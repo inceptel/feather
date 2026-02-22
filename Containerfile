@@ -42,25 +42,31 @@ RUN userdel -r ubuntu 2>/dev/null || true && \
     useradd -m -s /bin/bash -u 1000 -G sudo user && \
     echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Copy Feather binary
+# Copy Feather binary (pre-built for instant first boot)
 COPY --from=builder /build/target/release/feather-rs /usr/local/bin/feather
 
-# Copy static files and configs
-COPY static/ /opt/feather/static/
-COPY container/ /opt/feather/container/
+# Copy configs
+COPY container/ /opt/feather-config/
 
 # Install configs
-RUN cp /opt/feather/container/supervisord.conf /etc/supervisor/conf.d/supervisord.conf && \
-    mkdir -p /etc/caddy && cp /opt/feather/container/Caddyfile /etc/caddy/Caddyfile && \
-    cp /opt/feather/container/run-feather.sh /usr/local/bin/run-feather.sh && \
-    cp /opt/feather/container/entrypoint.sh /entrypoint.sh && \
+RUN cp /opt/feather-config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf && \
+    mkdir -p /etc/caddy && cp /opt/feather-config/Caddyfile /etc/caddy/Caddyfile && \
+    cp /opt/feather-config/run-feather.sh /usr/local/bin/run-feather.sh && \
+    cp /opt/feather-config/entrypoint.sh /entrypoint.sh && \
     chmod +x /usr/local/bin/run-feather.sh /entrypoint.sh
 
+# Pre-populate /opt/feather with static files (entrypoint will git clone over this on first boot)
+COPY static/ /opt/feather/static/
+
 # Set permissions
-RUN mkdir -p /opt/feather/uploads && chown user:user /opt/feather/uploads && \
+RUN mkdir -p /opt/feather/uploads && \
+    chown -R user:user /opt/feather && \
     chown -R user:user /etc/caddy && \
     mkdir -p /var/log/supervisor && chown -R user:user /var/log/supervisor && \
     mkdir -p /home/user && chown -R user:user /home/user
+
+# Rust toolchain for rebuilding from source
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | su user -c 'sh -s -- -y'
 
 USER user
 WORKDIR /home/user

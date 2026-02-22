@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# Clone Feather repo on first boot, leave it alone after that
+if [ ! -d /opt/feather/.git ]; then
+    echo "First boot: cloning Feather..."
+    git clone https://github.com/inceptel/feather.git /tmp/feather-clone
+    cp -r /tmp/feather-clone/* /tmp/feather-clone/.* /opt/feather/ 2>/dev/null || true
+    rm -rf /tmp/feather-clone
+    echo "Feather repo ready at /opt/feather"
+else
+    echo "Feather repo exists at /opt/feather ($(cd /opt/feather && git log --oneline -1))"
+fi
+
 # Ensure directories exist
 mkdir -p ~/memory
 mkdir -p ~/.claude
