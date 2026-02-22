@@ -1,0 +1,12 @@
+/target
+.env
+node_modules/
+test-results/
+test-failure.png
+uploads/
+playwright-report/
+test-config.json
+title-cache.json
+tests/visual-baselines/*-comparison-diff.png
+*.local.md
+*.private.md

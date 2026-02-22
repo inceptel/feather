@@ -1,0 +1,25 @@
+{
+    "name": "feather-rs-tests",
+    "version": "1.0.0",
+    "description": "E2E tests for Feather-rs UI with Claude-powered visual testing",
+    "scripts": {
+        "test": "playwright test",
+        "test:stagehand": "export $(cat .env | xargs) && tsx tests/feather.stagehand.ts",
+        "test:ui": "playwright test --ui",
+        "test:headed": "playwright test --headed",
+        "test:debug": "playwright test --debug",
+        "test:visual": "playwright test tests/visual.spec.js",
+        "test:visual:update": "UPDATE_BASELINES=1 playwright test tests/visual.spec.js",
+        "install-browsers": "playwright install chromium"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.40.0",
+        "pixelmatch": "^5.3.0",
+        "pngjs": "^7.0.0",
+        "tsx": "^4.21.0",
+        "typescript": "^5.9.3"
+    },
+    "dependencies": {
+        "@browserbasehq/stagehand": "^3.0.8"
+    }
+}

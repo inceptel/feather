@@ -1,0 +1,3730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Feather</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        smoke: {
+                            1: '#121212', 2: '#1a1a1a', 3: '#212121', 4: '#252525',
+                            5: '#303030', 6: '#3a3a3a', 7: '#4b4c5c', 8: '#5e5e5e',
+                            9: '#6a6a6a', 10: '#8a8a8a', 11: '#a0a0a0', 12: '#e0e0e0'
+                        },
+                        gold: { 9: '#fab283', 10: '#f5a742', 11: '#fcd9b8' },
+                        azure: { 9: '#5c9cf5', 10: '#4a8ae6', 11: '#8cbcff' },
+                        violet: { 9: '#9d7cd8', 10: '#8b6bc5', 11: '#c4aef0' },
+                        apple: { 9: '#7fd88f', 11: '#a8e8b5' },
+                        ember: { 9: '#e06c75', 11: '#f0a0a5' },
+                        cyan: { 9: '#56b6c2', 11: '#8cd4dd' },
+                        amber: { 9: '#e5c07b', 11: '#f0d9a8' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        html, body { height: 100%; overflow: hidden; }
+        ::selection { background: rgba(250, 178, 131, 0.3); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .status-active { animation: pulse 1.5s ease-in-out infinite; }
+        .message-enter { animation: fadeIn 0.2s ease-out; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+        .session-item { transition: all 0.15s ease; }
+        .session-item:hover { transform: translateX(2px); background: rgba(250, 178, 131, 0.1); }
+        .session-item.active { background: linear-gradient(90deg, rgba(250, 178, 131, 0.15) 0%, transparent 100%); border-left: 2px solid #fab283 !important; }
+        .thin-scrollbar::-webkit-scrollbar { width: 6px; }
+        .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .thin-scrollbar::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+        .markdown-content { white-space: normal !important; }
+        .markdown-content p { margin-bottom: 0.5em; line-height: 1.6; }
+        .markdown-content p:last-child { margin-bottom: 0; }
+        .markdown-content pre { background: #1a1a1a !important; padding: 1em; border-radius: 0.5em; overflow-x: auto; margin: 1em 0; border: 1px solid #303030; position: relative; }
+        .code-copy-btn { position: absolute; top: 0.5em; right: 0.5em; padding: 0.25em 0.5em; background: #303030; border: 1px solid #4b4c5c; border-radius: 0.25em; color: #a0a0a0; font-size: 0.7em; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+        .markdown-content pre:hover .code-copy-btn { opacity: 1; }
+        .code-copy-btn:hover { background: #4b4c5c; color: #e0e0e0; }
+        .code-copy-btn.copied { background: #7fd88f; color: #121212; }
+        .markdown-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; }
+        .markdown-content :not(pre) > code { background: #252525; padding: 0.2em 0.4em; border-radius: 0.25em; color: #56b6c2; }
+        .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+        .markdown-content li { margin: 0.25em 0; }
+        .markdown-content ul li { list-style: disc; }
+        .markdown-content ol li { list-style: decimal; }
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 { font-weight: 600; margin: 1em 0 0.5em; }
+        .markdown-content h1 { font-size: 1.4em; }
+        .markdown-content h2 { font-size: 1.2em; color: #5c9cf5; }
+        .markdown-content h3 { font-size: 1.1em; color: #9d7cd8; }
+        .tool-card { background: #1a1a1a; border: 1px solid #303030; border-radius: 0.5em; margin: 0.25em 0; }
+        .tool-card.running { border-color: #fab283; }
+        .tool-card.completed { border-color: #7fd88f; }
+        .tool-card.error { border-color: #e06c75; }
+        .tool-header:hover { background: rgba(255,255,255,0.03); }
+        /* Lightbox */
+        #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 200; align-items: center; justify-content: center; cursor: zoom-out; }
+        #lightbox.open { display: flex; }
+        #lightbox img { max-width: 95vw; max-height: 95vh; object-fit: contain; border-radius: 4px; }
+        /* Drag & drop overlay */
+        #drop-overlay { display: none; position: absolute; inset: 0; background: rgba(250, 178, 131, 0.1); border: 2px dashed #fab283; border-radius: 8px; z-index: 30; align-items: center; justify-content: center; pointer-events: none; }
+        #drop-overlay.active { display: flex; }
+        /* Thinking blocks collapse */
+        .thinking-block.collapsed .thinking-content { display: none; }
+        .thinking-toggle { cursor: pointer; user-select: none; }
+        /* Terminal panel - fixed bottom, separate from main chat */
+        #terminal-panel {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 288px;
+            right: 0;
+            height: 280px;
+            flex-direction: column;
+            z-index: 50;
+            background: #0d0d0d;
+            border-top: 1px solid #3a3a3a;
+        }
+        #terminal-panel.open { display: flex; }
+        body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: none !important; }
+        #terminal-resize-handle {
+            height: 6px;
+            background: #303030;
+            cursor: ns-resize;
+            flex-shrink: 0;
+        }
+        #terminal-resize-handle:hover { background: #fab283; }
+        #terminal-container {
+            flex: 1;
+            overflow: hidden;
+            min-height: 150px;
+            padding: 4px;
+        }
+        #terminal-container .xterm {
+            height: 100%;
+        }
+        #terminal-container .xterm-viewport {
+            overflow-y: auto !important;
+        }
+        @media (max-width: 768px) {
+            #terminal-panel {
+                left: 0;
+                height: 40vh;
+                max-height: 200px;
+            }
+            body.terminal-open main { height: calc(100vh - var(--terminal-height, 210px)) !important; flex: none !important; }
+            /* Smaller sidebar on mobile */
+            #sidebar { width: 85vw; max-width: 280px; }
+            /* Larger touch targets */
+            #input { font-size: 16px !important; min-height: 48px; }  /* 16px prevents iOS zoom */
+            #send-btn { min-height: 44px; min-width: 60px; }
+            /* Hide helper text on mobile */
+            #input + div > div:first-child { display: none; }
+        }
+        #voice-btn.recording { background: rgba(239, 68, 68, 0.2) !important; color: #ef4444 !important; animation: voice-pulse 1.5s infinite; }
+        #voice-btn.transcribing { background: rgba(59, 130, 246, 0.2) !important; color: #3b82f6 !important; cursor: wait; }
+        @keyframes voice-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+        .safe-top { padding-top: max(1rem, env(safe-area-inset-top, 1rem)); }
+        .safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem)); }
+    </style>
+</head>
+<body class="bg-smoke-1 text-smoke-12 flex overflow-hidden" style="height: 100vh; height: calc(var(--vh, 1vh) * 100);">
+    <!-- Onboarding Modal -->
+    <div id="onboarding-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] hidden items-center justify-center">
+        <div class="bg-smoke-2 border border-smoke-5 rounded-lg max-w-lg w-full mx-4 shadow-2xl">
+            <div class="p-6 border-b border-smoke-5">
+                <h2 class="text-xl font-semibold text-gold-10">Welcome to Feather</h2>
+                <p class="text-smoke-10 mt-1">Let's connect your Claude account</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="flex items-start gap-3">
+                    <span class="bg-gold-10 text-smoke-1 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0">1</span>
+                    <div>
+                        <p class="text-smoke-12">Open the terminal</p>
+                        <p class="text-smoke-9 text-sm">Click the terminal button in the bottom bar or press <kbd class="bg-smoke-4 px-1.5 py-0.5 rounded text-xs">Ctrl+`</kbd></p>
+                    </div>
+                </div>
+                <div class="flex items-start gap-3">
+                    <span class="bg-gold-10 text-smoke-1 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0">2</span>
+                    <div>
+                        <p class="text-smoke-12">Run the Claude CLI</p>
+                        <p class="text-smoke-9 text-sm">Type <code class="bg-smoke-4 px-1.5 py-0.5 rounded text-cyan-9">claude</code> and press Enter</p>
+                    </div>
+                </div>
+                <div class="flex items-start gap-3">
+                    <span class="bg-gold-10 text-smoke-1 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0">3</span>
+                    <div>
+                        <p class="text-smoke-12">Authorize in your browser</p>
+                        <p class="text-smoke-9 text-sm">Click the link that appears and complete the authorization</p>
+                    </div>
+                </div>
+                <div class="flex items-start gap-3">
+                    <span class="bg-gold-10 text-smoke-1 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0">4</span>
+                    <div>
+                        <p class="text-smoke-12">Return here</p>
+                        <p class="text-smoke-9 text-sm">Once authorized, close this dialog and start using Feather!</p>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-smoke-5 flex justify-between items-center">
+                <button onclick="window.open('/onboarding', '_blank')" class="bg-gold-10 hover:bg-gold-9 text-smoke-1 px-4 py-2 rounded-lg font-medium transition-colors">
+                    Start Setup
+                </button>
+                <button onclick="dismissOnboarding()" class="text-smoke-10 hover:text-smoke-12 px-4 py-2 transition-colors">
+                    I've completed authorization
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Project Modal -->
+    <div id="new-project-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] hidden items-center justify-center">
+        <div class="bg-smoke-2 border border-smoke-5 rounded-lg max-w-lg w-full mx-4 shadow-2xl">
+            <div class="p-6 border-b border-smoke-5">
+                <h2 class="text-xl font-semibold text-gold-10">Create New Project</h2>
+                <p class="text-smoke-10 mt-1">Set up a new workspace for Claude</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-smoke-11 mb-2">Project Name</label>
+                    <input id="new-project-name" type="text" placeholder="my-project"
+                        class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-smoke-12 placeholder-smoke-8 focus:outline-none focus:border-gold-9"
+                        onkeydown="if(event.key==='Enter') createProject()">
+                    <p class="text-smoke-8 text-xs mt-1">Lowercase letters, numbers, and hyphens only</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-smoke-11 mb-2">What is this project about?</label>
+                    <textarea id="new-project-description" rows="3" placeholder="Describe your project - this helps Claude understand the context..."
+                        class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-smoke-12 placeholder-smoke-8 focus:outline-none focus:border-gold-9 resize-none"></textarea>
+                </div>
+            </div>
+            <div class="p-6 border-t border-smoke-5 flex justify-end gap-3">
+                <button onclick="hideNewProjectModal()" class="text-smoke-10 hover:text-smoke-12 px-4 py-2 transition-colors">
+                    Cancel
+                </button>
+                <button onclick="createProject()" class="bg-gold-10 hover:bg-gold-9 text-smoke-1 px-4 py-2 rounded-lg font-medium transition-colors">
+                    Create Project
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile menu button -->
+    <button id="menu-btn" onclick="toggleSidebar()" class="md:hidden fixed top-3 left-3 z-50 w-10 h-10 bg-smoke-3/90 hover:bg-gold-9 border border-smoke-5 rounded-lg flex items-center justify-center text-smoke-11 hover:text-smoke-1 shadow-lg">
+        ☰
+    </button>
+
+    <!-- Sidebar overlay -->
+    <div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed md:relative w-72 bg-gradient-to-b from-smoke-2 to-smoke-1 border-r border-smoke-4 flex flex-col h-full z-40 -translate-x-full md:translate-x-0 transition-transform">
+        <div class="p-4 safe-top border-b border-smoke-4">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-xl">🪶</span>
+                <h1 class="text-lg font-bold text-gold-9">Feather</h1>
+            </div>
+            <p class="text-xs text-smoke-9 ml-7">20260217-0158</p>
+        </div>
+
+        <!-- Folder dropdown -->
+        <div class="px-3 pt-3">
+            <div class="flex gap-2">
+                <select id="folder-select" onchange="selectFolder(this.value)" class="flex-1 px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-11 focus:outline-none focus:border-gold-9/50 cursor-pointer"></select>
+                <button onclick="showNewProjectModal()" class="px-2.5 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-gold-9 text-smoke-11 rounded-lg text-sm font-bold transition-all" title="New Project">+</button>
+            </div>
+        </div>
+
+        <div class="p-3 space-y-2">
+            <div class="flex gap-2">
+                <button onclick="newPiSession()" class="flex-1 py-2.5 bg-gold-9 hover:bg-gold-10 text-smoke-1 rounded-lg text-sm font-semibold transition-all">
+                    + Pi
+                </button>
+                <button onclick="newClaudeSession()" class="flex-1 py-2.5 bg-smoke-4 hover:bg-smoke-5 text-smoke-11 rounded-lg text-sm font-semibold transition-all">
+                    + Claude
+                </button>
+                <button onclick="newCodexSession()" class="flex-1 py-2.5 bg-smoke-4 hover:bg-smoke-5 text-smoke-11 rounded-lg text-sm font-semibold transition-all">
+                    + Codex
+                </button>
+            </div>
+            <input id="session-search" type="text" placeholder="Search sessions..."
+                   oninput="filterSessions(this.value)"
+                   class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm placeholder-smoke-8 focus:outline-none focus:border-gold-9/50">
+        </div>
+
+        <!-- Sessions -->
+        <div class="flex-1 overflow-y-auto thin-scrollbar px-3 pb-4 pt-2">
+            <div id="sessions" class="space-y-1"></div>
+        </div>
+
+        <!-- Workspace tools -->
+        <div class="px-3 pb-2 pt-1 border-t border-smoke-4">
+            <div class="flex flex-wrap gap-1.5 mt-2">
+                <a href="/terminal/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Terminal</a>
+                <a href="/code/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">VS Code</a>
+                <a href="/jupyter/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Jupyter</a>
+                <a href="/files/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Files</a>
+                <a href="/dashboards/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Dashboards</a>
+                <a href="/onboarding" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Setup</a>
+            </div>
+        </div>
+
+        <!-- Connection status -->
+        <div class="p-3 border-t border-smoke-4 text-xs">
+            <div class="flex items-center justify-between text-smoke-9">
+                <span>SSE:</span>
+                <span id="sse-status" class="text-apple-9">Connected</span>
+            </div>
+            <div class="flex items-center justify-between text-smoke-9 mt-1">
+                <span>Event ID:</span>
+                <span id="sse-event-id" class="font-mono">-</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 flex flex-col min-w-0 bg-smoke-1 relative">
+        <input type="file" id="screenshot-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.json,.csv" class="hidden" multiple onchange="handleFileUpload(event)">
+
+        <!-- Messages -->
+        <div id="messages" class="flex-1 overflow-y-auto thin-scrollbar relative pt-2" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+            <!-- Drop overlay for drag & drop files -->
+            <div id="drop-overlay"><span class="text-gold-9 text-lg font-medium">Drop files to upload</span></div>
+            <div id="empty-state" class="h-full flex items-center justify-center">
+                <div class="text-center max-w-md px-8">
+                    <div class="w-16 h-16 mx-auto mb-6 rounded-xl bg-gold-9/20 flex items-center justify-center">
+                        <span class="text-3xl">🪶</span>
+                    </div>
+                    <h2 class="text-xl font-semibold mb-2">What can I help with?</h2>
+                    <p class="text-sm text-smoke-9 mb-6">Select a session from the sidebar or start a new one</p>
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button onclick="setPrompt('Fix the bug in')" class="px-3 py-2 bg-smoke-3 hover:bg-gold-9/20 border border-smoke-5 hover:border-gold-9/40 rounded-lg text-xs text-smoke-10 hover:text-gold-11 transition-all">🔧 Fix a bug</button>
+                        <button onclick="setPrompt('Explain how')" class="px-3 py-2 bg-smoke-3 hover:bg-azure-9/20 border border-smoke-5 hover:border-azure-9/40 rounded-lg text-xs text-smoke-10 hover:text-azure-11 transition-all">💡 Explain</button>
+                        <button onclick="setPrompt('Write a function')" class="px-3 py-2 bg-smoke-3 hover:bg-violet-9/20 border border-smoke-5 hover:border-violet-9/40 rounded-lg text-xs text-smoke-10 hover:text-violet-11 transition-all">✨ Write code</button>
+                    </div>
+                </div>
+            </div>
+            <div id="message-container" class="max-w-4xl mx-auto p-4 space-y-4 hidden"></div>
+        </div>
+
+        <!-- Scroll to bottom button - floats above input area -->
+        <button id="scroll-to-bottom-btn" onclick="scrollToBottom(true)" class="hidden absolute bottom-24 right-6 w-9 h-9 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded-full shadow-lg flex items-center justify-center text-smoke-10 hover:text-smoke-12 transition-all z-20" title="Scroll to bottom">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+        </button>
+
+        <!-- Input -->
+        <div class="p-3 border-t border-smoke-4 bg-smoke-2/80 safe-bottom">
+            <div class="max-w-3xl mx-auto">
+                <div class="bg-smoke-3/50 border border-smoke-5 rounded-xl overflow-hidden focus-within:border-gold-9/50 transition-all">
+                    <textarea id="input" rows="1"
+                        class="w-full min-h-[44px] bg-transparent px-4 py-3 text-sm resize-none focus:outline-none placeholder-smoke-8"
+                        placeholder="Ask anything..."
+                        onkeydown="handleKeydown(event)"
+                        onpaste="handlePaste(event)"
+                        oninput="autoResize(this)"></textarea>
+                    <div id="file-preview" class="hidden px-3 py-2 border-t border-smoke-5/50">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <div id="file-preview-items" class="flex items-center gap-2 flex-wrap"></div>
+                            <button onclick="clearPendingFiles()" class="text-xs text-ember-9 hover:text-ember-11 ml-auto">Clear all</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between px-3 py-2 border-t border-smoke-5/50">
+                        <div class="flex items-center gap-2">
+                            <span id="status-dot" class="status-dot bg-apple-9" title="Status"></span>
+                            <span id="status" class="text-[10px] text-smoke-8">Ready</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks">🧠</button>
+                            <button onclick="triggerScreenshot()" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Screenshot">📷</button>
+                            <button onclick="toggleTerminal()" id="terminal-toggle" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Terminal (Ctrl+`)">⌨</button>
+                            <button id="voice-btn" onclick="toggleVoiceRecording()" class="px-2 py-1.5 bg-smoke-4 hover:bg-smoke-5 rounded-lg text-sm transition-all text-smoke-10 hover:text-smoke-12" title="Voice input">
+                                🎤
+                            </button>
+                            <button id="ctrlc-btn" onclick="sendCtrlC()" class="hidden px-2.5 py-1.5 bg-amber-9 hover:bg-amber-9/80 rounded-lg text-xs font-semibold text-smoke-1" title="Interrupt Claude (Ctrl-C)">Interrupt</button>
+                            <button id="send-btn" onclick="handleSend()" class="px-4 py-1.5 bg-gold-9 hover:bg-gold-10 text-smoke-1 rounded-lg text-sm font-semibold transition-all">
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Terminal Panel - fixed at bottom, resizable -->
+    <div id="terminal-panel" class="bg-smoke-1 border-t border-smoke-4">
+        <div id="terminal-resize-handle"></div>
+        <div class="flex items-center justify-between px-3 py-1.5 bg-smoke-2 border-b border-smoke-4">
+            <div class="flex items-center gap-2">
+                <span id="terminal-session" class="text-xs text-smoke-9 font-mono">—</span>
+                <span class="w-px h-4 bg-smoke-5"></span>
+                <button onclick="toggleTerminal()" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Hide terminal (Ctrl+`)">Hide</button>
+                <button onclick="toggleInteractiveMode()" id="interactive-toggle" class="px-2 py-0.5 text-[10px] bg-smoke-4 hover:bg-smoke-5 rounded" title="Toggle interactive mode (WebSocket)">Read-only</button>
+            </div>
+            <div class="flex items-center gap-1">
+                <button onclick="terminalSignal('Escape')" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Send Escape">Esc</button>
+                <button onclick="terminalSignal('C-c')" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Send Ctrl-C">^C</button>
+                <button onclick="terminalSignal('C-d')" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Send Ctrl-D">^D</button>
+                <button onclick="terminalRefresh()" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Refresh">↻</button>
+                <span class="w-px h-4 bg-smoke-5"></span>
+                <button id="restart-btn" onclick="restartSession()" class="px-2 py-0.5 text-[10px] text-gold-9 hover:bg-gold-9/20 rounded" title="Kill and restart Claude session">Restart</button>
+                <button id="kill-btn" onclick="killCurrentSession()" class="px-2 py-0.5 text-[10px] text-ember-9 hover:bg-ember-9/20 rounded" title="Kill session and all processes">Stop</button>
+                <span class="w-px h-4 bg-smoke-5"></span>
+                <button onclick="toggleTerminal()" class="px-1.5 py-0.5 text-[10px] text-smoke-8 hover:text-smoke-12 hover:bg-smoke-4 rounded" title="Close terminal">✕</button>
+            </div>
+        </div>
+        <div id="terminal-container" class="flex-1 overflow-hidden"></div>
+    </div>
+
+    <!-- Image lightbox -->
+    <div id="lightbox" onclick="closeLightbox()">
+        <img id="lightbox-img" src="" alt="Full size image">
+    </div>
+
+    <script>
+        /**
+         * Feather-rs Frontend
+         *
+         * This single-page application provides:
+         * - Session browsing: View Claude conversation history from JSONL files
+         * - Active sessions: Manage Claude CLI instances running in tmux
+         * - Real-time updates: SSE stream for live terminal output
+         *
+         * Architecture:
+         * - Sidebar: Folder tabs (CODE/LIFE), active tmux sessions, history sessions
+         * - Main area: Message display with markdown rendering
+         * - Terminal panel: xterm.js for viewing raw tmux output
+         *
+         * Data Flow:
+         * 1. loadSessions() fetches active tmux sessions + JSONL session list
+         * 2. selectSession() loads message history from /api/.../history
+         * 3. selectTmuxSession() connects terminal SSE + loads linked history
+         * 4. handleSend() sends messages to Claude via tmux send-keys
+         */
+
+        // ========== State ==========
+        let currentSessionId = null;
+        let currentSessionProjectId = null;
+        let currentTmuxSession = null;
+        let isStreaming = false;
+        let sseConnection = null;
+        let terminalSSE = null;
+        let term = null;
+        let fitAddon = null;
+        let historyPollInterval = null;  // Poll JSONL for updates
+        let pollGeneration = 0;  // Incremented on stop to invalidate in-flight callbacks
+        let lastMessageCount = 0;  // Track messages to detect new responses
+        let tmuxSessionStartTime = null;  // Track when we started the tmux session
+        let currentEngine = localStorage.getItem('feather-engine') || 'pi';
+        let codexMode = localStorage.getItem('feather-codex-mode') || 'yolo';
+
+        // Folder configuration - dynamically populated from /api/projects
+        let FOLDERS = [];
+        let currentFolder = localStorage.getItem('feather-folder') || null;
+        let hashRestored = false;  // Prevent double-restore
+
+        // ========== URL Hash Routing ==========
+        function parseHash() {
+            const hash = location.hash.replace(/^#/, '');
+            const params = {};
+            for (const part of hash.split('&')) {
+                const [k, v] = part.split('=');
+                if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
+            }
+            return params;
+        }
+
+        function updateHash(params) {
+            const current = parseHash();
+            Object.assign(current, params);
+            // Remove null/undefined values
+            for (const k of Object.keys(current)) {
+                if (current[k] == null) delete current[k];
+            }
+            const hash = Object.entries(current).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+            history.replaceState(null, '', hash ? `#${hash}` : location.pathname);
+        }
+
+        async function restoreFromHash() {
+            if (hashRestored) return;
+            hashRestored = true;
+            const params = parseHash();
+
+            // Restore folder if specified
+            if (params.folder && FOLDERS.find(f => f.id === params.folder)) {
+                if (currentFolder !== params.folder) {
+                    currentFolder = params.folder;
+                    localStorage.setItem('feather-folder', params.folder);
+                    initFolderTabs();
+                    await loadSessions();
+                }
+            }
+
+            if (!params.session) return;
+            const sid = params.session;
+
+            // Try matching by session ID in allSessions
+            const session = allSessions.find(s => s.id === sid);
+            if (session) {
+                const source = session.source || 'claude';
+                const isTerminal = source === 'codex' || source === 'pi';
+                if (isTerminal) {
+                    openCodexSession(session.id, session.project, source);
+                } else {
+                    // Check if there's an active tmux for this session
+                    const prefix = session.id.substring(0, 8);
+                    const tmuxName = tmuxNameLookup[prefix];
+                    if (tmuxName) {
+                        selectTmuxSession(tmuxName);
+                    } else {
+                        resumeSession(session.id, session.project);
+                    }
+                }
+                return;
+            }
+
+            // Try matching as a tmux session name (e.g., feather-new-xxx)
+            const tmuxMatch = Object.values(tmuxNameLookup).find(n => n === sid);
+            if (tmuxMatch) {
+                selectTmuxSession(tmuxMatch);
+                return;
+            }
+
+            // Try matching by prefix (first 8 chars of UUID)
+            const byPrefix = allSessions.find(s => s.id.startsWith(sid));
+            if (byPrefix) {
+                const source = byPrefix.source || 'claude';
+                if (source === 'codex' || source === 'pi') {
+                    openCodexSession(byPrefix.id, byPrefix.project, source);
+                } else {
+                    resumeSession(byPrefix.id, byPrefix.project);
+                }
+            }
+        }
+
+        // Fetch and build folders from API
+        async function initFolders() {
+            try {
+                const res = await fetch('/api/projects');
+                const data = await res.json();
+                // System folders to hide from project list
+                const hiddenFolders = ['memory', 'dashboards', '.claude', 'projects'];
+                FOLDERS = (data.projects || [])
+                    .filter(p => {
+                        const parts = p.id.split('-').filter(Boolean);
+                        const lastPart = parts[parts.length - 1] || '';
+                        // Hide system folders and bare home directory
+                        if (hiddenFolders.includes(lastPart)) return false;
+                        // Note: -home-user and -home-ubuntu contain Codex sessions started from home dir
+                        // Keeping them visible for now until Codex sessions are properly scoped to projects
+                        return true;
+                    })
+                    .map(p => {
+                        // Extract display name from project ID (e.g., "-home-user-myproject" -> "myproject")
+                        const parts = p.id.split('-').filter(Boolean);
+                        const displayName = parts[parts.length - 1] || p.id;
+                        return {
+                            id: p.id,
+                            name: displayName,
+                            path: p.name, // API returns readable path in 'name'
+                            pattern: p.id
+                        };
+                    });
+                // Sort alphabetically by name
+                FOLDERS.sort((a, b) => a.name.localeCompare(b.name));
+                // Set default folder if not set or invalid
+                if (!currentFolder || !FOLDERS.find(f => f.id === currentFolder)) {
+                    currentFolder = FOLDERS[0]?.id || null;
+                    // Clear invalid localStorage to prevent stale state
+                    if (!currentFolder) {
+                        localStorage.removeItem('feather-folder');
+                    }
+                }
+                initFolderTabs();
+                updateEngineUI();
+                await loadSessions();
+                // Restore session from URL hash (e.g., #session=xxx&folder=yyy)
+                await restoreFromHash();
+                // Update status bar to reflect folder state
+                if (!currentFolder || FOLDERS.length === 0) {
+                    setStatus('No folder selected', 'ember');
+                } else {
+                    setStatus('Ready', 'apple');
+                }
+            } catch (e) {
+                console.error('Failed to load projects:', e);
+                setStatus('Failed to load projects', 'ember');
+            }
+        }
+
+        function setEngine(engine) {
+            currentEngine = engine;
+            localStorage.setItem('feather-engine', engine);
+            updateEngineUI();
+        }
+
+        function setCodexMode(mode) {
+            codexMode = mode;
+            localStorage.setItem('feather-codex-mode', mode);
+        }
+
+        function updateEngineUI() {
+            const engineSelect = document.getElementById('engine-select');
+            const modeSelect = document.getElementById('codex-mode-select');
+            const restartBtn = document.getElementById('restart-btn');
+            if (engineSelect) engineSelect.value = currentEngine;
+            if (modeSelect) {
+                modeSelect.value = codexMode;
+                if (currentEngine === 'codex') {
+                    modeSelect.classList.remove('hidden');
+                } else {
+                    modeSelect.classList.add('hidden');
+                }
+            }
+            if (restartBtn) {
+                if (currentEngine === 'codex') {
+                    restartBtn.classList.add('hidden');
+                } else {
+                    restartBtn.classList.remove('hidden');
+                }
+            }
+        }
+
+        // ========== Sidebar ==========
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        // Close sidebar on mobile after selecting something
+        function closeSidebarMobile() {
+            if (window.innerWidth < 768) {
+                const sidebar = document.getElementById('sidebar');
+                const overlay = document.getElementById('sidebar-overlay');
+                sidebar.classList.add('-translate-x-full');
+                overlay.classList.add('hidden');
+            }
+        }
+
+        function initFolderTabs() {
+            const select = document.getElementById('folder-select');
+            select.innerHTML = FOLDERS.map(f => `
+                <option value="${f.id}" ${currentFolder === f.id ? 'selected' : ''}>
+                    ${f.name}
+                </option>
+            `).join('');
+        }
+
+        function selectFolder(folderId) {
+            currentFolder = folderId;
+            localStorage.setItem('feather-folder', folderId);
+            updateHash({ folder: folderId, session: null });
+            sessionsDisplayCount = 5;
+            initFolderTabs();
+            loadSessions();
+        }
+
+        // ========== Sessions ==========
+        let allSessions = [];       // Full merged list
+        let sessionsDisplayCount = 5;
+        let activeTmuxPrefixes = new Set(); // Session ID prefixes with tmux
+        let tmuxNameLookup = {};    // session prefix → tmux name
+        let codexTmuxMapping = {};  // Codex JSONL UUID → tmux session name (for sessions spawned by Feather)
+        let pendingCodexTmux = null; // tmux name of most recently spawned Codex (waiting for JSONL UUID)
+
+        async function loadSessions() {
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) {
+                // Show helpful message when no project is selected
+                const container = document.getElementById('sessions');
+                if (FOLDERS.length === 0) {
+                    container.innerHTML = '<div class="text-xs text-smoke-8 italic px-1 py-4 text-center">Create a project to get started<br><span class="text-gold-9 cursor-pointer" onclick="showNewProjectModal()">+ New Project</span></div>';
+                } else {
+                    container.innerHTML = '<div class="text-xs text-smoke-8 italic px-1 py-2 text-center">Select a project</div>';
+                }
+                return;
+            }
+
+            try {
+                const [tmuxRes, projectRes] = await Promise.all([
+                    fetch('/api/claude-sessions'),
+                    fetch('/api/projects')
+                ]);
+                const tmuxData = await tmuxRes.json();
+                const projectData = await projectRes.json();
+
+                const project = projectData.projects.find(p => p.id.includes(folder.pattern));
+
+                let historySessions = [];
+                if (project) {
+                    const sessRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                    const sessData = await sessRes.json();
+                    historySessions = sessData.sessions || [];
+                }
+
+                // Build tmux lookup: prefix → tmux session name
+                activeTmuxPrefixes = new Set();
+                tmuxNameLookup = {};
+                if (tmuxData.tmux_sessions) {
+                    for (const ts of tmuxData.tmux_sessions) {
+                        const key = ts.session_id || '';
+                        if (key) {
+                            activeTmuxPrefixes.add(key);
+                            tmuxNameLookup[key] = ts.name;
+                        }
+                    }
+                }
+
+                // Sessions are already sorted by lastUpdated from API
+                allSessions = historySessions;
+
+                // Link pending Codex tmux session to its JSONL UUID
+                // (Pi sessions are mapped immediately at spawn time via --session flag)
+                if (pendingCodexTmux) {
+                    for (const sess of historySessions) {
+                        const isNewSession = !codexTmuxMapping[sess.id] && !tmuxNameLookup[sess.id];
+                        if (isNewSession && sess.id.startsWith('019c')) {
+                            codexTmuxMapping[sess.id] = pendingCodexTmux;
+                            tmuxNameLookup[sess.id] = pendingCodexTmux;
+                            console.log('Linked Codex session', sess.id, 'to tmux', pendingCodexTmux);
+
+                            if (currentTmuxSession === pendingCodexTmux) {
+                                const oldSessionId = currentSessionId;
+                                currentSessionId = sess.id;
+                                currentSessionProjectId = sess.project;
+                                updateHash({ session: sess.id });
+                                console.log('Updated currentSessionId from', oldSessionId, 'to', sess.id);
+
+                                loadSessionHistory(sess.project, sess.id).then(result => {
+                                    console.log('History loaded, restarting tail with UUID:', sess.id);
+                                    stopSessionTailing();
+                                    startSessionTailing(sess.project, sess.id, result?.cursor || null);
+                                }).catch(err => {
+                                    console.error('Failed to load history for linked session:', err);
+                                });
+                            }
+
+                            pendingCodexTmux = null;
+                            break;
+                        }
+                    }
+                }
+
+                renderSessions();
+            } catch (e) {
+                console.error('Failed to load sessions:', e);
+            }
+        }
+
+        function renderSessions() {
+            const container = document.getElementById('sessions');
+            const q = currentSearchQuery.toLowerCase();
+
+            let sessions = allSessions;
+            if (q) {
+                sessions = sessions.filter(s =>
+                    (s.title || '').toLowerCase().includes(q) ||
+                    s.id.toLowerCase().includes(q)
+                );
+            }
+
+            if (!sessions.length) {
+                container.innerHTML = '<div class="text-xs text-smoke-8 italic px-1 py-2 text-center">No sessions</div>';
+                return;
+            }
+
+            const showCount = q ? sessions.length : sessionsDisplayCount;
+            const visible = sessions.slice(0, showCount);
+            const hasMore = !q && sessions.length > showCount;
+
+            let html = visible.map(s => {
+                // Determine session type from API source field, with fallback heuristics
+                const source = s.source || 'claude';
+                const isTerminalSession = source === 'codex' || source === 'pi'
+                    || s.id.startsWith('feather-codex-') || !!codexTmuxMapping[s.id];
+                const prefix = s.id.startsWith('feather-codex-')
+                    ? s.id.replace('feather-codex-', '').slice(-8)
+                    : s.id.substring(0, 8);
+                const tmuxKey = s.id.startsWith('feather-codex-') ? s.id : prefix;
+                const hasTmux = activeTmuxPrefixes.has(tmuxKey);
+                const tmuxName = tmuxNameLookup[tmuxKey];
+                const isSelected = currentSessionId === s.id || currentTmuxSession === tmuxName;
+
+                const dot = hasTmux
+                    ? '<span class="w-2 h-2 rounded-full bg-apple-9 shadow-sm shadow-apple-9/50 shrink-0" title="Active (tmux)"></span>'
+                    : '<span class="w-2 h-2 rounded-full bg-smoke-6 shrink-0" title="Inactive"></span>';
+
+                const onclick = isTerminalSession
+                    ? `openCodexSession('${s.id}', '${s.project}', '${source}')`
+                    : (hasTmux && tmuxName
+                        ? `selectTmuxSession('${tmuxName}')`
+                        : `resumeSession('${s.id}', '${s.project}')`);
+
+                const sourceBadge = source === 'pi'
+                    ? `<span class="px-1.5 py-0.5 text-[9px] rounded bg-indigo-4 text-indigo-11">Pi</span>`
+                    : source === 'codex'
+                    ? `<span class="px-1.5 py-0.5 text-[9px] rounded bg-smoke-4 text-smoke-9">Codex</span>`
+                    : '';
+
+                return `
+                    <div class="session-item p-2 rounded-lg cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
+                         onclick="${onclick}">
+                        <div class="flex items-center gap-2">
+                            ${dot}
+                            <div class="flex-1 min-w-0">
+                                <div class="text-sm text-smoke-12 truncate">${s.title || 'Untitled'}</div>
+                                <div class="flex items-center gap-1 text-xs text-smoke-8">
+                                    <span class="font-mono">${prefix}</span>
+                                    ${sourceBadge}
+                                    <span class="mx-0.5">·</span>
+                                    <span>${formatTime(s.lastUpdated)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            if (hasMore) {
+                const remaining = sessions.length - showCount;
+                html += `
+                    <button onclick="loadMoreSessions()" class="w-full px-3 py-2.5 mt-1 text-xs text-smoke-8 hover:text-gold-9 hover:bg-smoke-3/50 rounded-lg transition-all text-center">
+                        Show more (${remaining} remaining)
+                    </button>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function loadMoreSessions() {
+            sessionsDisplayCount += 5;
+            renderSessions();
+        }
+
+        let currentSearchQuery = '';
+
+        function filterSessions(query) {
+            currentSearchQuery = query;
+            renderSessions();
+        }
+
+        function formatTime(iso) {
+            try {
+                const d = new Date(iso);
+                const now = new Date();
+                const diff = now - d;
+                const mins = Math.floor(diff / 60000);
+                const hours = Math.floor(diff / 3600000);
+                const days = Math.floor(diff / 86400000);
+                if (mins < 1) return 'now';
+                if (mins < 60) return `${mins}m`;
+                if (hours < 24) return `${hours}h`;
+                return `${days}d`;
+            } catch { return iso; }
+        }
+
+        // ========== Session Selection ==========
+
+        /**
+         * Resume a history session by spawning a Claude CLI with --resume.
+         * Loads the conversation history immediately, then spawns the tmux session.
+         */
+        async function resumeSession(sessionId, projectId) {
+            closeSidebarMobile();
+            setEngine('claude');
+            updateHash({ session: sessionId, folder: currentFolder });
+            // IMPORTANT: Use projectId (where session was created), not currentFolder
+            // This fixes a bug where switching folders before clicking resume would
+            // send the wrong cwd to Claude CLI, causing resume to fail
+            const folder = FOLDERS.find(f => f.id === projectId) || FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) return;
+
+            currentSessionId = sessionId;
+            currentSessionProjectId = projectId;
+            currentTmuxSession = null;
+            lastMessageCount = 0;
+            stopHistoryPolling();
+
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('message-container').classList.remove('hidden');
+            setStatus('Resuming session...', 'amber');
+
+            // Update sidebar highlight
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            if (event && event.currentTarget) event.currentTarget.classList.add('active');
+
+            // Load history immediately so user sees the conversation
+            const historyResult = await loadSessionHistory(projectId, sessionId);
+            const historyCursor = historyResult?.cursor || null;
+
+            // Spawn Claude CLI with --resume in a tmux session
+            try {
+                const res = await fetch(`/api/claude-spawn/${sessionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cwd: folder.path })
+                });
+                const data = await res.json();
+
+                if (data.status === 'spawned' || data.status === 'ok') {
+                    const tmuxName = data.tmux_name;
+                    currentTmuxSession = tmuxName;
+                    setStatus('Ready', 'apple');
+
+
+                    // Open terminal and connect
+                    if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                        toggleTerminal();
+                    }
+                    connectToTerminal(tmuxName);
+                    loadSessions();
+
+                    // Start SSE tailing for live updates on new messages
+                    // Use cursor from history to start from end of file
+                    startSessionTailing(projectId, sessionId, historyCursor);
+                } else {
+                    setStatus(data.error || 'Failed to resume', 'ember');
+                }
+            } catch (e) {
+                console.error('Failed to resume session:', e);
+                setStatus('Failed to resume session', 'ember');
+            }
+        }
+
+        /**
+         * Open a Codex session history (no Claude resume).
+         * If a matching tmux session is active, connect to terminal output.
+         */
+        async function openCodexSession(sessionId, projectId, source) {
+            closeSidebarMobile();
+            updateHash({ session: sessionId, folder: currentFolder });
+            // Detect engine from source field, then fallback to tmux name mapping
+            if (source === 'pi') {
+                setEngine('pi');
+            } else if (source === 'codex') {
+                setEngine('codex');
+            } else {
+                const mappedTmux = codexTmuxMapping[sessionId] || tmuxNameLookup[sessionId.substring(0, 8)];
+                setEngine(mappedTmux && mappedTmux.startsWith('feather-pi-') ? 'pi' : 'codex');
+            }
+
+            // Preserve existing tmux session - Codex sessions share a terminal
+            const previousTmux = currentTmuxSession;
+            console.log('openCodexSession: previousTmux =', previousTmux, 'sessionId =', sessionId);
+            currentSessionId = sessionId;
+            currentSessionProjectId = projectId;
+            lastMessageCount = 0;
+            stopHistoryPolling();
+
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('message-container').classList.remove('hidden');
+            setStatus('Loading Codex history...', 'amber');
+
+            // Update sidebar highlight
+            document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+            if (event && event.currentTarget) event.currentTarget.classList.add('active');
+
+            const historyResult = await loadSessionHistory(projectId, sessionId);
+            startSessionTailing(projectId, sessionId, historyResult?.cursor || null);
+
+            // If tmux session is active for this session, use it
+            // Otherwise preserve the previous tmux session (Codex sessions share terminal)
+            const tmuxKey = sessionId;
+            let tmuxName = tmuxNameLookup[tmuxKey] || codexTmuxMapping[sessionId];
+            console.log('openCodexSession: looking for tmuxKey =', tmuxKey, 'found =', tmuxName, 'codexTmuxMapping =', JSON.stringify(codexTmuxMapping));
+
+            if (tmuxName) {
+                currentTmuxSession = tmuxName;
+                if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                    toggleTerminal();
+                }
+                connectToTerminal(tmuxName);
+                setStatus('Ready', 'apple');
+            } else {
+                currentTmuxSession = null;
+                setStatus('History loaded', 'gold');
+            }
+            console.log('openCodexSession: final currentTmuxSession =', currentTmuxSession);
+        }
+
+        /**
+         * Select an active tmux session and optionally load its message history.
+         *
+         * Tmux sessions are named:
+         * - "feather-{8-char-id}" for resumed sessions (have linked JSONL)
+         * - "feather-new-{timestamp}" for new sessions (no history yet)
+         *
+         * This function tries to match the tmux session ID to a JSONL file
+         * so we can show the conversation history alongside the terminal.
+         */
+        async function selectTmuxSession(name) {
+            closeSidebarMobile();
+            setEngine('claude');
+            currentTmuxSession = name;
+            currentSessionId = null;  // Reset session ID - will be discovered from JSONL
+            lastMessageCount = 0;  // Reset message tracking
+            tmuxSessionStartTime = new Date().toISOString();  // Track when we selected this session
+            stopHistoryPolling();  // Stop any existing polling
+            updateHash({ session: name, folder: currentFolder });
+            // For non-new sessions, reset snapshot. For new sessions, preserve pre-taken snapshot from newSession()
+            if (!name.includes('-new-')) {
+                sessionSnapshot = {};
+            } else if (Object.keys(sessionSnapshot).length === 0) {
+                // New session selected directly (not via newSession()) - take snapshot now
+                const folder = FOLDERS.find(f => f.id === currentFolder);
+                if (folder) {
+                    try {
+                        const projRes = await fetch('/api/projects');
+                        const projData = await projRes.json();
+                        const proj = projData.projects.find(p => p.id.includes(folder.pattern));
+                        if (proj) {
+                            const snapRes = await fetch(`/api/projects/${encodeURIComponent(proj.id)}/sessions`);
+                            const snapData = await snapRes.json();
+                            for (const sess of (snapData.sessions || [])) {
+                                sessionSnapshot[sess.id] = sess.lastUpdated || '';
+                            }
+                            console.log('Snapshot taken on session select:', Object.keys(sessionSnapshot).length);
+                        }
+                    } catch (e) { console.error('Snapshot failed:', e); }
+                }
+            }
+
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('message-container').classList.remove('hidden');
+            // project-name removed = name;
+            setStatus('Ready', 'apple');
+
+            // Default: show "new session" message until we find history
+            const container = document.getElementById('message-container');
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <div class="text-4xl mb-4">🪶</div>
+                    <div class="text-smoke-11 mb-2">Active Session</div>
+                    <div class="text-smoke-9 text-sm">Type a message below to chat with Claude</div>
+                    <div class="text-smoke-8 text-xs mt-2">Terminal output shown below ↓</div>
+                </div>
+            `;
+
+            // Match tmux name to JSONL session (e.g., "feather-0c4350d3" -> "0c4350d3...")
+            // Only matches resumed sessions, not "feather-new-*" ones
+            const sessionIdMatch = name.match(/feather-([a-f0-9]{8,})/);
+            if (sessionIdMatch && !name.includes('-new-') && !name.startsWith('feather-codex-')) {
+                const shortId = sessionIdMatch[1];
+                // Find matching session in current folder
+                const folder = FOLDERS.find(f => f.id === currentFolder);
+                if (folder) {
+                    try {
+                        const projectRes = await fetch('/api/projects');
+                        const projectData = await projectRes.json();
+                        const project = projectData.projects.find(p => p.id.includes(folder.pattern));
+
+                        if (project) {
+                            const sessRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                            const sessData = await sessRes.json();
+
+                            // Find session that starts with the short ID
+                            const matchingSession = sessData.sessions?.find(s => s.id.startsWith(shortId));
+                            if (matchingSession) {
+                                currentSessionId = matchingSession.id;
+                                updateHash({ session: matchingSession.id });
+                                const historyResult = await loadSessionHistory(project.id, matchingSession.id);
+                                // Start SSE tailing for live updates
+                                startSessionTailing(project.id, matchingSession.id, historyResult?.cursor || null);
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Could not load session history for tmux session:', e);
+                    }
+                }
+            }
+
+            // Show terminal for tmux sessions
+            if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                toggleTerminal();
+            }
+            connectToTerminal(name);
+
+            loadSessions(); // Refresh sidebar
+        }
+
+        async function loadSessionHistory(projectId, sessionId) {
+            const container = document.getElementById('message-container');
+            container.innerHTML = '<div class="text-center text-smoke-9 py-8">Loading...</div>';
+
+            try {
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
+                const data = await res.json();
+
+                if (!data.messages || data.messages.length === 0) {
+                    container.innerHTML = '<div class="text-center text-smoke-9 py-8">No messages in this session</div>';
+                    lastMessageCount = 0;
+                    return { cursor: data.cursor || null };
+                }
+
+                // Clear and track UUIDs to prevent duplicates when SSE tailing starts
+                renderedUuids.clear();
+                for (const msg of data.messages) {
+                    if (msg.uuid) renderedUuids.add(msg.uuid);
+                }
+                console.log('Tracked', renderedUuids.size, 'UUIDs from history');
+
+                container.innerHTML = '';
+                const MAX_INITIAL = 200;
+                const allMessages = data.messages;
+                let renderStart = 0;
+                if (allMessages.length > MAX_INITIAL) {
+                    renderStart = allMessages.length - MAX_INITIAL;
+                    const loadMoreBtn = document.createElement('div');
+                    loadMoreBtn.className = 'text-center py-4';
+                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); renderEarlierMessages()" class="px-4 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all">${renderStart} earlier messages — click to load</button>`;
+                    loadMoreBtn.id = 'load-earlier-btn';
+                    container.appendChild(loadMoreBtn);
+                    window._earlierMessages = allMessages;
+                }
+                renderMessages(allMessages.slice(renderStart));
+                lastMessageCount = allMessages.length;  // Track for polling
+                // Delay scroll to ensure DOM has rendered - force scroll on initial load
+                userAtBottom = true;  // Reset scroll state for new session
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => scrollToBottom(true));
+                });
+
+                // Return cursor for SSE tailing
+                return { cursor: data.cursor || null };
+            } catch (e) {
+                console.error('Failed to load history:', e);
+                container.innerHTML = '<div class="text-center text-ember-9 py-8">Failed to load session</div>';
+                return { cursor: null };
+            }
+        }
+
+        function renderEarlierMessages() {
+            if (!window._earlierMessages) return;
+            const container = document.getElementById('message-container');
+            container.innerHTML = '<div class="text-center text-smoke-9 py-4">Rendering all messages...</div>';
+            const all = window._earlierMessages;
+            window._earlierMessages = null;
+            // Use setTimeout to let the "Rendering..." text show before the heavy work
+            setTimeout(() => {
+                container.innerHTML = '';
+                renderMessages(all);
+            }, 50);
+        }
+
+        function renderMessages(messages) {
+            const container = document.getElementById('message-container');
+            messages.forEach(msg => {
+                // Backend returns: { role: "user"|"assistant", content: [...blocks], timestamp, uuid }
+                if (msg.role === 'user' || msg.type === 'human') {
+                    const content = msg.content;
+                    if (Array.isArray(content)) {
+                        // Extract text and image blocks
+                        const textBlocks = content.filter(b => b.type === 'text');
+                        const imageBlocks = content.filter(b => b.type === 'image');
+                        const text = textBlocks.map(b => b.text).join('\n');
+
+                        // Render user message if there's text OR images
+                        if (text || imageBlocks.length > 0) {
+                            addUserMessageWithImages(text, imageBlocks, false);
+                        }
+                        // Render tool_result blocks
+                        content.filter(b => b.type === 'tool_result').forEach(block => {
+                            addToolResult(block);
+                        });
+                    } else if (typeof content === 'string') {
+                        addUserMessage(content);
+                    }
+                } else if (msg.role === 'assistant' || msg.type === 'assistant') {
+                    const content = msg.content;
+                    const msgUuid = msg.uuid;  // Pass UUID to rendered elements
+                    if (Array.isArray(content)) {
+                        content.forEach(block => {
+                            if (block.type === 'text') {
+                                addAssistantMessage(block.text, msgUuid);
+                            } else if (block.type === 'thinking') {
+                                addThinkingBlock(block.text);
+                            } else if (block.type === 'tool_use') {
+                                addToolCall(block);
+                            } else if (block.type === 'tool_result') {
+                                addToolResult(block);
+                            }
+                        });
+                    } else if (typeof content === 'string') {
+                        addAssistantMessage(content, msgUuid);
+                    }
+                }
+            });
+
+            scrollToBottom();
+        }
+
+        function addUserMessage(content, isOptimistic = false) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter flex justify-end';
+            if (isOptimistic) {
+                div.setAttribute('data-optimistic', 'true');
+                div.setAttribute('data-content-hash', hashContent(content));
+                div.setAttribute('data-has-image', 'true');
+            }
+
+            // Check for attached image or file path in the message
+            // Matches: [Attached image: path] or [Image: source: path]
+            const imageMatch = content.match(/\[(?:Attached image|Image: source): ([^\]]+)\]/);
+            const fileMatch = content.match(/\[Attached file: ([^\]]+)\]\s*\(([^)]+)\)/);
+            let attachmentHtml = '';
+            let textContent = content;
+
+            if (imageMatch) {
+                const imagePath = imageMatch[1];
+                // Convert server path to web URL
+                let webPath = imagePath;
+                if (imagePath.includes('/uploads/')) {
+                    webPath = '/uploads/' + imagePath.split('/uploads/').pop();
+                } else if (imagePath.startsWith('/home/user/')) {
+                    webPath = imagePath.replace('/home/user/', '/userfiles/');
+                } else if (imagePath.startsWith('/opt/feather/uploads/')) {
+                    webPath = imagePath.replace('/opt/feather/uploads/', '/uploads/');
+                }
+                textContent = content.replace(imageMatch[0], '').trim();
+                attachmentHtml = `<img src="${webPath}" alt="Attached image" class="max-w-full max-h-48 rounded-lg mt-2 cursor-pointer" onclick="openLightbox('${webPath}')">`;
+            } else if (fileMatch) {
+                const filePath = fileMatch[1];
+                const fileName = fileMatch[2];
+                const icon = getFileIcon(fileName);
+                textContent = content.replace(fileMatch[0], '').trim();
+                attachmentHtml = `
+                    <div class="flex items-center gap-2 px-3 py-2 mt-2 bg-smoke-3/50 rounded-lg border border-smoke-5">
+                        <span class="text-2xl">${icon}</span>
+                        <div class="flex flex-col">
+                            <span class="text-sm text-smoke-11 font-medium">${escapeHtml(fileName)}</span>
+                            <span class="text-[10px] text-smoke-8">${escapeHtml(filePath)}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            div.innerHTML = `
+                <div class="max-w-[80%] bg-gold-9/20 border border-gold-9/30 rounded-xl px-4 py-3">
+                    ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${escapeHtml(textContent)}</div>` : ''}
+                    ${attachmentHtml}
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function hashContent(str) {
+            // Simple hash for deduplication
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return hash.toString();
+        }
+
+        function removeOptimisticMessage(content) {
+            const hash = hashContent(content);
+            const container = document.getElementById('message-container');
+            const optimistic = container.querySelector(`[data-optimistic="true"][data-content-hash="${hash}"]`);
+            if (optimistic) {
+                optimistic.remove();
+                return true;
+            }
+            return false;
+        }
+
+        function addUserMessageWithImage(content, imagePath, dataUrl) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-optimistic', 'true');
+            div.setAttribute('data-image-path', imagePath);
+            div.innerHTML = `
+                <div class="max-w-[80%] bg-gold-9/20 border border-gold-9/30 rounded-xl px-4 py-3">
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    <img src="${dataUrl}" class="max-w-full max-h-48 rounded border border-smoke-5 cursor-pointer" alt="Uploaded screenshot" onclick="openLightbox(this.src)">
+                    <div class="text-xs text-smoke-7 mt-1">📷 ${escapeHtml(imagePath.split('/').pop())}</div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function removeOptimisticImageMessage(imagePath) {
+            const container = document.getElementById('message-container');
+            const optimistic = container.querySelector(`[data-optimistic="true"][data-image-path="${imagePath}"]`);
+            if (optimistic) {
+                optimistic.remove();
+                return true;
+            }
+            return false;
+        }
+
+        function addUserMessageWithFile(content, filePath, fileName) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter flex justify-end';
+            const icon = getFileIcon(fileName);
+            div.innerHTML = `
+                <div class="max-w-[80%] bg-gold-9/20 border border-gold-9/30 rounded-xl px-4 py-3">
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    <div class="flex items-center gap-2 px-3 py-2 bg-smoke-3/50 rounded-lg border border-smoke-5">
+                        <span class="text-2xl">${icon}</span>
+                        <div class="flex flex-col">
+                            <span class="text-sm text-smoke-11 font-medium">${escapeHtml(fileName)}</span>
+                            <span class="text-[10px] text-smoke-8">${escapeHtml(filePath)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function addUserMessageWithFiles(content, files) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-optimistic', 'true');
+
+            let attachmentsHtml = files.map(f => {
+                if (f.isImage) {
+                    return `
+                        <div class="inline-block">
+                            <img src="${f.dataUrl}" class="max-w-full max-h-48 rounded border border-smoke-5 cursor-pointer" alt="Uploaded image" onclick="openLightbox(this.src)">
+                            <div class="text-xs text-smoke-7 mt-1">📷 ${escapeHtml(f.path.split('/').pop())}</div>
+                        </div>
+                    `;
+                } else {
+                    const icon = getFileIcon(f.name);
+                    return `
+                        <div class="flex items-center gap-2 px-3 py-2 bg-smoke-3/50 rounded-lg border border-smoke-5">
+                            <span class="text-2xl">${icon}</span>
+                            <div class="flex flex-col">
+                                <span class="text-sm text-smoke-11 font-medium">${escapeHtml(f.name)}</span>
+                                <span class="text-[10px] text-smoke-8">${escapeHtml(f.path)}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            }).join('');
+
+            div.innerHTML = `
+                <div class="max-w-[80%] bg-gold-9/20 border border-gold-9/30 rounded-xl px-4 py-3">
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    <div class="flex flex-wrap gap-2">${attachmentsHtml}</div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function addAssistantMessage(content, uuid = null) {
+            if (!content || !content.trim()) return;
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter';
+            if (uuid) div.setAttribute('data-uuid', uuid);
+            div.innerHTML = `
+                <div class="max-w-[90%] bg-smoke-3/50 border border-smoke-5 rounded-xl px-4 py-3">
+                    <div class="markdown-content text-sm text-smoke-12">${renderMarkdown(content)}</div>
+                </div>
+            `;
+            container.appendChild(div);
+
+            // Highlight code blocks and add copy buttons
+            div.querySelectorAll('pre code').forEach(block => {
+                hljs.highlightElement(block);
+                addCopyButton(block.parentElement);
+            });
+        }
+
+        function addCopyButton(preElement) {
+            const btn = document.createElement('button');
+            btn.className = 'code-copy-btn';
+            btn.textContent = 'Copy';
+            btn.onclick = async (e) => {
+                e.stopPropagation();
+                const code = preElement.querySelector('code')?.textContent || preElement.textContent;
+                try {
+                    await navigator.clipboard.writeText(code);
+                    btn.textContent = 'Copied!';
+                    btn.classList.add('copied');
+                    setTimeout(() => {
+                        btn.textContent = 'Copy';
+                        btn.classList.remove('copied');
+                    }, 1500);
+                } catch (err) {
+                    btn.textContent = 'Failed';
+                    setTimeout(() => btn.textContent = 'Copy', 1500);
+                }
+            };
+            preElement.appendChild(btn);
+        }
+
+        function updateAssistantMessage(uuid, content) {
+            // Find existing element by UUID
+            const existing = document.querySelector(`[data-uuid="${uuid}"]`);
+            if (!existing) {
+                // Element not in DOM (e.g. in "earlier messages" group) - skip to avoid out-of-order append
+                return;
+            }
+
+            // Update the content
+            let textContent = '';
+            if (Array.isArray(content)) {
+                textContent = content
+                    .filter(b => b.type === 'text' && b.text)
+                    .map(b => b.text)
+                    .join('\n\n');
+            } else if (typeof content === 'string') {
+                textContent = content;
+            }
+
+            const markdownDiv = existing.querySelector('.markdown-content');
+            if (markdownDiv && textContent) {
+                markdownDiv.innerHTML = renderMarkdown(textContent);
+                // Re-highlight code blocks and add copy buttons
+                existing.querySelectorAll('pre code').forEach(block => {
+                    hljs.highlightElement(block);
+                    addCopyButton(block.parentElement);
+                });
+            }
+        }
+
+        function addUserMessageWithImages(textContent, imageBlocks, isOptimistic = false) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter flex justify-end';
+            if (isOptimistic) {
+                div.setAttribute('data-optimistic', 'true');
+                if (textContent) div.setAttribute('data-content-hash', hashContent(textContent));
+            }
+
+            let attachmentHtml = '';
+            let displayText = textContent || '';
+
+            // PRIORITY 1: Check for image path patterns (most reliable - server-served)
+            // Matches: [Attached image: path] or [Image: source: path]
+            const imageMatch = displayText.match(/\[(?:Attached image|Image: source): ([^\]]+)\]/);
+            if (imageMatch) {
+                const imagePath = imageMatch[1];
+                let webPath = imagePath;
+                if (imagePath.includes('/uploads/')) {
+                    webPath = '/uploads/' + imagePath.split('/uploads/').pop();
+                } else if (imagePath.startsWith('/home/user/')) {
+                    webPath = imagePath.replace('/home/user/', '/userfiles/');
+                } else if (imagePath.startsWith('/opt/feather/uploads/')) {
+                    webPath = imagePath.replace('/opt/feather/uploads/', '/uploads/');
+                }
+                displayText = displayText.replace(imageMatch[0], '').trim();
+                attachmentHtml = `<img src="${webPath}" alt="Attached image" class="max-w-full max-h-48 rounded-lg mt-2 cursor-pointer" onclick="openLightbox('${webPath}')">`;
+            }
+
+            // PRIORITY 2: If no path pattern, try base64 image blocks as fallback
+            if (!attachmentHtml && imageBlocks && imageBlocks.length > 0) {
+                for (const imgBlock of imageBlocks) {
+                    if (imgBlock.source && imgBlock.source.type === 'base64' && imgBlock.source.data) {
+                        const dataUrl = `data:${imgBlock.source.media_type || 'image/png'};base64,${imgBlock.source.data}`;
+                        attachmentHtml += `<img src="${dataUrl}" alt="Attached image" class="max-w-full max-h-48 rounded-lg mt-2 cursor-pointer" onclick="openLightbox(this.src)">`;
+                    }
+                }
+            }
+
+            div.innerHTML = `
+                <div class="max-w-[80%] bg-gold-9/20 border border-gold-9/30 rounded-xl px-4 py-3">
+                    ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${escapeHtml(displayText)}</div>` : ''}
+                    ${attachmentHtml}
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        // Tool icons for prettier display
+        const TOOL_ICONS = {
+            'Bash': '⌘', 'Read': '📄', 'Write': '✏️', 'Edit': '🔧',
+            'Grep': '🔍', 'Glob': '📁', 'Task': '🤖', 'WebFetch': '🌐',
+            'WebSearch': '🔎', 'LSP': '💡', 'NotebookEdit': '📓',
+            'ExitPlanMode': '📋', 'EnterPlanMode': '📋',
+            'TaskCreate': '☑️', 'TaskUpdate': '☑️', 'TaskList': '☑️'
+        };
+
+        function getToolInputPreview(name, input) {
+            if (!input) return '';
+            try {
+                switch (name) {
+                    case 'Bash':
+                        return (input.command || '').split('\n')[0].substring(0, 80);
+                    case 'Read':
+                        return input.file_path || '';
+                    case 'Write':
+                        return input.file_path || '';
+                    case 'Edit':
+                        return input.file_path || '';
+                    case 'Grep':
+                        return `/${input.pattern || ''}/` + (input.path ? ` in ${input.path}` : '');
+                    case 'Glob':
+                        return input.pattern || '';
+                    case 'Task':
+                        return input.description || '';
+                    case 'WebFetch':
+                        return input.url || '';
+                    case 'WebSearch':
+                        return input.query || '';
+                    case 'ExitPlanMode': {
+                        const plan = input.plan || '';
+                        const titleMatch = plan.match(/^#\s+(.+)/m);
+                        return titleMatch ? titleMatch[1].substring(0, 80) : plan.split('\n')[0].substring(0, 80);
+                    }
+                    case 'EnterPlanMode':
+                        return 'Entering plan mode';
+                    case 'TaskCreate':
+                        return input.subject || '';
+                    case 'TaskUpdate':
+                        return `#${input.taskId || '?'} → ${input.status || 'update'}`;
+                    case 'TaskList':
+                        return 'List tasks';
+                    default:
+                        const s = JSON.stringify(input);
+                        return s.length > 60 ? s.substring(0, 60) + '...' : s;
+                }
+            } catch { return ''; }
+        }
+
+        function formatToolInput(name, input) {
+            if (!input) return '';
+            try {
+                switch (name) {
+                    case 'Bash':
+                        let bashHtml = `<div class="bg-smoke-4/50 rounded p-2 font-mono text-xs text-cyan-9 whitespace-pre-wrap">${escapeHtml(input.command || '')}</div>`;
+                        if (input.description) bashHtml = `<div class="text-smoke-10 text-xs mb-2">${escapeHtml(input.description)}</div>` + bashHtml;
+                        return bashHtml;
+                    case 'Read':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">File:</span> <span class="font-mono text-azure-9">${escapeHtml(input.file_path || '')}</span></div>`;
+                    case 'Write':
+                        let writeHtml = `<div class="text-smoke-10 text-xs mb-2"><span class="text-smoke-8">File:</span> <span class="font-mono text-azure-9">${escapeHtml(input.file_path || '')}</span></div>`;
+                        if (input.content) {
+                            const preview = input.content.length > 500 ? input.content.substring(0, 500) + '...' : input.content;
+                            writeHtml += `<div class="bg-smoke-4/50 rounded p-2 font-mono text-xs text-smoke-11 whitespace-pre-wrap max-h-32 overflow-auto">${escapeHtml(preview)}</div>`;
+                        }
+                        return writeHtml;
+                    case 'Edit':
+                        let editHtml = `<div class="text-smoke-10 text-xs mb-2"><span class="text-smoke-8">File:</span> <span class="font-mono text-azure-9">${escapeHtml(input.file_path || '')}</span></div>`;
+                        if (input.old_string) {
+                            editHtml += `<div class="text-xs mb-1"><span class="text-ember-9">- </span><span class="font-mono text-smoke-9 line-through">${escapeHtml(input.old_string.substring(0, 100))}${input.old_string.length > 100 ? '...' : ''}</span></div>`;
+                        }
+                        if (input.new_string) {
+                            editHtml += `<div class="text-xs"><span class="text-apple-9">+ </span><span class="font-mono text-smoke-11">${escapeHtml(input.new_string.substring(0, 100))}${input.new_string.length > 100 ? '...' : ''}</span></div>`;
+                        }
+                        return editHtml;
+                    case 'Grep':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Pattern:</span> <span class="font-mono text-violet-9">/${escapeHtml(input.pattern || '')}/</span>${input.path ? ` <span class="text-smoke-8">in</span> <span class="font-mono text-azure-9">${escapeHtml(input.path)}</span>` : ''}</div>`;
+                    case 'Glob':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Pattern:</span> <span class="font-mono text-gold-9">${escapeHtml(input.pattern || '')}</span></div>`;
+                    case 'Task':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Task:</span> ${escapeHtml(input.description || '')}</div>${input.prompt ? `<div class="bg-smoke-4/50 rounded p-2 mt-2 text-xs text-smoke-11 max-h-24 overflow-auto">${escapeHtml(input.prompt.substring(0, 300))}${input.prompt.length > 300 ? '...' : ''}</div>` : ''}`;
+                    case 'WebFetch':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">URL:</span> <span class="font-mono text-azure-9">${escapeHtml(input.url || '')}</span></div>`;
+                    case 'WebSearch':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Query:</span> <span class="text-gold-9">"${escapeHtml(input.query || '')}"</span></div>`;
+                    case 'ExitPlanMode': {
+                        const plan = input.plan || '';
+                        if (plan) {
+                            return `<div class="markdown-content text-xs text-smoke-11 max-h-96 overflow-auto">${renderMarkdown(plan)}</div>`;
+                        }
+                        return `<div class="text-xs text-smoke-9 italic">No plan content</div>`;
+                    }
+                    case 'EnterPlanMode':
+                        return `<div class="text-xs text-smoke-10">Switching to plan mode</div>`;
+                    case 'TaskCreate':
+                        let tcHtml = `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Subject:</span> ${escapeHtml(input.subject || '')}</div>`;
+                        if (input.description) tcHtml += `<div class="text-smoke-9 text-xs mt-1 max-h-24 overflow-auto">${escapeHtml(input.description)}</div>`;
+                        return tcHtml;
+                    case 'TaskUpdate': {
+                        let tuHtml = `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Task:</span> #${escapeHtml(input.taskId || '?')}`;
+                        if (input.status) tuHtml += ` <span class="text-smoke-8">→</span> <span class="font-medium">${escapeHtml(input.status)}</span>`;
+                        tuHtml += `</div>`;
+                        return tuHtml;
+                    }
+                    case 'TaskList':
+                        return `<div class="text-xs text-smoke-10">Listing all tasks</div>`;
+                    default:
+                        return `<pre class="text-xs text-smoke-10 whitespace-pre-wrap">${escapeHtml(JSON.stringify(input, null, 2) || '')}</pre>`;
+                }
+            } catch { return ''; }
+        }
+
+        function addToolCall(tool) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter';
+
+            const toolId = tool.id || Math.random().toString(36).substr(2, 8);
+            const preview = getToolInputPreview(tool.name, tool.input);
+            const icon = TOOL_ICONS[tool.name] || '⚡';
+            const formattedInput = formatToolInput(tool.name, tool.input);
+
+            div.innerHTML = `
+                <div class="max-w-3xl mx-auto">
+                    <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}">
+                        <div class="tool-header flex items-center gap-2.5 px-3 py-2 cursor-pointer"
+                             onclick="this.parentElement.querySelector('.tool-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.tool-body').classList.contains('hidden') ? '▶' : '▼'">
+                            <span class="text-sm">${icon}</span>
+                            <span class="text-xs font-medium text-smoke-12">${escapeHtml(tool.name)}</span>
+                            <span class="text-xs text-smoke-8 font-mono truncate flex-1">${escapeHtml(preview)}</span>
+                            <span class="tool-chevron text-[10px] text-smoke-7">▶</span>
+                        </div>
+                        <div class="tool-body hidden border-t border-smoke-5/30 p-3">
+                            ${formattedInput}
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        let thinkingBlocksCollapsed = false;
+
+        function addThinkingBlock(text) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter thinking-block' + (thinkingBlocksCollapsed ? ' collapsed' : '');
+
+            div.innerHTML = `
+                <div class="max-w-3xl mx-auto">
+                    <div class="border-l-[3px] border-violet-9/30 pl-3 py-1">
+                        <div class="thinking-toggle text-[10px] text-violet-9/70 font-medium mb-1"
+                             onclick="this.closest('.thinking-block').classList.toggle('collapsed');">💭 thinking</div>
+                        <div class="thinking-content text-xs text-smoke-9 italic whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+            // Show brain toggle button when we have thinking blocks
+            updateThinkingToggleButton();
+        }
+
+        function updateThinkingToggleButton() {
+            const btn = document.getElementById('thinking-toggle-btn');
+            const hasThinking = document.querySelectorAll('.thinking-block').length > 0;
+            if (btn) {
+                if (hasThinking) {
+                    btn.classList.remove('hidden');
+                    btn.style.opacity = thinkingBlocksCollapsed ? '0.5' : '1';
+                } else {
+                    btn.classList.add('hidden');
+                }
+            }
+        }
+
+        function toggleAllThinking() {
+            thinkingBlocksCollapsed = !thinkingBlocksCollapsed;
+            document.querySelectorAll('.thinking-block').forEach(block => {
+                if (thinkingBlocksCollapsed) {
+                    block.classList.add('collapsed');
+                } else {
+                    block.classList.remove('collapsed');
+                }
+            });
+            updateThinkingToggleButton();
+        }
+
+        function addSystemMessage(text) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter system-message';
+            div.innerHTML = `
+                <div class="max-w-3xl mx-auto text-center py-3">
+                    <span class="text-xs text-smoke-8 italic">${escapeHtml(text)}</span>
+                </div>
+            `;
+            container.appendChild(div);
+            scrollToBottom();
+        }
+
+        function removeSystemMessages() {
+            const container = document.getElementById('message-container');
+            container.querySelectorAll('.system-message').forEach(el => el.remove());
+        }
+
+        function addToolResult(result) {
+            const container = document.getElementById('message-container');
+            const div = document.createElement('div');
+            div.className = 'message-enter';
+
+            const isError = result.is_error === true;
+            const borderColor = isError ? 'border-ember-9/50' : 'border-smoke-6';
+            const labelColor = isError ? 'text-ember-9' : 'text-smoke-9';
+            const icon = isError ? '❌' : '✓';
+
+            // Extract text and image content from tool_result
+            let outputText = '';
+            let images = [];
+            if (typeof result.content === 'string') {
+                outputText = result.content;
+            } else if (Array.isArray(result.content)) {
+                outputText = result.content
+                    .filter(c => c.type === 'text')
+                    .map(c => c.text || '')
+                    .join('\n');
+                // Extract images (base64 format from Read tool)
+                images = result.content
+                    .filter(c => c.type === 'image' && c.source?.type === 'base64')
+                    .map(c => ({
+                        mediaType: c.source.media_type || 'image/png',
+                        data: c.source.data
+                    }));
+            } else if (result.content && typeof result.content === 'object') {
+                outputText = JSON.stringify(result.content, null, 2);
+            }
+
+            // Create a summary for the header
+            const lineCount = outputText.split('\n').length;
+            const charCount = outputText.length;
+            let summary = '';
+            if (isError) {
+                summary = outputText.split('\n')[0].substring(0, 50);
+            } else if (charCount < 60 && lineCount === 1) {
+                summary = outputText;
+            } else {
+                summary = `${lineCount} lines`;
+            }
+
+            // Truncate long output
+            const displayText = outputText.length > 2000
+                ? outputText.substring(0, 2000) + '\n... (truncated)'
+                : outputText;
+
+            // Build image HTML
+            const imageHtml = images.map(img =>
+                `<img src="data:${img.mediaType};base64,${img.data}"
+                      class="max-w-full max-h-96 rounded border border-smoke-5 mt-2 cursor-pointer"
+                      alt="Image from Read tool"
+                      onclick="openLightbox(this.src)">`
+            ).join('');
+
+            // Determine if result body should be expanded (has images or is error)
+            const hasImages = images.length > 0;
+            const shouldExpand = isError || hasImages;
+            // Short results can be shown inline without expansion
+            const isShort = charCount < 100 && lineCount <= 2 && !hasImages;
+
+            div.innerHTML = `
+                <div class="max-w-3xl mx-auto">
+                    <div class="tool-card border-l-[3px] ${borderColor} bg-smoke-3/30 rounded-r-lg overflow-hidden">
+                        <div class="tool-header flex items-center gap-2.5 px-3 py-2 ${isShort ? '' : 'cursor-pointer'}"
+                             ${isShort ? '' : `onclick="this.parentElement.querySelector('.result-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.result-body').classList.contains('hidden') ? '▶' : '▼'"`}>
+                            <span class="text-xs ${isError ? 'text-ember-9' : 'text-apple-9'}">${icon}</span>
+                            <span class="text-xs text-smoke-10 truncate flex-1 ${isShort ? 'font-mono' : ''}">${escapeHtml(summary)}</span>
+                            ${hasImages ? `<span class="text-[10px] text-smoke-7">📷 ${images.length}</span>` : ''}
+                            ${!isShort ? `<span class="tool-chevron text-[10px] text-smoke-7">${shouldExpand ? '▼' : '▶'}</span>` : ''}
+                        </div>
+                        ${!isShort ? `<div class="result-body ${shouldExpand ? '' : 'hidden'} border-t border-smoke-5/30">
+                            ${imageHtml ? `<div class="p-3 bg-smoke-4/30">${imageHtml}</div>` : ''}
+                            ${displayText ? `<pre class="text-xs text-smoke-10 bg-smoke-4/30 p-3 overflow-auto max-h-64 font-mono whitespace-pre-wrap">${escapeHtml(displayText)}</pre>` : ''}
+                        </div>` : ''}
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                return marked.parse(text);
+            } catch {
+                return escapeHtml(text);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Track if user is at bottom of scroll (within threshold)
+        let userAtBottom = true;
+        const SCROLL_THRESHOLD = 100; // pixels from bottom to consider "at bottom"
+
+        function isNearBottom() {
+            const container = document.getElementById('messages');
+            const scrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            return scrollBottom <= SCROLL_THRESHOLD;
+        }
+
+        function handleMessagesScroll() {
+            userAtBottom = isNearBottom();
+            const btn = document.getElementById('scroll-to-bottom-btn');
+            if (btn) {
+                if (userAtBottom) {
+                    btn.classList.add('hidden');
+                } else {
+                    btn.classList.remove('hidden');
+                }
+            }
+        }
+
+        let scrollPending = false;
+        function scrollToBottom(force = false) {
+            // Debounce with requestAnimationFrame to avoid blocking during rapid updates
+            if (scrollPending) return;
+            scrollPending = true;
+            requestAnimationFrame(() => {
+                scrollPending = false;
+                const container = document.getElementById('messages');
+                // Only auto-scroll if user was at bottom or force is true
+                if (force || userAtBottom) {
+                    container.scrollTop = container.scrollHeight;
+                    userAtBottom = true;
+                    // Hide the button since we're now at bottom
+                    const btn = document.getElementById('scroll-to-bottom-btn');
+                    if (btn) btn.classList.add('hidden');
+                }
+            });
+        }
+
+        // ========== JSONL History Polling ==========
+        // Poll for the most recent session and its messages
+        let sessionSnapshot = {};  // {sessionId: lastUpdated} snapshot taken when polling starts
+
+        async function startHistoryPolling() {
+            if (historyPollInterval) {
+                clearInterval(historyPollInterval);
+            }
+
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) return;
+
+            let projectId = null;
+            try {
+                const projectRes = await fetch('/api/projects');
+                const projectData = await projectRes.json();
+                const project = projectData.projects.find(p => p.id.includes(folder.pattern));
+                if (project) projectId = project.id;
+            } catch (e) {
+                console.error('Failed to find project:', e);
+                return;
+            }
+
+            if (!projectId) return;
+
+            // Snapshot current session timestamps so we can detect which one changes
+            if (!currentSessionId && Object.keys(sessionSnapshot).length === 0) {
+                try {
+                    const snapRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions`);
+                    const snapData = await snapRes.json();
+                    sessionSnapshot = {};
+                    for (const sess of (snapData.sessions || [])) {
+                        sessionSnapshot[sess.id] = sess.lastUpdated || '';
+                    }
+                    console.log('Session snapshot taken:', Object.keys(sessionSnapshot).length, 'sessions');
+                } catch (e) {
+                    console.error('Failed to snapshot sessions:', e);
+                }
+            }
+
+            console.log('startHistoryPolling: snapshot has', Object.keys(sessionSnapshot).length, 'sessions, currentSessionId:', currentSessionId);
+
+            // Poll every 500ms for updates
+            historyPollInterval = setInterval(async () => {
+                const myGeneration = pollGeneration;
+                try {
+                    // Get sessions
+                    const sessRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions`);
+                    const sessData = await sessRes.json();
+
+                    console.log('Poll: found', sessData.sessions?.length || 0, 'sessions');
+
+                    // Abort if polling was stopped during the fetch (session changed)
+                    if (myGeneration !== pollGeneration) return;
+
+                    if (sessData.sessions && sessData.sessions.length > 0) {
+                        let targetSession = null;
+
+                        // If we already have a session ID (from resumed session), use it
+                        if (currentSessionId) {
+                            targetSession = sessData.sessions.find(s => s.id === currentSessionId);
+                        } else {
+                            // Find the correct JSONL session for this tmux session.
+                            // Strategy: look for a session that CHANGED since our snapshot.
+                            // For "feather-new-*" tmux: only accept BRAND NEW sessions (not in snapshot)
+                            // because the driver session also gets updated and would be a false match.
+                            let newSession = null;      // Not in snapshot at all (Claude just created it)
+                            let updatedSession = null;  // Was in snapshot but timestamp changed
+
+                            for (const sess of sessData.sessions) {
+                                const prevUpdated = sessionSnapshot[sess.id];
+                                if (prevUpdated === undefined) {
+                                    // Brand new JSONL - highest priority
+                                    if (!newSession) newSession = sess;
+                                } else if (sess.lastUpdated && sess.lastUpdated > prevUpdated) {
+                                    // Existing session with new activity
+                                    if (!updatedSession) updatedSession = sess;
+                                }
+                            }
+
+                            // For new tmux sessions, ONLY accept new JSONLs (not updated ones)
+                            // Updated ones are likely the driver session (this Claude instance)
+                            const isNewTmux = currentTmuxSession && currentTmuxSession.includes('-new-');
+                            const discovered = isNewTmux ? newSession : (newSession || updatedSession);
+
+                            console.log('Poll compare:', { isNewTmux, currentTmuxSession, newSession: newSession?.id, updatedSession: updatedSession?.id, snapshotKeys: Object.keys(sessionSnapshot) });
+
+                            if (discovered) {
+                                targetSession = discovered;
+                                const isFirstDiscovery = !currentSessionId;
+                                currentSessionId = discovered.id;
+                                updateHash({ session: discovered.id });
+                                console.log('Found active session:', discovered.id, discovered.title,
+                                    newSession ? '(new JSONL)' : '(updated JSONL)');
+
+                                // First discovery: load full history, then switch to SSE tailing
+                                if (isFirstDiscovery) {
+                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history`);
+                                    const initHistData = await initHistRes.json();
+                                    if (myGeneration !== pollGeneration) return;
+
+                                    // Clear rendered UUIDs for fresh session
+                                    renderedUuids.clear();
+
+                                    if (initHistData.messages && initHistData.messages.length > 0) {
+                                        const container = document.getElementById('message-container');
+                                        container.innerHTML = '';
+
+                                        // Track UUIDs BEFORE rendering to prevent duplicates in SSE
+                                        for (const msg of initHistData.messages) {
+                                            if (msg.uuid) renderedUuids.add(msg.uuid);
+                                        }
+                                        console.log('Tracked', renderedUuids.size, 'UUIDs from history');
+
+                                        renderMessages(initHistData.messages);
+                                        lastMessageCount = initHistData.messages.length;
+                                    }
+
+                                    // Switch from polling to SSE tailing for live updates
+                                    // Use cursor from history to start tailing from end of file
+                                    const cursor = initHistData.cursor || null;
+                                    stopHistoryPolling();
+                                    startSessionTailing(projectId, discovered.id, cursor);
+                                    return;
+                                }
+                            }
+                        }
+
+                        // If we already have a session and are still polling, switch to tailing
+                        if (targetSession && currentSessionId) {
+                            console.log('Switching to SSE tailing for session:', currentSessionId);
+                            stopHistoryPolling();
+                            startSessionTailing(projectId, currentSessionId);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.error('History poll error:', e);
+                }
+            }, 500);
+        }
+
+        function stopHistoryPolling() {
+            if (historyPollInterval) {
+                clearInterval(historyPollInterval);
+                historyPollInterval = null;
+            }
+            pollGeneration++;
+            // Also stop any active SSE tailing
+            stopSessionTailing();
+        }
+
+        // ========== Session Tailing (SSE with byte-offset cursor) ==========
+        let tailingEventSource = null;
+        let tailCursor = null;  // Opaque cursor for reconnection
+        let currentTailProjectId = null;
+        let currentTailSessionId = null;
+        let renderedUuids = new Set();  // Track rendered messages to prevent duplicates
+
+        function startSessionTailing(projectId, sessionId, cursor = null) {
+            if (tailingEventSource) {
+                tailingEventSource.close();
+                tailingEventSource = null;
+            }
+
+            currentTailProjectId = projectId;
+            currentTailSessionId = sessionId;
+
+            // Build URL with optional cursor for resumption
+            let url = `/api/tail/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`;
+            if (cursor) {
+                url += `?cursor=${encodeURIComponent(cursor)}`;
+            }
+
+            console.log('Starting SSE tail:', url);
+            tailingEventSource = new EventSource(url);
+
+            tailingEventSource.addEventListener('lines', (event) => {
+                try {
+                    const events = JSON.parse(event.data);
+                    for (const evt of events) {
+                        // Update cursor for reconnection
+                        tailCursor = evt.cursor;
+
+                        // Process the raw JSONL line
+                        const line = evt.line;
+                        if (!line || !line.type) continue;
+
+                        // Check for duplicate UUIDs - update existing or skip user messages
+                        const isDuplicate = line.uuid && renderedUuids.has(line.uuid);
+                        if (line.uuid) {
+                            renderedUuids.add(line.uuid);
+                        }
+
+                        // Handle different record types
+                        if (line.type === 'user' && line.message) {
+                            // Skip duplicate user messages (they don't change)
+                            if (isDuplicate) continue;
+
+                            // Extract text content and images
+                            const content = line.message.content;
+                            let textContent = '';
+                            let imageBlocks = [];
+                            if (Array.isArray(content)) {
+                                textContent = content
+                                    .filter(b => b.type === 'text' && b.text)
+                                    .map(b => b.text)
+                                    .join('\n');
+                                // Collect image blocks
+                                imageBlocks = content.filter(b => b.type === 'image');
+                                // Also render tool_result blocks (which contain image results from Read tool)
+                                content.filter(b => b.type === 'tool_result').forEach(block => {
+                                    addToolResult(block);
+                                });
+                            } else if (typeof content === 'string') {
+                                textContent = content;
+                            }
+
+                            if (textContent || imageBlocks.length > 0) {
+                                // Remove optimistic version if exists, then add real one
+                                // Check for image path in text to remove optimistic image message
+                                const imgPathMatch = textContent.match(/\[(?:Attached image|Image: source): ([^\]]+)\]/);
+                                if (imgPathMatch) {
+                                    removeOptimisticImageMessage(imgPathMatch[1]);
+                                }
+                                if (textContent) removeOptimisticMessage(textContent);
+                                addUserMessageWithImages(textContent, imageBlocks, false);
+                            }
+                            scrollToBottom();
+                        } else if (line.type === 'assistant' && line.message) {
+                            // For assistant messages, update existing element if duplicate
+                            const content = line.message.content;
+
+                            let hasTextContent = false;
+                            if (isDuplicate && line.uuid) {
+                                // Update existing message element
+                                updateAssistantMessage(line.uuid, content);
+                                hasTextContent = true; // Updates mean we're receiving final content
+                            } else {
+                                // Render new message
+                                if (Array.isArray(content)) {
+                                    content.forEach(block => {
+                                        if (block.type === 'text' && block.text) {
+                                            addAssistantMessage(block.text, line.uuid);
+                                            hasTextContent = true;
+                                        } else if (block.type === 'thinking' && block.thinking) {
+                                            addThinkingBlock(block.thinking);
+                                            // Only set generic "Thinking..." if terminal isn't providing better status
+                                            if (!currentTmuxSession || !terminalDerivedStatus) {
+                                                setStatus('Thinking...', 'gold');
+                                            }
+                                        } else if (block.type === 'tool_use') {
+                                            addToolCall(block);
+                                            if (!currentTmuxSession || !terminalDerivedStatus) {
+                                                setStatus('Running tool...', 'gold');
+                                            }
+                                        } else if (block.type === 'tool_result') {
+                                            addToolResult(block);
+                                        }
+                                    });
+                                } else if (typeof content === 'string') {
+                                    addAssistantMessage(content, line.uuid);
+                                    hasTextContent = true;
+                                }
+                            }
+                            scrollToBottom();
+
+                            // Only show Ready when we get actual text content AND no terminal providing ground-truth
+                            if (hasTextContent && (!currentTmuxSession || !terminalDerivedStatus)) {
+                                setStatus('Ready', 'apple');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to parse tail event:', e, event.data);
+                }
+            });
+
+            tailingEventSource.addEventListener('error', (event) => {
+                console.log('Tail SSE error, will auto-reconnect:', event);
+            });
+
+            tailingEventSource.onerror = () => {
+                // EventSource auto-reconnects, but we want to resume from cursor
+                if (tailingEventSource && tailingEventSource.readyState === EventSource.CLOSED) {
+                    console.log('Tail SSE closed, reconnecting with cursor:', tailCursor);
+                    setTimeout(() => {
+                        if (currentTailProjectId && currentTailSessionId) {
+                            startSessionTailing(currentTailProjectId, currentTailSessionId, tailCursor);
+                        }
+                    }, 1000);
+                }
+            };
+        }
+
+        function stopSessionTailing() {
+            if (tailingEventSource) {
+                tailingEventSource.close();
+                tailingEventSource = null;
+            }
+            tailCursor = null;
+            currentTailProjectId = null;
+            currentTailSessionId = null;
+        }
+
+        // ========== New Session ==========
+        async function newPiSession() {
+            setEngine('pi');
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) {
+                setStatus('Select a project first', 'ember');
+                return;
+            }
+
+            stopHistoryPolling();
+
+            try {
+                const res = await fetch('/api/pi-new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cwd: folder.path })
+                });
+                const data = await res.json();
+
+                if (data.status === 'spawned') {
+                    currentTmuxSession = data.tmux_name;
+                    currentSessionProjectId = data.project_id || folder.id;
+                    updateHash({ session: data.tmux_name, folder: currentFolder });
+
+                    setStatus('Starting Pi...', 'amber');
+
+                    // Clear chat area
+                    document.getElementById('empty-state').classList.add('hidden');
+                    document.getElementById('message-container').classList.remove('hidden');
+                    document.getElementById('message-container').innerHTML = '';
+                    addSystemMessage('Starting Pi session...');
+
+                    // Open terminal immediately
+                    if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                        toggleTerminal();
+                    }
+                    connectToTerminal(data.tmux_name);
+
+                    // If UUID returned directly, use it
+                    if (data.session_id) {
+                        currentSessionId = data.session_id;
+                        updateHash({ session: data.session_id });
+                        codexTmuxMapping[data.session_id] = data.tmux_name;
+                        tmuxNameLookup[data.session_id] = data.tmux_name;
+                        setStatus('Pi running', 'apple');
+                        setTimeout(() => {
+                            loadSessions();
+                            startSessionTailing(currentSessionProjectId, currentSessionId, null);
+                        }, 2000);
+                    } else {
+                        currentSessionId = null;
+                        piResolvePoll(data.tmux_name, currentSessionProjectId);
+                    }
+                } else {
+                    setStatus(data.error || 'Failed to start Pi', 'ember');
+                }
+            } catch (e) {
+                console.error('Failed to create Pi session:', e);
+                setStatus('Failed to create Pi session', 'ember');
+            }
+        }
+
+        async function piResolvePoll(tmuxName, projectId) {
+            for (let i = 0; i < 60; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                try {
+                    const res = await fetch(`/api/pi-resolve/${encodeURIComponent(tmuxName)}`);
+                    const data = await res.json();
+                    if (data.resolved && data.session_id) {
+                        currentSessionId = data.session_id;
+                        updateHash({ session: data.session_id });
+                        codexTmuxMapping[data.session_id] = tmuxName;
+                        tmuxNameLookup[data.session_id] = tmuxName;
+                        console.log('Pi session resolved:', data.session_id, '→', tmuxName);
+                        setStatus('Pi running', 'apple');
+                        removeSystemMessages();
+                        loadSessions();
+                        startSessionTailing(projectId, data.session_id, null);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('Pi resolve poll error:', e);
+                }
+            }
+            setStatus('Pi started (no chat link)', 'gold');
+        }
+
+        async function newClaudeSession() {
+            setEngine('claude');
+            await newSession();
+        }
+
+        async function newSession() {
+            if (currentEngine === 'pi') {
+                await newPiSession();
+                return;
+            }
+            if (currentEngine === 'codex') {
+                await newCodexSession();
+                return;
+            }
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) {
+                setStatus('Select a project first', 'ember');
+                return;
+            }
+
+            // Stop any existing polling immediately to prevent stale callbacks
+            // from rendering content into the container after it's cleared
+            stopHistoryPolling();
+
+            try {
+                // Take session snapshot BEFORE spawning so the new JSONL is detected as "new"
+                const projectRes = await fetch('/api/projects');
+                const projectData = await projectRes.json();
+                const project = projectData.projects.find(p => p.id.includes(folder.pattern));
+                if (project) {
+                    const snapRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                    const snapData = await snapRes.json();
+                    sessionSnapshot = {};
+                    for (const sess of (snapData.sessions || [])) {
+                        sessionSnapshot[sess.id] = sess.lastUpdated || '';
+                    }
+                    console.log('Pre-spawn snapshot taken:', Object.keys(sessionSnapshot).length, 'sessions');
+                }
+
+                const res = await fetch('/api/claude-new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cwd: folder.path })
+                });
+                const data = await res.json();
+
+                if (data.status === 'spawned') {
+                    setStatus('Starting session...', 'amber');
+                    // Show spawn feedback in chat area
+                    document.getElementById('empty-state').classList.add('hidden');
+                    document.getElementById('message-container').classList.remove('hidden');
+                    document.getElementById('message-container').innerHTML = '';
+                    addSystemMessage('Spawning new Claude session...');
+                    setTimeout(() => {
+                        loadSessions();
+                        const name = data.tmux_name || data.tmux_session;
+                        if (name) {
+                            selectTmuxSession(name);
+                        } else {
+                            setStatus('Ready', 'apple');
+                        }
+                    }, 2000);
+                }
+            } catch (e) {
+                console.error('Failed to create session:', e);
+                setStatus('Failed to create session', 'ember');
+            }
+        }
+
+        async function newCodexSession() {
+            setEngine('codex');
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) {
+                setStatus('Select a project first', 'ember');
+                return;
+            }
+
+            stopHistoryPolling();
+
+            try {
+                const res = await fetch('/api/codex-new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cwd: folder.path, mode: codexMode })
+                });
+                const data = await res.json();
+
+                if (data.status === 'spawned') {
+                    currentSessionId = data.session_id;
+                    currentTmuxSession = data.tmux_name;
+                    currentSessionProjectId = data.project_id || folder.id;
+                    pendingCodexTmux = data.tmux_name;  // Track for UUID discovery
+                    updateHash({ session: data.tmux_name, folder: currentFolder });
+                    console.log('newCodexSession: set currentTmuxSession =', currentTmuxSession, 'pendingCodexTmux =', pendingCodexTmux);
+                    setStatus('Starting Codex...', 'amber');
+
+                    // For Codex, use terminal as primary - clear chat area
+                    document.getElementById('empty-state').classList.add('hidden');
+                    document.getElementById('message-container').classList.remove('hidden');
+                    document.getElementById('message-container').innerHTML = '';
+                    addSystemMessage('Codex session started - use terminal below');
+
+                    // For Codex, terminal is the primary interface
+                    // The actual Codex session will appear in sidebar with its own UUID
+                    if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                        toggleTerminal();
+                    }
+                    connectToTerminal(data.tmux_name);
+                    setStatus('Codex running', 'apple');
+
+                    // Reload sessions after a delay to pick up the new Codex session
+                    setTimeout(() => loadSessions(), 2000);
+                } else {
+                    setStatus(data.error || 'Failed to start Codex', 'ember');
+                }
+            } catch (e) {
+                console.error('Failed to create Codex session:', e);
+                setStatus('Failed to create Codex session', 'ember');
+            }
+        }
+
+        // ========== Input Handling ==========
+        let pendingFiles = [];  // Array of {blob: Blob, dataUrl: string, type: string, name: string, isImage: boolean}
+
+        // Input history for up/down arrow navigation
+        const inputHistory = [];
+        let historyIndex = -1;
+        let currentDraft = '';
+
+        function handleKeydown(e) {
+            const input = document.getElementById('input');
+
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+            } else if (e.key === 'ArrowUp' && input.selectionStart === 0 && !e.shiftKey) {
+                // Navigate to previous history item
+                if (inputHistory.length > 0) {
+                    if (historyIndex === -1) {
+                        currentDraft = input.value;
+                        historyIndex = inputHistory.length - 1;
+                    } else if (historyIndex > 0) {
+                        historyIndex--;
+                    }
+                    input.value = inputHistory[historyIndex];
+                    e.preventDefault();
+                }
+            } else if (e.key === 'ArrowDown' && input.selectionEnd === input.value.length && !e.shiftKey) {
+                // Navigate to next history item
+                if (historyIndex !== -1) {
+                    if (historyIndex < inputHistory.length - 1) {
+                        historyIndex++;
+                        input.value = inputHistory[historyIndex];
+                    } else {
+                        historyIndex = -1;
+                        input.value = currentDraft;
+                    }
+                    e.preventDefault();
+                }
+            } else if (e.key === 'Escape') {
+                // Clear input on Escape
+                input.value = '';
+                historyIndex = -1;
+                currentDraft = '';
+                autoResize(input);
+            }
+        }
+
+        function addToInputHistory(text) {
+            if (text.trim() && (inputHistory.length === 0 || inputHistory[inputHistory.length - 1] !== text)) {
+                inputHistory.push(text);
+                if (inputHistory.length > 50) inputHistory.shift(); // Keep last 50
+            }
+            historyIndex = -1;
+            currentDraft = '';
+        }
+
+        const MAX_IMAGE_DIM = 1568;  // Claude vision optimal max (longest side)
+
+        function resizeImageBlob(blob) {
+            return new Promise((resolve, reject) => {
+                // iOS Safari workaround: use FileReader instead of URL.createObjectURL
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.onload = (e) => {
+                    const dataUrl = e.target.result;
+                    const img = new Image();
+                    img.onerror = () => reject(new Error('Failed to load image'));
+                    img.onload = () => {
+                        let { width, height } = img;
+
+                        // Only resize if exceeds max dimension
+                        if (width <= MAX_IMAGE_DIM && height <= MAX_IMAGE_DIM) {
+                            resolve({ blob, dataUrl, type: blob.type });
+                            return;
+                        }
+
+                        // Scale down proportionally
+                        try {
+                            const scale = MAX_IMAGE_DIM / Math.max(width, height);
+                            const newW = Math.round(width * scale);
+                            const newH = Math.round(height * scale);
+
+                            const canvas = document.createElement('canvas');
+                            canvas.width = newW;
+                            canvas.height = newH;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, newW, newH);
+
+                            canvas.toBlob((resizedBlob) => {
+                                if (!resizedBlob) {
+                                    // Fallback if toBlob fails
+                                    resolve({ blob, dataUrl, type: blob.type });
+                                    return;
+                                }
+                                const resizedDataUrl = canvas.toDataURL('image/png');
+                                console.log(`Image resized: ${width}x${height} → ${newW}x${newH}`);
+                                resolve({ blob: resizedBlob, dataUrl: resizedDataUrl, type: 'image/png' });
+                            }, 'image/png');
+                        } catch (err) {
+                            // Fallback on any canvas error
+                            resolve({ blob, dataUrl, type: blob.type });
+                        }
+                    };
+                    img.src = dataUrl;
+                };
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        function handlePaste(e) {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const blob = item.getAsFile();
+                    if (!blob) return;
+
+                    resizeImageBlob(blob).then((result) => {
+                        addPendingFile({ ...result, isImage: true, name: 'pasted-image.png' });
+                        setTimeout(() => document.getElementById('input').focus(), 100);
+                    }).catch((err) => {
+                        console.error('Paste image error:', err);
+                    });
+                    return;
+                }
+            }
+        }
+
+        function addPendingFile(file) {
+            pendingFiles.push(file);
+            renderFilePreview();
+        }
+
+        function removePendingFile(index) {
+            pendingFiles.splice(index, 1);
+            if (pendingFiles.length === 0) {
+                clearPendingFiles();
+            } else {
+                renderFilePreview();
+            }
+        }
+
+        function renderFilePreview() {
+            const preview = document.getElementById('file-preview');
+            const container = document.getElementById('file-preview-items');
+            container.innerHTML = '';
+
+            pendingFiles.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'relative group';
+
+                if (file.isImage) {
+                    item.innerHTML = `
+                        <img src="${file.dataUrl}" class="max-h-16 rounded border border-smoke-5" alt="Preview">
+                        <button onclick="removePendingFile(${index})" class="absolute -top-1 -right-1 w-4 h-4 bg-ember-9 text-white rounded-full text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                    `;
+                } else {
+                    const icon = getFileIcon(file.name);
+                    item.innerHTML = `
+                        <div class="flex items-center gap-1.5 px-2 py-1.5 bg-smoke-3 rounded-lg border border-smoke-5">
+                            <span class="text-lg">${icon}</span>
+                            <span class="text-xs text-smoke-11 max-w-[100px] truncate">${escapeHtml(file.name)}</span>
+                            <button onclick="removePendingFile(${index})" class="ml-1 text-ember-9 hover:text-ember-11 text-xs">×</button>
+                        </div>
+                    `;
+                }
+                container.appendChild(item);
+            });
+
+            preview.classList.remove('hidden');
+            preview.style.display = 'block';
+            preview.offsetHeight; // iOS repaint fix
+        }
+
+        function getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const icons = {
+                pdf: '📕',
+                doc: '📘', docx: '📘',
+                xls: '📗', xlsx: '📗',
+                txt: '📝', md: '📝',
+                json: '📋', csv: '📊',
+                png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️'
+            };
+            return icons[ext] || '📄';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function clearPendingFiles() {
+            pendingFiles = [];
+            const preview = document.getElementById('file-preview');
+            preview.classList.add('hidden');
+            preview.style.display = '';
+            document.getElementById('file-preview-items').innerHTML = '';
+        }
+
+        function autoResize(el) {
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+        }
+
+        // ========== Voice Recording ==========
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        async function toggleVoiceRecording() {
+            const voiceBtn = document.getElementById('voice-btn');
+
+            if (isRecording) {
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+            } else {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        stream.getTracks().forEach(track => track.stop());
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        audioChunks = [];
+
+                        if (audioBlob.size > 0) {
+                            voiceBtn.className = 'transcribing px-3 py-1.5 rounded-lg text-sm transition-all';
+                            voiceBtn.textContent = '⏳';
+                            voiceBtn.disabled = true;
+
+                            try {
+                                const formData = new FormData();
+                                formData.append('file', audioBlob, 'recording.webm');
+                                const controller = new AbortController();
+                                const timeout = setTimeout(() => controller.abort(), 15000);
+                                const res = await fetch('/api/transcribe', { method: 'POST', body: formData, signal: controller.signal });
+                                clearTimeout(timeout);
+
+                                if (res.ok) {
+                                    const result = await res.json();
+                                    if (result.success && result.text) {
+                                        const input = document.getElementById('input');
+                                        input.value = input.value + (input.value ? ' ' : '') + result.text;
+                                        input.focus();
+                                        autoResize(input);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('Transcription failed:', e);
+                            } finally {
+                                voiceBtn.className = 'px-3 py-1.5 bg-smoke-4 hover:bg-smoke-5 rounded-lg text-sm transition-all text-smoke-10 hover:text-smoke-12';
+                                voiceBtn.textContent = '🎤';
+                                voiceBtn.disabled = false;
+                            }
+                        }
+
+                        isRecording = false;
+                        voiceBtn.className = 'px-3 py-1.5 bg-smoke-4 hover:bg-smoke-5 rounded-lg text-sm transition-all text-smoke-10 hover:text-smoke-12';
+                        voiceBtn.textContent = '🎤';
+                        mediaRecorder = null;
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    voiceBtn.className = 'recording px-3 py-1.5 rounded-lg text-sm transition-all';
+                    voiceBtn.textContent = '🔴';
+                } catch (e) {
+                    console.error('Microphone access denied:', e);
+                }
+            }
+        }
+
+        async function handleSend() {
+            // Prevent double-submit
+            if (isStreaming) return;
+
+            const input = document.getElementById('input');
+            const sendBtn = document.getElementById('send-btn');
+            const message = input.value.trim();
+            if (!message && pendingFiles.length === 0) {
+                setStatus('Nothing to send', 'amber');
+                return;
+            }
+
+            // Add to input history
+            if (message) addToInputHistory(message);
+
+            // Show loading state
+            isStreaming = true;
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+            sendBtn.classList.add('opacity-50');
+
+            function resetSendButton() {
+                isStreaming = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send';
+                sendBtn.classList.remove('opacity-50');
+            }
+
+            const isCodex = currentEngine === 'codex';
+            const isPi = currentEngine === 'pi';
+            const isTerminalAgent = isCodex || isPi;
+            console.log('handleSend state:', { isCodex, isPi, currentEngine, currentTmuxSession, currentSessionId, tmuxNameLookupKeys: Object.keys(tmuxNameLookup) });
+
+            // For terminal agents (Codex/Pi), try to recover tmux session from mapping if not set
+            if (!currentTmuxSession && isTerminalAgent && currentSessionId) {
+                const mappedTmux = codexTmuxMapping[currentSessionId] || tmuxNameLookup[currentSessionId];
+                if (mappedTmux) {
+                    currentTmuxSession = mappedTmux;
+                    console.log('Recovered tmux session from mapping:', mappedTmux);
+                }
+            }
+
+            if (!currentTmuxSession) {
+                // Auto-create a new session when user sends a message without one
+                const folder = FOLDERS.find(f => f.id === currentFolder);
+                if (!folder) {
+                    setStatus('No folder selected', 'ember');
+                    resetSendButton();
+                    return;
+                }
+
+                setStatus('Starting session...', 'amber');
+                input.value = '';
+                autoResize(input);
+                stopHistoryPolling();
+
+                try {
+                    if (isPi) {
+                        // Spawn Pi session (resume existing or create new)
+                        const piPayload = { cwd: folder.path };
+                        if (currentSessionId) {
+                            piPayload.resume_session = currentSessionId;
+                        }
+                        const spawnRes = await fetch('/api/pi-new', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(piPayload)
+                        });
+                        const spawnData = await spawnRes.json();
+
+                        if (spawnData.status !== 'spawned') {
+                            setStatus(spawnData.error || 'Failed to create Pi session', 'ember');
+                            resetSendButton();
+                            return;
+                        }
+
+                        currentTmuxSession = spawnData.tmux_name;
+                        currentSessionProjectId = spawnData.project_id || folder.id;
+                        lastMessageCount = 0;
+                        tmuxSessionStartTime = new Date().toISOString();
+                        updateHash({ session: spawnData.tmux_name, folder: currentFolder });
+
+                        document.getElementById('empty-state').classList.add('hidden');
+                        document.getElementById('message-container').classList.remove('hidden');
+                        document.getElementById('message-container').innerHTML = '';
+                        addSystemMessage(piPayload.resume_session ? 'Resuming Pi session...' : 'Starting Pi session...');
+    
+
+                        if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                            toggleTerminal();
+                        }
+                        connectToTerminal(currentTmuxSession);
+
+                        // UUID resolved immediately or poll for it
+                        if (spawnData.session_id) {
+                            currentSessionId = spawnData.session_id;
+                            updateHash({ session: spawnData.session_id });
+                            codexTmuxMapping[spawnData.session_id] = spawnData.tmux_name;
+                            tmuxNameLookup[spawnData.session_id] = spawnData.tmux_name;
+                            loadSessions();
+                            setTimeout(() => startSessionTailing(currentSessionProjectId, currentSessionId, null), 2000);
+                        } else {
+                            // Poll for UUID in background
+                            currentSessionId = null;
+                            piResolvePoll(spawnData.tmux_name, currentSessionProjectId);
+                        }
+                    } else if (isCodex) {
+                        // Spawn new Codex session
+                        const spawnRes = await fetch('/api/codex-new', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                cwd: folder.path,
+                                mode: codexMode,
+                                session_id: currentSessionId || null
+                            })
+                        });
+                        const spawnData = await spawnRes.json();
+
+                        if (spawnData.status !== 'spawned') {
+                            setStatus(spawnData.error || 'Failed to create Codex session', 'ember');
+                            resetSendButton();
+                            return;
+                        }
+
+                        currentTmuxSession = spawnData.tmux_name;
+                        currentSessionId = spawnData.session_id;
+                        currentSessionProjectId = spawnData.project_id || folder.id;
+                        pendingCodexTmux = spawnData.tmux_name;  // Track for UUID discovery
+                        lastMessageCount = 0;
+                        tmuxSessionStartTime = new Date().toISOString();
+                        updateHash({ session: spawnData.tmux_name, folder: currentFolder });
+
+                        // Set up UI
+                        document.getElementById('empty-state').classList.add('hidden');
+                        document.getElementById('message-container').classList.remove('hidden');
+                        document.getElementById('message-container').innerHTML = '';
+                        addSystemMessage('Spawning new Codex session...');
+    
+
+                        // Open terminal
+                        if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                            toggleTerminal();
+                        }
+                        connectToTerminal(currentTmuxSession);
+                        loadSessions();
+
+                        // Don't start tailing yet - loadSessions() will start tailing
+                        // when it discovers the Codex UUID and links it to the tmux session
+                    } else {
+                    // Take snapshot before spawning
+                    const projectRes = await fetch('/api/projects');
+                    const projectData = await projectRes.json();
+                    const project = projectData.projects.find(p => p.id.includes(folder.pattern));
+                    if (project) {
+                        const snapRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                        const snapData = await snapRes.json();
+                        sessionSnapshot = {};
+                        for (const sess of (snapData.sessions || [])) {
+                            sessionSnapshot[sess.id] = sess.lastUpdated || '';
+                        }
+                    }
+
+                    // Spawn new Claude session
+                    const spawnRes = await fetch('/api/claude-new', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cwd: folder.path })
+                    });
+                    const spawnData = await spawnRes.json();
+
+                    if (spawnData.status !== 'spawned') {
+                        setStatus('Failed to create session', 'ember');
+                        resetSendButton();
+                        return;
+                    }
+
+                    const tmuxName = spawnData.tmux_name || spawnData.tmux_session;
+                    currentTmuxSession = tmuxName;
+                    currentSessionId = null;
+                    currentSessionProjectId = folder.id;
+                    lastMessageCount = 0;
+                    tmuxSessionStartTime = new Date().toISOString();
+                    updateHash({ session: tmuxName, folder: currentFolder });
+
+                    // Set up UI
+                    document.getElementById('empty-state').classList.add('hidden');
+                    document.getElementById('message-container').classList.remove('hidden');
+                    document.getElementById('message-container').innerHTML = '';
+                    addSystemMessage('Spawning new Claude session...');
+                    // project-name removed = tmuxName;
+
+
+                    // Open terminal
+                    if (!document.getElementById('terminal-panel').classList.contains('open')) {
+                        toggleTerminal();
+                    }
+                    connectToTerminal(tmuxName);
+                    loadSessions();
+
+                    // Wait for Claude CLI to show its ready prompt
+                    const maxWait = 10000;
+                    const pollInterval = 300;
+                    let waited = 0;
+                    while (waited < maxWait) {
+                        await new Promise(resolve => setTimeout(resolve, pollInterval));
+                        waited += pollInterval;
+                        try {
+                            const outRes = await fetch(`/api/claude-output/${tmuxName}`);
+                            const outData = await outRes.json();
+                            if (outData.output && /^[>❯]\s/m.test(outData.output)) break;
+                        } catch (e) { /* retry */ }
+                    }
+                    }
+                } catch (e) {
+                    console.error('Failed to auto-create session:', e);
+                    setStatus('Failed to create session', 'ember');
+                    resetSendButton();
+                    return;
+                }
+            }
+
+            input.value = '';
+            autoResize(input);
+
+            // Upload pending files (images or documents)
+            const uploadedFiles = [];
+            if (pendingFiles.length > 0) {
+                setStatus(`Uploading ${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''}...`, 'gold');
+                for (const file of pendingFiles) {
+                    try {
+                        const res = await fetch('/api/upload-file', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': file.type || 'application/octet-stream',
+                                'X-Filename': encodeURIComponent(file.name || 'file')
+                            },
+                            body: file.blob
+                        });
+                        const data = await res.json();
+                        if (data.status === 'ok') {
+                            uploadedFiles.push({
+                                path: data.path,
+                                name: file.name,
+                                isImage: file.isImage,
+                                dataUrl: file.dataUrl
+                            });
+                        } else {
+                            setStatus(`Failed to upload ${file.name}`, 'ember');
+                            resetSendButton();
+                            return;
+                        }
+                    } catch (e) {
+                        console.error('File upload failed:', e);
+                        setStatus(`Failed to upload ${file.name}`, 'ember');
+                        resetSendButton();
+                        return;
+                    }
+                }
+                clearPendingFiles();
+            }
+
+            // Build the message to send to Claude
+            let sendMessage = message;
+            if (uploadedFiles.length > 0) {
+                // Include file paths so Claude can read them with its Read tool
+                const fileRefs = uploadedFiles.map(f =>
+                    f.isImage ? `[Attached image: ${f.path}]` : `[Attached file: ${f.path}] (${f.name})`
+                ).join('\n');
+                if (message) {
+                    sendMessage = `${message}\n\n${fileRefs}`;
+                } else {
+                    const hasImages = uploadedFiles.some(f => f.isImage);
+                    const hasFiles = uploadedFiles.some(f => !f.isImage);
+                    let prefix = hasImages && hasFiles ? 'Files attached' : hasImages ? 'Pictures attached' : 'Files attached';
+                    sendMessage = `${prefix}\n\n${fileRefs}`;
+                }
+            }
+
+            // Add user message to UI (show images/files if attached)
+            if (uploadedFiles.length > 0) {
+                addUserMessageWithFiles(message, uploadedFiles);
+            } else {
+                addUserMessage(message, true);  // true = optimistic
+            }
+            scrollToBottom(true);  // Force scroll when user sends message
+
+            // Wait for Claude CLI to be ready before sending (handles both auto-created and pre-created sessions)
+            if (!isCodex && currentTmuxSession && currentTmuxSession.includes('-new-')) {
+                console.log('Waiting for Claude ready prompt, tmux:', currentTmuxSession);
+                setStatus('Waiting for Claude...', 'amber');
+                const maxWait = 30000;  // Increased to 30s for first-time cold start
+                const pollInterval = 500;
+                let waited = 0;
+                let foundPrompt = false;
+                while (waited < maxWait) {
+                    try {
+                        const outRes = await fetch(`/api/claude-output/${currentTmuxSession}`);
+                        const outData = await outRes.json();
+                        // Log first few attempts to debug
+                        if (waited < 3000) {
+                            console.log('Claude output check:', waited, 'ms, output length:', outData.output?.length || 0);
+                        }
+                        if (outData.output && /^[>❯]\s/m.test(outData.output)) {
+                            console.log('Claude ready prompt detected after', waited, 'ms');
+                            foundPrompt = true;
+                            break;
+                        }
+                    } catch (e) {
+                        console.error('Error checking Claude output:', e);
+                    }
+                    await new Promise(resolve => setTimeout(resolve, pollInterval));
+                    waited += pollInterval;
+                }
+                if (!foundPrompt) {
+                    console.warn('Claude ready prompt NOT found after', maxWait, 'ms - sending anyway');
+                }
+            }
+
+            // Send message via selected engine
+            // For terminal agents (Codex/Pi), always use tmux session name (not UUID)
+            const terminalSendTarget = currentTmuxSession;
+            console.log(`Sending message via ${currentEngine}:`, terminalSendTarget || currentTmuxSession, sendMessage.substring(0, 50));
+            try {
+                const url = isPi
+                    ? `/api/pi-send/${encodeURIComponent(terminalSendTarget)}`
+                    : isCodex
+                    ? `/api/codex-send/${encodeURIComponent(terminalSendTarget)}`
+                    : `/api/claude-send/${encodeURIComponent(currentTmuxSession)}`;
+                const sendRes = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: sendMessage })
+                });
+                const sendData = await sendRes.json();
+                console.log('Send response:', sendData);
+                setStatus('Processing...', 'gold');
+
+                if (isTerminalAgent) {
+                    // Terminal agents (Codex/Pi) use terminal as primary view
+                } else {
+                    // If tailing is active, it will pick up new messages automatically
+                    // Only start polling if we're not already tailing
+                    if (!tailingEventSource) {
+                        startHistoryPolling();
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to send:', e);
+                setStatus('Failed to send', 'ember');
+            } finally {
+                resetSendButton();
+            }
+        }
+
+        async function sendCtrlC() {
+            if (!currentTmuxSession) return;
+            try {
+                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ signal: 'C-c' })
+                });
+            } catch (e) {
+                console.error('Failed to send Ctrl-C:', e);
+            }
+        }
+
+        async function killCurrentSession() {
+            if (!currentTmuxSession) return;
+            if (!confirm('Kill this session and all its processes?')) return;
+            try {
+                // Send Ctrl-C first, then kill if needed
+                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ signal: 'C-c' })
+                });
+                await new Promise(r => setTimeout(r, 500));
+                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ signal: 'C-c' })
+                });
+                await new Promise(r => setTimeout(r, 500));
+                await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                setStatus('Stopped', 'ember');
+                terminalDerivedStatus = null;
+                updateInterruptButtons();
+            } catch (e) {
+                console.error('Failed to kill session:', e);
+            }
+        }
+
+        function setPrompt(text) {
+            document.getElementById('input').value = text;
+            document.getElementById('input').focus();
+        }
+
+        function updateSessionButtons() {
+            updateInterruptButtons();
+        }
+
+        function updateInterruptButtons() {
+            const ctrlcBtn = document.getElementById('ctrlc-btn');
+            const hasSession = !!currentTmuxSession;
+            // Show Interrupt button whenever there's an active tmux session
+            if (ctrlcBtn) {
+                ctrlcBtn.classList.toggle('hidden', !hasSession);
+            }
+        }
+
+        const STATUS_COLORS = {
+            apple: '#7fd88f', ember: '#e06c75', gold: '#fab283', amber: '#e5c07b',
+            azure: '#5c9cf5', violet: '#9d7cd8', cyan: '#56b6c2', smoke: '#6a6a6a'
+        };
+
+        function setStatus(text, color = 'apple') {
+            document.getElementById('status').textContent = text;
+            document.getElementById('status-dot').style.backgroundColor = STATUS_COLORS[color] || STATUS_COLORS.apple;
+            updateSessionButtons();
+        }
+
+        // ========== Terminal Status Parsing ==========
+        let terminalDerivedStatus = null; // { state: 'ready'|'working', text: '...', color: '...' }
+        let lastSpinnerSeen = 0; // timestamp of last unambiguous spinner char
+        const SPINNER_HOLD_MS = 2000; // hold "working" for 2s after last spinner
+
+        function parseTerminalStatus(content) {
+            if (!content) return null;
+            const lines = content.split('\n');
+            // Find the bottom status bar (⏵⏵ or ⏸) to anchor parsing
+            let statusBarIdx = -1;
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const t = lines[i].trim();
+                if (t.startsWith('⏵⏵') || t.startsWith('⏸')) {
+                    statusBarIdx = i;
+                    break;
+                }
+            }
+            if (statusBarIdx < 0) return null; // Not a Claude CLI terminal
+
+            // Find the upper separator (above the ❯ prompt area)
+            // Pattern: status_line / separator / ❯ / separator / ⏵⏵
+            let upperSepIdx = -1;
+            for (let i = statusBarIdx - 1; i >= Math.max(0, statusBarIdx - 5); i--) {
+                if (/^[─]{8,}/.test(lines[i].trim())) {
+                    // This is the lower separator; find the upper one
+                    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+                        if (/^[─]{8,}/.test(lines[j].trim())) {
+                            upperSepIdx = j;
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+            if (upperSepIdx < 0) return null;
+
+            // Look above the upper separator for the thinking status line
+            // Spinner chars: ✻(U+273B) ✢(U+2722) ✶(U+2736) ✽(U+273D)
+            // · and * also appear in spinner rotation but are ambiguous (also used when settled)
+            // Strategy: ✻✢✶✽ = definitely working. · or * = working if a spinner was seen < 2s ago.
+            const SPINNERS = '✻✢✶✽';
+            for (let i = upperSepIdx - 1; i >= Math.max(0, upperSepIdx - 10); i--) {
+                const trimmed = lines[i].trim();
+                if (!trimmed) continue;
+                // Skip tool output markers
+                if (trimmed.startsWith('⎿') || trimmed.startsWith('│')) continue;
+                // Tool call header (● = U+25CF) - skip, keep looking
+                if (trimmed.codePointAt(0) === 0x25CF) continue;
+                // Match thinking status line: <char> <Verb>…
+                const statusMatch = trimmed.match(/^(.)\s+(\S+…)/);
+                if (statusMatch) {
+                    const prefix = statusMatch[1];
+                    const verb = statusMatch[2];
+                    if (SPINNERS.includes(prefix)) {
+                        lastSpinnerSeen = Date.now();
+                        return { state: 'working', text: verb, color: 'gold' };
+                    }
+                    // Ambiguous prefix (· or *) — still working if spinner seen recently
+                    if (Date.now() - lastSpinnerSeen < SPINNER_HOLD_MS) {
+                        return { state: 'working', text: verb, color: 'gold' };
+                    }
+                    break; // no recent spinner = settled
+                    break; // settled → ready
+                }
+                // Not a status line — stop looking
+                break;
+            }
+            return { state: 'ready', text: 'Ready', color: 'apple' };
+        }
+
+        // ========== Terminal ==========
+        let terminalHeight = parseInt(localStorage.getItem('terminalHeight') || '280');
+        let terminalLastContent = '';
+        let terminalInteractive = localStorage.getItem('terminalInteractive') === 'true';
+        let terminalWS = null;
+
+        function toggleTerminal() {
+            const panel = document.getElementById('terminal-panel');
+            const btn = document.getElementById('terminal-toggle');
+            const isOpen = panel.classList.contains('open');
+
+            if (isOpen) {
+                panel.classList.remove('open');
+                btn.classList.remove('bg-gold-9/20', 'text-gold-9');
+                document.body.classList.remove('terminal-open');
+                closeTerminalConnection();
+            } else {
+                panel.classList.add('open');
+                panel.style.height = terminalHeight + 'px';
+                btn.classList.add('bg-gold-9/20', 'text-gold-9');
+                document.body.classList.add('terminal-open');
+                document.body.style.setProperty('--terminal-height', (terminalHeight + 10) + 'px');
+
+                // Initialize terminal after panel is visible
+                requestAnimationFrame(() => {
+                    if (!term) {
+                        initTerminal();
+                    } else {
+                        // Refit existing terminal
+                        if (fitAddon) fitAddon.fit();
+                    }
+                    if (currentTmuxSession) {
+                        connectToTerminal(currentTmuxSession);
+                    }
+                    // Keep chat scrolled to bottom so latest messages stay visible
+                    scrollToBottom();
+                });
+            }
+        }
+
+        function initTerminal() {
+            const container = document.getElementById('terminal-container');
+            term = new Terminal({
+                theme: {
+                    background: '#121212',
+                    foreground: '#e0e0e0',
+                    cursor: '#fab283',
+                    cursorAccent: '#121212',
+                    selectionBackground: 'rgba(250, 178, 131, 0.3)',
+                    black: '#1a1a1a',
+                    red: '#e06c75',
+                    green: '#7fd88f',
+                    yellow: '#e5c07b',
+                    blue: '#5c9cf5',
+                    magenta: '#9d7cd8',
+                    cyan: '#56b6c2',
+                    white: '#e0e0e0',
+                },
+                fontSize: 12,
+                fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, monospace',
+                cursorBlink: true,
+                scrollback: 5000,
+                convertEol: true,
+            });
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(container);
+
+            // Fit after a short delay to ensure container is sized
+            setTimeout(() => {
+                if (fitAddon) fitAddon.fit();
+            }, 50);
+
+            window.addEventListener('resize', () => {
+                if (fitAddon && document.getElementById('terminal-panel').classList.contains('open')) {
+                    fitAddon.fit();
+                }
+            });
+
+            term.writeln('\x1b[90mSelect a session to view terminal output...\x1b[0m');
+            initTerminalResize();
+            updateInteractiveButton();
+
+            // Handle keyboard input for interactive mode
+            term.onData(data => {
+                if (terminalInteractive && terminalWS && terminalWS.readyState === WebSocket.OPEN) {
+                    terminalWS.send(data);
+                }
+            });
+        }
+
+        function toggleInteractiveMode() {
+            terminalInteractive = !terminalInteractive;
+            localStorage.setItem('terminalInteractive', terminalInteractive);
+            updateInteractiveButton();
+
+            // Reconnect with new mode
+            if (currentTmuxSession) {
+                connectToTerminal(currentTmuxSession);
+            }
+        }
+
+        function updateInteractiveButton() {
+            const btn = document.getElementById('interactive-toggle');
+            if (terminalInteractive) {
+                btn.textContent = 'Interactive';
+                btn.classList.remove('bg-smoke-4');
+                btn.classList.add('bg-apple-9/20', 'text-apple-9');
+            } else {
+                btn.textContent = 'Read-only';
+                btn.classList.remove('bg-apple-9/20', 'text-apple-9');
+                btn.classList.add('bg-smoke-4');
+            }
+        }
+
+        function connectToTerminal(sessionName) {
+            // Close existing connections
+            if (terminalSSE) {
+                terminalSSE.close();
+                terminalSSE = null;
+            }
+            if (terminalWS) {
+                terminalWS.close();
+                terminalWS = null;
+            }
+            terminalLastContent = '';
+            terminalDerivedStatus = null;
+            let terminalRafPending = false;
+
+            document.getElementById('terminal-session').textContent = sessionName;
+
+            if (term) {
+                term.clear();
+                const mode = terminalInteractive ? 'interactive (WS)' : 'read-only (SSE)';
+                term.writeln(`\x1b[33mConnecting to ${sessionName} [${mode}]...\x1b[0m`);
+            }
+
+            if (terminalInteractive) {
+                // WebSocket mode - interactive
+                const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                terminalWS = new WebSocket(`${wsProtocol}//${location.host}/ws/terminal/${sessionName}`);
+
+                terminalWS.onopen = () => {
+                    if (term) {
+                        term.clear();
+                        term.writeln('\x1b[32mConnected (interactive mode)\x1b[0m\n');
+                        term.focus();
+                    }
+                };
+
+                terminalWS.onmessage = (e) => {
+                    if (term && e.data !== terminalLastContent) {
+                        terminalLastContent = e.data;
+                        // Parse status immediately (don't wait for render RAF)
+                        const parsed = parseTerminalStatus(e.data.replace(/\n+$/, ''));
+                        if (parsed) {
+                            terminalDerivedStatus = parsed;
+                            setStatus(parsed.text, parsed.color);
+                            updateInterruptButtons();
+                        }
+                        if (!terminalRafPending) {
+                            terminalRafPending = true;
+                            requestAnimationFrame(() => {
+                                terminalRafPending = false;
+                                term.clear();
+                                const content = terminalLastContent.replace(/\n+$/, '');
+                                term.write(content);
+                            });
+                        }
+                    }
+                };
+
+                terminalWS.onerror = () => {
+                    if (term) {
+                        term.writeln('\n\x1b[31mWebSocket error\x1b[0m');
+                    }
+                };
+
+                terminalWS.onclose = () => {
+                    if (term) {
+                        term.writeln('\n\x1b[31mConnection closed\x1b[0m');
+                    }
+                };
+            } else {
+                // SSE mode - read-only
+                terminalSSE = new EventSource(`/api/terminal/${sessionName}`);
+
+                terminalSSE.addEventListener('terminal', (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (term && data.data && data.data !== terminalLastContent) {
+                            terminalLastContent = data.data;
+                            // Parse status immediately (don't wait for render RAF)
+                            const parsed = parseTerminalStatus(data.data.replace(/\n+$/, ''));
+                            if (parsed) {
+                                terminalDerivedStatus = parsed;
+                                setStatus(parsed.text, parsed.color);
+                                updateInterruptButtons();
+                            }
+                            if (!terminalRafPending) {
+                                terminalRafPending = true;
+                                requestAnimationFrame(() => {
+                                    terminalRafPending = false;
+                                    term.clear();
+                                    const content = terminalLastContent.replace(/\n+$/, '');
+                                    term.write(content);
+                                    const viewport = document.querySelector('.xterm-viewport');
+                                    if (viewport) viewport.scrollTop = 0;
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Terminal parse error:', err);
+                    }
+                });
+
+                terminalSSE.onerror = () => {
+                    if (term) {
+                        term.writeln('\n\x1b[31mConnection lost. Retrying...\x1b[0m');
+                    }
+                };
+            }
+        }
+
+        function closeTerminalConnection() {
+            if (terminalSSE) {
+                terminalSSE.close();
+                terminalSSE = null;
+            }
+            if (terminalWS) {
+                terminalWS.close();
+                terminalWS = null;
+            }
+            terminalLastContent = '';
+            terminalDerivedStatus = null;
+        }
+
+        function terminalRefresh() {
+            if (currentTmuxSession && term) {
+                terminalLastContent = '';
+                term.clear();
+                term.writeln('\x1b[33mRefreshing...\x1b[0m');
+                connectToTerminal(currentTmuxSession);
+            }
+        }
+
+        async function terminalSignal(signal) {
+            if (!currentTmuxSession) return;
+            try {
+                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ signal })
+                });
+            } catch (e) {
+                console.error('Failed to send signal:', e);
+            }
+        }
+
+        async function restartSession() {
+            if (!currentTmuxSession) {
+                console.log('No tmux session to restart');
+                return;
+            }
+
+            // Need session ID and folder path to respawn
+            if (!currentSessionId || !currentFolder) {
+                console.error('Missing session ID or folder for restart');
+                setStatus('Cannot restart - missing context', 'ember');
+                return;
+            }
+
+            const folder = FOLDERS.find(f => f.id === currentFolder);
+            if (!folder) {
+                console.error('Folder not found:', currentFolder);
+                return;
+            }
+
+            setStatus('Restarting...', 'gold');
+
+            try {
+                // Kill the current tmux session
+                await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                console.log('Killed tmux session:', currentTmuxSession);
+
+                // Wait a moment for cleanup
+                await new Promise(r => setTimeout(r, 500));
+
+                // Re-spawn with the same session ID
+                const res = await fetch(`/api/claude-spawn/${currentSessionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cwd: folder.path })
+                });
+                const data = await res.json();
+
+                if (data.status === 'spawned' || data.status === 'ok') {
+                    currentTmuxSession = data.tmux_name;
+                    document.getElementById('terminal-session').textContent = data.tmux_name;
+                    setStatus('Ready', 'apple');
+
+                    // Reconnect terminal SSE
+                    if (terminalEventSource) {
+                        terminalEventSource.close();
+                    }
+                    connectTerminalSSE(data.tmux_name);
+                    console.log('Restarted session:', data.tmux_name);
+                } else {
+                    console.error('Failed to respawn:', data);
+                    setStatus('Restart failed', 'ember');
+                }
+            } catch (e) {
+                console.error('Failed to restart session:', e);
+                setStatus('Restart error', 'ember');
+            }
+        }
+
+        function initTerminalResize() {
+            const panel = document.getElementById('terminal-panel');
+            const handle = document.getElementById('terminal-resize-handle');
+            let isResizing = false;
+            let startY = 0;
+            let startHeight = 0;
+
+            handle.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                startY = e.clientY;
+                startHeight = panel.offsetHeight;
+                document.body.style.cursor = 'ns-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                const deltaY = startY - e.clientY;
+                const newHeight = Math.max(150, Math.min(window.innerHeight - 200, startHeight + deltaY));
+                panel.style.height = newHeight + 'px';
+                terminalHeight = newHeight;
+                document.body.style.setProperty('--terminal-height', (newHeight + 10) + 'px');
+                if (fitAddon) fitAddon.fit();
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    localStorage.setItem('terminalHeight', terminalHeight.toString());
+                }
+            });
+        }
+
+        // ========== Screenshot Upload ==========
+        function triggerScreenshot() {
+            document.getElementById('screenshot-input').click();
+        }
+
+        function handleFileUpload(event) {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            event.target.value = ''; // Reset immediately
+
+            processFiles(files);
+        }
+
+        async function processFiles(files) {
+            for (const file of files) {
+                const isImage = file.type.startsWith('image/');
+
+                if (isImage) {
+                    // Handle image files - resize if needed
+                    try {
+                        const result = await resizeImageBlob(file);
+                        addPendingFile({ ...result, isImage: true, name: file.name });
+                    } catch (err) {
+                        console.error('Image upload error:', err);
+                    }
+                } else {
+                    // Handle document files - read as-is
+                    try {
+                        const dataUrl = await readFileAsDataUrl(file);
+                        addPendingFile({
+                            blob: file,
+                            dataUrl,
+                            type: file.type,
+                            name: file.name,
+                            isImage: false
+                        });
+                    } catch (err) {
+                        console.error('File read error');
+                        setStatus('Failed to read file', 'ember');
+                    }
+                }
+            }
+            setTimeout(() => document.getElementById('input').focus(), 100);
+        }
+
+        function readFileAsDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ========== Drag & Drop ==========
+        let dragCounter = 0;
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter++;
+            document.getElementById('drop-overlay')?.classList.add('active');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                document.getElementById('drop-overlay')?.classList.remove('active');
+            }
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter = 0;
+            document.getElementById('drop-overlay')?.classList.remove('active');
+
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                processFiles(Array.from(files));
+            }
+        }
+
+        // ========== Image Lightbox ==========
+        function openLightbox(src) {
+            const lightbox = document.getElementById('lightbox');
+            const img = document.getElementById('lightbox-img');
+            img.src = src;
+            lightbox.classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeLightbox() {
+            const lightbox = document.getElementById('lightbox');
+            lightbox.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+
+        // Close lightbox on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('lightbox')?.classList.contains('open')) {
+                closeLightbox();
+            }
+        });
+
+        // ========== SSE Connection ==========
+        let lastHeartbeat = Date.now();
+        let heartbeatWatchdog = null;
+
+        function connectSSE() {
+            sseConnection = new EventSource('/api/stream');
+
+            sseConnection.onopen = () => {
+                document.getElementById('sse-status').textContent = 'Connected';
+                document.getElementById('sse-status').className = 'text-apple-9';
+                lastHeartbeat = Date.now();
+                setStatus('Ready', 'apple');
+            };
+
+            sseConnection.onerror = () => {
+                document.getElementById('sse-status').textContent = 'Disconnected';
+                document.getElementById('sse-status').className = 'text-ember-9';
+                setStatus('Disconnected', 'ember');
+            };
+
+            sseConnection.addEventListener('heartbeat', (e) => {
+                lastHeartbeat = Date.now();
+                if (e.lastEventId) {
+                    document.getElementById('sse-event-id').textContent = e.lastEventId;
+                }
+                // Recover from disconnected state
+                const statusEl = document.getElementById('status');
+                if (statusEl.textContent === 'Disconnected' || statusEl.textContent === 'Offline') {
+                    setStatus('Ready', 'apple');
+                }
+            });
+
+            sseConnection.addEventListener('status', (e) => {
+                // Handle status updates
+            });
+
+            // Heartbeat watchdog - server sends every 15s, alert after 20s
+            if (heartbeatWatchdog) clearInterval(heartbeatWatchdog);
+            heartbeatWatchdog = setInterval(() => {
+                if (Date.now() - lastHeartbeat > 20000) {
+                    setStatus('Disconnected', 'ember');
+                }
+            }, 5000);
+        }
+
+        // ========== Init ==========
+        // Onboarding functions
+        async function checkClaudeAuth() {
+            try {
+                const resp = await fetch('/api/claude-auth-status');
+                const data = await resp.json();
+                if (!data.authenticated) {
+                    showOnboarding();
+                }
+                return data.authenticated;
+            } catch (e) {
+                console.error('Failed to check Claude auth:', e);
+                return true; // Don't block on error
+            }
+        }
+
+        function showOnboarding() {
+            const modal = document.getElementById('onboarding-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function dismissOnboarding() {
+            const modal = document.getElementById('onboarding-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            // Re-check auth status
+            checkClaudeAuth();
+        }
+
+        function openTerminalForOnboarding() {
+            // Open terminal if not already open
+            const panel = document.getElementById('terminal-panel');
+            if (!panel.classList.contains('open')) {
+                toggleTerminal();
+            }
+            // Keep modal visible so user can see instructions
+        }
+
+        // New project modal functions
+        function showNewProjectModal() {
+            const modal = document.getElementById('new-project-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('new-project-name').value = '';
+            document.getElementById('new-project-description').value = '';
+            document.getElementById('new-project-name').focus();
+        }
+
+        function hideNewProjectModal() {
+            const modal = document.getElementById('new-project-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function createProject() {
+            const nameInput = document.getElementById('new-project-name');
+            const descInput = document.getElementById('new-project-description');
+            const name = nameInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+            const description = descInput.value.trim();
+
+            if (!name) {
+                nameInput.focus();
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/create-project', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description })
+                });
+                const data = await resp.json();
+
+                if (data.status === 'ok') {
+                    hideNewProjectModal();
+                    // Refresh folders to show new project
+                    await initFolders();
+                    // Select the new folder
+                    if (data.project_id) {
+                        selectFolder(data.project_id);
+                    }
+                } else {
+                    alert('Failed to create project: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                console.error('Failed to create project:', e);
+                alert('Failed to create project: ' + e.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // iOS viewport height fix - handle virtual keyboard
+            function setVH() {
+                document.documentElement.style.setProperty('--vh', `${window.innerHeight * 0.01}px`);
+            }
+            setVH();
+            window.addEventListener('resize', setVH);
+
+            // Check Claude auth status on load
+            checkClaudeAuth();
+
+            // Initialize terminal mode button
+            updateInteractiveButton();
+
+            // Dynamically load projects, then tabs and sessions
+            initFolders();
+            connectSSE();
+
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                // Ctrl+K to focus input
+                if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                    e.preventDefault();
+                    document.getElementById('input').focus();
+                }
+                // Ctrl+` to toggle terminal
+                if ((e.metaKey || e.ctrlKey) && e.key === '`') {
+                    e.preventDefault();
+                    toggleTerminal();
+                }
+            });
+
+            // Handle browser back/forward
+            window.addEventListener('hashchange', () => {
+                hashRestored = false;
+                restoreFromHash();
+            });
+
+            // Refresh sessions periodically
+            setInterval(loadSessions, 30000);
+        });
+    </script>
+</body>
+</html>

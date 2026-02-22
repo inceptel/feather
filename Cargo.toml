@@ -1,0 +1,28 @@
+[package]
+name = "feather-rs"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart", "ws"] }
+reqwest = { version = "0.12", features = ["multipart", "json"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3"
+time = "0.3"
+base64 = "0.22"
+urlencoding = "2.1"
+notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
+notify-debouncer-mini = "0.4"
+dashmap = "5.5"  # concurrent hashmap for session cache
+chrono = "0.4"   # timestamp formatting for uploads
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
