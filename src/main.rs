@@ -339,10 +339,10 @@ async fn stream_events(
             let event = SseEvent::Heartbeat {
                 timestamp: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("system clock before Unix epoch")
                     .as_secs(),
             };
-            let data = serde_json::to_string(&event).unwrap();
+            let data = serde_json::to_string(&event).unwrap_or_default();
             Some((
                 Ok(Event::default()
                     .event("heartbeat")
@@ -363,7 +363,7 @@ async fn stream_events(
                     SseEvent::Terminal { .. } => "terminal",
                     SseEvent::Status { .. } => "status",
                 };
-                let data = serde_json::to_string(&event).unwrap();
+                let data = serde_json::to_string(&event).unwrap_or_default();
                 Some((
                     Ok(Event::default()
                         .event(event_type)
@@ -383,7 +383,7 @@ async fn stream_events(
             status: "connected".to_string(),
             details: Some(format!("seq: {}", init_seq)),
         };
-        let data = serde_json::to_string(&event).unwrap();
+        let data = serde_json::to_string(&event).unwrap_or_default();
         Ok(Event::default()
             .event("status")
             .id(init_seq.to_string())
@@ -881,7 +881,7 @@ async fn codex_new(
     } else {
         let ts = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock before Unix epoch")
             .as_millis();
         format!("feather-codex-{}", ts)
     };
@@ -987,7 +987,7 @@ async fn pi_new(
             Some(path) => {
                 let ts = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("system clock before Unix epoch")
                     .as_millis();
                 let sid = format!("feather-pi-{}", ts);
                 (sid, path, true)
@@ -1023,7 +1023,7 @@ async fn pi_new(
         } else {
             let ts = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
+                .expect("system clock before Unix epoch")
                 .as_millis();
             format!("feather-pi-{}", ts)
         };
@@ -1327,7 +1327,7 @@ async fn upload_image(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
 
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock before Unix epoch")
         .as_millis();
     let filename = format!("screenshot-{}.{}", timestamp, ext);
     let filepath = upload_dir.join(&filename);
@@ -1400,7 +1400,7 @@ async fn upload_file(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
     // Add timestamp to prevent collisions
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .expect("system clock before Unix epoch")
         .as_millis();
 
     // Build filename: timestamp-originalname.ext
@@ -1475,7 +1475,7 @@ async fn transcribe(mut multipart: Multipart) -> Json<TranscribeResponse> {
     let part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name("recording.webm")
         .mime_str("audio/webm")
-        .unwrap();
+        .expect("valid MIME type literal");
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", part);
@@ -1631,7 +1631,7 @@ async fn terminal_stream(
                 last_content = content.clone();
 
                 let event = SseEvent::Terminal { data: content };
-                let data = serde_json::to_string(&event).unwrap();
+                let data = serde_json::to_string(&event).unwrap_or_default();
 
                 Some((
                     Ok(Event::default().event("terminal").data(data)),
@@ -2214,8 +2214,8 @@ async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("feather_rs=info".parse().unwrap())
-            .add_directive("tower_http=info".parse().unwrap()))
+            .add_directive("feather_rs=info".parse().expect("valid tracing directive"))
+            .add_directive("tower_http=info".parse().expect("valid tracing directive")))
         .init();
 
     let (event_tx, _) = broadcast::channel::<(u64, SseEvent)>(100);
@@ -2329,7 +2329,7 @@ async fn main() {
             heartbeat_state.broadcast(SseEvent::Heartbeat {
                 timestamp: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("system clock before Unix epoch")
                     .as_secs(),
             });
         }
@@ -2405,6 +2405,6 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Feather-rs v{} listening on {}", env!("CARGO_PKG_VERSION"), addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind TCP listener");
+    axum::serve(listener, app).await.expect("server exited with error");
 }

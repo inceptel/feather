@@ -89,7 +89,7 @@ impl TmuxManager {
         let working_dir = cwd.unwrap_or(&self.default_cwd);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system clock before Unix epoch")
             .as_millis();
         let tmux_name = format!("feather-new-{}", timestamp);
 
