@@ -54,9 +54,10 @@ if [ -d "$BUILDS_DIR" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -gt
     echo "Promoting build: $TARGET (was: $ACTIVE)"
 
     # Copy build to feather binary
-    if [ -L "$FEATHER_BIN" ]; then
-        sudo rm "$FEATHER_BIN"
-    fi
+    # Stop service before swapping binary (avoids "Text file busy")
+    supervisorctl -s unix:///tmp/supervisor.sock stop feather
+
+    sudo rm -f "$FEATHER_BIN"
     sudo cp "$BUILDS_DIR/${TARGET}.bin" "$FEATHER_BIN"
     echo "$TARGET" | sudo tee "$BUILDS_DIR/active" > /dev/null
 
@@ -66,9 +67,9 @@ if [ -d "$BUILDS_DIR" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -gt
         echo "  Restored static assets"
     fi
 
-    # Restart
-    echo "Restarting..."
-    sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
+    # Start service with rolled-back binary
+    echo "Starting..."
+    supervisorctl -s unix:///tmp/supervisor.sock start feather
 
     sleep 2
     if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
@@ -83,14 +84,16 @@ if [ -d "$BUILDS_DIR" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -gt
 # Legacy fallback: use feather.previous
 elif [ -f "$FEATHER_PREV" ]; then
     echo "No versioned builds found. Using legacy feather.previous..."
-    cp -L "$FEATHER_BIN" "${FEATHER_BIN}.broken" 2>/dev/null || true
-    if [ -L "$FEATHER_BIN" ]; then
-        sudo rm "$FEATHER_BIN"
-    fi
+    sudo cp -L "$FEATHER_BIN" "${FEATHER_BIN}.broken" 2>/dev/null || true
+
+    # Stop service before swapping binary (avoids "Text file busy")
+    supervisorctl -s unix:///tmp/supervisor.sock stop feather
+
+    sudo rm -f "$FEATHER_BIN"
     sudo cp "$FEATHER_PREV" "$FEATHER_BIN"
 
-    echo "Restarting..."
-    sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
+    echo "Starting..."
+    supervisorctl -s unix:///tmp/supervisor.sock start feather
 
     sleep 2
     if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then

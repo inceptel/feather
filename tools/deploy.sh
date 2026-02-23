@@ -130,7 +130,7 @@ fi
 echo ""
 echo "[4/4] Deploying..."
 
-# Ensure builds directory exists
+# Ensure builds directory exists (root-owned /usr/local/bin)
 sudo mkdir -p "$BUILDS_DIR"
 
 # Read version from build
@@ -152,10 +152,11 @@ fi
 sudo cp target/release/feather-rs "$BUILDS_DIR/${VERSION}.bin"
 sudo tar cf "$BUILDS_DIR/${VERSION}.static.tar" -C "$(pwd)" static/
 
-# Install new binary (remove symlink first if present)
-if [ -L "$FEATHER_BIN" ]; then
-    sudo rm "$FEATHER_BIN"
-fi
+# Stop service before swapping binary (avoids "Text file busy")
+supervisorctl -s unix:///tmp/supervisor.sock stop feather
+
+# Install new binary (rm + cp instead of overwrite to avoid ETXTBSY)
+sudo rm -f "$FEATHER_BIN"
 sudo cp "$BUILDS_DIR/${VERSION}.bin" "$FEATHER_BIN"
 
 # Sync static assets to production (remove symlinks first to avoid self-copy)
@@ -174,8 +175,8 @@ if [ "$BUILD_COUNT" -gt 20 ]; then
     echo "  Cleaned old builds (kept newest 20)"
 fi
 
-# Restart via supervisord (clean env, no CLAUDECODE leakage)
-sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
+# Start service with new binary
+supervisorctl -s unix:///tmp/supervisor.sock start feather
 
 # Verify production is healthy
 sleep 2
