@@ -776,6 +776,13 @@ async fn claude_spawn(
     Path(session_id): Path<String>,
     Json(req): Json<SpawnRequest>,
 ) -> Json<SpawnResponse> {
+    if !is_safe_session_id(&session_id) {
+        return Json(SpawnResponse {
+            status: "error: invalid session_id".to_string(),
+            tmux_name: String::new(),
+            session_id: None,
+        });
+    }
     match state.tmux.spawn_claude_session(&session_id, req.cwd.as_deref()) {
         Ok(info) => {
             state.title_trigger.notify_one();
@@ -926,6 +933,9 @@ async fn codex_send(
     Path(session_id): Path<String>,
     Json(req): Json<CodexSendRequest>,
 ) -> Json<SimpleResponse> {
+    if !is_safe_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     // Send message to tmux - Codex writes its own JSONL files that normalizer watches
     if let Err(e) = state.tmux.send_message(&session_id, &req.message) {
         return Json(SimpleResponse { status: format!("error: {}", e) });
@@ -1117,6 +1127,9 @@ async fn pi_send(
     Path(session_id): Path<String>,
     Json(req): Json<PiSendRequest>,
 ) -> Json<SimpleResponse> {
+    if !is_safe_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     if let Err(e) = state.tmux.send_message(&session_id, &req.message) {
         return Json(SimpleResponse { status: format!("error: {}", e) });
     }
@@ -1524,6 +1537,9 @@ async fn claude_signal(
     Path(session_id): Path<String>,
     Json(req): Json<SignalRequest>,
 ) -> Json<SimpleResponse> {
+    if !is_safe_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     match state.tmux.send_signal(&session_id, &req.signal) {
         Ok(()) => Json(SimpleResponse { status: "sent".to_string() }),
         Err(e) => Json(SimpleResponse { status: format!("error: {}", e) }),
@@ -1534,6 +1550,9 @@ async fn claude_kill(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Json<SimpleResponse> {
+    if !is_safe_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     state.tmux.kill_session(&session_id);
     Json(SimpleResponse { status: "killed".to_string() })
 }
