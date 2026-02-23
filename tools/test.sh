@@ -1,9 +1,15 @@
 #!/bin/bash
-# Run the test suite
+# Run the Playwright test suite.
+# Usage:
+#   ./tools/test.sh          # test production (:4850)
+#   ./tools/test.sh 4851     # test canary (:4851)
 set -e
-cd /opt/feather
+cd "$(dirname "$0")/.."
 
-echo "=== Feather Tests ==="
+PORT="${1:-4850}"
+URL="http://localhost:$PORT"
+
+echo "=== Feather Tests (targeting $URL) ==="
 
 # Install test deps if needed
 if [ ! -d node_modules ]; then
@@ -12,5 +18,11 @@ if [ ! -d node_modules ]; then
     npx playwright install chromium
 fi
 
+# Verify target is reachable
+if ! curl -sf "$URL/health" > /dev/null 2>&1; then
+    echo "ERROR: $URL is not reachable"
+    exit 1
+fi
+
 # Run tests
-npm test
+FEATHER_URL="$URL" npx playwright test tests/e2e.spec.js --reporter=list

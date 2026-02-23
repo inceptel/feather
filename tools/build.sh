@@ -1,19 +1,17 @@
 #!/bin/bash
-# Compile, stamp version, restart Feather (no git operations)
+# Compile Feather. Does NOT restart or deploy.
+# Use deploy.sh to build + test + swap + restart.
 set -e
-cd /opt/feather
+cd "$(dirname "$0")/.."
 
 VERSION=$(TZ=America/New_York date +%Y%m%d-%H%M)
 echo "=== Build: $VERSION ==="
 
-echo "[1/3] Compiling..."
+echo "[1/2] Compiling..."
+export PATH="/usr/local/cargo/bin:$PATH"
 cargo build --release
 
-echo "[2/3] Stamping: $VERSION"
+echo "[2/2] Stamping version: $VERSION"
 sed -i "s|<p class=\"text-xs text-smoke-9 ml-7\">.*</p>|<p class=\"text-xs text-smoke-9 ml-7\">$VERSION</p>|" static/index.html
 
-echo "[3/3] Restarting..."
-sudo cp target/release/feather-rs /usr/local/bin/feather
-sudo supervisorctl restart feather
-
-echo "=== Built: $VERSION ==="
+echo "=== Built: $VERSION (not deployed — run deploy.sh to ship) ==="

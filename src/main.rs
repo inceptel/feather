@@ -2230,6 +2230,12 @@ async fn reap_idle_sessions(state: &Arc<AppState>, threshold: Duration) {
 
 #[tokio::main]
 async fn main() {
+    // Strip Claude Code env vars so spawned Claude CLI sessions work correctly.
+    // If these leak into Feather's env (e.g. restarted from a Claude Code shell),
+    // all Claude sessions spawned via the API will refuse to start.
+    std::env::remove_var("CLAUDECODE");
+    std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
+
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env()
