@@ -17,9 +17,9 @@
                 extend: {
                     colors: {
                         smoke: {
-                            1: '#121212', 2: '#1a1a1a', 3: '#212121', 4: '#252525',
-                            5: '#303030', 6: '#3a3a3a', 7: '#4b4c5c', 8: '#5e5e5e',
-                            9: '#6a6a6a', 10: '#8a8a8a', 11: '#a0a0a0', 12: '#e0e0e0'
+                            1: 'var(--smoke-1)', 2: 'var(--smoke-2)', 3: 'var(--smoke-3)', 4: 'var(--smoke-4)',
+                            5: 'var(--smoke-5)', 6: 'var(--smoke-6)', 7: 'var(--smoke-7)', 8: 'var(--smoke-8)',
+                            9: 'var(--smoke-9)', 10: 'var(--smoke-10)', 11: 'var(--smoke-11)', 12: 'var(--smoke-12)'
                         },
                         gold: { 9: '#fab283', 10: '#f5a742', 11: '#fcd9b8' },
                         azure: { 9: '#5c9cf5', 10: '#4a8ae6', 11: '#8cbcff' },
@@ -34,6 +34,17 @@
         }
     </script>
     <style>
+        /* Theme CSS variables - dark is default */
+        :root {
+            --smoke-1: #121212; --smoke-2: #1a1a1a; --smoke-3: #212121; --smoke-4: #252525;
+            --smoke-5: #303030; --smoke-6: #3a3a3a; --smoke-7: #4b4c5c; --smoke-8: #5e5e5e;
+            --smoke-9: #6a6a6a; --smoke-10: #8a8a8a; --smoke-11: #a0a0a0; --smoke-12: #e0e0e0;
+        }
+        [data-theme="light"] {
+            --smoke-1: #f5f5f5; --smoke-2: #ebebeb; --smoke-3: #e0e0e0; --smoke-4: #d5d5d5;
+            --smoke-5: #c5c5c5; --smoke-6: #aaaaaa; --smoke-7: #888888; --smoke-8: #666666;
+            --smoke-9: #555555; --smoke-10: #444444; --smoke-11: #333333; --smoke-12: #1a1a1a;
+        }
         html, body { height: 100%; overflow: hidden; }
         ::selection { background: rgba(250, 178, 131, 0.3); }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -47,26 +58,26 @@
         .session-item.active { background: linear-gradient(90deg, rgba(250, 178, 131, 0.15) 0%, transparent 100%); border-left: 2px solid #fab283 !important; }
         .thin-scrollbar::-webkit-scrollbar { width: 6px; }
         .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .thin-scrollbar::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+        .thin-scrollbar::-webkit-scrollbar-thumb { background: var(--smoke-6); border-radius: 3px; }
         .markdown-content { white-space: normal !important; }
         .markdown-content p { margin-bottom: 0.5em; line-height: 1.6; }
         .markdown-content p:last-child { margin-bottom: 0; }
-        .markdown-content pre { background: #1a1a1a !important; padding: 1em; border-radius: 0.5em; overflow-x: auto; margin: 1em 0; border: 1px solid #303030; position: relative; }
-        .code-copy-btn { position: absolute; top: 0.5em; right: 0.5em; padding: 0.25em 0.5em; background: #303030; border: 1px solid #4b4c5c; border-radius: 0.25em; color: #a0a0a0; font-size: 0.7em; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+        .markdown-content pre { background: var(--smoke-2) !important; padding: 1em; border-radius: 0.5em; overflow-x: auto; margin: 1em 0; border: 1px solid var(--smoke-5); position: relative; }
+        .code-copy-btn { position: absolute; top: 0.5em; right: 0.5em; padding: 0.25em 0.5em; background: var(--smoke-5); border: 1px solid var(--smoke-7); border-radius: 0.25em; color: var(--smoke-11); font-size: 0.7em; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
         .markdown-content pre:hover .code-copy-btn { opacity: 1; }
-        .code-copy-btn:hover { background: #4b4c5c; color: #e0e0e0; }
-        .code-copy-btn.copied { background: #7fd88f; color: #121212; }
+        .code-copy-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
+        .code-copy-btn.copied { background: #7fd88f; color: var(--smoke-1); }
         .markdown-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; }
-        .markdown-content :not(pre) > code { background: #252525; padding: 0.2em 0.4em; border-radius: 0.25em; color: #56b6c2; }
+        .markdown-content :not(pre) > code { background: var(--smoke-4); padding: 0.2em 0.4em; border-radius: 0.25em; color: #56b6c2; }
         .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
         .markdown-content li { margin: 0.25em 0; }
         .markdown-content ul li { list-style: disc; }
         .markdown-content ol li { list-style: decimal; }
         .markdown-content h1, .markdown-content h2, .markdown-content h3 { font-weight: 600; margin: 1em 0 0.5em; }
         .markdown-content h1 { font-size: 1.4em; }
-        .markdown-content h2 { font-size: 1.2em; color: #5c9cf5; }
-        .markdown-content h3 { font-size: 1.1em; color: #9d7cd8; }
-        .tool-card { background: #1a1a1a; border: 1px solid #303030; border-radius: 0.5em; margin: 0.25em 0; }
+        .markdown-content h2 { font-size: 1.2em; color: #4a8ae6; }
+        .markdown-content h3 { font-size: 1.1em; color: #8b6bc5; }
+        .tool-card { background: var(--smoke-2); border: 1px solid var(--smoke-5); border-radius: 0.5em; margin: 0.25em 0; }
         .tool-card.running { border-color: #fab283; }
         .tool-card.completed { border-color: #7fd88f; }
         .tool-card.error { border-color: #e06c75; }
@@ -91,14 +102,14 @@
             height: 280px;
             flex-direction: column;
             z-index: 50;
-            background: #0d0d0d;
-            border-top: 1px solid #3a3a3a;
+            background: var(--smoke-1);
+            border-top: 1px solid var(--smoke-6);
         }
         #terminal-panel.open { display: flex; }
         body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: none !important; }
         #terminal-resize-handle {
             height: 6px;
-            background: #303030;
+            background: var(--smoke-5);
             cursor: ns-resize;
             flex-shrink: 0;
         }
@@ -135,6 +146,29 @@
         @keyframes voice-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
         .safe-top { padding-top: max(1rem, env(safe-area-inset-top, 1rem)); }
         .safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem)); }
+        /* Light mode: override highlight.js github-dark theme */
+        [data-theme="light"] .hljs {
+            background: var(--smoke-2) !important;
+            color: #24292e;
+        }
+        [data-theme="light"] .hljs-keyword,
+        [data-theme="light"] .hljs-selector-tag { color: #d73a49; }
+        [data-theme="light"] .hljs-string,
+        [data-theme="light"] .hljs-addition { color: #032f62; }
+        [data-theme="light"] .hljs-comment,
+        [data-theme="light"] .hljs-quote { color: #6a737d; }
+        [data-theme="light"] .hljs-number,
+        [data-theme="light"] .hljs-literal { color: #005cc5; }
+        [data-theme="light"] .hljs-built_in,
+        [data-theme="light"] .hljs-type { color: #e36209; }
+        [data-theme="light"] .hljs-title,
+        [data-theme="light"] .hljs-section,
+        [data-theme="light"] .hljs-name { color: #6f42c1; }
+        [data-theme="light"] .hljs-attr,
+        [data-theme="light"] .hljs-attribute { color: #005cc5; }
+        [data-theme="light"] .hljs-variable,
+        [data-theme="light"] .hljs-template-variable { color: #e36209; }
+        [data-theme="light"] .hljs-deletion { color: #b31d28; background: #ffeef0; }
     </style>
 </head>
 <body class="bg-smoke-1 text-smoke-12 flex overflow-hidden" style="height: 100vh; height: calc(var(--vh, 1vh) * 100);">
@@ -233,7 +267,7 @@
                 <span class="text-xl">🪶</span>
                 <h1 class="text-lg font-bold text-gold-9">Feather</h1>
             </div>
-            <p class="text-xs text-smoke-9 ml-7">20260223-1056</p>
+            <p class="text-xs text-smoke-9 ml-7">20260223-1217</p>
         </div>
 
         <!-- Folder dropdown -->
@@ -275,6 +309,8 @@
                 <a href="/files/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Files</a>
                 <a href="/dashboards/" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Dashboards</a>
                 <a href="/onboarding" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Setup</a>
+                <a href="/admin" target="_blank" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all">Admin</a>
+                <button id="theme-toggle" onclick="toggleTheme()" class="px-2 py-1 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-smoke-7 text-smoke-10 rounded text-xs transition-all" title="Toggle dark/light mode">Dark</button>
             </div>
         </div>
 
@@ -296,7 +332,7 @@
         <input type="file" id="screenshot-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.json,.csv" class="hidden" multiple onchange="handleFileUpload(event)">
 
         <!-- Messages -->
-        <div id="messages" class="flex-1 overflow-y-auto thin-scrollbar relative pt-2" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <div id="messages" class="flex-1 overflow-y-auto thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
             <!-- Drop overlay for drag & drop files -->
             <div id="drop-overlay"><span class="text-gold-9 text-lg font-medium">Drop files to upload</span></div>
             <div id="empty-state" class="h-full flex items-center justify-center">
@@ -313,7 +349,7 @@
                     </div>
                 </div>
             </div>
-            <div id="message-container" class="max-w-4xl mx-auto p-4 space-y-4 hidden"></div>
+            <div id="message-container" class="max-w-4xl mx-auto p-4 space-y-4 hidden mt-auto"></div>
         </div>
 
         <!-- Scroll to bottom button - floats above input area -->
@@ -412,6 +448,37 @@
          * 3. selectTmuxSession() connects terminal SSE + loads linked history
          * 4. handleSend() sends messages to Claude via tmux send-keys
          */
+
+        // ========== Theme ==========
+        function initTheme() {
+            const saved = localStorage.getItem('feather-theme') || 'dark';
+            if (saved === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+            }
+            updateThemeButton(saved);
+        }
+
+        function toggleTheme() {
+            const current = localStorage.getItem('feather-theme') || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('feather-theme', next);
+            if (next === 'light') {
+                document.documentElement.setAttribute('data-theme', 'light');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+            }
+            updateThemeButton(next);
+        }
+
+        function updateThemeButton(theme) {
+            const btn = document.getElementById('theme-toggle');
+            if (btn) btn.textContent = theme === 'dark' ? 'Dark' : 'Light';
+        }
+
+        // Apply theme immediately to avoid flash
+        initTheme();
 
         // ========== State ==========
         let currentSessionId = null;
@@ -698,9 +765,11 @@
                 // Link pending Codex tmux session to its JSONL UUID
                 // (Pi sessions are mapped immediately at spawn time via --session flag)
                 if (pendingCodexTmux) {
+                    const now = Date.now();
                     for (const sess of historySessions) {
                         const isNewSession = !codexTmuxMapping[sess.id] && !tmuxNameLookup[sess.id];
-                        if (isNewSession && sess.id.startsWith('019c')) {
+                        const isRecent = sess.lastUpdated && (now - new Date(sess.lastUpdated).getTime()) < 60000;
+                        if (isNewSession && isRecent && (sess.source === 'codex' || sess.source === 'pi')) {
                             codexTmuxMapping[sess.id] = pendingCodexTmux;
                             tmuxNameLookup[sess.id] = pendingCodexTmux;
                             console.log('Linked Codex session', sess.id, 'to tmux', pendingCodexTmux);
@@ -3591,6 +3660,22 @@
             }
         });
 
+        // ========== Auto-Refresh After Deploy ==========
+        let knownUptime = null;
+
+        function showToast(message, duration = 5000) {
+            const toast = document.createElement('div');
+            toast.textContent = message;
+            Object.assign(toast.style, {
+                position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+                background: '#1a1a2e', color: '#e0e0e0', padding: '12px 24px',
+                borderRadius: '8px', border: '1px solid #444', zIndex: '99999',
+                fontSize: '14px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+            });
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), duration);
+        }
+
         // ========== SSE Connection ==========
         let lastHeartbeat = Date.now();
         let heartbeatWatchdog = null;
@@ -3605,6 +3690,15 @@
                 lastHeartbeat = Date.now();
                 sseReconnectDelay = 1000; // Reset backoff on successful connect
                 setStatus('Ready', 'apple');
+
+                // Detect deploy: if server uptime dropped, it restarted
+                fetch('/health').then(r => r.json()).then(h => {
+                    if (knownUptime !== null && h.uptime_secs < knownUptime) {
+                        showToast('New version deployed, refreshing...', 5000);
+                        setTimeout(() => location.reload(true), 5000);
+                    }
+                    knownUptime = h.uptime_secs;
+                }).catch(() => {}); // ignore fetch errors during reconnect
             };
 
             sseConnection.onerror = () => {
