@@ -186,7 +186,10 @@ pub async fn start(cache: Arc<SessionCache>, api_key: String, trigger: Arc<Notif
     let title_cache: Arc<RwLock<HashMap<String, TitleEntry>>> =
         Arc::new(RwLock::new(load_title_cache()));
 
-    // Apply any cached titles to the session cache on startup
+    // Wait for normalizer to populate sessions before applying titles
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    // Apply cached titles to the session cache now that sessions are loaded
     {
         let tc = title_cache.read().await;
         for (session_id, entry) in tc.iter() {
@@ -195,7 +198,6 @@ pub async fn start(cache: Arc<SessionCache>, api_key: String, trigger: Arc<Notif
     }
 
     // Startup: fix any untitled sessions (active_only=false to catch everything)
-    tokio::time::sleep(Duration::from_secs(10)).await; // Let normalizer populate sessions
     let startup_count = run_cycle(&cache, &title_cache, &api_key, false).await;
     if startup_count > 0 {
         info!("Startup: generated {} titles for untitled sessions", startup_count);

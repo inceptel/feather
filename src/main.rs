@@ -582,9 +582,30 @@ async fn list_sessions(
 ) -> Json<SessionsResponse> {
     let mut sessions = Vec::new();
 
+    // Load title cache from disk as fallback for sessions whose in-memory title
+    // hasn't been applied yet (e.g. before the normalizer finishes startup)
+    let title_fallback: HashMap<String, String> = fs::read_to_string("title-cache.json")
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .map(|v| {
+            v.as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| {
+                            let title = v.get("title").and_then(|t| t.as_str())
+                                .or_else(|| v.as_str());
+                            title.map(|t| (k.clone(), t.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+
     let cached = state.session_cache.list_sessions();
     for meta in cached.into_iter().filter(|m| m.project == project_id) {
-        let title = meta.title.clone();
+        let title = meta.title.clone()
+            .or_else(|| title_fallback.get(&meta.id).cloned());
 
         let last_updated = if meta.updated_at.is_empty() {
             "unknown".to_string()
