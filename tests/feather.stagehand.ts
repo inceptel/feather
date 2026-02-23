@@ -5,14 +5,14 @@ const BASE_URL = process.env.FEATHER_URL || "http://localhost:4850";
 async function run() {
   const stagehand = new Stagehand({
     env: "LOCAL",
-    modelName: "claude-sonnet-4-20250514",
+    modelName: "claude-sonnet-4-6",
     modelClientOptions: {
       apiKey: process.env.FEATHER_ANTHROPIC_API_KEY,
     },
     localBrowserLaunchOptions: {
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath: "/usr/bin/google-chrome",
+      executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome",
     },
   });
 
@@ -26,7 +26,7 @@ async function run() {
     await page.waitForTimeout(2000);  // SSE keeps network alive, can't use networkidle
 
     const title = await page.evaluate(() => document.title);
-    assert(title === "Feather Rust", `Expected title "Feather Rust", got "${title}"`);
+    assert(title === "Feather", `Expected title "Feather", got "${title}"`);
 
     const hasInput = await page.evaluate(() => !!document.getElementById("input"));
     assert(hasInput, "Message input not found");
@@ -37,8 +37,8 @@ async function run() {
     console.log("  PASS: Page loads with input and send button");
 
     // ===== Test 2: +New creates a session and doesn't get stuck =====
-    console.log("TEST 2: +New button creates session");
-    await stagehand.act("click the +New button");
+    console.log("TEST 2: + Claude button creates session");
+    await stagehand.act("click the + Claude button to create a new Claude session");
 
     // Wait for session to spawn and be selected
     await page.waitForTimeout(4000);
