@@ -45,12 +45,17 @@ def get_health():
 
 
 def promote_version(version):
-    """Copy build to /usr/local/bin/feather, update active file, restart."""
+    """Copy build + static to production, update active file, restart."""
     src = BUILDS_DIR / f"{version}.bin"
     if not src.exists():
         return False, f"Build {version} not found"
     shutil.copy2(str(src), str(FEATHER_BIN))
     os.chmod(str(FEATHER_BIN), 0o755)
+    # Restore static assets if archived
+    static_tar = BUILDS_DIR / f"{version}.static.tar"
+    if static_tar.exists():
+        subprocess.run(["tar", "xf", str(static_tar), "-C", "/opt/feather/"],
+                       capture_output=True, timeout=10)
     ACTIVE_FILE.write_text(version)
     subprocess.run(["sudo", "supervisorctl", "restart", "feather"],
                    capture_output=True, timeout=10)
@@ -140,6 +145,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": f"Build {version} not found"})
                 return
             target.unlink()
+            static_tar = BUILDS_DIR / f"{version}.static.tar"
+            if static_tar.exists():
+                static_tar.unlink()
             self._json(200, {"ok": True, "deleted": version})
         else:
             self._json(404, {"error": "not found"})

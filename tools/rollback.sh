@@ -60,9 +60,15 @@ if [ -d "$BUILDS_DIR" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -gt
     sudo cp "$BUILDS_DIR/${TARGET}.bin" "$FEATHER_BIN"
     echo "$TARGET" | sudo tee "$BUILDS_DIR/active" > /dev/null
 
+    # Restore static assets if archived
+    if [ -f "$BUILDS_DIR/${TARGET}.static.tar" ]; then
+        tar xf "$BUILDS_DIR/${TARGET}.static.tar" -C /opt/feather/
+        echo "  Restored static assets"
+    fi
+
     # Restart
     echo "Restarting..."
-    sudo supervisorctl restart feather
+    sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
 
     sleep 2
     if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
@@ -84,7 +90,7 @@ elif [ -f "$FEATHER_PREV" ]; then
     sudo cp "$FEATHER_PREV" "$FEATHER_BIN"
 
     echo "Restarting..."
-    sudo supervisorctl restart feather
+    sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
 
     sleep 2
     if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then

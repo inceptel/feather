@@ -117,7 +117,7 @@ if [ "$CADDY_ADDED" = "true" ]; then
     echo "  Caddy canary route removed"
 fi
 kill $CANARY_PID 2>/dev/null
-wait $CANARY_PID 2>/dev/null
+wait $CANARY_PID 2>/dev/null || true
 
 if [ "$TEST_PASSED" != "true" ]; then
     echo ""
@@ -137,7 +137,7 @@ sudo mkdir -p "$BUILDS_DIR"
 VERSION=$(cat target/BUILD_VERSION 2>/dev/null || TZ=America/New_York date +%Y%m%d-%H%M)
 
 # One-time migration: import feather.previous as a build if it exists
-if [ -f "$FEATHER_PREV" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -eq 0 ]; then
+if [ -f "$FEATHER_PREV" ] && [ "$(find "$BUILDS_DIR" -maxdepth 1 -name '*.bin' 2>/dev/null | wc -l)" -eq 0 ]; then
     PREV_VERSION="pre-versioned"
     sudo cp "$FEATHER_PREV" "$BUILDS_DIR/${PREV_VERSION}.bin"
     echo "  Migrated feather.previous as build '${PREV_VERSION}'"
@@ -145,11 +145,12 @@ fi
 
 # Save previous binary for rollback (dereference symlinks)
 if [ -f "$FEATHER_BIN" ]; then
-    cp -L "$FEATHER_BIN" "$FEATHER_PREV"
+    sudo cp -L "$FEATHER_BIN" "$FEATHER_PREV"
 fi
 
-# Archive this build
+# Archive this build (binary + static assets)
 sudo cp target/release/feather-rs "$BUILDS_DIR/${VERSION}.bin"
+sudo tar cf "$BUILDS_DIR/${VERSION}.static.tar" -C "$(pwd)" static/
 
 # Install new binary (remove symlink first if present)
 if [ -L "$FEATHER_BIN" ]; then
@@ -157,18 +158,24 @@ if [ -L "$FEATHER_BIN" ]; then
 fi
 sudo cp "$BUILDS_DIR/${VERSION}.bin" "$FEATHER_BIN"
 
+# Sync static assets to production (remove symlinks first to avoid self-copy)
+find /opt/feather/static/ -maxdepth 1 -type l -delete 2>/dev/null || true
+cp -f static/* /opt/feather/static/
+
 # Record active version
 echo "$VERSION" | sudo tee "$BUILDS_DIR/active" > /dev/null
 
 # Cleanup: keep newest 20 builds
-BUILD_COUNT=$(ls -1 "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)
+BUILD_COUNT=$(find "$BUILDS_DIR" -maxdepth 1 -name '*.bin' | wc -l)
 if [ "$BUILD_COUNT" -gt 20 ]; then
-    ls -1t "$BUILDS_DIR"/*.bin | tail -n +21 | xargs sudo rm -f
+    find "$BUILDS_DIR" -maxdepth 1 -name '*.bin' -printf '%T@ %p\n' | sort -rn | tail -n +21 | cut -d' ' -f2 | while read f; do
+        sudo rm -f "$f" "${f%.bin}.static.tar"
+    done
     echo "  Cleaned old builds (kept newest 20)"
 fi
 
 # Restart via supervisord (clean env, no CLAUDECODE leakage)
-sudo supervisorctl restart feather
+sudo supervisorctl -s unix:///tmp/supervisor.sock restart feather
 
 # Verify production is healthy
 sleep 2
