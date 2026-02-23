@@ -195,7 +195,7 @@ async fn call_haiku(api_key: &str, prompt: &str) -> Result<String, Box<dyn std::
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "model": "claude-3-5-haiku-20241022",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 1024,
             "messages": [
                 {"role": "user", "content": prompt}
@@ -291,16 +291,5 @@ fn append_facts_to_file(path: &Path, facts: &[ExtractedFact]) -> Result<(), Box<
 
 /// Get today's date as YYYY-MM-DD
 fn chrono_like_today() -> String {
-    let now = std::time::SystemTime::now();
-    let duration = now.duration_since(std::time::UNIX_EPOCH).unwrap();
-    let secs = duration.as_secs();
-
-    // Simple date calculation (not accounting for leap seconds, good enough)
-    let days = secs / 86400;
-    let years = (days / 365) + 1970;
-    let remaining_days = days % 365;
-    let month = remaining_days / 30 + 1;
-    let day = remaining_days % 30 + 1;
-
-    format!("{:04}-{:02}-{:02}", years, month.min(12), day.min(31))
+    chrono::Local::now().format("%Y-%m-%d").to_string()
 }
