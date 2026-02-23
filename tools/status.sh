@@ -29,9 +29,26 @@ else
     echo "Health:  DOWN"
 fi
 
-# Rollback available?
-if [ -f /usr/local/bin/feather.previous ]; then
-    echo "Rollback: available"
+# Build info
+BUILDS_DIR="/usr/local/bin/feather-builds"
+if [ -d "$BUILDS_DIR" ]; then
+    ACTIVE=$(cat "$BUILDS_DIR/active" 2>/dev/null || echo "unknown")
+    BUILD_COUNT=$(ls -1 "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)
+    echo "Build:   $ACTIVE ($BUILD_COUNT archived)"
+    echo ""
+    echo "Recent builds:"
+    ls -1t "$BUILDS_DIR"/*.bin 2>/dev/null | head -5 | while read f; do
+        V=$(basename "$f" .bin)
+        SIZE=$(du -h "$f" 2>/dev/null | cut -f1)
+        if [ "$V" = "$ACTIVE" ]; then
+            echo "  $V  $SIZE  [ACTIVE]"
+        else
+            echo "  $V  $SIZE"
+        fi
+    done
+    echo "  Rollback: ./tools/rollback.sh [VERSION]"
+elif [ -f /usr/local/bin/feather.previous ]; then
+    echo "Rollback: available (legacy — no versioned builds)"
 else
     echo "Rollback: no previous binary"
 fi

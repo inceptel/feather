@@ -14,4 +14,6 @@ cargo build --release
 echo "[2/2] Stamping version: $VERSION"
 sed -i "s|<p class=\"text-xs text-smoke-9 ml-7\">.*</p>|<p class=\"text-xs text-smoke-9 ml-7\">$VERSION</p>|" static/index.html
 
+echo "$VERSION" > target/BUILD_VERSION
+
 echo "=== Built: $VERSION (not deployed — run deploy.sh to ship) ==="

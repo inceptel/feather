@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 
 FEATHER_BIN="/usr/local/bin/feather"
 FEATHER_PREV="/usr/local/bin/feather.previous"
+BUILDS_DIR="/usr/local/bin/feather-builds"
 CANARY_PORT=4851
 CANARY_CADDY_PORT=8081
 PROD_PORT=4850
@@ -125,20 +126,46 @@ if [ "$TEST_PASSED" != "true" ]; then
     exit 1
 fi
 
-# Step 4: Swap binary and restart
+# Step 4: Swap binary, archive build, and restart
 echo ""
 echo "[4/4] Deploying..."
+
+# Ensure builds directory exists
+sudo mkdir -p "$BUILDS_DIR"
+
+# Read version from build
+VERSION=$(cat target/BUILD_VERSION 2>/dev/null || TZ=America/New_York date +%Y%m%d-%H%M)
+
+# One-time migration: import feather.previous as a build if it exists
+if [ -f "$FEATHER_PREV" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -eq 0 ]; then
+    PREV_VERSION="pre-versioned"
+    sudo cp "$FEATHER_PREV" "$BUILDS_DIR/${PREV_VERSION}.bin"
+    echo "  Migrated feather.previous as build '${PREV_VERSION}'"
+fi
 
 # Save previous binary for rollback (dereference symlinks)
 if [ -f "$FEATHER_BIN" ]; then
     cp -L "$FEATHER_BIN" "$FEATHER_PREV"
 fi
 
+# Archive this build
+sudo cp target/release/feather-rs "$BUILDS_DIR/${VERSION}.bin"
+
 # Install new binary (remove symlink first if present)
 if [ -L "$FEATHER_BIN" ]; then
     sudo rm "$FEATHER_BIN"
 fi
-sudo cp target/release/feather-rs "$FEATHER_BIN"
+sudo cp "$BUILDS_DIR/${VERSION}.bin" "$FEATHER_BIN"
+
+# Record active version
+echo "$VERSION" | sudo tee "$BUILDS_DIR/active" > /dev/null
+
+# Cleanup: keep newest 20 builds
+BUILD_COUNT=$(ls -1 "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)
+if [ "$BUILD_COUNT" -gt 20 ]; then
+    ls -1t "$BUILDS_DIR"/*.bin | tail -n +21 | xargs sudo rm -f
+    echo "  Cleaned old builds (kept newest 20)"
+fi
 
 # Restart via supervisord (clean env, no CLAUDECODE leakage)
 sudo supervisorctl restart feather
@@ -146,10 +173,12 @@ sudo supervisorctl restart feather
 # Verify production is healthy
 sleep 2
 if curl -sf "http://localhost:$PROD_PORT/health" > /dev/null 2>&1; then
-    VERSION=$(curl -sf "http://localhost:$PROD_PORT/health" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','?'))" 2>/dev/null || echo "?")
+    HEALTH_VERSION=$(curl -sf "http://localhost:$PROD_PORT/health" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','?'))" 2>/dev/null || echo "?")
     echo ""
-    echo "=== Deployed successfully (v$VERSION) ==="
+    echo "=== Deployed successfully (v$HEALTH_VERSION, build $VERSION) ==="
+    echo "  $BUILD_COUNT build(s) archived in $BUILDS_DIR"
     echo "  Rollback: ./tools/rollback.sh"
+    echo "  Admin:    http://localhost:8080/admin"
 else
     echo ""
     echo "WARNING: Production not healthy after restart!"
