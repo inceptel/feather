@@ -625,9 +625,10 @@ async fn normalize_session(
     };
 
     // Read main file
-    parse_jsonl_file(&main_file, &mut messages, &mut meta)?;
+    let had_trailing_error = parse_jsonl_file(&main_file, &mut messages, &mut meta)?;
 
     // Read subagent files if they exist (skip suggestion subagents entirely)
+    let mut any_trailing_error = had_trailing_error;
     if subagents_dir.exists() {
         if let Ok(entries) = fs::read_dir(&subagents_dir) {
             for entry in entries.flatten() {
@@ -641,8 +642,38 @@ async fn normalize_session(
                     if filename.contains("suggestion") {
                         continue;
                     }
-                    if let Err(e) = parse_jsonl_file(&path, &mut messages, &mut meta) {
-                        debug!("Error parsing subagent file {}: {}", path.display(), e);
+                    match parse_jsonl_file(&path, &mut messages, &mut meta) {
+                        Ok(trailing_err) => {
+                            any_trailing_error = any_trailing_error || trailing_err;
+                        }
+                        Err(e) => {
+                            debug!("Error parsing subagent file {}: {}", path.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If we hit trailing parse errors (likely a partially-written line from Claude Code
+    // still streaming), wait briefly and re-read to pick up the complete line.
+    if any_trailing_error {
+        debug!("Trailing parse error detected, retrying after 200ms...");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        messages.clear();
+        meta.title = None;
+        let _ = parse_jsonl_file(&main_file, &mut messages, &mut meta);
+        if subagents_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&subagents_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().map_or(false, |e| e == "jsonl") {
+                        let filename = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        if filename.contains("suggestion") { continue; }
+                        let _ = parse_jsonl_file(&path, &mut messages, &mut meta);
                     }
                 }
             }
@@ -650,29 +681,29 @@ async fn normalize_session(
     }
 
     // Sort messages by timestamp
-    let mut messages: Vec<_> = messages.into_values().collect();
-    messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    let mut sorted_messages: Vec<_> = messages.into_values().collect();
+    sorted_messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
     // Skip sessions with no messages
-    if messages.is_empty() {
+    if sorted_messages.is_empty() {
         return Err("Session has no messages".into());
     }
 
-    meta.message_count = messages.len();
-    if let Some(first) = messages.first() {
+    meta.message_count = sorted_messages.len();
+    if let Some(first) = sorted_messages.first() {
         meta.created_at = first.timestamp.clone();
     }
-    if let Some(last) = messages.last() {
+    if let Some(last) = sorted_messages.last() {
         meta.updated_at = last.timestamp.clone();
     }
 
     // Write normalized file
     let normalized_path = config.normalized_dir.join(format!("{}.jsonl", session_id));
-    write_normalized_file(&normalized_path, &messages)?;
+    write_normalized_file(&normalized_path, &sorted_messages)?;
 
     Ok(NormalizedSession {
         meta,
-        messages,
+        messages: sorted_messages,
         normalized_path,
     })
 }
@@ -683,21 +714,35 @@ async fn normalize_session(
 /// - isCompactSummary: true (auto-compaction summary injections)
 /// - isVisibleInTranscriptOnly: true (internal-only messages not meant for session view)
 /// Also chains: assistant responses to filtered messages are themselves filtered.
+/// Returns ((), had_parse_errors) — caller can schedule a retry if the last line failed to parse
+/// (likely a partially-written line from Claude Code still streaming).
 fn parse_jsonl_file(
     path: &Path,
     messages: &mut HashMap<String, NormalizedMessage>,
     meta: &mut SessionMeta,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     let file_content = std::fs::read_to_string(path)?;
     let lines: Vec<&str> = file_content.lines().filter(|l| !l.is_empty()).collect();
 
     // Track UUIDs of filtered messages so we can also skip their response chains
     let mut skip_chain_uuids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for line in &lines {
+    // Track if the last line(s) failed to parse — likely a partial write in progress
+    let mut trailing_parse_error = false;
+
+    for (idx, line) in lines.iter().enumerate() {
         let record: serde_json::Value = match serde_json::from_str(line) {
-            Ok(r) => r,
-            Err(_) => continue,
+            Ok(r) => {
+                trailing_parse_error = false;
+                r
+            }
+            Err(_) => {
+                // Only flag as trailing error if it's near the end of the file
+                if idx >= lines.len().saturating_sub(3) {
+                    trailing_parse_error = true;
+                }
+                continue;
+            }
         };
 
         let record_type = record.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -773,7 +818,7 @@ fn parse_jsonl_file(
         });
     }
 
-    Ok(())
+    Ok(trailing_parse_error)
 }
 
 /// Extract content blocks from a JSONL record
@@ -837,14 +882,20 @@ fn extract_content_blocks(record: &serde_json::Value) -> Vec<ContentBlock> {
     }
 }
 
-/// Write normalized messages to a JSONL file
+/// Write normalized messages to a JSONL file atomically.
+/// Writes to a temp file first, then renames to avoid the SSE tail
+/// reading a truncated/partially-written file.
 fn write_normalized_file(path: &Path, messages: &[NormalizedMessage]) -> Result<(), Box<dyn std::error::Error>> {
-    let mut file = File::create(path)?;
+    let tmp_path = path.with_extension("jsonl.tmp");
+    let mut file = File::create(&tmp_path)?;
 
     for msg in messages {
         let json = serde_json::to_string(msg)?;
         writeln!(file, "{}", json)?;
     }
+
+    file.sync_all()?;
+    fs::rename(&tmp_path, path)?;
 
     Ok(())
 }
