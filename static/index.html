@@ -2095,15 +2095,18 @@
                 console.log('Tail SSE error, will auto-reconnect:', event);
             });
 
+            let tailReconnectDelay = 1000;
+            tailingEventSource.onopen = () => { tailReconnectDelay = 1000; };
             tailingEventSource.onerror = () => {
                 // EventSource auto-reconnects, but we want to resume from cursor
                 if (tailingEventSource && tailingEventSource.readyState === EventSource.CLOSED) {
-                    console.log('Tail SSE closed, reconnecting with cursor:', tailCursor);
+                    console.log(`Tail SSE closed, reconnecting in ${tailReconnectDelay}ms with cursor:`, tailCursor);
                     setTimeout(() => {
                         if (currentTailProjectId && currentTailSessionId) {
                             startSessionTailing(currentTailProjectId, currentTailSessionId, tailCursor);
                         }
-                    }, 1000);
+                    }, tailReconnectDelay);
+                    tailReconnectDelay = Math.min(tailReconnectDelay * 2, 30000);
                 }
             };
         }
@@ -3591,6 +3594,7 @@
         // ========== SSE Connection ==========
         let lastHeartbeat = Date.now();
         let heartbeatWatchdog = null;
+        let sseReconnectDelay = 1000;
 
         function connectSSE() {
             sseConnection = new EventSource('/api/stream');
@@ -3599,6 +3603,7 @@
                 document.getElementById('sse-status').textContent = 'Connected';
                 document.getElementById('sse-status').className = 'text-apple-9';
                 lastHeartbeat = Date.now();
+                sseReconnectDelay = 1000; // Reset backoff on successful connect
                 setStatus('Ready', 'apple');
             };
 
@@ -3606,6 +3611,13 @@
                 document.getElementById('sse-status').textContent = 'Disconnected';
                 document.getElementById('sse-status').className = 'text-ember-9';
                 setStatus('Disconnected', 'ember');
+                // EventSource auto-reconnects, but if it closes we do manual backoff
+                if (sseConnection && sseConnection.readyState === EventSource.CLOSED) {
+                    sseConnection = null;
+                    console.log(`SSE closed, reconnecting in ${sseReconnectDelay}ms`);
+                    setTimeout(connectSSE, sseReconnectDelay);
+                    sseReconnectDelay = Math.min(sseReconnectDelay * 2, 30000);
+                }
             };
 
             sseConnection.addEventListener('heartbeat', (e) => {
