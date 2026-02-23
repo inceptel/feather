@@ -1,5 +1,5 @@
 #!/bin/bash
-# Safe deploy: build → canary test → swap binary → restart
+# Safe deploy: build → canary (through Caddy) → test → swap binary → restart
 # This is the primary way to ship changes.
 set -e
 cd "$(dirname "$0")/.."
@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 FEATHER_BIN="/usr/local/bin/feather"
 FEATHER_PREV="/usr/local/bin/feather.previous"
 CANARY_PORT=4851
+CANARY_CADDY_PORT=8081
 PROD_PORT=4850
 
 echo "=== Deploy ==="
@@ -16,9 +17,9 @@ echo ""
 echo "[1/4] Building..."
 ./tools/build.sh
 
-# Step 2: Start canary on alternate port
+# Step 2: Start canary on alternate port, fronted by Caddy
 echo ""
-echo "[2/4] Starting canary on :$CANARY_PORT..."
+echo "[2/4] Starting canary on :$CANARY_PORT (Caddy :$CANARY_CADDY_PORT)..."
 
 # Clean env: strip CLAUDECODE vars that break Claude CLI spawning
 env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT \
@@ -31,7 +32,7 @@ env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT \
     ' &
 CANARY_PID=$!
 
-# Wait for canary to be healthy
+# Wait for canary backend to be healthy
 HEALTHY=false
 for i in $(seq 1 20); do
     sleep 1
@@ -47,15 +48,61 @@ if [ "$HEALTHY" != "true" ]; then
     wait $CANARY_PID 2>/dev/null
     exit 1
 fi
-echo "  Canary healthy (PID $CANARY_PID)"
+echo "  Canary backend healthy (PID $CANARY_PID)"
+
+# Add canary server to Caddy (mirrors production routing, points to canary backend)
+CANARY_CADDY_CONFIG=$(cat <<CADDYJSON
+{
+  "listen": [":$CANARY_CADDY_PORT"],
+  "routes": [
+    {
+      "match": [{"path": ["/jupyter/*"]}],
+      "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:8888"}]}]
+    },
+    {
+      "match": [{"path": ["/terminal/*", "/terminal"]}],
+      "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:7681"}], "flush_interval": -1}]
+    },
+    {
+      "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:$CANARY_PORT"}]}]
+    }
+  ]
+}
+CADDYJSON
+)
+
+CADDY_ADDED=false
+if curl -sf -X POST "http://localhost:2019/config/apps/http/servers/canary" \
+    -H "Content-Type: application/json" \
+    -d "$CANARY_CADDY_CONFIG" > /dev/null 2>&1; then
+    CADDY_ADDED=true
+    echo "  Caddy canary route added on :$CANARY_CADDY_PORT"
+
+    # Wait for Caddy canary to be reachable
+    for i in $(seq 1 10); do
+        sleep 0.5
+        if curl -sf "http://localhost:$CANARY_CADDY_PORT/health" > /dev/null 2>&1; then
+            break
+        fi
+    done
+else
+    echo "  WARNING: Could not add Caddy canary route, testing directly on :$CANARY_PORT"
+fi
+
+# Choose test URL (prefer Caddy-fronted canary)
+if [ "$CADDY_ADDED" = "true" ]; then
+    TEST_URL="http://localhost:$CANARY_CADDY_PORT"
+else
+    TEST_URL="http://localhost:$CANARY_PORT"
+fi
 
 # Step 3: Run tests against canary
 echo ""
-echo "[3/4] Testing canary..."
+echo "[3/4] Testing canary ($TEST_URL)..."
 TEST_PASSED=false
 
 if [ -d node_modules ] && command -v npx > /dev/null 2>&1; then
-    if FEATHER_URL="http://localhost:$CANARY_PORT" npx playwright test tests/e2e.spec.js --reporter=line 2>&1; then
+    if FEATHER_URL="$TEST_URL" npx playwright test tests/e2e.spec.js --reporter=line 2>&1; then
         TEST_PASSED=true
     fi
 else
@@ -63,7 +110,11 @@ else
     TEST_PASSED=true
 fi
 
-# Kill canary regardless
+# Clean up: remove Caddy canary route and kill canary
+if [ "$CADDY_ADDED" = "true" ]; then
+    curl -sf -X DELETE "http://localhost:2019/config/apps/http/servers/canary" > /dev/null 2>&1
+    echo "  Caddy canary route removed"
+fi
 kill $CANARY_PID 2>/dev/null
 wait $CANARY_PID 2>/dev/null
 

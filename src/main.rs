@@ -2417,7 +2417,9 @@ async fn main() {
         // JSONL tail stream (byte-offset based)
         .route("/api/tail/{project_id}/{session_id}", get(tail_session))
         // Serve uploaded files
-        .nest_service("/uploads", ServeDir::new("uploads"))
+        .nest_service("/uploads", ServeDir::new(
+            std::env::var("FEATHER_UPLOAD_DIR").unwrap_or_else(|_| "uploads".to_string())
+        ))
         // Static files
         .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
         .with_state(state);
