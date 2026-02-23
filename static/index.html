@@ -517,6 +517,7 @@
         async function initFolders() {
             try {
                 const res = await fetch('/api/projects');
+                if (!res.ok) { console.error('API error:', res.status); return; }
                 const data = await res.json();
                 // System folders to hide from project list
                 const hiddenFolders = ['memory', 'dashboards', '.claude', 'projects'];
@@ -663,6 +664,8 @@
                     fetch('/api/claude-sessions'),
                     fetch('/api/projects')
                 ]);
+                if (!tmuxRes.ok) { console.error('API error:', tmuxRes.status); return; }
+                if (!projectRes.ok) { console.error('API error:', projectRes.status); return; }
                 const tmuxData = await tmuxRes.json();
                 const projectData = await projectRes.json();
 
@@ -671,6 +674,7 @@
                 let historySessions = [];
                 if (project) {
                     const sessRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                    if (!sessRes.ok) { console.error('API error:', sessRes.status); return; }
                     const sessData = await sessRes.json();
                     historySessions = sessData.sessions || [];
                 }
@@ -878,6 +882,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cwd: folder.path })
                 });
+                if (!res.ok) { console.error('API error:', res.status); setStatus('Failed to resume', 'ember'); return; }
                 const data = await res.json();
 
                 if (data.status === 'spawned' || data.status === 'ok') {
@@ -989,10 +994,12 @@
                 if (folder) {
                     try {
                         const projRes = await fetch('/api/projects');
+                        if (!projRes.ok) { console.error('API error:', projRes.status); throw new Error('API error'); }
                         const projData = await projRes.json();
                         const proj = projData.projects.find(p => p.id.includes(folder.pattern));
                         if (proj) {
                             const snapRes = await fetch(`/api/projects/${encodeURIComponent(proj.id)}/sessions`);
+                            if (!snapRes.ok) { console.error('API error:', snapRes.status); throw new Error('API error'); }
                             const snapData = await snapRes.json();
                             for (const sess of (snapData.sessions || [])) {
                                 sessionSnapshot[sess.id] = sess.lastUpdated || '';
@@ -1029,11 +1036,13 @@
                 if (folder) {
                     try {
                         const projectRes = await fetch('/api/projects');
+                        if (!projectRes.ok) { console.error('API error:', projectRes.status); throw new Error('API error'); }
                         const projectData = await projectRes.json();
                         const project = projectData.projects.find(p => p.id.includes(folder.pattern));
 
                         if (project) {
                             const sessRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                            if (!sessRes.ok) { console.error('API error:', sessRes.status); throw new Error('API error'); }
                             const sessData = await sessRes.json();
 
                             // Find session that starts with the short ID
@@ -1067,6 +1076,7 @@
 
             try {
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
+                if (!res.ok) { console.error('API error:', res.status); throw new Error('API error ' + res.status); }
                 const data = await res.json();
 
                 if (!data.messages || data.messages.length === 0) {
@@ -1814,6 +1824,7 @@
             let projectId = null;
             try {
                 const projectRes = await fetch('/api/projects');
+                if (!projectRes.ok) { console.error('API error:', projectRes.status); return; }
                 const projectData = await projectRes.json();
                 const project = projectData.projects.find(p => p.id.includes(folder.pattern));
                 if (project) projectId = project.id;
@@ -1828,6 +1839,7 @@
             if (!currentSessionId && Object.keys(sessionSnapshot).length === 0) {
                 try {
                     const snapRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions`);
+                    if (!snapRes.ok) { console.error('API error:', snapRes.status); throw new Error('API error'); }
                     const snapData = await snapRes.json();
                     sessionSnapshot = {};
                     for (const sess of (snapData.sessions || [])) {
@@ -1847,6 +1859,7 @@
                 try {
                     // Get sessions
                     const sessRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions`);
+                    if (!sessRes.ok) { console.error('API error:', sessRes.status); return; }
                     const sessData = await sessRes.json();
 
                     console.log('Poll: found', sessData.sessions?.length || 0, 'sessions');
@@ -1897,6 +1910,7 @@
                                 // First discovery: load full history, then switch to SSE tailing
                                 if (isFirstDiscovery) {
                                     const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history`);
+                                    if (!initHistRes.ok) { console.error('API error:', initHistRes.status); return; }
                                     const initHistData = await initHistRes.json();
                                     if (myGeneration !== pollGeneration) return;
 
@@ -2121,6 +2135,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cwd: folder.path })
                 });
+                if (!res.ok) { console.error('API error:', res.status); setStatus('Failed to start Pi', 'ember'); return; }
                 const data = await res.json();
 
                 if (data.status === 'spawned') {
@@ -2171,6 +2186,7 @@
                 await new Promise(r => setTimeout(r, 500));
                 try {
                     const res = await fetch(`/api/pi-resolve/${encodeURIComponent(tmuxName)}`);
+                    if (!res.ok) { console.error('API error:', res.status); continue; }
                     const data = await res.json();
                     if (data.resolved && data.session_id) {
                         currentSessionId = data.session_id;
@@ -2218,16 +2234,20 @@
             try {
                 // Take session snapshot BEFORE spawning so the new JSONL is detected as "new"
                 const projectRes = await fetch('/api/projects');
+                if (!projectRes.ok) { console.error('API error:', projectRes.status); setStatus('Failed to create session', 'ember'); return; }
                 const projectData = await projectRes.json();
                 const project = projectData.projects.find(p => p.id.includes(folder.pattern));
                 if (project) {
                     const snapRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                    if (!snapRes.ok) { console.error('API error:', snapRes.status); }
+                    else {
                     const snapData = await snapRes.json();
                     sessionSnapshot = {};
                     for (const sess of (snapData.sessions || [])) {
                         sessionSnapshot[sess.id] = sess.lastUpdated || '';
                     }
                     console.log('Pre-spawn snapshot taken:', Object.keys(sessionSnapshot).length, 'sessions');
+                    }
                 }
 
                 const res = await fetch('/api/claude-new', {
@@ -2235,6 +2255,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cwd: folder.path })
                 });
+                if (!res.ok) { console.error('API error:', res.status); setStatus('Failed to create session', 'ember'); return; }
                 const data = await res.json();
 
                 if (data.status === 'spawned') {
@@ -2276,6 +2297,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cwd: folder.path, mode: codexMode })
                 });
+                if (!res.ok) { console.error('API error:', res.status); setStatus('Failed to start Codex', 'ember'); return; }
                 const data = await res.json();
 
                 if (data.status === 'spawned') {
@@ -2662,6 +2684,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(piPayload)
                         });
+                        if (!spawnRes.ok) { console.error('API error:', spawnRes.status); setStatus('Failed to create Pi session', 'ember'); resetSendButton(); return; }
                         const spawnData = await spawnRes.json();
 
                         if (spawnData.status !== 'spawned') {
@@ -2711,6 +2734,7 @@
                                 session_id: currentSessionId || null
                             })
                         });
+                        if (!spawnRes.ok) { console.error('API error:', spawnRes.status); setStatus('Failed to create Codex session', 'ember'); resetSendButton(); return; }
                         const spawnData = await spawnRes.json();
 
                         if (spawnData.status !== 'spawned') {
@@ -2746,14 +2770,18 @@
                     } else {
                     // Take snapshot before spawning
                     const projectRes = await fetch('/api/projects');
+                    if (!projectRes.ok) { console.error('API error:', projectRes.status); setStatus('Failed to create session', 'ember'); resetSendButton(); return; }
                     const projectData = await projectRes.json();
                     const project = projectData.projects.find(p => p.id.includes(folder.pattern));
                     if (project) {
                         const snapRes = await fetch(`/api/projects/${encodeURIComponent(project.id)}/sessions`);
+                        if (!snapRes.ok) { console.error('API error:', snapRes.status); }
+                        else {
                         const snapData = await snapRes.json();
                         sessionSnapshot = {};
                         for (const sess of (snapData.sessions || [])) {
                             sessionSnapshot[sess.id] = sess.lastUpdated || '';
+                        }
                         }
                     }
 
@@ -2763,6 +2791,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ cwd: folder.path })
                     });
+                    if (!spawnRes.ok) { console.error('API error:', spawnRes.status); setStatus('Failed to create session', 'ember'); resetSendButton(); return; }
                     const spawnData = await spawnRes.json();
 
                     if (spawnData.status !== 'spawned') {
@@ -2803,6 +2832,7 @@
                         waited += pollInterval;
                         try {
                             const outRes = await fetch(`/api/claude-output/${tmuxName}`);
+                            if (!outRes.ok) { console.error('API error:', outRes.status); break; }
                             const outData = await outRes.json();
                             if (outData.output && /^[>❯]\s/m.test(outData.output)) break;
                         } catch (e) { /* retry */ }
@@ -2833,6 +2863,7 @@
                             },
                             body: file.blob
                         });
+                        if (!res.ok) { console.error('API error:', res.status); setStatus(`Failed to upload ${file.name}`, 'ember'); resetSendButton(); return; }
                         const data = await res.json();
                         if (data.status === 'ok') {
                             uploadedFiles.push({
@@ -2892,6 +2923,7 @@
                 while (waited < maxWait) {
                     try {
                         const outRes = await fetch(`/api/claude-output/${currentTmuxSession}`);
+                        if (!outRes.ok) { console.error('API error:', outRes.status); break; }
                         const outData = await outRes.json();
                         // Log first few attempts to debug
                         if (waited < 3000) {
@@ -2928,6 +2960,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: sendMessage })
                 });
+                if (!sendRes.ok) { console.error('API error:', sendRes.status); setStatus('Failed to send', 'ember'); resetSendButton(); return; }
                 const sendData = await sendRes.json();
                 console.log('Send response:', sendData);
                 setStatus('Processing...', 'gold');
@@ -2952,11 +2985,12 @@
         async function sendCtrlC() {
             if (!currentTmuxSession) return;
             try {
-                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                const res = await fetch(`/api/claude-signal/${currentTmuxSession}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ signal: 'C-c' })
                 });
+                if (!res.ok) { console.error('API error:', res.status); }
             } catch (e) {
                 console.error('Failed to send Ctrl-C:', e);
             }
@@ -2967,19 +3001,22 @@
             if (!confirm('Kill this session and all its processes?')) return;
             try {
                 // Send Ctrl-C first, then kill if needed
-                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                const sig1 = await fetch(`/api/claude-signal/${currentTmuxSession}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ signal: 'C-c' })
                 });
+                if (!sig1.ok) { console.error('API error:', sig1.status); }
                 await new Promise(r => setTimeout(r, 500));
-                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                const sig2 = await fetch(`/api/claude-signal/${currentTmuxSession}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ signal: 'C-c' })
                 });
+                if (!sig2.ok) { console.error('API error:', sig2.status); }
                 await new Promise(r => setTimeout(r, 500));
-                await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                const killRes = await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                if (!killRes.ok) { console.error('API error:', killRes.status); }
                 setStatus('Stopped', 'ember');
                 terminalDerivedStatus = null;
                 updateInterruptButtons();
@@ -3336,11 +3373,12 @@
         async function terminalSignal(signal) {
             if (!currentTmuxSession) return;
             try {
-                await fetch(`/api/claude-signal/${currentTmuxSession}`, {
+                const res = await fetch(`/api/claude-signal/${currentTmuxSession}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ signal })
                 });
+                if (!res.ok) { console.error('API error:', res.status); }
             } catch (e) {
                 console.error('Failed to send signal:', e);
             }
@@ -3369,7 +3407,8 @@
 
             try {
                 // Kill the current tmux session
-                await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                const killRes = await fetch(`/api/claude-kill/${currentTmuxSession}`, { method: 'DELETE' });
+                if (!killRes.ok) { console.error('API error:', killRes.status); }
                 console.log('Killed tmux session:', currentTmuxSession);
 
                 // Wait a moment for cleanup
@@ -3381,6 +3420,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cwd: folder.path })
                 });
+                if (!res.ok) { console.error('API error:', res.status); setStatus('Restart failed', 'ember'); return; }
                 const data = await res.json();
 
                 if (data.status === 'spawned' || data.status === 'ok') {
@@ -3598,6 +3638,7 @@
         async function checkClaudeAuth() {
             try {
                 const resp = await fetch('/api/claude-auth-status');
+                if (!resp.ok) { console.error('API error:', resp.status); return true; }
                 const data = await resp.json();
                 if (!data.authenticated) {
                     showOnboarding();
@@ -3665,6 +3706,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name, description })
                 });
+                if (!resp.ok) { console.error('API error:', resp.status); alert('Failed to create project: server error ' + resp.status); return; }
                 const data = await resp.json();
 
                 if (data.status === 'ok') {
