@@ -40,27 +40,53 @@ test.describe('Feather-rs UI', () => {
         });
     });
 
-    test.describe('Folder Tabs', () => {
-        test('CODE tab should be active by default', async ({ page }) => {
-            const codeTab = page.locator('#folder-tabs button:has-text("CODE")');
-            await expect(codeTab).toBeVisible();
+    test.describe('Project Dropdown', () => {
+        test('project dropdown should be visible with a selected project', async ({ page }) => {
+            const folderSelect = page.locator('#folder-select');
+            await expect(folderSelect).toBeVisible();
+            // Should have at least one option selected
+            const selectedValue = await folderSelect.inputValue();
+            expect(selectedValue).toBeTruthy();
         });
 
-        test('should switch to LIFE folder', async ({ page }) => {
-            await page.click('button:has-text("LIFE")');
-            // Sessions should reload - wait for update
-            await page.waitForTimeout(1000);
-            // Check that the folder switch worked
-            const lifeTab = page.locator('#folder-tabs button:has-text("LIFE")');
-            await expect(lifeTab).toBeVisible();
+        test('should switch to another project', async ({ page }) => {
+            const folderSelect = page.locator('#folder-select');
+            // Get all available options
+            const options = await folderSelect.locator('option').allTextContents();
+            expect(options.length).toBeGreaterThan(0);
+
+            // If there are multiple projects, switch to a different one
+            if (options.length > 1) {
+                const currentValue = await folderSelect.inputValue();
+                const allValues = await folderSelect.locator('option').evaluateAll(
+                    opts => opts.map(o => o.value)
+                );
+                const otherValue = allValues.find(v => v !== currentValue);
+                await folderSelect.selectOption(otherValue);
+                await page.waitForTimeout(1000);
+                // Verify the dropdown reflects the new selection
+                const newValue = await folderSelect.inputValue();
+                expect(newValue).toBe(otherValue);
+            }
         });
 
-        test('should switch back to CODE folder', async ({ page }) => {
-            await page.click('button:has-text("LIFE")');
-            await page.waitForTimeout(500);
-            await page.click('button:has-text("CODE")');
-            await page.waitForTimeout(1000);
-            // Verify CODE sessions are loaded
+        test('should switch back to original project', async ({ page }) => {
+            const folderSelect = page.locator('#folder-select');
+            const originalValue = await folderSelect.inputValue();
+
+            const allValues = await folderSelect.locator('option').evaluateAll(
+                opts => opts.map(o => o.value)
+            );
+            if (allValues.length > 1) {
+                // Switch to another project
+                const otherValue = allValues.find(v => v !== originalValue);
+                await folderSelect.selectOption(otherValue);
+                await page.waitForTimeout(500);
+                // Switch back
+                await folderSelect.selectOption(originalValue);
+                await page.waitForTimeout(1000);
+            }
+            // Verify sessions are loaded
             const historyItems = page.locator('#sessions .session-item');
             await expect(historyItems.first()).toBeVisible();
         });
@@ -111,7 +137,7 @@ test.describe('Feather-rs UI', () => {
             await page.waitForTimeout(300);
 
             // Active sessions containing "feather" should be visible
-            const activeItems = page.locator('#active-sessions .session-item:visible');
+            const activeItems = page.locator('#sessions .session-item:visible');
             const count = await activeItems.count();
             expect(count).toBeGreaterThanOrEqual(0);
         });
@@ -150,7 +176,7 @@ test.describe('Feather-rs UI', () => {
         });
 
         test('should load active tmux session with history', async ({ page }) => {
-            const activeSession = page.locator('#active-sessions .session-item').first();
+            const activeSession = page.locator('#sessions .session-item').first();
 
             if (await activeSession.isVisible()) {
                 await activeSession.click();
@@ -176,8 +202,8 @@ test.describe('Feather-rs UI', () => {
             await toggleBtn.click();
             await expect(page.locator('#terminal-panel')).toHaveClass(/open/);
 
-            // Click to close
-            await page.locator('button:has-text("Close")').click();
+            // Click Hide button to close (terminal panel has "Hide" not "Close")
+            await page.locator('#terminal-panel button:has-text("Hide")').click();
             await expect(page.locator('#terminal-panel')).not.toHaveClass(/open/);
         });
 
@@ -199,27 +225,29 @@ test.describe('Feather-rs UI', () => {
 
             await expect(page.locator('button:has-text("^C")')).toBeVisible();
             await expect(page.locator('button:has-text("^D")')).toBeVisible();
-            await expect(page.locator('button:has-text("Close")')).toBeVisible();
+            await expect(page.locator('#terminal-panel button:has-text("Hide")')).toBeVisible();
         });
     });
 
     test.describe('New Session', () => {
         test('should create new session on button click', async ({ page }) => {
-            const newBtn = page.locator('#new-session-btn');
+            // Use the "+ Claude" button to create a new session
+            const newBtn = page.locator('button:has-text("+ Claude")');
+            await expect(newBtn).toBeVisible();
 
-            // Count active sessions before
-            const beforeCount = await page.locator('#active-sessions .session-item').count();
+            // Count sessions before
+            const beforeCount = await page.locator('#sessions .session-item').count();
 
             await newBtn.click();
 
             // Status should indicate starting
-            await expect(page.locator('#status')).toContainText('Starting session');
+            await expect(page.locator('#status')).toContainText(/Starting|Connecting/);
 
             // Wait for session to be created
             await page.waitForTimeout(3000);
 
-            // New session should appear in active list
-            const afterCount = await page.locator('#active-sessions .session-item').count();
+            // New session should appear in session list
+            const afterCount = await page.locator('#sessions .session-item').count();
             expect(afterCount).toBeGreaterThanOrEqual(beforeCount);
         });
     });
@@ -349,7 +377,7 @@ test.describe('Feather-rs UI', () => {
 
         test('should not send on Shift+Enter', async ({ page }) => {
             // First select a tmux session to enable sending
-            const activeSession = page.locator('#active-sessions .session-item').first();
+            const activeSession = page.locator('#sessions .session-item').first();
             if (await activeSession.isVisible()) {
                 await activeSession.click();
                 await page.waitForTimeout(500);
@@ -393,14 +421,14 @@ test.describe('Feather-rs UI', () => {
             await expect(eventId).toBeVisible();
         });
 
-        test('should show connection dot indicator', async ({ page }) => {
-            // Connection dot should be green when connected
-            const connDot = page.locator('#conn-dot');
-            await expect(connDot).toBeVisible();
+        test('should show status dot indicator', async ({ page }) => {
+            // Status dot should be visible when connected
+            const statusDot = page.locator('#status-dot');
+            await expect(statusDot).toBeVisible();
 
             // After connection, should have green class
             await page.waitForSelector('#sse-status:text("Connected")', { timeout: 5000 });
-            await expect(connDot).toHaveClass(/bg-apple-9/);
+            await expect(statusDot).toHaveClass(/bg-apple-9/);
         });
     });
 
@@ -452,9 +480,9 @@ test.describe('Feather-rs UI', () => {
                 const firstImage = images.first();
                 await expect(firstImage).toHaveClass(/max-w-full|max-h-48|rounded/);
 
-                // Verify image is clickable
+                // Verify image is clickable (uses lightbox)
                 const onclick = await firstImage.getAttribute('onclick');
-                expect(onclick).toContain('window.open');
+                expect(onclick).toContain('openLightbox');
             }
         });
 
@@ -483,21 +511,43 @@ test.describe('Feather-rs UI', () => {
     });
 
     test.describe('Session Persistence', () => {
-        test('should remember selected folder in localStorage', async ({ page, context }) => {
-            // Switch to LIFE folder
-            await page.click('button:has-text("LIFE")');
-            await page.waitForTimeout(500);
+        test('should remember selected project in localStorage', async ({ page, context }) => {
+            const folderSelect = page.locator('#folder-select');
+            const allValues = await folderSelect.locator('option').evaluateAll(
+                opts => opts.map(o => o.value)
+            );
 
-            // Reload page
-            await page.reload();
-            await page.waitForSelector('.session-item', { timeout: 10000 });
+            if (allValues.length > 1) {
+                // Switch to the second project
+                const targetProject = allValues[1];
+                await folderSelect.selectOption(targetProject);
+                await page.waitForTimeout(500);
 
-            // Should still be on LIFE folder (check localStorage)
-            const folder = await page.evaluate(() => localStorage.getItem('feather-folder'));
-            expect(folder).toBe('life');
+                // Reload page
+                await page.reload();
+                // Wait for the page to load and projects to be fetched into the dropdown
+                await page.waitForSelector('#folder-select', { timeout: 10000 });
+                // Wait for projects API to populate the dropdown options
+                await page.waitForFunction(
+                    () => document.querySelector('#folder-select')?.options?.length > 0,
+                    { timeout: 10000 }
+                );
 
-            // Reset to CODE for other tests
-            await page.click('button:has-text("CODE")');
+                // Should still be on the selected project (check localStorage)
+                const folder = await page.evaluate(() => localStorage.getItem('feather-folder'));
+                expect(folder).toBe(targetProject);
+
+                // Verify the dropdown reflects the persisted selection
+                const selectedValue = await page.locator('#folder-select').inputValue();
+                expect(selectedValue).toBe(targetProject);
+
+                // Reset to first project for other tests
+                await page.locator('#folder-select').selectOption(allValues[0]);
+            } else {
+                // Only one project - just verify localStorage stores it
+                const folder = await page.evaluate(() => localStorage.getItem('feather-folder'));
+                expect(folder).toBeTruthy();
+            }
         });
     });
 });
