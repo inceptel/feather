@@ -4,11 +4,6 @@
         reverse_proxy localhost:8888
     }
 
-    # Admin sidecar API
-    handle /admin/api/* {
-        reverse_proxy localhost:4860
-    }
-
     # Feather (default — everything else)
     handle {
         reverse_proxy localhost:4850
