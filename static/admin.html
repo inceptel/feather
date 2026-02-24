@@ -1,235 +1,535 @@
 <!DOCTYPE html>
-<html lang="en" class="bg-neutral-950">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Feather Admin</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            smoke: {
-              1: '#fcfcfc', 2: '#f8f8f8', 3: '#f0f0f0', 4: '#e8e8e8',
-              5: '#ddd', 6: '#d0d0d0', 7: '#b8b8b8', 8: '#a0a0a0',
-              9: '#717171', 10: '#5a5a5a', 11: '#3a3a3a', 12: '#1a1a1a',
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feather Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        smoke: {
+                            1: '#121212', 2: '#1a1a1a', 3: '#212121', 4: '#252525',
+                            5: '#303030', 6: '#3a3a3a', 7: '#4b4c5c', 8: '#5e5e5e',
+                            9: '#6a6a6a', 10: '#8a8a8a', 11: '#a0a0a0', 12: '#e0e0e0'
+                        },
+                        gold: { 9: '#fab283', 10: '#f5a742', 11: '#fcd9b8' },
+                        azure: { 9: '#5c9cf5', 10: '#4a8ae6', 11: '#8cbcff' },
+                        violet: { 9: '#9d7cd8', 10: '#8b6bc5', 11: '#c4aef0' },
+                        apple: { 9: '#7fd88f', 11: '#a8e8b5' },
+                        ember: { 9: '#e06c75', 11: '#f0a0a5' },
+                        cyan: { 9: '#56b6c2', 11: '#8cd4dd' },
+                        amber: { 9: '#e5c07b', 11: '#f0d9a8' }
+                    }
+                }
             }
-          }
         }
-      }
-    }
-  </script>
-  <style>
-    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
-    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-    .spinner { animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+    </script>
+    <style>
+        html, body { height: 100%; }
+        ::selection { background: rgba(250, 178, 131, 0.3); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .thin-scrollbar::-webkit-scrollbar { width: 6px; }
+        .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .thin-scrollbar::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+        .tab-active { border-color: #fab283; color: #fab283; }
+        .log-area { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace; }
+    </style>
 </head>
-<body class="bg-neutral-950 text-smoke-3 min-h-screen p-6 font-mono">
-  <div class="max-w-3xl mx-auto">
-    <!-- Header -->
-    <div class="flex items-center justify-between mb-8">
-      <div>
-        <h1 class="text-2xl font-bold text-smoke-1">Feather Admin</h1>
-        <p class="text-sm text-smoke-8 mt-1">Build management &amp; deployment control</p>
-      </div>
-      <a href="/" class="text-sm text-smoke-8 hover:text-smoke-4 transition">&larr; Back to app</a>
-    </div>
-
-    <!-- Status Card -->
-    <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-5 mb-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold text-smoke-2">Status</h2>
-        <button onclick="doRestart()" id="restart-btn"
-          class="px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded transition">
-          Restart Feather
-        </button>
-      </div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-        <div>
-          <div class="text-smoke-8 mb-1">Active Version</div>
-          <div id="st-version" class="text-smoke-2 font-semibold">...</div>
-        </div>
-        <div>
-          <div class="text-smoke-8 mb-1">Health</div>
-          <div id="st-health" class="flex items-center gap-2">
-            <span id="health-dot" class="inline-block w-2.5 h-2.5 rounded-full bg-neutral-600"></span>
-            <span id="health-text">...</span>
-          </div>
-        </div>
-        <div>
-          <div class="text-smoke-8 mb-1">Uptime</div>
-          <div id="st-uptime" class="text-smoke-2">...</div>
-        </div>
-        <div>
-          <div class="text-smoke-8 mb-1">Builds</div>
-          <div id="st-count" class="text-smoke-2">...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Builds List -->
-    <div class="bg-neutral-900 border border-neutral-800 rounded-lg p-5">
-      <h2 class="text-lg font-semibold text-smoke-2 mb-4">Builds</h2>
-      <div id="builds-list" class="space-y-2">
-        <div class="text-smoke-8 text-sm">Loading...</div>
-      </div>
-    </div>
-
-    <!-- Toast -->
-    <div id="toast" class="fixed bottom-6 right-6 px-4 py-2 rounded-lg text-sm transition-all duration-300 opacity-0 pointer-events-none"></div>
-  </div>
-
-  <script>
-    const API = '/admin/api';
-    let busy = false;
-
-    function toast(msg, ok = true) {
-      const el = document.getElementById('toast');
-      el.textContent = msg;
-      el.className = `fixed bottom-6 right-6 px-4 py-2 rounded-lg text-sm transition-all duration-300 ${ok ? 'bg-green-900 text-green-200 border border-green-800' : 'bg-red-900 text-red-200 border border-red-800'}`;
-      el.style.opacity = '1';
-      setTimeout(() => { el.style.opacity = '0'; }, 3000);
-    }
-
-    function fmtSize(bytes) {
-      return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-    }
-
-    function fmtUptime(secs) {
-      if (!secs) return '-';
-      const h = Math.floor(secs / 3600);
-      const m = Math.floor((secs % 3600) / 60);
-      return h > 0 ? `${h}h ${m}m` : `${m}m`;
-    }
-
-    function fmtTimestamp(ts) {
-      if (!ts) return '';
-      return new Date(ts * 1000).toLocaleString();
-    }
-
-    async function api(method, path, body) {
-      const opts = { method, headers: { 'Content-Type': 'application/json' } };
-      if (body) opts.body = JSON.stringify(body);
-      const res = await fetch(API + path, opts);
-      return res.json();
-    }
-
-    async function fetchStatus() {
-      try {
-        const s = await api('GET', '/status');
-        document.getElementById('st-version').textContent = s.active_version || 'unknown';
-        const dot = document.getElementById('health-dot');
-        const txt = document.getElementById('health-text');
-        if (s.healthy) {
-          dot.className = 'inline-block w-2.5 h-2.5 rounded-full bg-green-500 pulse-dot';
-          txt.textContent = 'UP';
-          txt.className = 'text-green-400';
-        } else {
-          dot.className = 'inline-block w-2.5 h-2.5 rounded-full bg-red-500 pulse-dot';
-          txt.textContent = 'DOWN';
-          txt.className = 'text-red-400';
-        }
-        document.getElementById('st-uptime').textContent = fmtUptime(s.uptime_secs);
-        document.getElementById('st-count').textContent = s.build_count;
-      } catch (e) {
-        document.getElementById('health-text').textContent = 'SIDECAR DOWN';
-        document.getElementById('health-text').className = 'text-red-400';
-      }
-    }
-
-    async function fetchBuilds() {
-      try {
-        const data = await api('GET', '/builds');
-        const el = document.getElementById('builds-list');
-        if (!data.builds || data.builds.length === 0) {
-          el.innerHTML = '<div class="text-smoke-8 text-sm">No builds found. Run deploy.sh to create the first build.</div>';
-          return;
-        }
-        el.innerHTML = data.builds.map(b => `
-          <div class="flex items-center justify-between py-2.5 px-3 rounded ${b.active ? 'bg-neutral-800 border border-neutral-700' : 'hover:bg-neutral-800/50'} transition">
-            <div class="flex items-center gap-3 min-w-0">
-              <span class="font-semibold text-smoke-2 ${b.active ? 'text-green-400' : ''}">${b.version}</span>
-              ${b.active ? '<span class="text-xs bg-green-900 text-green-300 px-1.5 py-0.5 rounded">ACTIVE</span>' : ''}
-              <span class="text-smoke-8 text-xs">${fmtSize(b.size)}</span>
-              <span class="text-smoke-9 text-xs hidden sm:inline">${fmtTimestamp(b.timestamp)}</span>
+<body class="bg-smoke-1 text-smoke-12 min-h-screen">
+    <div class="max-w-4xl mx-auto p-6">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center gap-3">
+                <a href="/" class="text-smoke-8 hover:text-smoke-12 transition-colors" title="Back to Feather">&larr;</a>
+                <span class="text-xl">🪶</span>
+                <div>
+                    <h1 class="text-xl font-bold text-gold-9">Admin Panel</h1>
+                    <p class="text-xs text-smoke-8" id="admin-subtitle">Loading...</p>
+                </div>
             </div>
-            <div class="flex gap-2">
-              ${b.active ? '' : `
-                <button onclick="doPromote('${b.version}')"
-                  class="px-2.5 py-1 text-xs bg-blue-900 hover:bg-blue-800 text-blue-200 border border-blue-800 rounded transition">
-                  Promote
-                </button>
-                <button onclick="doDelete('${b.version}')"
-                  class="px-2.5 py-1 text-xs bg-neutral-800 hover:bg-red-900 text-smoke-8 hover:text-red-200 border border-neutral-700 hover:border-red-800 rounded transition">
-                  Delete
-                </button>
-              `}
+            <div class="flex items-center gap-3">
+                <span id="sse-indicator" class="w-2 h-2 rounded-full bg-smoke-5" title="SSE disconnected"></span>
+                <button onclick="refreshStatus()" class="px-3 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-smoke-12 transition-all">Refresh</button>
             </div>
-          </div>
-        `).join('');
-      } catch (e) {
-        document.getElementById('builds-list').innerHTML =
-          '<div class="text-red-400 text-sm">Failed to load builds. Is feather-ctl running?</div>';
-      }
-    }
+        </div>
 
-    async function doPromote(version) {
-      if (busy) return;
-      if (!confirm(`Promote build ${version}? This will restart Feather.`)) return;
-      busy = true;
-      toast('Promoting ' + version + '...');
-      try {
-        const r = await api('POST', '/promote', { version });
-        toast(r.ok ? `Promoted ${version}` : (r.message || r.error), r.ok);
-      } catch (e) {
-        toast('Promote failed: ' + e.message, false);
-      }
-      busy = false;
-      fetchStatus();
-      fetchBuilds();
-    }
+        <!-- Tabs -->
+        <div class="flex border-b border-smoke-5 mb-6">
+            <button onclick="switchTab('supervisor')" id="tab-supervisor" class="px-5 py-3 text-sm font-medium text-smoke-10 hover:text-smoke-12 border-b-2 border-transparent transition-all">Supervisor</button>
+            <button onclick="switchTab('app')" id="tab-app" class="px-5 py-3 text-sm font-medium text-smoke-10 hover:text-smoke-12 border-b-2 border-transparent transition-all">App</button>
+            <button onclick="switchTab('container')" id="tab-container" class="px-5 py-3 text-sm font-medium text-smoke-10 hover:text-smoke-12 border-b-2 border-transparent transition-all hidden">Container</button>
+        </div>
 
-    async function doRestart() {
-      if (busy) return;
-      if (!confirm('Restart Feather?')) return;
-      busy = true;
-      const btn = document.getElementById('restart-btn');
-      btn.textContent = 'Restarting...';
-      btn.disabled = true;
-      try {
-        const r = await api('POST', '/restart');
-        toast(r.healthy ? 'Restarted successfully' : 'Restarted (health check pending)', r.healthy);
-      } catch (e) {
-        toast('Restart failed: ' + e.message, false);
-      }
-      btn.textContent = 'Restart Feather';
-      btn.disabled = false;
-      busy = false;
-      fetchStatus();
-    }
+        <!-- ================================================================ -->
+        <!-- Supervisor Panel -->
+        <!-- ================================================================ -->
+        <div id="panel-supervisor" class="space-y-6 hidden">
+            <div class="bg-smoke-2 border border-smoke-5 rounded-lg p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold text-smoke-11 uppercase tracking-wider">Running Services</h2>
+                    <button onclick="rollbackSupervisor()" id="svc-rollback-btn" class="px-3 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-amber-9 transition-all hidden">Rollback Config</button>
+                </div>
+                <div id="services-list" class="space-y-2">
+                    <p class="text-smoke-8 text-sm">Loading...</p>
+                </div>
+            </div>
 
-    async function doDelete(version) {
-      if (busy) return;
-      if (!confirm(`Delete build ${version}? This cannot be undone.`)) return;
-      busy = true;
-      try {
-        const r = await api('DELETE', '/builds/' + version);
-        toast(r.ok ? `Deleted ${version}` : (r.error || 'Delete failed'), r.ok);
-      } catch (e) {
-        toast('Delete failed: ' + e.message, false);
-      }
-      busy = false;
-      fetchBuilds();
-    }
+            <div class="bg-smoke-2 border border-smoke-5 rounded-lg p-5">
+                <h2 class="text-sm font-semibold text-smoke-11 uppercase tracking-wider mb-4">Add Service</h2>
+                <div class="space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-smoke-9 mb-1">Name</label>
+                            <input id="svc-name" type="text" placeholder="my-service" class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-12 placeholder-smoke-7 focus:outline-none focus:border-gold-9">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-smoke-9 mb-1">Port (optional)</label>
+                            <input id="svc-port" type="number" placeholder="9999" class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-12 placeholder-smoke-7 focus:outline-none focus:border-gold-9">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-smoke-9 mb-1">Command</label>
+                        <input id="svc-command" type="text" placeholder="python3 -m http.server 9999" class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-12 placeholder-smoke-7 focus:outline-none focus:border-gold-9">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-smoke-9 mb-1">Caddy route (optional)</label>
+                        <input id="svc-caddy" type="text" placeholder="/myapp" class="w-full px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-12 placeholder-smoke-7 focus:outline-none focus:border-gold-9">
+                    </div>
+                    <button onclick="addService()" class="px-4 py-2 bg-gold-10 hover:bg-gold-9 text-smoke-1 rounded-lg text-sm font-medium transition-colors">Add Service</button>
+                </div>
+            </div>
 
-    // Initial load + polling
-    fetchStatus();
-    fetchBuilds();
-    setInterval(fetchStatus, 5000);
-    setInterval(fetchBuilds, 30000);
-  </script>
+            <div id="svc-log-section" class="hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs text-smoke-9 uppercase tracking-wider">Log</h3>
+                    <button onclick="clearLog('svc')" class="text-xs text-smoke-8 hover:text-smoke-12">Clear</button>
+                </div>
+                <div id="svc-log" class="log-area bg-smoke-2 border border-smoke-5 rounded-lg p-4 text-xs text-smoke-10 max-h-60 overflow-y-auto thin-scrollbar"></div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- App Panel -->
+        <!-- ================================================================ -->
+        <div id="panel-app" class="space-y-6 hidden">
+            <div class="bg-smoke-2 border border-smoke-5 rounded-lg p-5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="text-sm font-semibold text-smoke-11 uppercase tracking-wider">Feather Binary</h2>
+                        <p class="text-sm text-smoke-9 mt-1">Current version: <span id="app-version" class="font-mono text-gold-9">—</span></p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="rollbackApp()" id="app-rollback-btn" class="px-4 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded-lg text-sm text-smoke-10 hover:text-amber-9 transition-all hidden">Rollback</button>
+                        <button onclick="deployApp()" id="app-deploy-btn" class="px-4 py-2 bg-gold-10 hover:bg-gold-9 text-smoke-1 rounded-lg text-sm font-medium transition-colors">Build & Deploy</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="app-progress-section" class="hidden">
+                <div class="bg-smoke-2 border border-gold-9/30 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-4 h-4 border-2 border-gold-9 border-t-transparent rounded-full" style="animation: spin 1s linear infinite"></div>
+                        <span id="app-stage" class="text-sm text-gold-9">Building...</span>
+                    </div>
+                    <div class="w-full bg-smoke-4 rounded-full h-1.5">
+                        <div id="app-bar" class="bg-gold-9 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="app-log-section" class="hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs text-smoke-9 uppercase tracking-wider">Build Output</h3>
+                    <button onclick="clearLog('app')" class="text-xs text-smoke-8 hover:text-smoke-12">Clear</button>
+                </div>
+                <div id="app-log" class="log-area bg-smoke-2 border border-smoke-5 rounded-lg p-4 text-xs text-smoke-10 max-h-96 overflow-y-auto thin-scrollbar"></div>
+            </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- Container Panel (admin only) -->
+        <!-- ================================================================ -->
+        <div id="panel-container" class="space-y-6 hidden">
+            <div class="bg-smoke-2 border border-smoke-5 rounded-lg p-5">
+                <h2 class="text-sm font-semibold text-smoke-11 uppercase tracking-wider mb-4">Container Deploy</h2>
+                <p class="text-sm text-smoke-9 mb-4">Rebuild container image and redeploy via host. This runs <code class="bg-smoke-4 px-1.5 py-0.5 rounded text-cyan-9 text-xs">deploy.sh</code> on the host machine.</p>
+                <div class="flex items-center gap-3">
+                    <div>
+                        <label class="block text-xs text-smoke-9 mb-1">Target</label>
+                        <select id="container-target" class="px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-11 focus:outline-none focus:border-gold-9 min-w-[120px]">
+                            <option value="user0">user0</option>
+                            <option value="user1">user1</option>
+                            <option value="all">all</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-2 self-end">
+                        <button onclick="deployContainer()" id="container-deploy-btn" class="px-4 py-2 bg-gold-10 hover:bg-gold-9 text-smoke-1 rounded-lg text-sm font-medium transition-colors">Deploy</button>
+                        <button onclick="rollbackContainer()" class="px-4 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded-lg text-sm text-smoke-10 hover:text-amber-9 transition-all">Rollback</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="container-progress-section" class="hidden">
+                <div class="bg-smoke-2 border border-gold-9/30 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-4 h-4 border-2 border-gold-9 border-t-transparent rounded-full" style="animation: spin 1s linear infinite"></div>
+                        <span id="container-stage" class="text-sm text-gold-9">Deploying...</span>
+                    </div>
+                    <div class="w-full bg-smoke-4 rounded-full h-1.5">
+                        <div id="container-bar" class="bg-gold-9 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="container-log-section" class="hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xs text-smoke-9 uppercase tracking-wider">Host Output</h3>
+                    <button onclick="clearLog('container')" class="text-xs text-smoke-8 hover:text-smoke-12">Clear</button>
+                </div>
+                <div id="container-log" class="log-area bg-smoke-2 border border-smoke-5 rounded-lg p-4 text-xs text-smoke-10 max-h-96 overflow-y-auto thin-scrollbar"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========== State ==========
+        let activeTab = 'app';
+        let deploySSE = null;
+        let statusData = null;
+
+        // ========== Init ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshStatus();
+            connectSSE();
+            switchTab('app');
+        });
+
+        // ========== Tabs ==========
+        function switchTab(tab) {
+            activeTab = tab;
+            ['supervisor', 'app', 'container'].forEach(t => {
+                const btn = document.getElementById(`tab-${t}`);
+                const panel = document.getElementById(`panel-${t}`);
+                if (t === tab) {
+                    btn.classList.add('tab-active');
+                    btn.classList.remove('text-smoke-10');
+                    panel.classList.remove('hidden');
+                } else {
+                    btn.classList.remove('tab-active');
+                    btn.classList.add('text-smoke-10');
+                    panel.classList.add('hidden');
+                }
+            });
+        }
+
+        // ========== Status ==========
+        async function refreshStatus() {
+            try {
+                const resp = await fetch('/api/deploy/status');
+                statusData = await resp.json();
+
+                // Subtitle
+                document.getElementById('admin-subtitle').textContent =
+                    `v${statusData.version} ${statusData.is_admin ? '(admin)' : ''}`;
+
+                // Container tab visibility
+                const containerTab = document.getElementById('tab-container');
+                if (statusData.is_admin) {
+                    containerTab.classList.remove('hidden');
+                } else {
+                    containerTab.classList.add('hidden');
+                }
+
+                // App version
+                document.getElementById('app-version').textContent = statusData.version || '—';
+
+                // App rollback
+                const appRollback = document.getElementById('app-rollback-btn');
+                statusData.has_app_backup ? appRollback.classList.remove('hidden') : appRollback.classList.add('hidden');
+
+                // Supervisor rollback
+                const svcRollback = document.getElementById('svc-rollback-btn');
+                statusData.has_supervisor_backup ? svcRollback.classList.remove('hidden') : svcRollback.classList.add('hidden');
+
+                // Services list
+                renderServices(statusData.services);
+            } catch (e) {
+                document.getElementById('admin-subtitle').textContent = 'Failed to load status';
+                console.error('Status error:', e);
+            }
+        }
+
+        function renderServices(services) {
+            const list = document.getElementById('services-list');
+            if (!services || services.length === 0) {
+                list.innerHTML = '<p class="text-smoke-8 text-sm">No managed services</p>';
+                return;
+            }
+            list.innerHTML = services.map(svc => {
+                const running = svc.status === 'RUNNING';
+                const dotColor = running ? 'bg-apple-9' : 'bg-ember-9';
+                const statusColor = running ? 'text-apple-9' : svc.status === 'STOPPED' ? 'text-ember-9' : 'text-amber-9';
+                const detail = svc.uptime ? `uptime ${svc.uptime}` : svc.pid ? `pid ${svc.pid}` : '';
+                return `<div class="flex items-center justify-between py-2.5 px-3 bg-smoke-3 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0"></span>
+                        <span class="text-smoke-12 font-medium text-sm">${esc(svc.name)}</span>
+                        <span class="${statusColor} text-xs">${esc(svc.status)}</span>
+                        ${detail ? `<span class="text-smoke-8 text-xs">${esc(detail)}</span>` : ''}
+                    </div>
+                    <button onclick="removeService('${esc(svc.name)}')" class="text-xs text-smoke-8 hover:text-ember-9 px-2 py-1 rounded hover:bg-ember-9/10 transition-all">Remove</button>
+                </div>`;
+            }).join('');
+        }
+
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        // ========== SSE ==========
+        function connectSSE() {
+            if (deploySSE) deploySSE.close();
+            deploySSE = new EventSource('/api/deploy/stream');
+
+            const indicator = document.getElementById('sse-indicator');
+
+            deploySSE.onopen = () => {
+                indicator.classList.remove('bg-smoke-5', 'bg-ember-9');
+                indicator.classList.add('bg-apple-9');
+                indicator.title = 'SSE connected';
+            };
+
+            ['supervisor', 'app', 'container'].forEach(track => {
+                deploySSE.addEventListener(`deploy-${track}`, (e) => {
+                    try {
+                        handleEvent(track, JSON.parse(e.data));
+                    } catch (err) {
+                        console.error('SSE parse error:', err);
+                    }
+                });
+            });
+
+            deploySSE.onerror = () => {
+                indicator.classList.remove('bg-apple-9');
+                indicator.classList.add('bg-ember-9');
+                indicator.title = 'SSE disconnected, reconnecting...';
+                // Auto-reconnect (handles feather restarting after Track 2 deploy)
+                setTimeout(() => {
+                    appendLog('app', '--- Reconnecting... ---');
+                    connectSSE();
+                    setTimeout(refreshStatus, 2000);
+                }, 3000);
+            };
+        }
+
+        function handleEvent(track, data) {
+            if (data.type === 'output') {
+                appendLog(track, data.line);
+            } else if (data.type === 'progress') {
+                showProgress(track, data.stage, data.pct);
+            } else if (data.type === 'complete') {
+                hideProgress(track);
+                const prefix = data.success ? 'DONE' : 'FAILED';
+                appendLog(track, `--- ${prefix}: ${data.message} ---`);
+                resetButton(track);
+                setTimeout(refreshStatus, 1500);
+            }
+        }
+
+        // ========== Logging ==========
+        function appendLog(track, line) {
+            const logId = track === 'supervisor' ? 'svc' : track;
+            const section = document.getElementById(`${logId}-log-section`);
+            const log = document.getElementById(`${logId}-log`);
+            if (!log) return;
+            section.classList.remove('hidden');
+            const div = document.createElement('div');
+            div.textContent = line;
+            div.className = 'py-0.5';
+            if (line.includes('FAILED') || line.includes('Error') || line.includes('error[')) {
+                div.classList.add('text-ember-9');
+            } else if (line.includes('DONE') || line.includes('complete') || line.includes('Compiling')) {
+                div.classList.add('text-apple-9');
+            } else if (line.includes('warning')) {
+                div.classList.add('text-amber-9');
+            }
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog(logId) {
+            const log = document.getElementById(`${logId}-log`);
+            if (log) log.innerHTML = '';
+            const section = document.getElementById(`${logId}-log-section`);
+            if (section) section.classList.add('hidden');
+        }
+
+        // ========== Progress ==========
+        function showProgress(track, stage, pct) {
+            const sectionId = track === 'supervisor' ? null : `${track}-progress-section`;
+            if (!sectionId) return;
+            const section = document.getElementById(sectionId);
+            if (section) section.classList.remove('hidden');
+            const stageEl = document.getElementById(`${track}-stage`);
+            const barEl = document.getElementById(`${track}-bar`);
+            if (stageEl) stageEl.textContent = stage || 'Working...';
+            if (barEl && pct != null) barEl.style.width = pct + '%';
+        }
+
+        function hideProgress(track) {
+            const sectionId = track === 'supervisor' ? null : `${track}-progress-section`;
+            if (!sectionId) return;
+            const section = document.getElementById(sectionId);
+            if (section) section.classList.add('hidden');
+        }
+
+        function resetButton(track) {
+            if (track === 'app') {
+                const btn = document.getElementById('app-deploy-btn');
+                btn.disabled = false;
+                btn.textContent = 'Build & Deploy';
+                btn.classList.remove('opacity-50', 'cursor-wait');
+            } else if (track === 'container') {
+                const btn = document.getElementById('container-deploy-btn');
+                btn.disabled = false;
+                btn.textContent = 'Deploy';
+                btn.classList.remove('opacity-50', 'cursor-wait');
+            }
+        }
+
+        // ========== Track 1: Supervisor ==========
+        async function addService() {
+            const name = document.getElementById('svc-name').value.trim();
+            const command = document.getElementById('svc-command').value.trim();
+            const port = document.getElementById('svc-port').value.trim();
+            const caddy = document.getElementById('svc-caddy').value.trim();
+
+            if (!name || !command) {
+                alert('Name and command are required');
+                return;
+            }
+
+            const body = { action: 'add', name, command };
+            if (port) body.port = parseInt(port);
+            if (caddy) body.caddy_route = caddy;
+
+            try {
+                const resp = await fetch('/api/deploy/supervisor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    document.getElementById('svc-name').value = '';
+                    document.getElementById('svc-command').value = '';
+                    document.getElementById('svc-port').value = '';
+                    document.getElementById('svc-caddy').value = '';
+                    setTimeout(refreshStatus, 1000);
+                } else {
+                    alert(data.message || 'Failed to add service');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function removeService(name) {
+            if (!confirm(`Remove service "${name}"?\nThis will stop the process and remove it from supervisor.`)) return;
+            try {
+                const resp = await fetch('/api/deploy/supervisor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'remove', name })
+                });
+                const data = await resp.json();
+                if (data.status !== 'ok') alert(data.message || 'Failed');
+                setTimeout(refreshStatus, 1000);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function rollbackSupervisor() {
+            if (!confirm('Rollback supervisor config to previous state?\nThis restores the .prev backup of supervisord.conf and Caddyfile.')) return;
+            try {
+                await fetch('/api/deploy/supervisor/rollback', { method: 'POST' });
+                setTimeout(refreshStatus, 2000);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // ========== Track 2: App ==========
+        async function deployApp() {
+            if (!confirm('Rebuild and deploy feather from source?\nThis will compile the binary, replace the running version, and restart.')) return;
+
+            const btn = document.getElementById('app-deploy-btn');
+            btn.disabled = true;
+            btn.textContent = 'Building...';
+            btn.classList.add('opacity-50', 'cursor-wait');
+            clearLog('app');
+
+            try {
+                await fetch('/api/deploy/app', { method: 'POST' });
+            } catch (e) {
+                resetButton('app');
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function rollbackApp() {
+            if (!confirm('Rollback to previous feather binary?\nThis restores the .prev backup and restarts.')) return;
+            clearLog('app');
+            try {
+                await fetch('/api/deploy/app/rollback', { method: 'POST' });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // ========== Track 3: Container ==========
+        async function deployContainer() {
+            const target = document.getElementById('container-target').value;
+            if (!confirm(`Deploy container for "${target}"?\nThis runs deploy.sh on the host (podman build + redeploy). Takes 2-5 minutes.`)) return;
+
+            const btn = document.getElementById('container-deploy-btn');
+            btn.disabled = true;
+            btn.textContent = 'Deploying...';
+            btn.classList.add('opacity-50', 'cursor-wait');
+            clearLog('container');
+
+            try {
+                await fetch('/api/deploy/container', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+            } catch (e) {
+                resetButton('container');
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function rollbackContainer() {
+            const target = document.getElementById('container-target').value;
+            if (!confirm(`Rollback container for "${target}"?\nThis runs rollback.sh on the host.`)) return;
+            clearLog('container');
+            try {
+                await fetch('/api/deploy/container/rollback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+    </script>
 </body>
 </html>

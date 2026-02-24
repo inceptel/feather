@@ -36,6 +36,7 @@
 //! - `GET /api/claude-sessions` - List active tmux sessions
 
 mod codex;
+mod deploy;
 mod memory;
 mod normalizer;
 mod pi;
@@ -198,6 +199,8 @@ struct AppState {
     event_tx: broadcast::Sender<(u64, SseEvent)>,  // SSE broadcast channel
     seq: std::sync::atomic::AtomicU64,             // Monotonic event sequence number
     sessions_dir: PathBuf,                          // Path to ~/.claude/projects/
+    deploy_tx: broadcast::Sender<deploy::DeployEvent>,  // Deploy SSE broadcast channel
+    is_admin: bool,                                // Has host tmux access
     default_cwd: String,                            // Default working directory for new sessions
     tmux: TmuxManager,                              // Handles tmux session lifecycle
     session_cache: Arc<SessionCache>,               // Normalized session cache
@@ -339,10 +342,10 @@ async fn stream_events(
             let event = SseEvent::Heartbeat {
                 timestamp: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("system clock before Unix epoch")
+                    .unwrap()
                     .as_secs(),
             };
-            let data = serde_json::to_string(&event).unwrap_or_default();
+            let data = serde_json::to_string(&event).unwrap();
             Some((
                 Ok(Event::default()
                     .event("heartbeat")
@@ -363,7 +366,7 @@ async fn stream_events(
                     SseEvent::Terminal { .. } => "terminal",
                     SseEvent::Status { .. } => "status",
                 };
-                let data = serde_json::to_string(&event).unwrap_or_default();
+                let data = serde_json::to_string(&event).unwrap();
                 Some((
                     Ok(Event::default()
                         .event(event_type)
@@ -383,7 +386,7 @@ async fn stream_events(
             status: "connected".to_string(),
             details: Some(format!("seq: {}", init_seq)),
         };
-        let data = serde_json::to_string(&event).unwrap_or_default();
+        let data = serde_json::to_string(&event).unwrap();
         Ok(Event::default()
             .event("status")
             .id(init_seq.to_string())
@@ -582,30 +585,9 @@ async fn list_sessions(
 ) -> Json<SessionsResponse> {
     let mut sessions = Vec::new();
 
-    // Load title cache from disk as fallback for sessions whose in-memory title
-    // hasn't been applied yet (e.g. before the normalizer finishes startup)
-    let title_fallback: HashMap<String, String> = fs::read_to_string("title-cache.json")
-        .ok()
-        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-        .map(|v| {
-            v.as_object()
-                .map(|obj| {
-                    obj.iter()
-                        .filter_map(|(k, v)| {
-                            let title = v.get("title").and_then(|t| t.as_str())
-                                .or_else(|| v.as_str());
-                            title.map(|t| (k.clone(), t.to_string()))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-
     let cached = state.session_cache.list_sessions();
     for meta in cached.into_iter().filter(|m| m.project == project_id) {
-        let title = meta.title.clone()
-            .or_else(|| title_fallback.get(&meta.id).cloned());
+        let title = meta.title.clone();
 
         let last_updated = if meta.updated_at.is_empty() {
             "unknown".to_string()
@@ -797,13 +779,6 @@ async fn claude_spawn(
     Path(session_id): Path<String>,
     Json(req): Json<SpawnRequest>,
 ) -> Json<SpawnResponse> {
-    if !is_safe_session_id(&session_id) {
-        return Json(SpawnResponse {
-            status: "error: invalid session_id".to_string(),
-            tmux_name: String::new(),
-            session_id: None,
-        });
-    }
     match state.tmux.spawn_claude_session(&session_id, req.cwd.as_deref()) {
         Ok(info) => {
             state.title_trigger.notify_one();
@@ -909,7 +884,7 @@ async fn codex_new(
     } else {
         let ts = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before Unix epoch")
+            .unwrap()
             .as_millis();
         format!("feather-codex-{}", ts)
     };
@@ -954,9 +929,6 @@ async fn codex_send(
     Path(session_id): Path<String>,
     Json(req): Json<CodexSendRequest>,
 ) -> Json<SimpleResponse> {
-    if !is_safe_session_id(&session_id) {
-        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
-    }
     // Send message to tmux - Codex writes its own JSONL files that normalizer watches
     if let Err(e) = state.tmux.send_message(&session_id, &req.message) {
         return Json(SimpleResponse { status: format!("error: {}", e) });
@@ -1018,7 +990,7 @@ async fn pi_new(
             Some(path) => {
                 let ts = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("system clock before Unix epoch")
+                    .unwrap()
                     .as_millis();
                 let sid = format!("feather-pi-{}", ts);
                 (sid, path, true)
@@ -1054,7 +1026,7 @@ async fn pi_new(
         } else {
             let ts = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("system clock before Unix epoch")
+                .unwrap()
                 .as_millis();
             format!("feather-pi-{}", ts)
         };
@@ -1148,9 +1120,6 @@ async fn pi_send(
     Path(session_id): Path<String>,
     Json(req): Json<PiSendRequest>,
 ) -> Json<SimpleResponse> {
-    if !is_safe_session_id(&session_id) {
-        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
-    }
     if let Err(e) = state.tmux.send_message(&session_id, &req.message) {
         return Json(SimpleResponse { status: format!("error: {}", e) });
     }
@@ -1361,7 +1330,7 @@ async fn upload_image(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
 
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("system clock before Unix epoch")
+        .unwrap()
         .as_millis();
     let filename = format!("screenshot-{}.{}", timestamp, ext);
     let filepath = upload_dir.join(&filename);
@@ -1434,7 +1403,7 @@ async fn upload_file(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
     // Add timestamp to prevent collisions
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("system clock before Unix epoch")
+        .unwrap()
         .as_millis();
 
     // Build filename: timestamp-originalname.ext
@@ -1509,7 +1478,7 @@ async fn transcribe(mut multipart: Multipart) -> Json<TranscribeResponse> {
     let part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name("recording.webm")
         .mime_str("audio/webm")
-        .expect("valid MIME type literal");
+        .unwrap();
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", part);
@@ -1558,9 +1527,6 @@ async fn claude_signal(
     Path(session_id): Path<String>,
     Json(req): Json<SignalRequest>,
 ) -> Json<SimpleResponse> {
-    if !is_safe_session_id(&session_id) {
-        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
-    }
     match state.tmux.send_signal(&session_id, &req.signal) {
         Ok(()) => Json(SimpleResponse { status: "sent".to_string() }),
         Err(e) => Json(SimpleResponse { status: format!("error: {}", e) }),
@@ -1571,9 +1537,6 @@ async fn claude_kill(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> Json<SimpleResponse> {
-    if !is_safe_session_id(&session_id) {
-        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
-    }
     state.tmux.kill_session(&session_id);
     Json(SimpleResponse { status: "killed".to_string() })
 }
@@ -1671,7 +1634,7 @@ async fn terminal_stream(
                 last_content = content.clone();
 
                 let event = SseEvent::Terminal { data: content };
-                let data = serde_json::to_string(&event).unwrap_or_default();
+                let data = serde_json::to_string(&event).unwrap();
 
                 Some((
                     Ok(Event::default().event("terminal").data(data)),
@@ -2251,17 +2214,11 @@ async fn reap_idle_sessions(state: &Arc<AppState>, threshold: Duration) {
 
 #[tokio::main]
 async fn main() {
-    // Strip Claude Code env vars so spawned Claude CLI sessions work correctly.
-    // If these leak into Feather's env (e.g. restarted from a Claude Code shell),
-    // all Claude sessions spawned via the API will refuse to start.
-    std::env::remove_var("CLAUDECODE");
-    std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
-
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("feather_rs=info".parse().expect("valid tracing directive"))
-            .add_directive("tower_http=info".parse().expect("valid tracing directive")))
+            .add_directive("feather_rs=info".parse().unwrap())
+            .add_directive("tower_http=info".parse().unwrap()))
         .init();
 
     let (event_tx, _) = broadcast::channel::<(u64, SseEvent)>(100);
@@ -2313,12 +2270,17 @@ async fn main() {
         map
     };
 
+    let (deploy_tx, _) = broadcast::channel::<deploy::DeployEvent>(100);
+    let is_admin = deploy::is_admin();
+
     let title_trigger = titles::create_trigger();
     let state = Arc::new(AppState {
         start_time: Instant::now(),
         event_tx,
         seq: std::sync::atomic::AtomicU64::new(1),
         sessions_dir: sessions_dir.clone(),
+        deploy_tx,
+        is_admin,
         default_cwd: default_cwd.clone(),
         tmux: TmuxManager::new(default_cwd),
         session_cache: session_cache.clone(),
@@ -2375,7 +2337,7 @@ async fn main() {
             heartbeat_state.broadcast(SseEvent::Heartbeat {
                 timestamp: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("system clock before Unix epoch")
+                    .unwrap()
                     .as_secs(),
             });
         }
@@ -2426,6 +2388,15 @@ async fn main() {
         .route("/api/pi-new", post(pi_new))
         .route("/api/pi-send/{session_id}", post(pi_send))
         .route("/api/pi-resolve/{tmux_name}", get(pi_resolve))
+        // Deploy management
+        .route("/api/deploy/status", get(deploy::deploy_status))
+        .route("/api/deploy/stream", get(deploy::deploy_stream))
+        .route("/api/deploy/supervisor", post(deploy::supervisor_deploy))
+        .route("/api/deploy/supervisor/rollback", post(deploy::supervisor_rollback))
+        .route("/api/deploy/app", post(deploy::app_deploy))
+        .route("/api/deploy/app/rollback", post(deploy::app_rollback))
+        .route("/api/deploy/container", post(deploy::container_deploy))
+        .route("/api/deploy/container/rollback", post(deploy::container_rollback))
         // File upload & transcription (10MB limit)
         .route("/api/upload-image", post(upload_image))
         .route("/api/upload-file", post(upload_file))
@@ -2438,9 +2409,7 @@ async fn main() {
         // JSONL tail stream (byte-offset based)
         .route("/api/tail/{project_id}/{session_id}", get(tail_session))
         // Serve uploaded files
-        .nest_service("/uploads", ServeDir::new(
-            std::env::var("FEATHER_UPLOAD_DIR").unwrap_or_else(|_| "uploads".to_string())
-        ))
+        .nest_service("/uploads", ServeDir::new("uploads"))
         // Static files
         .fallback_service(ServeDir::new("static").append_index_html_on_directories(true))
         .with_state(state);
@@ -2453,6 +2422,6 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Feather-rs v{} listening on {}", env!("CARGO_PKG_VERSION"), addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind TCP listener");
-    axum::serve(listener, app).await.expect("server exited with error");
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
