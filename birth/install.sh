@@ -80,7 +80,12 @@ if command -v ufw > /dev/null 2>&1; then
     log "UFW configured (22, 80, 443)"
 fi
 
-# --- 8. Create systemd service ---
+# --- 8. Enable podman socket ---
+log "Enabling podman socket..."
+systemctl enable --now podman.socket
+log "Podman socket at /run/podman/podman.sock"
+
+# --- 9. Create systemd service ---
 log "Creating systemd service..."
 
 # Build environment flags
@@ -106,18 +111,15 @@ RestartSec=5
 ExecStartPre=-/usr/bin/podman stop -t 15 feather-birth
 ExecStartPre=-/usr/bin/podman rm -f feather-birth
 
+ExecStartPre=-/usr/bin/podman stop -t 10 feather-work-blue
+ExecStartPre=-/usr/bin/podman stop -t 10 feather-work-green
+ExecStartPre=-/usr/bin/podman rm -f feather-work-blue
+ExecStartPre=-/usr/bin/podman rm -f feather-work-green
+
 ExecStart=/usr/bin/podman run \\
     --name feather-birth \\
-    --cap-add SYS_ADMIN \\
-    --cap-add MKNOD \\
-    --device /dev/fuse \\
-    --security-opt label=disable \\
-    --security-opt seccomp=unconfined \\
-    -p 80:80 \\
-    -p 443:443 \\
-    -v feather-home:/home/user:Z \\
-    -v feather-caddy-data:/data:Z \\
-    -v feather-podman-storage:/var/lib/containers:Z \\
+    --network=host \\
+    -v /run/podman/podman.sock:/run/podman/podman.sock \\
     -v ${FEATHER_SRC}:/opt/feather-src:ro \\
     ${ENV_FLAGS} \\
     localhost/feather-birth:latest

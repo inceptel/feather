@@ -7,6 +7,9 @@ STATE_PORT="/tmp/active-work-port"
 HEALTH_TIMEOUT=120
 DRAIN_SECONDS=5
 
+PODMAN_SOCKET="${PODMAN_SOCKET:-/run/podman/podman.sock}"
+hostpodman() { podman --url "unix://$PODMAN_SOCKET" "$@"; }
+
 log() { echo "[swap] $(date '+%H:%M:%S') $*"; }
 
 # --- 1. Read current state ---
@@ -32,16 +35,15 @@ fi
 log "New: $NEW_NAME on port $NEW_PORT"
 
 # --- 3. Clean up any stale container with the new name ---
-if podman container exists "$NEW_NAME" 2>/dev/null; then
+if hostpodman container exists "$NEW_NAME" 2>/dev/null; then
     log "Removing stale container: $NEW_NAME"
-    podman stop -t 5 "$NEW_NAME" 2>/dev/null || true
-    podman rm -f "$NEW_NAME" 2>/dev/null || true
+    hostpodman stop -t 5 "$NEW_NAME" 2>/dev/null || true
+    hostpodman rm -f "$NEW_NAME" 2>/dev/null || true
 fi
 
 # --- 4. Start new container ---
 log "Starting $NEW_NAME..."
 
-# Collect env vars to pass through
 env_args=()
 while IFS='=' read -r key value; do
     case "$key" in
@@ -51,10 +53,10 @@ while IFS='=' read -r key value; do
     esac
 done < <(env)
 
-podman run -d \
+hostpodman run -d \
     --name "$NEW_NAME" \
     -p "127.0.0.1:${NEW_PORT}:8080" \
-    -v /home/user:/home/user:Z \
+    -v feather-home:/home/user:Z \
     "${env_args[@]}" \
     "$WORK_IMAGE"
 
@@ -72,9 +74,9 @@ done
 if [ "$healthy" != "true" ]; then
     log "ERROR: New container failed health check — aborting swap"
     log "Old container ($CURRENT_NAME) remains active"
-    podman logs "$NEW_NAME" 2>&1 | tail -30
-    podman stop -t 5 "$NEW_NAME" 2>/dev/null || true
-    podman rm -f "$NEW_NAME" 2>/dev/null || true
+    hostpodman logs "$NEW_NAME" 2>&1 | tail -30
+    hostpodman stop -t 5 "$NEW_NAME" 2>/dev/null || true
+    hostpodman rm -f "$NEW_NAME" 2>/dev/null || true
     exit 1
 fi
 
@@ -88,8 +90,8 @@ PATCH_RESPONSE=$(curl -sf -X PATCH \
     "http://localhost:2019/id/work_upstream/upstreams" 2>&1) || {
     log "ERROR: Caddy PATCH failed: $PATCH_RESPONSE"
     log "Aborting — old container remains active, new container will be removed"
-    podman stop -t 5 "$NEW_NAME" 2>/dev/null || true
-    podman rm -f "$NEW_NAME" 2>/dev/null || true
+    hostpodman stop -t 5 "$NEW_NAME" 2>/dev/null || true
+    hostpodman rm -f "$NEW_NAME" 2>/dev/null || true
     exit 1
 }
 
@@ -101,8 +103,8 @@ sleep "$DRAIN_SECONDS"
 
 # --- 8. Stop and remove old container ---
 log "Stopping $CURRENT_NAME..."
-podman stop -t 10 "$CURRENT_NAME" 2>/dev/null || true
-podman rm -f "$CURRENT_NAME" 2>/dev/null || true
+hostpodman stop -t 10 "$CURRENT_NAME" 2>/dev/null || true
+hostpodman rm -f "$CURRENT_NAME" 2>/dev/null || true
 
 # --- 9. Update state ---
 echo "$NEW_NAME" > "$STATE_CONTAINER"
