@@ -38,7 +38,7 @@ apt-get install -y -qq ca-certificates curl gnupg > /dev/null
 
 mkdir -p /etc/apt/keyrings
 curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/Release.key" \
-    | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg
+    | gpg --batch --dearmor -o /etc/apt/keyrings/kubic.gpg
 
 echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/ /" \
     > /etc/apt/sources.list.d/kubic.list

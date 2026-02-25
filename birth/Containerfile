@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y ca-certificates curl gnupg \
     && . /etc/os-release \
     && curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/Release.key" \
-       | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg \
+       | gpg --batch --dearmor -o /etc/apt/keyrings/kubic.gpg \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/ /" \
        > /etc/apt/sources.list.d/kubic.list \
     && apt-get update && apt-get install -y \
