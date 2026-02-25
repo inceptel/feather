@@ -6,7 +6,7 @@
     "http": {
       "servers": {
         "main": {
-          "listen": [":443"],
+          "listen": [":8443"],
           "routes": [
             {
               "handle": [
@@ -27,7 +27,7 @@
           ]
         },
         "http_redirect": {
-          "listen": [":80"],
+          "listen": [":8880"],
           "routes": [
             {
               "handle": [

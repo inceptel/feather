@@ -43,6 +43,6 @@ RUN mkdir -p /run/user/1000 && chown user:user /run/user/1000
 USER user
 WORKDIR /home/user
 
-EXPOSE 80 443
+EXPOSE 8880 8443
 
 ENTRYPOINT ["/entrypoint.sh"]

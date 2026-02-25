@@ -21,7 +21,7 @@ if [ -n "${DOMAIN:-}" ]; then
     log "Domain: $DOMAIN"
     # Set TLS domain on the main server listen
     jq --arg domain "$DOMAIN" '
-        .apps.http.servers.main.listen = [":443"] |
+        .apps.http.servers.main.listen = [":8443"] |
         .apps.http.servers.main.routes[0].match = [{"host": [$domain]}]
     ' "$CADDY_RUNTIME" > /tmp/caddy-tmp.json && mv /tmp/caddy-tmp.json "$CADDY_RUNTIME"
 
@@ -34,7 +34,7 @@ else
     log "No DOMAIN set — HTTP-only mode on :80"
     # No TLS: listen on :80 only, remove redirect server and TLS config
     jq '
-        .apps.http.servers.main.listen = [":80"] |
+        .apps.http.servers.main.listen = [":8880"] |
         del(.apps.http.servers.http_redirect) |
         del(.apps.tls)
     ' "$CADDY_RUNTIME" > /tmp/caddy-tmp.json && mv /tmp/caddy-tmp.json "$CADDY_RUNTIME"
