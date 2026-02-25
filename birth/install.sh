@@ -113,11 +113,11 @@ ExecStart=/usr/bin/podman run \\
     --device /dev/fuse \\
     --security-opt label=disable \\
     --security-opt seccomp=unconfined \\
-    -p 80:8880 \\
-    -p 443:8443 \\
+    -p 80:80 \\
+    -p 443:443 \\
     -v feather-home:/home/user:Z \\
     -v feather-caddy-data:/data:Z \\
-    -v feather-podman-storage:/home/user/.local/share/containers:Z \\
+    -v feather-podman-storage:/var/lib/containers:Z \\
     -v ${FEATHER_SRC}:/opt/feather-src:ro \\
     ${ENV_FLAGS} \\
     localhost/feather-birth:latest
