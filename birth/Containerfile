@@ -1,0 +1,48 @@
+FROM docker.io/library/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Podman from Kubic repo (Ubuntu 22.04)
+RUN apt-get update && apt-get install -y ca-certificates curl gnupg \
+    && . /etc/os-release \
+    && curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/Release.key" \
+       | gpg --dearmor -o /etc/apt/keyrings/kubic.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/ /" \
+       > /etc/apt/sources.list.d/kubic.list \
+    && apt-get update && apt-get install -y \
+       podman fuse-overlayfs slirp4netns crun uidmap jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Caddy binary
+RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/local/bin/caddy \
+    && chmod +x /usr/local/bin/caddy
+
+# Create user with sub-uid/sub-gid ranges for rootless podman
+RUN useradd -m -s /bin/bash -u 1000 user \
+    && echo "user:100000:65536" >> /etc/subuid \
+    && echo "user:100000:65536" >> /etc/subgid
+
+# Podman configs for nested operation
+COPY containers.conf /home/user/.config/containers/containers.conf
+COPY storage.conf /home/user/.config/containers/storage.conf
+
+# Caddy config and scripts
+COPY caddy.json /opt/birth/caddy.json
+COPY entrypoint.sh /entrypoint.sh
+COPY swap.sh /usr/local/bin/swap.sh
+
+RUN chmod +x /entrypoint.sh /usr/local/bin/swap.sh \
+    && mkdir -p /home/user/.config/containers \
+    && mkdir -p /home/user/.local/share/containers \
+    && mkdir -p /data/caddy \
+    && chown -R user:user /home/user /opt/birth /data
+
+ENV XDG_RUNTIME_DIR=/run/user/1000
+RUN mkdir -p /run/user/1000 && chown user:user /run/user/1000
+
+USER user
+WORKDIR /home/user
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/entrypoint.sh"]
