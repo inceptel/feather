@@ -69,6 +69,7 @@ log "Work container image built"
 # --- 6. Save work image as tar for birth container to load ---
 WORK_IMAGE_TAR="/opt/feather-work.tar"
 log "Saving work image to $WORK_IMAGE_TAR..."
+rm -f "$WORK_IMAGE_TAR"
 podman save localhost/feather-work:latest -o "$WORK_IMAGE_TAR"
 log "Work image saved ($(du -h "$WORK_IMAGE_TAR" | cut -f1))"
 
