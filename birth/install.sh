@@ -116,8 +116,7 @@ ExecStartPre=-/usr/bin/podman rm -f feather-birth
 ExecStart=/usr/bin/podman run \\
     --name feather-birth \\
     --privileged \\
-    -p 80:80 \\
-    -p 443:443 \\
+    --network=host \\
     -v feather-home:/home/user:Z \\
     -v feather-caddy-data:/data:Z \\
     -v feather-podman-storage:/var/lib/containers:Z \\
