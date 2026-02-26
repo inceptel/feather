@@ -92,7 +92,7 @@ log "Switching Caddy upstream to 127.0.0.1:$NEW_PORT..."
 PATCH_RESPONSE=$(curl -sf -X PATCH \
     -H "Content-Type: application/json" \
     -d "[{\"dial\": \"127.0.0.1:${NEW_PORT}\"}]" \
-    "http://localhost:2019/id/work_upstream/upstreams" 2>&1) || {
+    "http://localhost:2020/id/work_upstream/upstreams" 2>&1) || {
     log "ERROR: Caddy PATCH failed: $PATCH_RESPONSE"
     log "Aborting — old container remains active, new container will be removed"
     podman stop -t 5 "$NEW_NAME" 2>/dev/null || true
