@@ -106,7 +106,8 @@ start_work_container() {
 
     podman run -d \
         --name "$name" \
-        --network=host \
+        --dns 8.8.8.8 --dns 1.1.1.1 \
+        -p "127.0.0.1:${port}:8080" \
         -v /home/user:/home/user:Z \
         "${env_args[@]}" \
         "$WORK_IMAGE"

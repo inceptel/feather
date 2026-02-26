@@ -60,7 +60,8 @@ done < <(env)
 
 podman run -d \
     --name "$NEW_NAME" \
-    --network=host \
+    --dns 8.8.8.8 --dns 1.1.1.1 \
+    -p "127.0.0.1:${NEW_PORT}:8080" \
     -v /home/user:/home/user:Z \
     "${env_args[@]}" \
     "$WORK_IMAGE"
