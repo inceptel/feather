@@ -6,6 +6,8 @@ Feather is a unified frontend for [Claude Code](https://docs.anthropic.com/en/do
 
 > Software shouldn't be frozen at release. Feather is built to be changed — by you, by agents, by whatever comes next.
 
+![Feather UI](docs/screenshot.png)
+
 ## Get Started
 
 **One command, any Ubuntu VPS:**
