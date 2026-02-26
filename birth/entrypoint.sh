@@ -4,16 +4,13 @@ set -euo pipefail
 CADDY_CONFIG="/opt/birth/caddy.json"
 CADDY_RUNTIME="/tmp/caddy-runtime.json"
 WORK_IMAGE="${WORK_IMAGE:-localhost/feather-work:latest}"
+WORK_IMAGE_TAR="${WORK_IMAGE_TAR:-/opt/feather-work.tar}"
 STATE_CONTAINER="/tmp/active-work-container"
 STATE_PORT="/tmp/active-work-port"
 HEALTH_TIMEOUT=120
 WATCHDOG_INTERVAL=30
 WATCHDOG_FAILURES=0
 MAX_WATCHDOG_FAILURES=3
-
-# Host podman socket (mounted in)
-PODMAN_SOCKET="${PODMAN_SOCKET:-/run/podman/podman.sock}"
-hostpodman() { podman --url "unix://$PODMAN_SOCKET" "$@"; }
 
 log() { echo "[birth] $(date '+%H:%M:%S') $*"; }
 
@@ -59,28 +56,32 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# --- 3. Check host podman socket ---
-if [ ! -S "$PODMAN_SOCKET" ]; then
-    log "ERROR: Host podman socket not found at $PODMAN_SOCKET"
-    log "Mount it with: -v /run/podman/podman.sock:/run/podman/podman.sock"
-    exit 1
-fi
-log "Host podman socket: $PODMAN_SOCKET"
-
-# --- 4. Find work image ---
+# --- 3. Load work image ---
 log "Checking for work image: $WORK_IMAGE"
-if ! hostpodman image exists "$WORK_IMAGE" 2>/dev/null; then
-    log "Image not found, attempting build from source..."
-    if [ -d /opt/feather-src ]; then
-        hostpodman build -t "$WORK_IMAGE" -f /opt/feather-src/Containerfile /opt/feather-src/
+if ! podman image exists "$WORK_IMAGE" 2>/dev/null; then
+    if [ -f "$WORK_IMAGE_TAR" ]; then
+        log "Loading work image from $WORK_IMAGE_TAR..."
+        podman load -i "$WORK_IMAGE_TAR"
+        log "Work image loaded"
     else
-        log "ERROR: No image available and /opt/feather-src not mounted"
+        log "ERROR: Work image not found and no tar at $WORK_IMAGE_TAR"
+        log "Mount the image tar with: -v /path/to/feather-work.tar:/opt/feather-work.tar:ro"
         exit 1
     fi
+else
+    log "Work image already loaded (cached in podman storage volume)"
+fi
+
+# Verify the image exists after load
+if ! podman image exists "$WORK_IMAGE" 2>/dev/null; then
+    log "ERROR: Work image $WORK_IMAGE still not available after load"
+    log "Available images:"
+    podman images 2>&1
+    exit 1
 fi
 log "Work image ready"
 
-# --- 5. Start work container ---
+# --- 4. Start work container ---
 start_work_container() {
     local name="$1"
     local port="$2"
@@ -97,17 +98,17 @@ start_work_container() {
         esac
     done < <(env)
 
-    hostpodman run -d \
+    podman run -d \
         --name "$name" \
         -p "127.0.0.1:${port}:8080" \
-        -v feather-home:/home/user:Z \
+        -v /home/user:/home/user:Z \
         "${env_args[@]}" \
         "$WORK_IMAGE"
 
     log "Container $name started"
 }
 
-# --- 6. Health check ---
+# --- 5. Health check ---
 wait_for_healthy() {
     local port="$1"
     local timeout="$2"
@@ -129,30 +130,30 @@ INITIAL_NAME="feather-work-blue"
 INITIAL_PORT=8080
 
 # Clean up any leftover work container from previous run
-hostpodman stop -t 5 "$INITIAL_NAME" 2>/dev/null || true
-hostpodman rm -f "$INITIAL_NAME" 2>/dev/null || true
+podman stop -t 5 "$INITIAL_NAME" 2>/dev/null || true
+podman rm -f "$INITIAL_NAME" 2>/dev/null || true
 
 start_work_container "$INITIAL_NAME" "$INITIAL_PORT"
 
 if ! wait_for_healthy "$INITIAL_PORT" "$HEALTH_TIMEOUT"; then
     log "Work container failed health check, showing logs:"
-    hostpodman logs "$INITIAL_NAME" 2>&1 | tail -50
+    podman logs "$INITIAL_NAME" 2>&1 | tail -50
     exit 1
 fi
 
-# --- 7. Record state ---
+# --- 6. Record state ---
 echo "$INITIAL_NAME" > "$STATE_CONTAINER"
 echo "$INITIAL_PORT" > "$STATE_PORT"
 log "Active: $INITIAL_NAME on port $INITIAL_PORT"
 
-# --- 8. Signal handling ---
+# --- 7. Signal handling ---
 cleanup() {
     log "Shutting down..."
     local container
     container=$(cat "$STATE_CONTAINER" 2>/dev/null || true)
     if [ -n "$container" ]; then
-        hostpodman stop -t 10 "$container" 2>/dev/null || true
-        hostpodman rm -f "$container" 2>/dev/null || true
+        podman stop -t 10 "$container" 2>/dev/null || true
+        podman rm -f "$container" 2>/dev/null || true
     fi
     kill "$CADDY_PID" 2>/dev/null || true
     log "Shutdown complete"
@@ -160,7 +161,7 @@ cleanup() {
 }
 trap cleanup SIGTERM SIGINT
 
-# --- 9. Watchdog loop ---
+# --- 8. Watchdog loop ---
 log "Watchdog started (interval: ${WATCHDOG_INTERVAL}s)"
 while true; do
     sleep "$WATCHDOG_INTERVAL"
@@ -184,7 +185,7 @@ while true; do
         if [ "$WATCHDOG_FAILURES" -ge "$MAX_WATCHDOG_FAILURES" ]; then
             log "Restarting work container after $MAX_WATCHDOG_FAILURES consecutive failures..."
             local_container=$(cat "$STATE_CONTAINER" 2>/dev/null || echo "feather-work-blue")
-            hostpodman restart "$local_container" 2>/dev/null || true
+            podman restart "$local_container" 2>/dev/null || true
             WATCHDOG_FAILURES=0
             sleep 10
         fi

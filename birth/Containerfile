@@ -2,19 +2,25 @@ FROM docker.io/library/ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Just need caddy, curl, jq — podman runs on host via socket
-RUN apt-get update && apt-get install -y \
-       curl jq ca-certificates \
+# Podman from Kubic repo (Ubuntu 22.04)
+RUN apt-get update && apt-get install -y ca-certificates curl gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && . /etc/os-release \
+    && curl -fsSL "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/Release.key" \
+       | gpg --batch --dearmor -o /etc/apt/keyrings/kubic.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/kubic.gpg] https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/unstable/xUbuntu_${VERSION_ID}/ /" \
+       > /etc/apt/sources.list.d/kubic.list \
+    && apt-get update && apt-get install -y \
+       podman fuse-overlayfs slirp4netns crun uidmap jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Caddy binary
 RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/local/bin/caddy \
     && chmod +x /usr/local/bin/caddy
 
-# Install podman-remote for talking to host podman via socket
-RUN curl -fsSL "https://github.com/containers/podman/releases/download/v5.3.1/podman-remote-static-linux_amd64.tar.gz" \
-    | tar xz -C /usr/local/bin --strip-components=1 \
-    && mv /usr/local/bin/podman-remote-static-linux_amd64 /usr/local/bin/podman
+# Podman configs for rootful nested operation
+COPY containers.conf /etc/containers/containers.conf
+COPY storage.conf /etc/containers/storage.conf
 
 # Caddy config and scripts
 COPY caddy.json /opt/birth/caddy.json
@@ -22,5 +28,7 @@ COPY entrypoint.sh /entrypoint.sh
 COPY swap.sh /usr/local/bin/swap.sh
 
 RUN chmod +x /entrypoint.sh /usr/local/bin/swap.sh
+
+EXPOSE 80 443
 
 ENTRYPOINT ["/entrypoint.sh"]

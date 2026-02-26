@@ -66,12 +66,18 @@ log "Building work container image (this may take 3-10 minutes on first run)..."
 podman build -t localhost/feather-work:latest -f "$FEATHER_SRC/Containerfile" "$FEATHER_SRC/"
 log "Work container image built"
 
-# --- 6. Build birth certificate image ---
+# --- 6. Save work image as tar for birth container to load ---
+WORK_IMAGE_TAR="/opt/feather-work.tar"
+log "Saving work image to $WORK_IMAGE_TAR..."
+podman save localhost/feather-work:latest -o "$WORK_IMAGE_TAR"
+log "Work image saved ($(du -h "$WORK_IMAGE_TAR" | cut -f1))"
+
+# --- 7. Build birth certificate image ---
 log "Building birth certificate image..."
 podman build -t localhost/feather-birth:latest -f "$FEATHER_SRC/birth/Containerfile" "$FEATHER_SRC/birth/"
 log "Birth certificate image built"
 
-# --- 7. Configure firewall ---
+# --- 8. Configure firewall ---
 if command -v ufw > /dev/null 2>&1; then
     log "Configuring UFW..."
     ufw allow 22/tcp > /dev/null 2>&1 || true
@@ -80,11 +86,6 @@ if command -v ufw > /dev/null 2>&1; then
     ufw --force enable > /dev/null 2>&1 || true
     log "UFW configured (22, 80, 443)"
 fi
-
-# --- 8. Enable podman socket ---
-log "Enabling podman socket..."
-systemctl enable --now podman.socket
-log "Podman socket at /run/podman/podman.sock"
 
 # --- 9. Create systemd service ---
 log "Creating systemd service..."
@@ -112,16 +113,19 @@ RestartSec=5
 ExecStartPre=-/usr/bin/podman stop -t 15 feather-birth
 ExecStartPre=-/usr/bin/podman rm -f feather-birth
 
-ExecStartPre=-/usr/bin/podman stop -t 10 feather-work-blue
-ExecStartPre=-/usr/bin/podman stop -t 10 feather-work-green
-ExecStartPre=-/usr/bin/podman rm -f feather-work-blue
-ExecStartPre=-/usr/bin/podman rm -f feather-work-green
-
 ExecStart=/usr/bin/podman run \\
     --name feather-birth \\
-    --network=host \\
-    -v /run/podman/podman.sock:/run/podman/podman.sock \\
-    -v ${FEATHER_SRC}:/opt/feather-src:ro \\
+    --cap-add SYS_ADMIN \\
+    --cap-add MKNOD \\
+    --device /dev/fuse \\
+    --security-opt label=disable \\
+    --security-opt seccomp=unconfined \\
+    -p 80:80 \\
+    -p 443:443 \\
+    -v feather-home:/home/user:Z \\
+    -v feather-caddy-data:/data:Z \\
+    -v feather-podman-storage:/var/lib/containers:Z \\
+    -v ${WORK_IMAGE_TAR}:/opt/feather-work.tar:ro \\
     ${ENV_FLAGS} \\
     localhost/feather-birth:latest
 
@@ -136,7 +140,7 @@ systemctl daemon-reload
 systemctl enable feather.service
 systemctl start feather.service
 
-# --- 9. Print summary ---
+# --- 10. Print summary ---
 echo ""
 echo "============================================"
 log "Feather installed successfully!"
@@ -155,12 +159,13 @@ fi
 
 echo ""
 log "Useful commands:"
-echo "  systemctl status feather        # Check service status"
-echo "  journalctl -u feather -f        # Follow logs"
-echo "  podman exec feather-birth swap.sh  # Zero-downtime update"
+echo "  systemctl status feather            # Check service status"
+echo "  journalctl -u feather -f            # Follow logs"
+echo "  podman exec feather-birth swap.sh   # Zero-downtime update"
 echo ""
 log "To update Feather:"
 echo "  cd ${FEATHER_SRC} && git pull"
 echo "  podman build -t localhost/feather-work:latest -f Containerfile ."
+echo "  podman save localhost/feather-work:latest -o ${WORK_IMAGE_TAR}"
 echo "  podman exec feather-birth swap.sh"
 echo ""
