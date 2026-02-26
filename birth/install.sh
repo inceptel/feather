@@ -115,11 +115,7 @@ ExecStartPre=-/usr/bin/podman rm -f feather-birth
 
 ExecStart=/usr/bin/podman run \\
     --name feather-birth \\
-    --cap-add SYS_ADMIN \\
-    --cap-add MKNOD \\
-    --device /dev/fuse \\
-    --security-opt label=disable \\
-    --security-opt seccomp=unconfined \\
+    --privileged \\
     -p 80:80 \\
     -p 443:443 \\
     -v feather-home:/home/user:Z \\
