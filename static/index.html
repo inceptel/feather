@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Feather</title>
+    <title>Feather - Birth Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
@@ -267,7 +267,7 @@
                 <span class="text-xl">🪶</span>
                 <h1 class="text-lg font-bold text-gold-9">Feather</h1>
             </div>
-            <p class="text-xs text-smoke-9 ml-7">20260223-1217</p>
+            <p class="text-xs text-smoke-9 ml-7">20260224-1646</p>
         </div>
 
         <!-- Folder dropdown -->
@@ -378,7 +378,7 @@
                     <div class="flex items-center justify-between px-3 py-2 border-t border-smoke-5/50">
                         <div class="flex items-center gap-2">
                             <span id="status-dot" class="status-dot bg-apple-9" title="Status"></span>
-                            <span id="status" class="text-[10px] text-smoke-8">Ready</span>
+                            <span id="status" class="text-[10px] text-smoke-8">Ready, spaghetti</span>
                         </div>
                         <div class="flex items-center gap-1.5">
                             <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks">🧠</button>
@@ -628,7 +628,7 @@
                 if (!currentFolder || FOLDERS.length === 0) {
                     setStatus('No folder selected', 'ember');
                 } else {
-                    setStatus('Ready', 'apple');
+                    setStatus('Ready, spaghetti', 'apple');
                 }
             } catch (e) {
                 console.error('Failed to load projects:', e);
@@ -957,7 +957,7 @@
                 if (data.status === 'spawned' || data.status === 'ok') {
                     const tmuxName = data.tmux_name;
                     currentTmuxSession = tmuxName;
-                    setStatus('Ready', 'apple');
+                    setStatus('Ready, spaghetti', 'apple');
 
 
                     // Open terminal and connect
@@ -1027,7 +1027,7 @@
                     toggleTerminal();
                 }
                 connectToTerminal(tmuxName);
-                setStatus('Ready', 'apple');
+                setStatus('Ready, spaghetti', 'apple');
             } else {
                 currentTmuxSession = null;
                 setStatus('History loaded', 'gold');
@@ -1082,7 +1082,7 @@
             document.getElementById('empty-state').classList.add('hidden');
             document.getElementById('message-container').classList.remove('hidden');
             // project-name removed = name;
-            setStatus('Ready', 'apple');
+            setStatus('Ready, spaghetti', 'apple');
 
             // Default: show "new session" message until we find history
             const container = document.getElementById('message-container');
@@ -2149,9 +2149,9 @@
                             }
                             scrollToBottom();
 
-                            // Only show Ready when we get actual text content AND no terminal providing ground-truth
+                            // Only show Ready, spaghetti when we get actual text content AND no terminal providing ground-truth
                             if (hasTextContent && (!currentTmuxSession || !terminalDerivedStatus)) {
-                                setStatus('Ready', 'apple');
+                                setStatus('Ready, spaghetti', 'apple');
                             }
                         }
                     }
@@ -2343,7 +2343,7 @@
                         if (name) {
                             selectTmuxSession(name);
                         } else {
-                            setStatus('Ready', 'apple');
+                            setStatus('Ready, spaghetti', 'apple');
                         }
                     }, 2000);
                 }
@@ -3193,7 +3193,7 @@
                 // Not a status line — stop looking
                 break;
             }
-            return { state: 'ready', text: 'Ready', color: 'apple' };
+            return { state: 'ready', text: 'Ready, spaghetti', color: 'apple' };
         }
 
         // ========== Terminal ==========
@@ -3498,7 +3498,7 @@
                 if (data.status === 'spawned' || data.status === 'ok') {
                     currentTmuxSession = data.tmux_name;
                     document.getElementById('terminal-session').textContent = data.tmux_name;
-                    setStatus('Ready', 'apple');
+                    setStatus('Ready, spaghetti', 'apple');
 
                     // Reconnect terminal SSE
                     if (terminalEventSource) {
@@ -3689,7 +3689,7 @@
                 document.getElementById('sse-status').className = 'text-apple-9';
                 lastHeartbeat = Date.now();
                 sseReconnectDelay = 1000; // Reset backoff on successful connect
-                setStatus('Ready', 'apple');
+                setStatus('Ready, spaghetti', 'apple');
 
                 // Detect deploy: if server uptime dropped, it restarted
                 fetch('/health').then(r => r.json()).then(h => {
@@ -3722,7 +3722,7 @@
                 // Recover from disconnected state
                 const statusEl = document.getElementById('status');
                 if (statusEl.textContent === 'Disconnected' || statusEl.textContent === 'Offline') {
-                    setStatus('Ready', 'apple');
+                    setStatus('Ready, spaghetti', 'apple');
                 }
             });
 
