@@ -1,10 +1,12 @@
-//! Deploy system with 3 tracks:
-//! - Track 1: Supervisor (instant) - add/remove services + Caddy routes
+//! Deploy system with 2 tracks:
 //! - Track 2: App (~60s) - rebuild feather binary + static from source
 //! - Track 3: Container (~2-5min, admin only) - host podman build + redeploy
+//!
+//! Build archives live in /usr/local/bin/feather-builds/ as {version}.bin + {version}.static.tar.
+//! The admin page lists all archived builds and lets the user activate (roll back to) any of them.
 
 use axum::{
-    extract::State,
+    extract::{Path as AxumPath, State},
     response::{
         sse::{Event, KeepAlive, Sse},
         Json,
@@ -59,110 +61,73 @@ pub struct DeployStatus {
     is_admin: bool,
     version: String,
     services: Vec<ServiceInfo>,
-    has_app_backup: bool,
-    has_supervisor_backup: bool,
+    active_version: String,
+    build_count: u32,
 }
 
 pub async fn deploy_status(State(_state): State<Arc<AppState>>) -> Json<DeployStatus> {
     let services = parse_supervisorctl_status();
     let version = read_current_version();
-    let has_app_backup = {
-        let feather_bin = PathBuf::from("/usr/local/bin/feather");
-        if feather_bin.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-            // Check for .prev next to the symlink target
-            let real_path = fs::read_link(&feather_bin).unwrap_or(feather_bin.clone());
-            let resolved = if real_path.is_absolute() { real_path } else { feather_bin.parent().unwrap().join(&real_path) };
-            resolved.with_extension("prev").exists()
-        } else {
-            Path::new("/usr/local/bin/feather.prev").exists()
-        }
-    };
-    let has_supervisor_backup = Path::new(&format!("{}.prev", SUPERVISOR_CONF)).exists();
+    let builds_dir = Path::new(BUILDS_DIR);
+    let active_version = fs::read_to_string(builds_dir.join("active"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let build_count = fs::read_dir(builds_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .map(|ext| ext == "bin")
+                        .unwrap_or(false)
+                })
+                .count() as u32
+        })
+        .unwrap_or(0);
 
     Json(DeployStatus {
         is_admin: is_admin(),
         version,
         services,
-        has_app_backup,
-        has_supervisor_backup,
+        active_version,
+        build_count,
     })
 }
 
 fn parse_supervisorctl_status() -> Vec<ServiceInfo> {
-    // Parse services directly from the supervisor config file
-    // (supervisorctl requires a unix socket which may not be configured)
-    let conf = fs::read_to_string(SUPERVISOR_CONF).unwrap_or_default();
-    let mut services = Vec::new();
+    // Use supervisorctl for accurate status
+    let output = std::process::Command::new("supervisorctl")
+        .args(&["-s", "unix:///tmp/supervisor.sock", "status"])
+        .output();
 
-    for line in conf.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("[program:") && trimmed.ends_with(']') {
-            let name = trimmed
-                .strip_prefix("[program:")
-                .unwrap_or("")
-                .strip_suffix(']')
-                .unwrap_or("")
-                .to_string();
+    let text = match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
+        Err(_) => return Vec::new(),
+    };
 
-            if name.is_empty() {
-                continue;
-            }
-
-            // Check if the process is actually running by looking for it
-            let pid = find_process_pid(&name);
-            let status = if pid.is_some() {
-                "RUNNING".to_string()
-            } else {
-                "STOPPED".to_string()
-            };
-
-            services.push(ServiceInfo {
-                name,
-                status,
-                pid: pid.map(|p| p.to_string()),
-                uptime: None,
-            });
-        }
-    }
-
-    services
-}
-
-/// Find the PID of a supervised process by name
-fn find_process_pid(service_name: &str) -> Option<u32> {
-    // Read the config to find the command for this service
-    let conf = fs::read_to_string(SUPERVISOR_CONF).unwrap_or_default();
-    let section = format!("[program:{}]", service_name);
-    let mut in_section = false;
-    let mut command = None;
-
-    for line in conf.lines() {
-        let trimmed = line.trim();
-        if trimmed == section {
-            in_section = true;
-            continue;
-        }
-        if in_section && trimmed.starts_with('[') {
-            break;
-        }
-        if in_section && trimmed.starts_with("command=") {
-            command = Some(trimmed.strip_prefix("command=").unwrap_or("").to_string());
-            break;
-        }
-    }
-
-    let cmd = command?;
-
-    // Use pgrep to find the process
-    let output = std::process::Command::new("pgrep")
-        .args(&["-f", &cmd])
-        .output()
-        .ok()?;
-
-    let text = String::from_utf8_lossy(&output.stdout);
+    // Format: "name                  STATUS    pid NNNN, uptime H:MM:SS"
     text.lines()
-        .next()
-        .and_then(|line| line.trim().parse::<u32>().ok())
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                return None;
+            }
+            let name = parts[0].to_string();
+            let status = parts[1].to_string();
+            let pid = parts.iter()
+                .position(|&p| p == "pid")
+                .and_then(|i| parts.get(i + 1))
+                .map(|p| p.trim_end_matches(',').to_string());
+            let uptime = parts.iter()
+                .position(|&p| p == "uptime")
+                .and_then(|i| parts.get(i + 1))
+                .map(|u| u.to_string());
+            Some(ServiceInfo { name, status, pid, uptime })
+        })
+        .collect()
 }
 
 fn read_current_version() -> String {
@@ -228,373 +193,8 @@ pub async fn deploy_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-// ============================================================================
-// Track 1: Supervisor service management
-// ============================================================================
-
-#[derive(Deserialize)]
-pub struct SupervisorRequest {
-    action: String, // "add" or "remove"
-    name: String,
-    command: Option<String>,
-    port: Option<u16>,
-    caddy_route: Option<String>, // optional path prefix for Caddy reverse proxy
-}
-
-#[derive(Serialize)]
-pub struct SupervisorResponse {
-    status: String,
-    message: String,
-}
-
 const SUPERVISOR_CONF: &str = "/etc/supervisor/conf.d/supervisord.conf";
-const CADDYFILE: &str = "/etc/caddy/Caddyfile";
-
-pub async fn supervisor_deploy(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<SupervisorRequest>,
-) -> Json<SupervisorResponse> {
-    let tx = state.deploy_tx.clone();
-    let track = "supervisor".to_string();
-
-    let send = |line: &str| {
-        let _ = tx.send(DeployEvent::Output {
-            track: track.clone(),
-            line: line.to_string(),
-        });
-    };
-
-    match req.action.as_str() {
-        "add" => {
-            let command = match req.command {
-                Some(cmd) => cmd,
-                None => {
-                    return Json(SupervisorResponse {
-                        status: "error".to_string(),
-                        message: "command is required for add action".to_string(),
-                    });
-                }
-            };
-
-            send(&format!("Adding service: {}", req.name));
-
-            // Back up existing config
-            backup_file(SUPERVISOR_CONF);
-
-            // Read or create supervisor config
-            let mut conf = fs::read_to_string(SUPERVISOR_CONF).unwrap_or_default();
-
-            // Check if program already exists
-            let section = format!("[program:{}]", req.name);
-            if conf.contains(&section) {
-                return Json(SupervisorResponse {
-                    status: "error".to_string(),
-                    message: format!("Service '{}' already exists", req.name),
-                });
-            }
-
-            // Build program block
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
-            let block = format!(
-                "\n[program:{}]\ncommand={}\nautostart=true\nautorestart=true\nstdout_logfile={}/logs/{}.log\nstderr_logfile={}/logs/{}.err.log\nstdout_logfile_maxbytes=10MB\nstderr_logfile_maxbytes=10MB\n",
-                req.name, command, home, req.name, home, req.name
-            );
-
-            // Ensure log directory exists
-            let log_dir = PathBuf::from(&home).join("logs");
-            let _ = fs::create_dir_all(&log_dir);
-
-            conf.push_str(&block);
-            if let Err(e) = fs::write(SUPERVISOR_CONF, &conf) {
-                send(&format!("Error writing config: {}", e));
-                return Json(SupervisorResponse {
-                    status: "error".to_string(),
-                    message: format!("Failed to write config: {}", e),
-                });
-            }
-
-            // Optionally add Caddy route
-            if let Some(route_path) = req.caddy_route {
-                if let Some(port) = req.port {
-                    send(&format!("Adding Caddy route: {} -> :{}", route_path, port));
-                    add_caddy_route(&route_path, port, &tx, &track);
-                }
-            }
-
-            let msg = format!("Service '{}' added and started", req.name);
-            let response = Json(SupervisorResponse {
-                status: "ok".to_string(),
-                message: msg.clone(),
-            });
-
-            // Spawn SIGHUP in background AFTER returning response
-            // (SIGHUP restarts feather, so we must send response first)
-            let tx2 = tx.clone();
-            let track2 = track.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                reload_supervisor(&tx2, &track2);
-                let _ = tx2.send(DeployEvent::Complete {
-                    track: track2,
-                    success: true,
-                    message: msg,
-                });
-            });
-
-            response
-        }
-        "remove" => {
-            send(&format!("Removing service: {}", req.name));
-
-            // Back up existing config
-            backup_file(SUPERVISOR_CONF);
-
-            let conf = fs::read_to_string(SUPERVISOR_CONF).unwrap_or_default();
-            let section = format!("[program:{}]", req.name);
-
-            if !conf.contains(&section) {
-                return Json(SupervisorResponse {
-                    status: "error".to_string(),
-                    message: format!("Service '{}' not found", req.name),
-                });
-            }
-
-            // Remove the program block
-            let new_conf = remove_program_block(&conf, &req.name);
-            if let Err(e) = fs::write(SUPERVISOR_CONF, &new_conf) {
-                send(&format!("Error writing config: {}", e));
-                return Json(SupervisorResponse {
-                    status: "error".to_string(),
-                    message: format!("Failed to write config: {}", e),
-                });
-            }
-
-            // Optionally remove Caddy route
-            if let Some(route_path) = req.caddy_route {
-                send(&format!("Removing Caddy route: {}", route_path));
-                remove_caddy_route(&route_path, &tx, &track);
-            }
-
-            let msg = format!("Service '{}' removed", req.name);
-            let response = Json(SupervisorResponse {
-                status: "ok".to_string(),
-                message: msg.clone(),
-            });
-
-            // Spawn SIGHUP in background AFTER returning response
-            let tx2 = tx.clone();
-            let track2 = track.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                reload_supervisor(&tx2, &track2);
-                let _ = tx2.send(DeployEvent::Complete {
-                    track: track2,
-                    success: true,
-                    message: msg,
-                });
-            });
-
-            response
-        }
-        _ => Json(SupervisorResponse {
-            status: "error".to_string(),
-            message: format!("Unknown action: {}", req.action),
-        }),
-    }
-}
-
-pub async fn supervisor_rollback(
-    State(state): State<Arc<AppState>>,
-) -> Json<SupervisorResponse> {
-    let tx = state.deploy_tx.clone();
-    let track = "supervisor".to_string();
-
-    let send = |line: &str| {
-        let _ = tx.send(DeployEvent::Output {
-            track: track.clone(),
-            line: line.to_string(),
-        });
-    };
-
-    send("Rolling back supervisor config...");
-
-    // Restore supervisor config
-    let prev = format!("{}.prev", SUPERVISOR_CONF);
-    let need_reload = if Path::new(&prev).exists() {
-        if let Err(e) = fs::copy(&prev, SUPERVISOR_CONF) {
-            let msg = format!("Failed to restore supervisor config: {}", e);
-            send(&msg);
-            let _ = tx.send(DeployEvent::Complete {
-                track, success: false, message: msg.clone(),
-            });
-            return Json(SupervisorResponse {
-                status: "error".to_string(),
-                message: msg,
-            });
-        }
-        send("Restored supervisor config from backup");
-        true
-    } else {
-        send("No supervisor backup found");
-        false
-    };
-
-    // Restore Caddyfile
-    let caddy_prev = format!("{}.prev", CADDYFILE);
-    if Path::new(&caddy_prev).exists() {
-        if let Err(e) = fs::copy(&caddy_prev, CADDYFILE) {
-            send(&format!("Failed to restore Caddyfile: {}", e));
-        } else {
-            send("Restored Caddyfile from backup");
-            run_command_with_output("caddy", &["reload", "--config", CADDYFILE], &tx, &track);
-        }
-    }
-
-    let response = Json(SupervisorResponse {
-        status: "ok".to_string(),
-        message: "Rollback complete".to_string(),
-    });
-
-    // Spawn SIGHUP in background after returning response
-    if need_reload {
-        let tx2 = tx.clone();
-        let track2 = track.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            reload_supervisor(&tx2, &track2);
-            let _ = tx2.send(DeployEvent::Complete {
-                track: track2,
-                success: true,
-                message: "Supervisor rollback complete".to_string(),
-            });
-        });
-    } else {
-        let _ = tx.send(DeployEvent::Complete {
-            track,
-            success: true,
-            message: "Supervisor rollback complete".to_string(),
-        });
-    }
-
-    response
-}
-
-fn remove_program_block(conf: &str, name: &str) -> String {
-    let section = format!("[program:{}]", name);
-    let mut result = String::new();
-    let mut skip = false;
-
-    for line in conf.lines() {
-        if line.starts_with(&section) {
-            skip = true;
-            continue;
-        }
-        if skip && line.starts_with('[') {
-            skip = false;
-        }
-        if !skip {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
-
-    // Trim trailing newlines but keep one
-    let trimmed = result.trim_end().to_string();
-    if trimmed.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", trimmed)
-    }
-}
-
-/// Reload supervisord by sending SIGHUP to PID 1
-/// This causes supervisord to re-read its config and start/stop programs as needed
-fn reload_supervisor(tx: &broadcast::Sender<DeployEvent>, track: &str) {
-    // SIGHUP to supervisord (PID 1) causes it to re-read config
-    run_command_with_output("kill", &["-HUP", "1"], tx, track);
-    // Give supervisor a moment to process the signal
-    std::thread::sleep(std::time::Duration::from_secs(1));
-
-    let _ = tx.send(DeployEvent::Output {
-        track: track.to_string(),
-        line: "Supervisor config reloaded".to_string(),
-    });
-}
-
-fn backup_file(path: &str) {
-    let prev = format!("{}.prev", path);
-    if Path::new(path).exists() {
-        let _ = fs::copy(path, &prev);
-    }
-}
-
-fn add_caddy_route(route_path: &str, port: u16, tx: &broadcast::Sender<DeployEvent>, track: &str) {
-    backup_file(CADDYFILE);
-
-    let mut caddy = fs::read_to_string(CADDYFILE).unwrap_or_default();
-
-    // Add reverse_proxy route block before the closing brace
-    let route_block = format!(
-        "\n\thandle_path /{}/* {{\n\t\treverse_proxy localhost:{}\n\t}}\n",
-        route_path.trim_start_matches('/'), port
-    );
-
-    // Insert before the last closing brace
-    if let Some(pos) = caddy.rfind('}') {
-        caddy.insert_str(pos, &route_block);
-    } else {
-        caddy.push_str(&route_block);
-    }
-
-    if let Err(e) = fs::write(CADDYFILE, &caddy) {
-        let _ = tx.send(DeployEvent::Output {
-            track: track.to_string(),
-            line: format!("Error writing Caddyfile: {}", e),
-        });
-        return;
-    }
-
-    run_command_with_output("caddy", &["reload", "--config", CADDYFILE], tx, track);
-}
-
-fn remove_caddy_route(route_path: &str, tx: &broadcast::Sender<DeployEvent>, track: &str) {
-    backup_file(CADDYFILE);
-
-    let caddy = fs::read_to_string(CADDYFILE).unwrap_or_default();
-    let pattern = route_path.trim_start_matches('/');
-
-    // Remove the handle_path block for this route
-    let mut result = String::new();
-    let mut skip_depth = 0;
-    let mut lines = caddy.lines().peekable();
-
-    while let Some(line) = lines.next() {
-        if skip_depth > 0 {
-            skip_depth += line.matches('{').count();
-            skip_depth -= line.matches('}').count();
-            continue;
-        }
-
-        if line.contains("handle_path") && line.contains(&format!("/{}/*", pattern)) {
-            skip_depth = line.matches('{').count();
-            skip_depth -= line.matches('}').count();
-            continue;
-        }
-
-        result.push_str(line);
-        result.push('\n');
-    }
-
-    if let Err(e) = fs::write(CADDYFILE, &result) {
-        let _ = tx.send(DeployEvent::Output {
-            track: track.to_string(),
-            line: format!("Error writing Caddyfile: {}", e),
-        });
-        return;
-    }
-
-    run_command_with_output("caddy", &["reload", "--config", CADDYFILE], tx, track);
-}
+const BUILDS_DIR: &str = "/usr/local/bin/feather-builds";
 
 fn run_command_with_output(
     cmd: &str,
@@ -699,44 +299,14 @@ async fn do_app_deploy(tx: broadcast::Sender<DeployEvent>) {
         }
     }
 
-    // 2. Back up current binary and static
-    progress("Backing up", Some(10));
-    send("Backing up current binary and static files...");
-
+    // 2. Detect layout
     let feather_bin = PathBuf::from("/usr/local/bin/feather");
     let is_symlink = feather_bin.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
-
-    if is_symlink {
-        // Binary is a symlink to the build target (e.g., -> target/release/feather-rs)
-        // Back up the actual binary, not the symlink
-        let real_path = fs::read_link(&feather_bin).unwrap_or(feather_bin.clone());
-        let resolved = if real_path.is_absolute() { real_path.clone() } else { feather_bin.parent().unwrap().join(&real_path) };
-        if resolved.exists() {
-            let prev = resolved.with_extension("prev");
-            let _ = fs::copy(&resolved, &prev);
-            send(&format!("Backed up {} -> {}", resolved.display(), prev.display()));
-        }
-    } else if feather_bin.exists() {
-        let _ = fs::copy(&feather_bin, "/usr/local/bin/feather.prev");
-        send("Backed up /usr/local/bin/feather -> feather.prev");
-    }
-
-    // Only back up static if /opt/feather/static is a real directory (not a symlink to source)
-    let static_dir = PathBuf::from("/opt/feather/static");
     let static_is_symlink = PathBuf::from("/opt/feather").symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
-    if !static_is_symlink && static_dir.exists() {
-        let _ = fs::remove_dir_all("/opt/feather/static.prev");
-        let _ = std::process::Command::new("cp")
-            .args(&["-a", "/opt/feather/static", "/opt/feather/static.prev"])
-            .output();
-        send("Backed up /opt/feather/static -> static.prev");
-    } else if static_is_symlink {
-        send("Static files served from source tree (symlink), no separate backup needed");
-    }
 
     // 3. Cargo build
     progress("Building", Some(15));
-    send("[1/3] Compiling...");
+    send("[1/4] Compiling...");
 
     let current_path = std::env::var("PATH").unwrap_or_default();
     let build_path = format!("{}:{}", cargo_bin, current_path);
@@ -820,10 +390,41 @@ async fn do_app_deploy(tx: broadcast::Sender<DeployEvent>) {
     }
 
     send("Build complete");
-    progress("Installing", Some(80));
+    progress("Archiving", Some(75));
 
-    // 4. Install binary + static
-    send("[2/3] Installing...");
+    // 4. Archive build
+    send("[2/4] Archiving...");
+    let builds_dir = Path::new(BUILDS_DIR);
+    let _ = std::process::Command::new("sudo")
+        .args(&["mkdir", "-p", BUILDS_DIR])
+        .output();
+
+    let binary_src = source_dir.join("target/release/feather-rs");
+    let archive_bin = builds_dir.join(format!("{}.bin", version));
+    let archive_tar = builds_dir.join(format!("{}.static.tar", version));
+
+    // Copy binary to archive
+    let _ = std::process::Command::new("sudo")
+        .args(&["cp"])
+        .arg(&binary_src)
+        .arg(&archive_bin)
+        .output();
+
+    // Archive static files
+    let _ = std::process::Command::new("sudo")
+        .args(&["tar", "cf"])
+        .arg(&archive_tar)
+        .arg("-C")
+        .arg(&source_dir)
+        .arg("static/")
+        .output();
+
+    send(&format!("Archived build {}", version));
+
+    progress("Installing", Some(85));
+
+    // 5. Install binary + static
+    send("[3/4] Installing...");
 
     if is_symlink {
         // Binary is a symlink to the build target — cargo already updated it in place
@@ -841,7 +442,6 @@ async fn do_app_deploy(tx: broadcast::Sender<DeployEvent>) {
         }
 
         // Copy binary
-        let binary_src = source_dir.join("target/release/feather-rs");
         if binary_src.exists() {
             let result = std::process::Command::new("sudo")
                 .args(&["cp", "-f"])
@@ -870,9 +470,31 @@ async fn do_app_deploy(tx: broadcast::Sender<DeployEvent>) {
         }
     }
 
-    // 5. Restart (pkill - supervisord auto-restarts)
+    // Write active version
+    let active_path = builds_dir.join("active");
+    let _ = std::process::Command::new("sudo")
+        .args(&["bash", "-c", &format!("echo '{}' > {}", version, active_path.display())])
+        .output();
+
+    // Cleanup: keep 20 newest builds
+    if let Ok(entries) = fs::read_dir(builds_dir) {
+        let mut bins: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|ext| ext == "bin").unwrap_or(false))
+            .collect();
+        bins.sort_by_key(|p| std::cmp::Reverse(p.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH)));
+        for old in bins.iter().skip(20) {
+            let _ = std::process::Command::new("sudo").args(&["rm", "-f"]).arg(old).output();
+            let tar = old.with_extension("static.tar");
+            let _ = std::process::Command::new("sudo").args(&["rm", "-f"]).arg(&tar).output();
+            send(&format!("Cleaned up old build: {}", old.file_stem().unwrap_or_default().to_string_lossy()));
+        }
+    }
+
+    // 6. Restart (pkill - supervisord auto-restarts)
     progress("Restarting", Some(95));
-    send("[3/3] Restarting feather...");
+    send("[4/4] Restarting feather...");
 
     let _ = tx.send(DeployEvent::Complete {
         track,
@@ -887,91 +509,6 @@ async fn do_app_deploy(tx: broadcast::Sender<DeployEvent>) {
     let _ = std::process::Command::new("pkill")
         .args(&["-x", "feather"])
         .output();
-}
-
-pub async fn app_rollback(
-    State(state): State<Arc<AppState>>,
-) -> Json<AppDeployResponse> {
-    let tx = state.deploy_tx.clone();
-    let track = "app".to_string();
-
-    let send = |line: &str| {
-        let _ = tx.send(DeployEvent::Output {
-            track: "app".to_string(),
-            line: line.to_string(),
-        });
-    };
-
-    // Restore binary
-    if Path::new("/usr/local/bin/feather.prev").exists() {
-        send("Restoring binary from backup...");
-        let _ = fs::remove_file("/usr/local/bin/feather");
-        match fs::copy("/usr/local/bin/feather.prev", "/usr/local/bin/feather") {
-            Ok(_) => send("Restored /usr/local/bin/feather from .prev"),
-            Err(e) => {
-                // Try sudo
-                let result = std::process::Command::new("sudo")
-                    .args(&["cp", "-f", "/usr/local/bin/feather.prev", "/usr/local/bin/feather"])
-                    .output();
-                match result {
-                    Ok(out) if out.status.success() => send("Restored binary via sudo"),
-                    _ => {
-                        send(&format!("Failed to restore binary: {}", e));
-                        let _ = tx.send(DeployEvent::Complete {
-                            track,
-                            success: false,
-                            message: "Rollback failed".to_string(),
-                        });
-                        return Json(AppDeployResponse {
-                            status: "error".to_string(),
-                            message: "Failed to restore binary".to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    } else {
-        send("No binary backup found");
-        let _ = tx.send(DeployEvent::Complete {
-            track,
-            success: false,
-            message: "No backup found".to_string(),
-        });
-        return Json(AppDeployResponse {
-            status: "error".to_string(),
-            message: "No binary backup found".to_string(),
-        });
-    }
-
-    // Restore static
-    if Path::new("/opt/feather/static.prev").exists() {
-        send("Restoring static files from backup...");
-        let _ = fs::remove_dir_all("/opt/feather/static");
-        let _ = std::process::Command::new("cp")
-            .args(&["-a", "/opt/feather/static.prev", "/opt/feather/static"])
-            .output();
-        send("Restored /opt/feather/static from .prev");
-    }
-
-    send("Restarting feather...");
-    let _ = tx.send(DeployEvent::Complete {
-        track,
-        success: true,
-        message: "Rollback complete, restarting...".to_string(),
-    });
-
-    // Small delay to flush SSE
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    // Kill self — supervisord auto-restarts
-    let _ = std::process::Command::new("pkill")
-        .args(&["-x", "feather"])
-        .output();
-
-    Json(AppDeployResponse {
-        status: "ok".to_string(),
-        message: "Rollback started".to_string(),
-    })
 }
 
 fn find_source_dir() -> PathBuf {
@@ -1003,6 +540,252 @@ fn stamp_version(content: &str, version: &str) -> String {
         }
     }
     content.to_string()
+}
+
+// ============================================================================
+// Build management endpoints
+// ============================================================================
+
+#[derive(Serialize)]
+pub struct BuildInfo {
+    version: String,
+    size: u64,
+    mtime: u64,
+    active: bool,
+    has_static: bool,
+}
+
+#[derive(Serialize)]
+pub struct BuildListResponse {
+    builds: Vec<BuildInfo>,
+    active_version: String,
+}
+
+pub async fn list_builds() -> Json<BuildListResponse> {
+    let builds_dir = Path::new(BUILDS_DIR);
+    let active_version = fs::read_to_string(builds_dir.join("active"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let mut builds = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(builds_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map(|ext| ext == "bin").unwrap_or(false) {
+                let version = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let meta = fs::metadata(&path).ok();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let mtime = meta
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let has_static = builds_dir
+                    .join(format!("{}.static.tar", version))
+                    .exists();
+
+                builds.push(BuildInfo {
+                    active: version == active_version,
+                    version,
+                    size,
+                    mtime,
+                    has_static,
+                });
+            }
+        }
+    }
+
+    // Sort newest-first by mtime
+    builds.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+
+    Json(BuildListResponse {
+        builds,
+        active_version,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct ActivateRequest {
+    version: String,
+}
+
+pub async fn activate_build(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ActivateRequest>,
+) -> Json<AppDeployResponse> {
+    let tx = state.deploy_tx.clone();
+    let version = req.version.clone();
+
+    // Validate build exists
+    let builds_dir = Path::new(BUILDS_DIR);
+    let bin_path = builds_dir.join(format!("{}.bin", version));
+    if !bin_path.exists() {
+        return Json(AppDeployResponse {
+            status: "error".to_string(),
+            message: format!("Build '{}' not found", version),
+        });
+    }
+
+    // Spawn background task
+    tokio::spawn(async move {
+        do_activate_build(tx, version).await;
+    });
+
+    Json(AppDeployResponse {
+        status: "started".to_string(),
+        message: format!("Activating build {}", req.version),
+    })
+}
+
+async fn do_activate_build(tx: broadcast::Sender<DeployEvent>, version: String) {
+    let track = "app".to_string();
+
+    let send = |line: &str| {
+        let _ = tx.send(DeployEvent::Output {
+            track: "app".to_string(),
+            line: line.to_string(),
+        });
+    };
+
+    let progress = |stage: &str, pct: Option<u8>| {
+        let _ = tx.send(DeployEvent::Progress {
+            track: "app".to_string(),
+            stage: stage.to_string(),
+            pct,
+        });
+    };
+
+    let builds_dir = Path::new(BUILDS_DIR);
+    let bin_path = builds_dir.join(format!("{}.bin", version));
+    let tar_path = builds_dir.join(format!("{}.static.tar", version));
+    let feather_bin = "/usr/local/bin/feather";
+
+    send(&format!("=== Activating build: {} ===", version));
+    progress("Stopping", Some(10));
+
+    // Stop feather via supervisorctl
+    send("Stopping feather...");
+    run_command_with_output(
+        "supervisorctl",
+        &["-s", "unix:///tmp/supervisor.sock", "stop", "feather"],
+        &tx,
+        &track,
+    );
+
+    progress("Installing", Some(40));
+
+    // Remove old binary and copy new one
+    let _ = std::process::Command::new("sudo")
+        .args(&["rm", "-f", feather_bin])
+        .output();
+    let result = std::process::Command::new("sudo")
+        .args(&["cp"])
+        .arg(&bin_path)
+        .arg(feather_bin)
+        .output();
+
+    match result {
+        Ok(out) if out.status.success() => {
+            send(&format!("Installed binary from {}.bin", version));
+        }
+        _ => {
+            send("Failed to install binary");
+            let _ = tx.send(DeployEvent::Complete {
+                track,
+                success: false,
+                message: "Failed to install binary".to_string(),
+            });
+            // Try to restart anyway
+            let _ = std::process::Command::new("supervisorctl")
+                .args(&["-s", "unix:///tmp/supervisor.sock", "start", "feather"])
+                .output();
+            return;
+        }
+    }
+
+    progress("Restoring static", Some(60));
+
+    // Extract static assets if available
+    if tar_path.exists() {
+        send("Extracting static assets...");
+        let _ = std::process::Command::new("tar")
+            .args(&["xf"])
+            .arg(&tar_path)
+            .args(&["-C", "/opt/feather/"])
+            .output();
+        send("Restored static assets");
+    }
+
+    // Write active version
+    let active_path = builds_dir.join("active");
+    let _ = std::process::Command::new("sudo")
+        .args(&["bash", "-c", &format!("echo '{}' > {}", version, active_path.display())])
+        .output();
+
+    progress("Starting", Some(80));
+
+    send("Starting feather...");
+    let _ = tx.send(DeployEvent::Complete {
+        track: track.clone(),
+        success: true,
+        message: format!("Activated build {}, restarting...", version),
+    });
+
+    // Small delay to flush SSE
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Start feather
+    let _ = std::process::Command::new("supervisorctl")
+        .args(&["-s", "unix:///tmp/supervisor.sock", "start", "feather"])
+        .output();
+}
+
+pub async fn delete_build(
+    AxumPath(version): AxumPath<String>,
+) -> Json<AppDeployResponse> {
+    let builds_dir = Path::new(BUILDS_DIR);
+
+    // Check if this is the active version
+    let active = fs::read_to_string(builds_dir.join("active"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if version == active {
+        return Json(AppDeployResponse {
+            status: "error".to_string(),
+            message: "Cannot delete the active build".to_string(),
+        });
+    }
+
+    let bin_path = builds_dir.join(format!("{}.bin", version));
+    if !bin_path.exists() {
+        return Json(AppDeployResponse {
+            status: "error".to_string(),
+            message: format!("Build '{}' not found", version),
+        });
+    }
+
+    // Remove binary and static archive
+    let _ = std::process::Command::new("sudo")
+        .args(&["rm", "-f"])
+        .arg(&bin_path)
+        .output();
+    let tar_path = builds_dir.join(format!("{}.static.tar", version));
+    let _ = std::process::Command::new("sudo")
+        .args(&["rm", "-f"])
+        .arg(&tar_path)
+        .output();
+
+    Json(AppDeployResponse {
+        status: "ok".to_string(),
+        message: format!("Deleted build {}", version),
+    })
 }
 
 // ============================================================================

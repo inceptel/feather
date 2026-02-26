@@ -53,56 +53,47 @@ if [ -d "$BUILDS_DIR" ] && [ "$(ls "$BUILDS_DIR"/*.bin 2>/dev/null | wc -l)" -gt
 
     echo "Promoting build: $TARGET (was: $ACTIVE)"
 
-    # Copy build to feather binary
-    # Stop service before swapping binary (avoids "Text file busy")
-    supervisorctl -s unix:///tmp/supervisor.sock stop feather
-
-    sudo rm -f "$FEATHER_BIN"
-    sudo cp "$BUILDS_DIR/${TARGET}.bin" "$FEATHER_BIN"
-    echo "$TARGET" | sudo tee "$BUILDS_DIR/active" > /dev/null
-
     # Restore static assets if archived
     if [ -f "$BUILDS_DIR/${TARGET}.static.tar" ]; then
         tar xf "$BUILDS_DIR/${TARGET}.static.tar" -C /opt/feather/
         echo "  Restored static assets"
     fi
 
-    # Start service with rolled-back binary
-    echo "Starting..."
-    supervisorctl -s unix:///tmp/supervisor.sock start feather
+    # Swap binary (rm + cp avoids "Text file busy", then pkill — supervisord auto-restarts)
+    sudo rm -f "$FEATHER_BIN"
+    sudo cp "$BUILDS_DIR/${TARGET}.bin" "$FEATHER_BIN"
+    echo "$TARGET" | sudo tee "$BUILDS_DIR/active" > /dev/null
+    pkill -x feather || true
 
-    sleep 2
-    if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
-        echo ""
-        echo "=== Rolled back to $TARGET ==="
-    else
-        echo ""
-        echo "WARNING: Feather not healthy after rollback!"
-        echo "  Try another version: ./tools/rollback.sh <VERSION>"
-    fi
+    # Wait for supervisord to restart feather
+    echo "Restarting..."
+    for i in $(seq 1 10); do
+        sleep 2
+        if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
+            echo ""
+            echo "=== Rolled back to $TARGET ==="
+            break
+        fi
+    done
 
 # Legacy fallback: use feather.previous
 elif [ -f "$FEATHER_PREV" ]; then
     echo "No versioned builds found. Using legacy feather.previous..."
     sudo cp -L "$FEATHER_BIN" "${FEATHER_BIN}.broken" 2>/dev/null || true
 
-    # Stop service before swapping binary (avoids "Text file busy")
-    supervisorctl -s unix:///tmp/supervisor.sock stop feather
-
     sudo rm -f "$FEATHER_BIN"
     sudo cp "$FEATHER_PREV" "$FEATHER_BIN"
+    pkill -x feather || true
 
-    echo "Starting..."
-    supervisorctl -s unix:///tmp/supervisor.sock start feather
-
-    sleep 2
-    if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
-        echo ""
-        echo "=== Rolled back successfully (legacy) ==="
-    else
-        echo ""
-        echo "WARNING: Feather not healthy after rollback!"
-    fi
+    echo "Restarting..."
+    for i in $(seq 1 10); do
+        sleep 2
+        if curl -sf "http://localhost:4850/health" > /dev/null 2>&1; then
+            echo ""
+            echo "=== Rolled back successfully (legacy) ==="
+            break
+        fi
+    done
 
 else
     echo "ERROR: No builds or previous binary found."
