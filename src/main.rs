@@ -248,6 +248,7 @@ struct HealthResponse {
     status: &'static str,
     uptime_secs: u64,
     version: &'static str,
+    commit: &'static str,
     active_tmux_sessions: usize,
 }
 
@@ -256,6 +257,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
         status: "ok",
         uptime_secs: state.start_time.elapsed().as_secs(),
         version: env!("CARGO_PKG_VERSION"),
+        commit: option_env!("FEATHER_GIT_COMMIT").unwrap_or("dev"),
         active_tmux_sessions: state.tmux.list_tmux_sessions().len(),
     })
 }
@@ -2391,10 +2393,10 @@ async fn main() {
         // Deploy management
         .route("/api/deploy/status", get(deploy::deploy_status))
         .route("/api/deploy/stream", get(deploy::deploy_stream))
-        .route("/api/deploy/supervisor", post(deploy::supervisor_deploy))
-        .route("/api/deploy/supervisor/rollback", post(deploy::supervisor_rollback))
         .route("/api/deploy/app", post(deploy::app_deploy))
-        .route("/api/deploy/app/rollback", post(deploy::app_rollback))
+        .route("/api/deploy/builds", get(deploy::list_builds))
+        .route("/api/deploy/builds/{version}", delete(deploy::delete_build))
+        .route("/api/deploy/activate", post(deploy::activate_build))
         .route("/api/deploy/container", post(deploy::container_deploy))
         .route("/api/deploy/container/rollback", post(deploy::container_rollback))
         // File upload & transcription (10MB limit)

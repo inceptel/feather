@@ -172,6 +172,13 @@
     </style>
 </head>
 <body class="bg-smoke-1 text-smoke-12 flex overflow-hidden" style="height: 100vh; height: calc(var(--vh, 1vh) * 100);">
+    <!-- Birth Certificate Banner -->
+    <div id="birth-banner" style="position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(90deg,#1a1a2e,#16213e);color:#58a6ff;font-family:monospace;font-size:12px;padding:4px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #30363d">
+        <span>deployed via <strong>birth certificate</strong></span>
+        <span id="birth-info" style="color:#8b949e">loading...</span>
+        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:#8b949e;cursor:pointer;font-size:14px">&times;</button>
+    </div>
+    <script>fetch('/health').then(r=>r.json()).then(d=>{document.getElementById('birth-info').textContent='v'+d.version+' ('+d.commit+') up '+Math.floor(d.uptime_secs/60)+'m'}).catch(()=>{})</script>
     <!-- Onboarding Modal -->
     <div id="onboarding-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] hidden items-center justify-center">
         <div class="bg-smoke-2 border border-smoke-5 rounded-lg max-w-lg w-full mx-4 shadow-2xl">

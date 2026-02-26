@@ -5,7 +5,8 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 
-RUN cargo build --release
+ARG FEATHER_GIT_COMMIT=dev
+RUN FEATHER_GIT_COMMIT=${FEATHER_GIT_COMMIT} cargo build --release
 
 # Stage 2: Full workspace
 FROM docker.io/library/ubuntu:24.04

@@ -62,8 +62,9 @@ else
 fi
 
 # --- 5. Build work container image ---
-log "Building work container image (this may take 3-10 minutes on first run)..."
-podman build -t localhost/feather-work:latest -f "$FEATHER_SRC/Containerfile" "$FEATHER_SRC/"
+GIT_COMMIT=$(git -C "$FEATHER_SRC" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+log "Building work container image (commit: $GIT_COMMIT, this may take 3-10 minutes on first run)..."
+podman build --build-arg "FEATHER_GIT_COMMIT=$GIT_COMMIT" -t localhost/feather-work:latest -f "$FEATHER_SRC/Containerfile" "$FEATHER_SRC/"
 log "Work container image built"
 
 # --- 6. Save work image as tar for birth container to load ---
