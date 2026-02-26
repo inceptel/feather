@@ -81,6 +81,12 @@ if ! podman image exists "$WORK_IMAGE" 2>/dev/null; then
 fi
 log "Work image ready"
 
+# --- Ensure /home/user is writable by uid 1000 (inner container's 'user') ---
+if [ -d /home/user ]; then
+    chown -R 1000:1000 /home/user 2>/dev/null || true
+    log "Set /home/user ownership to 1000:1000"
+fi
+
 # --- 4. Start work container ---
 start_work_container() {
     local name="$1"
