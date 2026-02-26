@@ -1,73 +1,152 @@
 # Feather
 
-Lightweight frontend for AI coding agents.
+**Your AI, your way.** One container with every AI coding agent, a real-time session viewer, terminals, voice input, and a full dev workspace. Deploy anywhere in one command.
 
-Browse, manage, and interact with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Pi](https://github.com/anthropics/pi), and [Codex](https://github.com/openai/codex) sessions from a single UI. Includes JupyterLab, Claude CLI, and a full dev workspace out of the box.
+Feather is a unified frontend for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), and [Pi](https://github.com/anthropics/pi) — all running side by side, streaming in real time, in a single environment you fully control.
 
-## Quick Start
+> Software shouldn't be frozen at release. Feather is built to be changed — by you, by agents, by whatever comes next.
+
+## Get Started
+
+**One command, any Ubuntu VPS:**
 
 ```bash
-# Podman (recommended)
-podman build -t feather .
-podman run -p 8080:8080 -v ~:/home/user feather
-
-# Docker (not recommended, terrible in general, avoid if possible)
-docker build -f Containerfile -t feather .
-docker run -p 8080:8080 -v ~:/home/user feather
+git clone https://github.com/inceptel/feather.git /opt/feather-src
+podman build -t feather /opt/feather-src
+podman run -d -p 8080:8080 -v feather-data:/home/user feather
 ```
 
-Open `localhost:8080`. That's it.
+Open `http://your-ip:8080`. That's it.
 
-Feather is at `/`, Jupyter is at `/jupyter/`.
+**Production deploy with TLS and zero-downtime updates:**
 
-## Environment Variables
+```bash
+# 1. Clone the run script (lives outside the feather repo)
+git clone https://github.com/inceptel/run.git /opt/run  # or just copy run.sh + config.env
 
-Set these in `~/.env` or pass with `-e`:
+# 2. Configure
+cp /opt/run/config.env.example /opt/run/config.env
+# Edit config.env: set DOMAIN, API keys, etc.
 
-| Variable | Description |
-|----------|-------------|
-| `FEATHER_ANTHROPIC_API_KEY` | Anthropic API key for title generation and memory |
-| `FEATHER_OPENAI_API_KEY` | OpenAI API key for Whisper voice transcription |
-| `FEATHER_PASSWORD` | Simple auth password (optional, recommended for remote) |
+# 3. Deploy
+sudo /opt/run/run.sh install
+```
 
-## What's Inside
+This installs podman, builds everything, hardens the server (UFW, fail2ban, SSH lockdown, auto-updates), and starts Feather behind Caddy with automatic TLS. Updates are zero-downtime: `sudo /opt/run/run.sh update`.
 
-- **Feather** — session viewer, real-time streaming, terminal access, voice input
-- **JupyterLab** — notebooks at `/jupyter/`
-- **Claude CLI** — spawn and manage coding sessions
-- **Pi** — alternative coding agent
-- **Codex** — OpenAI coding agent
-- **tmux** — terminal multiplexer for background sessions
+## What You Get
+
+A single container running:
+
+| Tool | What it does |
+|------|-------------|
+| **Feather** | Session viewer, real-time streaming, terminal access, voice input |
+| **Claude Code** | Anthropic's CLI coding agent |
+| **Codex** | OpenAI's coding agent |
+| **Pi** | Alternative coding agent |
+| **JupyterLab** | Notebooks at `/jupyter/` |
+| **tmux** | Terminal multiplexer for background sessions |
+| **Caddy** | Reverse proxy with automatic HTTPS |
+| **Full dev env** | Rust, Node.js, Python, git, vim, htop — everything |
+
+All AI agents write sessions to disk. Feather watches them all, normalizes every format into a common schema, and streams everything to the browser in real time.
 
 ## Features
 
-- **Session viewer** — browse and search session history across Claude CLI, Pi, and Codex
-- **Real-time streaming** — SSE-based tailing of live sessions with byte-offset tracking
-- **Terminal access** — spawn and interact with coding agents via embedded xterm.js
-- **Voice input** — dictate prompts via OpenAI Whisper transcription
-- **Image upload** — drag-and-drop screenshots and images into conversations
-- **Multi-engine normalization** — all session formats normalized to a common JSONL schema
+- **Unified session viewer** — Browse and search across Claude, Codex, and Pi sessions in one place
+- **Real-time streaming** — SSE-based live tailing with byte-offset tracking. Watch agents think.
+- **Terminal access** — Spawn and interact with any coding agent via embedded xterm.js
+- **Voice input** — Dictate prompts via Whisper transcription. Talk to your agents.
+- **Image upload** — Drag-and-drop screenshots into conversations
+- **Session memory** — Automatic extraction and persistence of context across sessions
+- **Zero-downtime deploys** — Blue-green container swaps with atomic Caddy upstream switching
+- **Everything persists** — `/home/user` is a volume. Your data survives restarts, updates, and swaps.
 
 ## Architecture
 
-Feather is a Rust (axum) HTTP server with a single-file frontend (`static/index.html`). Sessions from different AI coding agents are watched and normalized into `~/sessions/{uuid}.jsonl`:
+```
+Host VPS
+  └── Birth Certificate (outer container)
+        ├── Caddy (TLS, reverse proxy, port 80/443)
+        ├── Podman (manages inner container lifecycle)
+        └── Work Container (swappable, blue-green)
+              ├── Caddy (internal routing, :8080)
+              ├── Feather server (Rust/axum, :4850)
+              ├── Claude Code CLI
+              ├── Codex CLI
+              ├── Pi agent
+              ├── JupyterLab (:8888)
+              └── supervisord (process management)
 
-- **Claude CLI** sessions from `~/.claude/projects/`
-- **Pi** sessions from `~/.pi/agent/sessions/` (tree-structured JSONL with parentId chains)
-- **Codex** sessions from `~/.codex/sessions/`
+Persistent volume: /home/user (sessions, config, credentials, code)
+```
 
-The frontend connects via SSE for real-time updates. Terminal sessions run in tmux and stream via xterm.js. Caddy reverse-proxies all services behind a single port.
+Feather is a Rust (axum) server with a single-file frontend (`static/index.html`, ~4000 lines). Sessions from all AI agents are watched via filesystem notifications and normalized into `~/sessions/{uuid}.jsonl`:
 
-## Testing
+- **Claude CLI** → `~/.claude/projects/` (JSONL conversation logs)
+- **Codex** → `~/.codex/sessions/` (JSON session files)
+- **Pi** → `~/.pi/agent/sessions/` (tree-structured JSONL with parentId chains)
+
+The frontend connects via Server-Sent Events for live updates. Terminal sessions run in tmux and stream via WebSocket + xterm.js.
+
+## Environment Variables
+
+Set in `config.env` (production) or pass with `-e` (local):
+
+| Variable | Description |
+|----------|-------------|
+| `FEATHER_ANTHROPIC_API_KEY` | Anthropic API key — powers title generation, memory extraction |
+| `FEATHER_OPENAI_API_KEY` | OpenAI API key — Whisper voice transcription |
+| `ANTHROPIC_API_KEY` | Passed to Claude Code sessions inside the container |
+| `OPENAI_API_KEY` | Passed to Codex sessions inside the container |
+| `FEATHER_PASSWORD` | Simple auth password (recommended for remote) |
+| `DOMAIN` | Your domain for automatic TLS (production) |
+| `ACME_EMAIL` | Email for Let's Encrypt certificates |
+
+## Production Deploy
+
+The `run.sh` script handles everything for production:
 
 ```bash
-npm install
-npx playwright install chromium
-npm test                    # E2E tests (Playwright)
-npm run test:visual         # Visual regression tests (Claude vision)
-npm run test:stagehand      # AI-powered tests (Stagehand)
+sudo ./run.sh install    # Full setup: podman, hardening, build, start
+sudo ./run.sh update     # Pull latest, rebuild, zero-downtime swap
+sudo ./run.sh status     # Service status, container info
+sudo ./run.sh logs       # Follow service logs
 ```
+
+**What `install` does:**
+1. Installs podman from upstream repos
+2. Hardens the server (UFW firewall, fail2ban, SSH lockdown, unattended security upgrades)
+3. Clones Feather, builds the container images
+4. Creates a systemd service with automatic restart
+5. Starts everything behind Caddy with TLS
+
+**What `update` does:**
+1. Pulls latest code from GitHub
+2. Rebuilds the work container image
+3. Triggers a zero-downtime blue-green swap inside the running birth container
+4. Zero dropped requests during the switch
+
+## Local Development
+
+```bash
+# Build and run locally
+podman build -t feather .
+podman run -p 8080:8080 -v ~/feather-data:/home/user feather
+
+# Or with Docker
+docker build -f Containerfile -t feather .
+docker run -p 8080:8080 -v ~/feather-data:/home/user feather
+```
+
+## Philosophy
+
+Feather exists because every AI coding tool has its own UI, its own session format, its own way of doing things. We think you should be able to use all of them — together, in one place, without vendor lock-in.
+
+The entire frontend is a single HTML file. The backend is ~5000 lines of Rust. There's no build step, no webpack, no framework. You can read the whole thing, change anything, and deploy in seconds.
+
+This is software that's meant to be modified.
 
 ## License
 
-[Elastic License 2.0 (ELv2)](LICENSE) — free to use, modify, and redistribute. Cannot be offered as a managed service.
+[Elastic License 2.0 (ELv2)](LICENSE) — free to use, modify, and self-host. Cannot be offered as a managed service.
