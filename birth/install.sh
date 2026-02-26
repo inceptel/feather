@@ -6,7 +6,7 @@ set -euo pipefail
 #   DOMAIN=feather.example.com ACME_EMAIL=me@example.com \
 #     FEATHER_ANTHROPIC_API_KEY=sk-ant-... \
 #     FEATHER_OPENAI_API_KEY=sk-... \
-#     curl -fsSL https://feather.dev/install | bash
+#     curl -fsSL https://raw.githubusercontent.com/inceptel/feather/master/birth/install.sh | bash
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
