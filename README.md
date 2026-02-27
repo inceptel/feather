@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-ELv2-blue?style=flat-square)](LICENSE)
 [![AI-native](https://img.shields.io/badge/AI--native-%E2%9C%A8-blueviolet?style=flat-square)](#what-makes-this-ai-native)
 
-[Join the waitlist](https://feather-waitlist.surge.sh) | [Vision doc](https://feather-future.surge.sh) | [Get started](#get-started)
+[Join the waitlist](https://inceptel.github.io/feather/) | [Vision doc](https://feather-future.surge.sh) | [Get started](#get-started)
 
 </div>
 
