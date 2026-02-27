@@ -32,6 +32,8 @@ RUN pip3 install --break-system-packages jupyterlab
 RUN curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd     && chmod +x /usr/local/bin/ttyd
 
 # File Browser
+n# VS Code (code-server)
+RUN curl -fsSL https://code-server.dev/install.sh | sh
 RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
 
 # Create non-root user with sudo (uid 1000 to match typical host user)

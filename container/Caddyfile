@@ -7,6 +7,10 @@
         reverse_proxy localhost:8085
     }
 
+    handle_path /code/* {
+        reverse_proxy localhost:8443
+    }
+
     handle /jupyter/* {
         reverse_proxy localhost:8888
     }
