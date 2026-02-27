@@ -1,12 +1,34 @@
+<div align="center">
+
 # Feather
 
-**Your AI, your way.** One container with every AI coding agent, a real-time session viewer, terminals, voice input, and a full dev workspace. Deploy anywhere in one command.
+### The first AI-native app. Software that changes itself.
 
-Feather is a unified frontend for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), and [Pi](https://github.com/anthropics/pi) — all running side by side, streaming in real time, in a single environment you fully control.
+[![GitHub stars](https://img.shields.io/github/stars/inceptel/feather?style=flat-square)](https://github.com/inceptel/feather/stargazers)
+[![License](https://img.shields.io/badge/license-ELv2-blue?style=flat-square)](LICENSE)
+[![AI-native](https://img.shields.io/badge/AI--native-%E2%9C%A8-blueviolet?style=flat-square)](#what-makes-this-ai-native)
+
+[Join the waitlist](https://feather-waitlist.surge.sh) | [Vision doc](https://feather-future.surge.sh) | [Get started](#get-started)
+
+</div>
+
+---
 
 > Software shouldn't be frozen at release. Feather is built to be changed — by you, by agents, by whatever comes next.
 
 ![Feather UI](docs/screenshot.png)
+
+## What makes this AI-native?
+
+Most tools bolt AI onto existing software. Feather is different — AI isn't a feature, it's the foundation.
+
+**Software that changes itself** — Agents can read and rewrite Feather's own source code, live. The entire frontend is a single HTML file. The backend is ~5000 lines of Rust. No build step, no framework. An agent can modify anything and the change is instant.
+
+**AI = experimentation** — Spin up an idea, watch it auto-deploy, iterate in seconds. Claude, Codex, and Pi all run side by side in the same environment. Zero-downtime blue-green deploys mean you never stop to wait.
+
+**The self-evolving future** — We're building toward software that improves itself. Read the [vision doc](https://feather-future.surge.sh) to see where this is going.
+
+---
 
 ## Get Started
 
