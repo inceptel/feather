@@ -1,24 +1,78 @@
 #!/bin/bash
-# Claude auth helper - captures OAuth URL for mobile users
-# Works for both initial auth and re-auth (expired tokens)
-AUTH_URL_FILE="$HOME/claude-auth-url.txt"
+# Claude auth helper for mobile - full web-based flow
+# 1. Starts claude auth login
+# 2. Captures OAuth URL to ~/claude-auth-url.txt
+# 3. Polls for auth code in ~/claude-auth-code.txt (set via /onboarding/ page)
+# 4. Feeds the code to claude auth login
 
-# Clean up any old URL file
-rm -f "$AUTH_URL_FILE"
+AUTH_URL_FILE="$HOME/claude-auth-url.txt"
+AUTH_CODE_FILE="$HOME/claude-auth-code.txt"
+
+# Clean up old files
+rm -f "$AUTH_URL_FILE" "$AUTH_CODE_FILE"
+
+# Check if already authenticated
+STATUS=$(claude auth status 2>&1)
+if echo "$STATUS" | grep -q '"loggedIn": true'; then
+    echo "Claude is already authenticated."
+    echo "$STATUS" | grep -o '"email": "[^"]*"' | sed 's/"email": "/Email: /;s/"$//'
+    echo ""
+    echo "To force re-auth, run: claude auth logout && claude-setup"
+    exit 0
+fi
 
 echo "Starting Claude authentication..."
-echo "The auth URL will be saved for mobile access."
-echo "Use the 'Get Auth Link' button on /onboarding/ to get a tappable link."
 echo ""
+echo "Go to /onboarding/ on your phone to complete the flow:"
+echo "  1. Tap 'Get Auth Link' to get the login URL"
+echo "  2. Complete sign-in in your browser"
+echo "  3. Copy the auth code and paste it in the 'Auth Code' field"
+echo ""
+echo "Waiting..."
 
-# Run claude auth login, tee output, and capture URL
-claude auth login 2>&1 | while IFS= read -r line; do
+# Create a named pipe for feeding the code to claude
+PIPE=$(mktemp -u)
+mkfifo "$PIPE"
+
+# Start claude auth login reading from the pipe, capture output
+(claude auth login < "$PIPE" 2>&1 | while IFS= read -r line; do
     echo "$line"
     URL=$(echo "$line" | grep -oP 'https://claude\.ai/oauth/authorize\S+')
     if [ -n "$URL" ]; then
         echo "$URL" > "$AUTH_URL_FILE"
+        echo ""
+        echo "Auth URL saved. Use 'Get Auth Link' on /onboarding/"
     fi
+done) &
+LOGIN_PID=$!
+
+# Keep the pipe open for writing
+exec 3>"$PIPE"
+
+# Poll for auth code from the web page
+ATTEMPTS=0
+while [ $ATTEMPTS -lt 300 ]; do  # 5 minute timeout
+    if [ -f "$AUTH_CODE_FILE" ]; then
+        CODE=$(cat "$AUTH_CODE_FILE")
+        if [ -n "$CODE" ]; then
+            echo ""
+            echo "Got auth code, submitting..."
+            echo "$CODE" >&3
+            sleep 3
+            break
+        fi
+    fi
+    sleep 1
+    ATTEMPTS=$((ATTEMPTS + 1))
 done
+
+# Close pipe
+exec 3>&-
+rm -f "$PIPE"
+wait $LOGIN_PID 2>/dev/null
+
+# Clean up
+rm -f "$AUTH_URL_FILE" "$AUTH_CODE_FILE"
 
 # Check result
 sleep 1
@@ -26,9 +80,7 @@ STATUS=$(claude auth status 2>&1)
 if echo "$STATUS" | grep -q '"loggedIn": true'; then
     echo ""
     echo "Authentication successful!"
-    rm -f "$AUTH_URL_FILE"
 else
     echo ""
-    echo "If you didn't complete auth, the URL is saved."
-    echo "Open /onboarding/ and tap 'Get Auth Link'."
+    echo "Authentication may have failed. Run 'claude auth status' to check."
 fi

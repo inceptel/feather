@@ -108,10 +108,20 @@
 
         <div class="section">
             <div class="section-title">Or use OAuth</div>
-            <div class="section-desc">Run <code>claude-setup</code> in the terminal, then tap below to get a tappable auth link.</div>
-            <button class="btn btn-sm" onclick="getAuthLink()">Get Auth Link</button>
-            <div id="auth-link-box" class="auth-link-box">
-                <a id="auth-link" href="#" target="_blank">Waiting for URL...</a>
+            <div class="section-desc">Run <code>claude-setup</code> in the terminal, then use these buttons:</div>
+
+            <div style="margin-bottom: 10px;">
+                <button class="btn btn-sm" onclick="getAuthLink()">1. Get Auth Link</button>
+                <div id="auth-link-box" class="auth-link-box">
+                    <a id="auth-link" href="#" target="_blank">Waiting for URL...</a>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-desc" style="margin-bottom: 4px;">After authorizing, paste the code from the browser here:</div>
+                <input type="text" id="auth-code" class="token-input" placeholder="Paste auth code here..." autocomplete="off" />
+                <button class="btn btn-sm" onclick="submitAuthCode()">2. Submit Code</button>
+                <div id="code-msg" class="msg"></div>
             </div>
         </div>
 
@@ -164,6 +174,29 @@
                 if (d.authenticated) { dot.className = 'dot dot-ok'; text.textContent = 'Authenticated'; detail.className = 'msg msg-ok'; detail.textContent = 'Claude is ready.'; }
                 else { dot.className = 'dot dot-err'; text.textContent = 'Not authenticated'; detail.className = 'msg msg-err'; detail.textContent = d.message || 'Not authenticated.'; }
             }).catch(() => { dot.className = 'dot dot-err'; text.textContent = 'Error'; });
+        }
+
+        function submitAuthCode() {
+            const code = document.getElementById('auth-code').value.trim();
+            const msg = document.getElementById('code-msg');
+            if (!code) { msg.className = 'msg msg-err'; msg.textContent = 'Paste the auth code first.'; return; }
+            msg.className = 'msg msg-info'; msg.textContent = 'Submitting...';
+
+            fetch('/jupyter/api/contents/claude-auth-code.txt', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'file', format: 'text', content: code + '\n' })
+            })
+            .then(r => {
+                if (r.ok) {
+                    msg.className = 'msg msg-ok';
+                    msg.textContent = 'Code sent! Check the terminal for result.';
+                    document.getElementById('auth-code').value = '';
+                    // Check auth status after a few seconds
+                    setTimeout(checkAuth, 5000);
+                } else throw new Error('Write failed');
+            })
+            .catch(e => { msg.className = 'msg msg-err'; msg.textContent = 'Failed: ' + e.message; });
         }
 
         let pollInterval = null;
