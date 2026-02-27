@@ -55,15 +55,20 @@
         .auth-link-box a {
             color: #7ec8e3;
             word-break: break-all;
-            font-size: 13px;
+            font-size: 14px;
+            font-weight: 500;
             line-height: 1.4;
+            display: block;
+            padding: 8px;
+            background: #0a0a0a;
+            border-radius: 4px;
+            text-align: center;
         }
         .auth-link-box .label {
             font-size: 11px;
             color: #666;
             margin-bottom: 6px;
         }
-        /* Mobile layout */
         @media (max-width: 768px) {
             body { flex-direction: column; }
             .instructions {
@@ -80,38 +85,38 @@
 </head>
 <body>
     <div class="instructions">
-        <h1>Feather Setup</h1>
-        <p class="sub">Connect your Claude account</p>
+        <h1>Claude Auth</h1>
+        <p class="sub">Authenticate or re-authenticate Claude</p>
 
         <div class="step">
             <div class="num">1</div>
             <div class="step-text">
-                <h3>Run setup in the terminal</h3>
-                <p>Type <code>claude-setup</code> and press Enter in the terminal on the right</p>
+                <h3>Run <code>claude-setup</code></h3>
+                <p>Type it in the terminal on the right. This captures the auth URL.</p>
             </div>
         </div>
         <div class="step">
             <div class="num">2</div>
             <div class="step-text">
-                <h3>Open the auth link</h3>
-                <p>On desktop, click the link in the terminal. On mobile, tap "Get Auth Link" below.</p>
+                <h3>Get the auth link</h3>
+                <p>Tap "Get Auth Link" below to get a tappable URL. Works on mobile.</p>
             </div>
         </div>
         <div class="step">
             <div class="num">3</div>
             <div class="step-text">
-                <h3>Complete authorization</h3>
-                <p>Sign in to Claude and authorize access, then come back here</p>
+                <h3>Complete auth in browser</h3>
+                <p>Sign in and authorize. All active Claude sessions will be refreshed.</p>
             </div>
         </div>
 
         <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="btn" onclick="checkAuth()">Check Auth Status</button>
             <button class="btn btn-outline" onclick="getAuthLink()">Get Auth Link</button>
+            <button class="btn" onclick="checkAuth()">Check Status</button>
         </div>
 
         <div id="auth-link-box" class="auth-link-box">
-            <div class="label">Tap to open auth page:</div>
+            <div class="label" id="auth-link-label">Looking for auth URL...</div>
             <a id="auth-link" href="#" target="_blank"></a>
         </div>
 
@@ -142,12 +147,12 @@
                 .then(d => {
                     if (d.authenticated) {
                         dot.className = 'dot dot-ok';
-                        text.textContent = 'Claude is authenticated';
-                        detail.innerHTML = '<span style="color:#4ade80;">Ready to go! Close this tab and start using Feather.</span>';
+                        text.textContent = 'Authenticated';
+                        detail.innerHTML = '<span style="color:#4ade80;">Claude is authenticated. All sessions will use the refreshed token.</span>';
                     } else {
                         dot.className = 'dot dot-err';
                         text.textContent = 'Not authenticated';
-                        detail.innerHTML = '<span style="color:#f87171;">' + (d.message || 'Run claude-setup in the terminal to authenticate.') + '</span>';
+                        detail.innerHTML = '<span style="color:#f87171;">' + (d.message || 'Run claude-setup in the terminal.') + '</span>';
                     }
                 })
                 .catch(() => {
@@ -161,17 +166,18 @@
         function getAuthLink() {
             const box = document.getElementById('auth-link-box');
             const link = document.getElementById('auth-link');
+            const label = document.getElementById('auth-link-label');
             box.style.display = 'block';
-            link.textContent = 'Looking for auth URL... Run claude-setup in the terminal first.';
+            link.textContent = 'Waiting for URL...';
             link.href = '#';
+            label.textContent = 'Run claude-setup in the terminal first, then the link will appear here:';
 
-            // Poll the Jupyter API for the auth URL file
             let attempts = 0;
             if (pollInterval) clearInterval(pollInterval);
 
             pollInterval = setInterval(() => {
                 attempts++;
-                if (attempts > 60) { // Stop after 60 seconds
+                if (attempts > 120) {
                     clearInterval(pollInterval);
                     link.textContent = 'Timed out. Run claude-setup again and retry.';
                     return;
@@ -187,12 +193,11 @@
                         if (url && url.startsWith('https://')) {
                             clearInterval(pollInterval);
                             link.href = url;
-                            link.textContent = 'Tap here to authenticate with Claude';
+                            link.textContent = 'Tap here to authenticate';
+                            label.textContent = 'Auth link ready:';
                         }
                     })
-                    .catch(() => {
-                        // File doesn't exist yet, keep polling
-                    });
+                    .catch(() => {});
             }, 1000);
         }
 
