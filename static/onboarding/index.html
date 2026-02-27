@@ -79,17 +79,15 @@
             border-radius: 4px;
             text-align: center;
         }
+        /* Mobile: hide terminal, full-width instructions */
         @media (max-width: 768px) {
-            body { flex-direction: column; }
             .instructions {
                 width: 100%;
                 min-width: unset;
                 border-right: none;
-                border-bottom: 1px solid #2a2a2a;
-                max-height: 55vh;
-                overflow-y: auto;
+                height: 100vh;
             }
-            .terminal-side { min-height: 45vh; }
+            .terminal-side { display: none; }
         }
     </style>
 </head>
@@ -98,10 +96,9 @@
         <h1>Claude Auth</h1>
         <p class="sub">Authenticate or re-authenticate Claude</p>
 
-        <!-- Option 1: API Key -->
         <div class="section">
             <div class="section-title">Paste API Key</div>
-            <div class="section-desc">Paste an Anthropic API key. This is the easiest way, especially on mobile.</div>
+            <div class="section-desc">Paste an Anthropic API key. Easiest way on mobile.</div>
             <input type="password" id="api-key" class="token-input" placeholder="sk-ant-..." autocomplete="off" />
             <button class="btn btn-sm" onclick="saveApiKey()">Save Key</button>
             <div id="key-msg" class="msg"></div>
@@ -109,11 +106,10 @@
 
         <hr class="divider">
 
-        <!-- Option 2: OAuth -->
         <div class="section">
             <div class="section-title">Or use OAuth</div>
             <div class="section-desc">Run <code>claude-setup</code> in the terminal, then tap below to get a tappable auth link.</div>
-            <button class="btn btn-sm" onclick="getAuthLink()" style="margin-right: 6px;">Get Auth Link</button>
+            <button class="btn btn-sm" onclick="getAuthLink()">Get Auth Link</button>
             <div id="auth-link-box" class="auth-link-box">
                 <a id="auth-link" href="#" target="_blank">Waiting for URL...</a>
             </div>
@@ -131,7 +127,7 @@
     </div>
 
     <div class="terminal-side">
-        <iframe src="/terminal/"></iframe>
+        <iframe src="/term-raw/"></iframe>
         <div class="status-bar">
             <div id="dot" class="dot dot-loading"></div>
             <span id="status-text">Checking auth...</span>
@@ -142,101 +138,49 @@
         function saveApiKey() {
             const key = document.getElementById('api-key').value.trim();
             const msg = document.getElementById('key-msg');
-            if (!key) {
-                msg.className = 'msg msg-err';
-                msg.textContent = 'Paste an API key first.';
-                return;
-            }
-            if (!key.startsWith('sk-ant-')) {
-                msg.className = 'msg msg-err';
-                msg.textContent = 'Key should start with sk-ant-';
-                return;
-            }
+            if (!key) { msg.className = 'msg msg-err'; msg.textContent = 'Paste an API key first.'; return; }
+            if (!key.startsWith('sk-ant-')) { msg.className = 'msg msg-err'; msg.textContent = 'Key should start with sk-ant-'; return; }
+            msg.className = 'msg msg-info'; msg.textContent = 'Saving...';
 
-            msg.className = 'msg msg-info';
-            msg.textContent = 'Saving...';
-
-            // Write key to ~/anthropic-key (non-hidden so Jupyter API can access it)
-            // run-feather.sh and .bashrc source this file
             const content = 'ANTHROPIC_API_KEY=' + key + '\n';
             fetch('/jupyter/api/contents/anthropic-key', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ type: 'file', format: 'text', content: content })
             })
-                .then(r => {
-                    if (r.ok) {
-                        msg.className = 'msg msg-ok';
-                        msg.textContent = 'Saved. Restart Claude Code to use it.';
-                        document.getElementById('api-key').value = '';
-                    } else {
-                        throw new Error('Write failed');
-                    }
-                })
-                .catch(e => {
-                    msg.className = 'msg msg-err';
-                    msg.textContent = 'Failed to save: ' + e.message;
-                });
+            .then(r => {
+                if (r.ok) { msg.className = 'msg msg-ok'; msg.textContent = 'Saved. Restart Claude to use it.'; document.getElementById('api-key').value = ''; }
+                else throw new Error('Write failed');
+            })
+            .catch(e => { msg.className = 'msg msg-err'; msg.textContent = 'Failed: ' + e.message; });
         }
 
         function checkAuth() {
             const dot = document.getElementById('dot');
             const text = document.getElementById('status-text');
             const detail = document.getElementById('auth-status');
-            dot.className = 'dot dot-loading';
-            text.textContent = 'Checking...';
-
-            fetch('/api/claude-auth-status')
-                .then(r => r.json())
-                .then(d => {
-                    if (d.authenticated) {
-                        dot.className = 'dot dot-ok';
-                        text.textContent = 'Authenticated';
-                        detail.className = 'msg msg-ok';
-                        detail.textContent = 'Claude is ready.';
-                    } else {
-                        dot.className = 'dot dot-err';
-                        text.textContent = 'Not authenticated';
-                        detail.className = 'msg msg-err';
-                        detail.textContent = d.message || 'Not authenticated.';
-                    }
-                })
-                .catch(() => {
-                    dot.className = 'dot dot-err';
-                    text.textContent = 'Error';
-                });
+            dot.className = 'dot dot-loading'; text.textContent = 'Checking...';
+            fetch('/api/claude-auth-status').then(r => r.json()).then(d => {
+                if (d.authenticated) { dot.className = 'dot dot-ok'; text.textContent = 'Authenticated'; detail.className = 'msg msg-ok'; detail.textContent = 'Claude is ready.'; }
+                else { dot.className = 'dot dot-err'; text.textContent = 'Not authenticated'; detail.className = 'msg msg-err'; detail.textContent = d.message || 'Not authenticated.'; }
+            }).catch(() => { dot.className = 'dot dot-err'; text.textContent = 'Error'; });
         }
 
         let pollInterval = null;
         function getAuthLink() {
             const box = document.getElementById('auth-link-box');
             const link = document.getElementById('auth-link');
-            box.style.display = 'block';
-            link.textContent = 'Waiting for URL...';
-            link.href = '#';
-
+            box.style.display = 'block'; link.textContent = 'Waiting for URL...'; link.href = '#';
             let attempts = 0;
             if (pollInterval) clearInterval(pollInterval);
             pollInterval = setInterval(() => {
-                if (++attempts > 120) {
-                    clearInterval(pollInterval);
-                    link.textContent = 'Timed out. Run claude-setup again.';
-                    return;
-                }
+                if (++attempts > 120) { clearInterval(pollInterval); link.textContent = 'Timed out. Run claude-setup again.'; return; }
                 fetch('/jupyter/api/contents/claude-auth-url.txt')
                     .then(r => { if (!r.ok) throw 0; return r.json(); })
-                    .then(d => {
-                        const url = (d.content || '').trim();
-                        if (url && url.startsWith('https://')) {
-                            clearInterval(pollInterval);
-                            link.href = url;
-                            link.textContent = 'Tap here to authenticate';
-                        }
-                    })
+                    .then(d => { const url = (d.content || '').trim(); if (url && url.startsWith('https://')) { clearInterval(pollInterval); link.href = url; link.textContent = 'Tap here to authenticate'; } })
                     .catch(() => {});
             }, 1000);
         }
-
         checkAuth();
     </script>
 </body>
