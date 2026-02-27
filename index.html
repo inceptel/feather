@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feather — The first AI-native app</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 720px;
+            width: 100%;
+            padding: 0 24px;
+        }
+
+        header {
+            text-align: center;
+            padding: 80px 0 40px;
+        }
+
+        .logo {
+            font-size: 14px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 32px;
+        }
+
+        h1 {
+            font-size: clamp(28px, 5vw, 48px);
+            font-weight: 700;
+            line-height: 1.15;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+
+        h1 span {
+            background: linear-gradient(135deg, #a78bfa, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: #999;
+            line-height: 1.6;
+            max-width: 520px;
+            margin: 0 auto 48px;
+        }
+
+        .screenshot {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid #222;
+            margin-bottom: 64px;
+            background: #111;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .screenshot img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .pillars {
+            display: grid;
+            gap: 32px;
+            margin-bottom: 64px;
+        }
+
+        .pillar {
+            padding: 24px;
+            border: 1px solid #1a1a1a;
+            border-radius: 12px;
+            background: #111;
+        }
+
+        .pillar h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+
+        .pillar p {
+            font-size: 15px;
+            color: #999;
+            line-height: 1.6;
+        }
+
+        .signup {
+            text-align: center;
+            padding: 48px 0;
+            border-top: 1px solid #1a1a1a;
+            margin-bottom: 48px;
+        }
+
+        .signup h2 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+
+        .signup p {
+            color: #888;
+            margin-bottom: 24px;
+            font-size: 15px;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            max-width: 440px;
+            margin: 0 auto;
+        }
+
+        .form-row input[type="email"] {
+            flex: 1;
+            padding: 12px 16px;
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-row input[type="email"]:focus {
+            border-color: #7c3aed;
+        }
+
+        .form-row input[type="email"]::placeholder {
+            color: #555;
+        }
+
+        .form-row button {
+            padding: 12px 24px;
+            background: #7c3aed;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+
+        .form-row button:hover {
+            background: #6d28d9;
+        }
+
+        .success-msg {
+            display: none;
+            color: #a78bfa;
+            font-size: 15px;
+            margin-top: 16px;
+        }
+
+        .links {
+            text-align: center;
+            padding-bottom: 64px;
+        }
+
+        .links a {
+            color: #888;
+            text-decoration: none;
+            font-size: 14px;
+            margin: 0 16px;
+            transition: color 0.2s;
+        }
+
+        .links a:hover {
+            color: #fff;
+        }
+
+        @media (max-width: 480px) {
+            header { padding: 48px 0 32px; }
+            .form-row { flex-direction: column; }
+            .form-row button { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">Feather</div>
+            <h1>The first AI-native app.<br><span>Software that changes itself.</span></h1>
+            <p class="subtitle">
+                One container with every AI coding agent, real-time streaming,
+                and a full dev workspace. Deploy anywhere in one command.
+            </p>
+        </header>
+
+        <div class="screenshot">
+            <img src="https://raw.githubusercontent.com/inceptel/feather/main/docs/screenshot.png"
+                 alt="Feather UI"
+                 onerror="this.parentElement.innerHTML='<span style=&quot;color:#333&quot;>screenshot</span>'">
+        </div>
+
+        <div class="pillars">
+            <div class="pillar">
+                <h3>Software that changes itself</h3>
+                <p>Agents can read and rewrite Feather's own source code, live.
+                   The entire frontend is a single HTML file. No build step, no framework.
+                   An agent modifies it and the change is instant.</p>
+            </div>
+            <div class="pillar">
+                <h3>AI = experimentation</h3>
+                <p>Spin up an idea, watch it auto-deploy, iterate in seconds.
+                   Claude, Codex, and Pi run side by side. Zero-downtime blue-green
+                   deploys mean you never stop to wait.</p>
+            </div>
+            <div class="pillar">
+                <h3>The self-evolving future</h3>
+                <p>We're building toward software that improves itself.
+                   <a href="https://feather-future.surge.sh" style="color:#a78bfa">Read the vision doc</a>
+                   to see where this is going.</p>
+            </div>
+        </div>
+
+        <div class="signup">
+            <h2>Get early access</h2>
+            <p>Join the waitlist. We're onboarding the first users now.</p>
+            <form id="waitlist-form" action="https://formspree.io/f/xwpkgjez" method="POST">
+                <div class="form-row">
+                    <input type="email" name="email" placeholder="you@example.com" required>
+                    <button type="submit">Join waitlist</button>
+                </div>
+            </form>
+            <p class="success-msg" id="success-msg">You're on the list. We'll be in touch.</p>
+        </div>
+
+        <div class="links">
+            <a href="https://github.com/inceptel/feather">GitHub</a>
+            <a href="https://feather-future.surge.sh">Vision</a>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('waitlist-form');
+        const msg = document.getElementById('success-msg');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = new FormData(form);
+            try {
+                const res = await fetch(form.action, {
+                    method: 'POST',
+                    body: data,
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (res.ok) {
+                    form.style.display = 'none';
+                    msg.style.display = 'block';
+                }
+            } catch (err) {
+                // Fall back to normal form submission
+                form.submit();
+            }
+        });
+    </script>
+</body>
+</html>
