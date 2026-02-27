@@ -135,8 +135,12 @@ cmd_add() {
     log "Container healthy"
 
     # Add Caddy route for subdomain
-    # Insert before the catch-all route (position 0)
+    # Insert before the last route (catch-all). Get route count, insert at N-1.
     local route_id="tenant-${username}"
+    local route_count
+    route_count=$(curl -sf http://localhost:2020/config/apps/http/servers/main/routes/ | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "1")
+    local insert_pos=$((route_count > 0 ? route_count - 1 : 0))
+
     local route_json
     route_json=$(cat <<ROUTE
 {
@@ -162,7 +166,7 @@ ROUTE
     caddy_response=$(curl -sf -X POST \
         -H "Content-Type: application/json" \
         -d "$route_json" \
-        "http://localhost:2020/config/apps/http/servers/main/routes/0" 2>&1) || {
+        "http://localhost:2020/config/apps/http/servers/main/routes/${insert_pos}" 2>&1) || {
         log "WARN: Caddy route add failed: $caddy_response"
         log "Container is running but subdomain routing may not work"
     }
