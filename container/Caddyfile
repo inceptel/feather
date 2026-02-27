@@ -1,10 +1,16 @@
 :8080 {
-    # JupyterLab
+    handle /terminal/* {
+        reverse_proxy localhost:7681
+    }
+
+    handle /files/* {
+        reverse_proxy localhost:8085
+    }
+
     handle /jupyter/* {
         reverse_proxy localhost:8888
     }
 
-    # Feather (default — everything else)
     handle {
         reverse_proxy localhost:4850
     }
