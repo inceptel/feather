@@ -644,8 +644,6 @@ pub async fn activate_build(
 }
 
 async fn do_activate_build(tx: broadcast::Sender<DeployEvent>, version: String) {
-    let track = "app".to_string();
-
     let send = |line: &str| {
         let _ = tx.send(DeployEvent::Output {
             track: "app".to_string(),
@@ -667,25 +665,23 @@ async fn do_activate_build(tx: broadcast::Sender<DeployEvent>, version: String) 
     let feather_bin = "/usr/local/bin/feather";
 
     send(&format!("=== Activating build: {} ===", version));
-    progress("Stopping", Some(10));
 
-    // Stop feather via supervisorctl
-    send("Stopping feather...");
-    run_command_with_output(
-        "supervisorctl",
-        &["-s", "unix:///tmp/supervisor.sock", "stop", "feather"],
-        &tx,
-        &track,
-    );
+    // ---------------------------------------------------------------
+    // FIX: The old code called `supervisorctl stop feather` in-process,
+    // which killed *this* process (feather) before the swap could finish.
+    //
+    // New approach: do all file operations while still running, then
+    // write a detached shell script that restarts us. The script
+    // outlives the feather process so the restart always completes.
+    // ---------------------------------------------------------------
 
-    progress("Installing", Some(40));
+    progress("Installing", Some(20));
 
-    // Remove old binary and copy new one
-    let _ = std::process::Command::new("sudo")
-        .args(&["rm", "-f", feather_bin])
-        .output();
+    // 1. Copy new binary into place (overwrites running binary on disk;
+    //    the kernel keeps the old inode open until the process exits)
+    send("Installing binary...");
     let result = std::process::Command::new("sudo")
-        .args(&["cp"])
+        .args(&["cp", "--force"])
         .arg(&bin_path)
         .arg(feather_bin)
         .output();
@@ -695,23 +691,18 @@ async fn do_activate_build(tx: broadcast::Sender<DeployEvent>, version: String) 
             send(&format!("Installed binary from {}.bin", version));
         }
         _ => {
-            send("Failed to install binary");
+            send("ERROR: Failed to install binary");
             let _ = tx.send(DeployEvent::Complete {
-                track,
+                track: "app".to_string(),
                 success: false,
                 message: "Failed to install binary".to_string(),
             });
-            // Try to restart anyway
-            let _ = std::process::Command::new("supervisorctl")
-                .args(&["-s", "unix:///tmp/supervisor.sock", "start", "feather"])
-                .output();
             return;
         }
     }
 
-    progress("Restoring static", Some(60));
-
-    // Extract static assets if available
+    // 2. Extract static assets while still running
+    progress("Restoring static", Some(50));
     if tar_path.exists() {
         send("Extracting static assets...");
         let _ = std::process::Command::new("tar")
@@ -722,28 +713,44 @@ async fn do_activate_build(tx: broadcast::Sender<DeployEvent>, version: String) 
         send("Restored static assets");
     }
 
-    // Write active version
+    // 3. Write active version marker
     let active_path = builds_dir.join("active");
     let _ = std::process::Command::new("sudo")
         .args(&["bash", "-c", &format!("echo '{}' > {}", version, active_path.display())])
         .output();
+    send(&format!("Active version set to {}", version));
 
-    progress("Starting", Some(80));
+    progress("Restarting", Some(80));
 
-    send("Starting feather...");
+    // 4. Write a detached restart script that outlives this process
+    let script = "/tmp/feather-activate.sh";
+    let script_content = format!(
+        "#!/bin/bash\n\
+         sleep 1\n\
+         supervisorctl -s unix:///tmp/supervisor.sock restart feather\n\
+         rm -f {script}\n"
+    );
+    let _ = fs::write(script, &script_content);
+    let _ = std::process::Command::new("chmod")
+        .args(&["+x", script])
+        .output();
+
+    send("Restarting feather...");
     let _ = tx.send(DeployEvent::Complete {
-        track: track.clone(),
+        track: "app".to_string(),
         success: true,
-        message: format!("Activated build {}, restarting...", version),
+        message: format!("Activated build {}. Restarting...", version),
     });
 
-    // Small delay to flush SSE
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // Small delay to flush SSE events to connected clients
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    // Start feather
-    let _ = std::process::Command::new("supervisorctl")
-        .args(&["-s", "unix:///tmp/supervisor.sock", "start", "feather"])
-        .output();
+    // 5. Launch the restart script detached (survives our death)
+    let _ = std::process::Command::new("nohup")
+        .args(&[script])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 pub async fn delete_build(
