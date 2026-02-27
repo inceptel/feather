@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feather Setup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .card { max-width: 520px; width: 100%; margin: 2rem; background: #141414; border: 1px solid #2a2a2a; border-radius: 16px; overflow: hidden; }
+        .header { padding: 24px; border-bottom: 1px solid #2a2a2a; }
+        .header h1 { font-size: 22px; font-weight: 600; color: #daa520; }
+        .header p { color: #888; font-size: 14px; margin-top: 4px; }
+        .steps { padding: 24px; }
+        .step { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 20px; }
+        .step:last-child { margin-bottom: 0; }
+        .num { background: #daa520; color: #0a0a0a; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+        .step-text h3 { font-size: 15px; color: #f0f0f0; margin-bottom: 2px; }
+        .step-text p { font-size: 13px; color: #888; line-height: 1.5; }
+        code { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-size: 13px; color: #7ec8e3; }
+        kbd { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #aaa; border: 1px solid #333; }
+        .footer { padding: 20px 24px; border-top: 1px solid #2a2a2a; display: flex; justify-content: space-between; align-items: center; }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: opacity 0.2s; }
+        .btn-primary { background: #daa520; color: #0a0a0a; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-secondary { background: transparent; color: #888; }
+        .btn-secondary:hover { color: #ccc; }
+        .status { padding: 16px 24px; border-top: 1px solid #2a2a2a; }
+        .status-box { padding: 12px 16px; border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+        .status-ok { background: #0a2a0a; border: 1px solid #1a4a1a; color: #4ade80; }
+        .status-err { background: #2a0a0a; border: 1px solid #4a1a1a; color: #f87171; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .dot-ok { background: #4ade80; }
+        .dot-err { background: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <h1>Feather Setup</h1>
+            <p>Connect your Claude account to get started</p>
+        </div>
+        <div id="auth-status" class="status" style="display:none;"></div>
+        <div class="steps">
+            <div class="step">
+                <div class="num">1</div>
+                <div class="step-text">
+                    <h3>Open the terminal</h3>
+                    <p>Go back to Feather and click <strong>Terminal</strong> in the bottom bar, or open <a href="/terminal/" target="_blank" style="color:#7ec8e3;">Terminal</a> directly</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="num">2</div>
+                <div class="step-text">
+                    <h3>Run the Claude CLI</h3>
+                    <p>Type <code>claude</code> and press Enter</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="num">3</div>
+                <div class="step-text">
+                    <h3>Authorize in your browser</h3>
+                    <p>Click the link that appears and complete the OAuth authorization flow</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="num">4</div>
+                <div class="step-text">
+                    <h3>Return here</h3>
+                    <p>Once authorized, come back to Feather and start coding</p>
+                </div>
+            </div>
+        </div>
+        <div class="footer">
+            <a href="/" class="btn btn-secondary">Back to Feather</a>
+            <button class="btn btn-primary" onclick="checkAuth()">Check Auth Status</button>
+        </div>
+    </div>
+    <script>
+        function checkAuth() {
+            fetch('/api/claude-auth-status')
+                .then(r => r.json())
+                .then(d => {
+                    const el = document.getElementById('auth-status');
+                    el.style.display = 'block';
+                    if (d.authenticated) {
+                        el.innerHTML = '<div class="status-box status-ok"><div class="dot dot-ok"></div>Claude is authenticated. You\'re all set!</div>';
+                    } else {
+                        el.innerHTML = '<div class="status-box status-err"><div class="dot dot-err"></div>' + (d.message || 'Not authenticated. Follow the steps below.') + '</div>';
+                    }
+                })
+                .catch(() => {
+                    const el = document.getElementById('auth-status');
+                    el.style.display = 'block';
+                    el.innerHTML = '<div class="status-box status-err"><div class="dot dot-err"></div>Could not check auth status</div>';
+                });
+        }
+        checkAuth();
+    </script>
+</body>
+</html>

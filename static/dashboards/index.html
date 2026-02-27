@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboards - Feather</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; padding: 2rem; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 24px; font-weight: 600; color: #daa520; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 32px; }
+        .subtitle a { color: #7ec8e3; text-decoration: none; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+        .card { background: #141414; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; transition: border-color 0.2s; }
+        .card:hover { border-color: #daa520; }
+        .card a { color: #f0f0f0; text-decoration: none; font-size: 15px; font-weight: 500; display: block; }
+        .card p { color: #666; font-size: 12px; margin-top: 4px; }
+        .empty { color: #555; font-size: 14px; padding: 40px; text-align: center; background: #141414; border: 1px dashed #2a2a2a; border-radius: 12px; }
+        .empty code { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; color: #7ec8e3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dashboards</h1>
+        <p class="subtitle"><a href="/">Back to Feather</a></p>
+        <div id="grid" class="grid"></div>
+    </div>
+    <script>
+        fetch('/api/dashboards')
+            .then(r => r.json())
+            .then(d => {
+                const grid = document.getElementById('grid');
+                if (!d.files || d.files.length === 0) {
+                    grid.innerHTML = '<div class="empty">No dashboards yet.<br><br>Add HTML files to <code>~/dashboards/</code> and they\'ll appear here.</div>';
+                    return;
+                }
+                d.files.forEach(f => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.innerHTML = `<a href="${f.path}" target="_blank">${f.name}</a><p>${f.path}</p>`;
+                    grid.appendChild(card);
+                });
+            })
+            .catch(() => {
+                document.getElementById('grid').innerHTML = '<div class="empty">Failed to load dashboards</div>';
+            });
+    </script>
+</body>
+</html>
