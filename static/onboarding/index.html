@@ -8,8 +8,8 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; height: 100vh; display: flex; }
         .instructions {
-            width: 340px;
-            min-width: 340px;
+            width: 360px;
+            min-width: 360px;
             padding: 28px 24px;
             border-right: 1px solid #2a2a2a;
             overflow-y: auto;
@@ -17,11 +17,7 @@
             flex-direction: column;
         }
         .instructions h1 { font-size: 20px; font-weight: 600; color: #daa520; margin-bottom: 4px; }
-        .instructions .sub { color: #666; font-size: 13px; margin-bottom: 24px; }
-        .step { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; }
-        .num { background: #daa520; color: #0a0a0a; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; margin-top: 1px; }
-        .step-text h3 { font-size: 14px; color: #f0f0f0; margin-bottom: 2px; }
-        .step-text p { font-size: 12px; color: #777; line-height: 1.5; }
+        .instructions .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
         code { background: #1a1a1a; padding: 1px 5px; border-radius: 3px; font-size: 12px; color: #7ec8e3; }
         .terminal-side { flex: 1; display: flex; flex-direction: column; }
         .terminal-side iframe { flex: 1; border: none; background: #000; }
@@ -41,12 +37,32 @@
         .spacer { flex: 1; }
         .back { color: #666; text-decoration: none; font-size: 12px; margin-top: auto; padding-top: 16px; border-top: 1px solid #1a1a1a; }
         .back:hover { color: #aaa; }
-        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: #daa520; color: #0a0a0a; display: inline-block; }
+        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: #daa520; color: #0a0a0a; }
         .btn:hover { opacity: 0.9; }
-        .btn-outline { background: transparent; border: 1px solid #daa520; color: #daa520; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+        .section { margin-bottom: 20px; }
+        .section-title { font-size: 14px; font-weight: 600; color: #f0f0f0; margin-bottom: 8px; }
+        .section-desc { font-size: 12px; color: #777; line-height: 1.5; margin-bottom: 10px; }
+        .divider { border: none; border-top: 1px solid #1a1a1a; margin: 16px 0; }
+        .token-input {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #2a2a2a;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: monospace;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .token-input:focus { outline: none; border-color: #daa520; }
+        .msg { font-size: 12px; margin-top: 8px; line-height: 1.4; }
+        .msg-ok { color: #4ade80; }
+        .msg-err { color: #f87171; }
+        .msg-info { color: #7ec8e3; }
         .auth-link-box {
-            margin-top: 12px;
-            padding: 12px;
+            margin-top: 8px;
+            padding: 10px;
             background: #1a1a1a;
             border: 1px solid #2a2a2a;
             border-radius: 8px;
@@ -57,17 +73,11 @@
             word-break: break-all;
             font-size: 14px;
             font-weight: 500;
-            line-height: 1.4;
             display: block;
             padding: 8px;
             background: #0a0a0a;
             border-radius: 4px;
             text-align: center;
-        }
-        .auth-link-box .label {
-            font-size: 11px;
-            color: #666;
-            margin-bottom: 6px;
         }
         @media (max-width: 768px) {
             body { flex-direction: column; }
@@ -76,10 +86,10 @@
                 min-width: unset;
                 border-right: none;
                 border-bottom: 1px solid #2a2a2a;
-                max-height: 50vh;
+                max-height: 55vh;
                 overflow-y: auto;
             }
-            .terminal-side { min-height: 50vh; }
+            .terminal-side { min-height: 45vh; }
         }
     </style>
 </head>
@@ -88,39 +98,33 @@
         <h1>Claude Auth</h1>
         <p class="sub">Authenticate or re-authenticate Claude</p>
 
-        <div class="step">
-            <div class="num">1</div>
-            <div class="step-text">
-                <h3>Run <code>claude-setup</code></h3>
-                <p>Type it in the terminal on the right. This captures the auth URL.</p>
-            </div>
+        <!-- Option 1: API Key -->
+        <div class="section">
+            <div class="section-title">Paste API Key</div>
+            <div class="section-desc">Paste an Anthropic API key. This is the easiest way, especially on mobile.</div>
+            <input type="password" id="api-key" class="token-input" placeholder="sk-ant-..." autocomplete="off" />
+            <button class="btn btn-sm" onclick="saveApiKey()">Save Key</button>
+            <div id="key-msg" class="msg"></div>
         </div>
-        <div class="step">
-            <div class="num">2</div>
-            <div class="step-text">
-                <h3>Get the auth link</h3>
-                <p>Tap "Get Auth Link" below to get a tappable URL. Works on mobile.</p>
-            </div>
-        </div>
-        <div class="step">
-            <div class="num">3</div>
-            <div class="step-text">
-                <h3>Complete auth in browser</h3>
-                <p>Sign in and authorize. All active Claude sessions will be refreshed.</p>
+
+        <hr class="divider">
+
+        <!-- Option 2: OAuth -->
+        <div class="section">
+            <div class="section-title">Or use OAuth</div>
+            <div class="section-desc">Run <code>claude-setup</code> in the terminal, then tap below to get a tappable auth link.</div>
+            <button class="btn btn-sm" onclick="getAuthLink()" style="margin-right: 6px;">Get Auth Link</button>
+            <div id="auth-link-box" class="auth-link-box">
+                <a id="auth-link" href="#" target="_blank">Waiting for URL...</a>
             </div>
         </div>
 
-        <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="btn btn-outline" onclick="getAuthLink()">Get Auth Link</button>
+        <hr class="divider">
+
+        <div style="display: flex; gap: 8px; align-items: center;">
             <button class="btn" onclick="checkAuth()">Check Status</button>
+            <div id="auth-status" class="msg" style="flex: 1;"></div>
         </div>
-
-        <div id="auth-link-box" class="auth-link-box">
-            <div class="label" id="auth-link-label">Looking for auth URL...</div>
-            <a id="auth-link" href="#" target="_blank"></a>
-        </div>
-
-        <div id="auth-status" style="margin-top: 12px; font-size: 13px;"></div>
 
         <div class="spacer"></div>
         <a href="/" class="back">Back to Feather</a>
@@ -135,6 +139,61 @@
     </div>
 
     <script>
+        function saveApiKey() {
+            const key = document.getElementById('api-key').value.trim();
+            const msg = document.getElementById('key-msg');
+            if (!key) {
+                msg.className = 'msg msg-err';
+                msg.textContent = 'Paste an API key first.';
+                return;
+            }
+            if (!key.startsWith('sk-ant-')) {
+                msg.className = 'msg msg-err';
+                msg.textContent = 'Key should start with sk-ant-';
+                return;
+            }
+
+            msg.className = 'msg msg-info';
+            msg.textContent = 'Saving...';
+
+            // Read current .env, update or add the key, write back
+            fetch('/jupyter/api/contents/.env')
+                .then(r => r.ok ? r.json() : { content: '' })
+                .then(d => {
+                    let env = (d.content || '').trim();
+                    const lines = env ? env.split('\n') : [];
+                    let found = false;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].startsWith('ANTHROPIC_API_KEY=')) {
+                            lines[i] = 'ANTHROPIC_API_KEY=' + key;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) lines.push('ANTHROPIC_API_KEY=' + key);
+                    const newContent = lines.join('\n') + '\n';
+
+                    return fetch('/jupyter/api/contents/.env', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: 'file', format: 'text', content: newContent })
+                    });
+                })
+                .then(r => {
+                    if (r.ok) {
+                        msg.className = 'msg msg-ok';
+                        msg.textContent = 'Saved to ~/.env. Restart Claude Code to use it.';
+                        document.getElementById('api-key').value = '';
+                    } else {
+                        throw new Error('Write failed');
+                    }
+                })
+                .catch(e => {
+                    msg.className = 'msg msg-err';
+                    msg.textContent = 'Failed to save: ' + e.message;
+                });
+        }
+
         function checkAuth() {
             const dot = document.getElementById('dot');
             const text = document.getElementById('status-text');
@@ -148,53 +207,45 @@
                     if (d.authenticated) {
                         dot.className = 'dot dot-ok';
                         text.textContent = 'Authenticated';
-                        detail.innerHTML = '<span style="color:#4ade80;">Claude is authenticated. All sessions will use the refreshed token.</span>';
+                        detail.className = 'msg msg-ok';
+                        detail.textContent = 'Claude is ready.';
                     } else {
                         dot.className = 'dot dot-err';
                         text.textContent = 'Not authenticated';
-                        detail.innerHTML = '<span style="color:#f87171;">' + (d.message || 'Run claude-setup in the terminal.') + '</span>';
+                        detail.className = 'msg msg-err';
+                        detail.textContent = d.message || 'Not authenticated.';
                     }
                 })
                 .catch(() => {
                     dot.className = 'dot dot-err';
-                    text.textContent = 'Error checking status';
+                    text.textContent = 'Error';
                 });
         }
 
         let pollInterval = null;
-
         function getAuthLink() {
             const box = document.getElementById('auth-link-box');
             const link = document.getElementById('auth-link');
-            const label = document.getElementById('auth-link-label');
             box.style.display = 'block';
             link.textContent = 'Waiting for URL...';
             link.href = '#';
-            label.textContent = 'Run claude-setup in the terminal first, then the link will appear here:';
 
             let attempts = 0;
             if (pollInterval) clearInterval(pollInterval);
-
             pollInterval = setInterval(() => {
-                attempts++;
-                if (attempts > 120) {
+                if (++attempts > 120) {
                     clearInterval(pollInterval);
-                    link.textContent = 'Timed out. Run claude-setup again and retry.';
+                    link.textContent = 'Timed out. Run claude-setup again.';
                     return;
                 }
-
                 fetch('/jupyter/api/contents/claude-auth-url.txt')
-                    .then(r => {
-                        if (!r.ok) throw new Error('not found');
-                        return r.json();
-                    })
+                    .then(r => { if (!r.ok) throw 0; return r.json(); })
                     .then(d => {
                         const url = (d.content || '').trim();
                         if (url && url.startsWith('https://')) {
                             clearInterval(pollInterval);
                             link.href = url;
                             link.textContent = 'Tap here to authenticate';
-                            label.textContent = 'Auth link ready:';
                         }
                     })
                     .catch(() => {});
