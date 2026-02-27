@@ -156,33 +156,18 @@
             msg.className = 'msg msg-info';
             msg.textContent = 'Saving...';
 
-            // Read current .env, update or add the key, write back
-            fetch('/jupyter/api/contents/.env')
-                .then(r => r.ok ? r.json() : { content: '' })
-                .then(d => {
-                    let env = (d.content || '').trim();
-                    const lines = env ? env.split('\n') : [];
-                    let found = false;
-                    for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].startsWith('ANTHROPIC_API_KEY=')) {
-                            lines[i] = 'ANTHROPIC_API_KEY=' + key;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) lines.push('ANTHROPIC_API_KEY=' + key);
-                    const newContent = lines.join('\n') + '\n';
-
-                    return fetch('/jupyter/api/contents/.env', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ type: 'file', format: 'text', content: newContent })
-                    });
-                })
+            // Write key to ~/anthropic-key (non-hidden so Jupyter API can access it)
+            // run-feather.sh and .bashrc source this file
+            const content = 'ANTHROPIC_API_KEY=' + key + '\n';
+            fetch('/jupyter/api/contents/anthropic-key', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'file', format: 'text', content: content })
+            })
                 .then(r => {
                     if (r.ok) {
                         msg.className = 'msg msg-ok';
-                        msg.textContent = 'Saved to ~/.env. Restart Claude Code to use it.';
+                        msg.textContent = 'Saved. Restart Claude Code to use it.';
                         document.getElementById('api-key').value = '';
                     } else {
                         throw new Error('Write failed');
