@@ -46,7 +46,9 @@ COPY --from=builder /build/target/release/feather-rs /usr/local/bin/feather
 COPY container/ /opt/feather-config/
 
 # Install configs
-RUN cp /opt/feather-config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf &&     mkdir -p /etc/caddy && cp /opt/feather-config/Caddyfile /etc/caddy/Caddyfile &&     cp /opt/feather-config/run-feather.sh /usr/local/bin/run-feather.sh &&     cp /opt/feather-config/entrypoint.sh /entrypoint.sh &&     chmod +x /usr/local/bin/run-feather.sh /entrypoint.sh
+RUN cp /opt/feather-config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf &&     mkdir -p /etc/caddy && cp /opt/feather-config/Caddyfile /etc/caddy/Caddyfile &&     cp /opt/feather-config/run-feather.sh /usr/local/bin/run-feather.sh &&     cp /opt/feather-config/entrypoint.sh /entrypoint.sh &&     chmod +x /usr/local/bin/run-feather.sh /entrypoint.sh &&
+    cp /opt/feather-config/claude-setup /usr/local/bin/claude-setup &&
+    chmod +x /usr/local/bin/claude-setup
 
 # Pre-populate /opt/feather with static files (entrypoint will git clone over this on first boot)
 COPY static/ /opt/feather/static/

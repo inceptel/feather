@@ -1,0 +1,38 @@
+#!/bin/bash
+# Claude authentication helper - captures auth URL for mobile users
+AUTH_URL_FILE="$HOME/claude-auth-url.txt"
+
+# Clean up any old URL file
+rm -f "$AUTH_URL_FILE"
+
+# Check if already authenticated
+STATUS=$(claude auth status 2>&1)
+if echo "$STATUS" | grep -q '"loggedIn": true'; then
+    echo "✓ Claude is already authenticated!"
+    echo "$STATUS" | grep -o '"email": "[^"]*"' | sed 's/"email": "/Email: /;s/"$//'
+    exit 0
+fi
+
+echo "Starting Claude authentication..."
+echo "The auth URL will appear below AND be saved for mobile access."
+echo ""
+
+# Run claude auth login and capture URL
+claude auth login 2>&1 | tee /dev/stderr | while IFS= read -r line; do
+    URL=$(echo "$line" | grep -oP 'https://claude\.ai/oauth/authorize\S+')
+    if [ -n "$URL" ]; then
+        echo "$URL" > "$AUTH_URL_FILE"
+    fi
+done
+
+# Check if auth succeeded
+sleep 2
+STATUS=$(claude auth status 2>&1)
+if echo "$STATUS" | grep -q '"loggedIn": true'; then
+    echo ""
+    echo "✓ Authentication successful!"
+    rm -f "$AUTH_URL_FILE"
+else
+    echo ""
+    echo "Auth URL saved. Use the 'Get Auth Link' button on the left to open it on mobile."
+fi

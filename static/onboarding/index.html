@@ -41,8 +41,41 @@
         .spacer { flex: 1; }
         .back { color: #666; text-decoration: none; font-size: 12px; margin-top: auto; padding-top: 16px; border-top: 1px solid #1a1a1a; }
         .back:hover { color: #aaa; }
-        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: #daa520; color: #0a0a0a; }
+        .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; background: #daa520; color: #0a0a0a; display: inline-block; }
         .btn:hover { opacity: 0.9; }
+        .btn-outline { background: transparent; border: 1px solid #daa520; color: #daa520; }
+        .auth-link-box {
+            margin-top: 12px;
+            padding: 12px;
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            display: none;
+        }
+        .auth-link-box a {
+            color: #7ec8e3;
+            word-break: break-all;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .auth-link-box .label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 6px;
+        }
+        /* Mobile layout */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .instructions {
+                width: 100%;
+                min-width: unset;
+                border-right: none;
+                border-bottom: 1px solid #2a2a2a;
+                max-height: 50vh;
+                overflow-y: auto;
+            }
+            .terminal-side { min-height: 50vh; }
+        }
     </style>
 </head>
 <body>
@@ -53,28 +86,35 @@
         <div class="step">
             <div class="num">1</div>
             <div class="step-text">
-                <h3>Run Claude in the terminal</h3>
-                <p>Type <code>claude</code> and press Enter in the terminal on the right</p>
+                <h3>Run setup in the terminal</h3>
+                <p>Type <code>claude-setup</code> and press Enter in the terminal on the right</p>
             </div>
         </div>
         <div class="step">
             <div class="num">2</div>
             <div class="step-text">
-                <h3>Authorize in your browser</h3>
-                <p>Click the link that appears and complete the OAuth flow</p>
+                <h3>Open the auth link</h3>
+                <p>On desktop, click the link in the terminal. On mobile, tap "Get Auth Link" below.</p>
             </div>
         </div>
         <div class="step">
             <div class="num">3</div>
             <div class="step-text">
-                <h3>Come back here</h3>
-                <p>Once authorized, check the status below</p>
+                <h3>Complete authorization</h3>
+                <p>Sign in to Claude and authorize access, then come back here</p>
             </div>
         </div>
 
-        <div style="margin-top: 20px;">
+        <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
             <button class="btn" onclick="checkAuth()">Check Auth Status</button>
+            <button class="btn btn-outline" onclick="getAuthLink()">Get Auth Link</button>
         </div>
+
+        <div id="auth-link-box" class="auth-link-box">
+            <div class="label">Tap to open auth page:</div>
+            <a id="auth-link" href="#" target="_blank"></a>
+        </div>
+
         <div id="auth-status" style="margin-top: 12px; font-size: 13px;"></div>
 
         <div class="spacer"></div>
@@ -107,7 +147,7 @@
                     } else {
                         dot.className = 'dot dot-err';
                         text.textContent = 'Not authenticated';
-                        detail.innerHTML = '<span style="color:#f87171;">' + (d.message || 'Run claude in the terminal to authenticate.') + '</span>';
+                        detail.innerHTML = '<span style="color:#f87171;">' + (d.message || 'Run claude-setup in the terminal to authenticate.') + '</span>';
                     }
                 })
                 .catch(() => {
@@ -115,6 +155,47 @@
                     text.textContent = 'Error checking status';
                 });
         }
+
+        let pollInterval = null;
+
+        function getAuthLink() {
+            const box = document.getElementById('auth-link-box');
+            const link = document.getElementById('auth-link');
+            box.style.display = 'block';
+            link.textContent = 'Looking for auth URL... Run claude-setup in the terminal first.';
+            link.href = '#';
+
+            // Poll the Jupyter API for the auth URL file
+            let attempts = 0;
+            if (pollInterval) clearInterval(pollInterval);
+
+            pollInterval = setInterval(() => {
+                attempts++;
+                if (attempts > 60) { // Stop after 60 seconds
+                    clearInterval(pollInterval);
+                    link.textContent = 'Timed out. Run claude-setup again and retry.';
+                    return;
+                }
+
+                fetch('/jupyter/api/contents/claude-auth-url.txt')
+                    .then(r => {
+                        if (!r.ok) throw new Error('not found');
+                        return r.json();
+                    })
+                    .then(d => {
+                        const url = (d.content || '').trim();
+                        if (url && url.startsWith('https://')) {
+                            clearInterval(pollInterval);
+                            link.href = url;
+                            link.textContent = 'Tap here to authenticate with Claude';
+                        }
+                    })
+                    .catch(() => {
+                        // File doesn't exist yet, keep polling
+                    });
+            }, 1000);
+        }
+
         checkAuth();
     </script>
 </body>
