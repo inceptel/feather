@@ -721,6 +721,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -4036,6 +4037,23 @@
             void target.offsetWidth; // force reflow
             target.classList.add('msg-nav-highlight');
         }
+
+        // Jump to first or last message (vim G / gg)
+        function jumpToMessage(position) {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            const msgs = Array.from(container.children).filter(el =>
+                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
+            );
+            if (msgs.length === 0) return;
+            _msgNavIdx = position === 'first' ? 0 : msgs.length - 1;
+            const target = msgs[_msgNavIdx];
+            target.scrollIntoView({ behavior: 'smooth', block: position === 'first' ? 'start' : 'center' });
+            target.classList.remove('msg-nav-highlight');
+            void target.offsetWidth;
+            target.classList.add('msg-nav-highlight');
+        }
+        let _lastGPress = 0; // for gg detection
         // Reset nav index on session switch
         const _origSelectSession = typeof selectSession === 'function' ? selectSession : null;
 
@@ -6207,6 +6225,8 @@
             { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
             { label: 'Next message', shortcut: 'J', action: () => navigateMessages(1) },
             { label: 'Previous message', shortcut: 'K', action: () => navigateMessages(-1) },
+            { label: 'First message', shortcut: 'gg', action: () => jumpToMessage('first') },
+            { label: 'Last message', shortcut: 'G', action: () => jumpToMessage('last') },
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
             { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
@@ -6359,6 +6379,27 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     navigateMessages(e.key === 'j' ? 1 : -1);
+                }
+            }
+            // G / gg vim-style jump navigation (when not in input)
+            if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    const now = Date.now();
+                    if (now - _lastGPress < 500) {
+                        e.preventDefault();
+                        _lastGPress = 0;
+                        jumpToMessage('first');
+                    } else {
+                        _lastGPress = now;
+                    }
+                }
+            }
+            if (e.key === 'G' && !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    jumpToMessage('last');
                 }
             }
         });

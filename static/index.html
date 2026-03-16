@@ -194,6 +194,18 @@
         }
         #terminal-panel.open { display: flex; }
         body.terminal-open #autoweb-version-indicator { display: none; }
+        /* Zen/focus mode — hides all chrome for distraction-free reading */
+        body.zen-mode #sidebar,
+        body.zen-mode #sidebar-overlay,
+        body.zen-mode #menu-btn,
+        body.zen-mode #mobile-session-header,
+        body.zen-mode #desktop-session-header,
+        body.zen-mode #terminal-panel,
+        body.zen-mode #autoweb-version-indicator { display: none !important; }
+        body.zen-mode main { margin-left: 0 !important; }
+        body.zen-mode #zen-exit-btn { display: flex !important; }
+        #zen-exit-btn { display: none; position: fixed; top: 12px; right: 12px; z-index: 200; padding: 4px 12px; background: var(--smoke-3); border: 1px solid var(--smoke-5); border-radius: 8px; color: var(--smoke-10); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; gap: 6px; align-items: center; opacity: 0.5; transition: opacity 0.2s; }
+        #zen-exit-btn:hover { opacity: 1; background: var(--smoke-4); color: var(--smoke-12); }
         /* What's New popover */
         #whats-new-popover {
             display: none; position: absolute; top: 100%; left: -80px; margin-top: 6px;
@@ -650,6 +662,11 @@
                 </div>
             </div>
         </div>
+        <!-- Zen mode exit button -->
+        <button id="zen-exit-btn" onclick="toggleZenMode()" title="Exit zen mode (Z)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Exit Zen
+        </button>
     </main>
 
     <!-- Terminal Panel -->
@@ -722,6 +739,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -969,6 +987,15 @@
 
         // Apply theme immediately to avoid flash
         initTheme();
+
+        // ========== Zen Mode ==========
+        function toggleZenMode() {
+            const active = document.body.classList.toggle('zen-mode');
+            // Close terminal if entering zen mode
+            if (active && document.body.classList.contains('terminal-open')) {
+                toggleTerminal();
+            }
+        }
 
         // ========== What's New Popover ==========
         let _whatsNewOpen = false;
@@ -6233,6 +6260,7 @@
             { label: 'Cycle sort mode', shortcut: '', action: () => cycleSessionSort() },
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
+            { label: 'Toggle zen mode', shortcut: 'Z', action: () => toggleZenMode() },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
@@ -6400,6 +6428,14 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     jumpToMessage('last');
+                }
+            }
+            // Z — toggle zen mode (when not in input)
+            if (e.key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    toggleZenMode();
                 }
             }
         });
