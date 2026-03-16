@@ -11,3 +11,21 @@
 [2m2026-03-16T15:16:42.250247Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.pi/agent/sessions for Pi changes
 [2m2026-03-16T15:16:42.250334Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.codex/sessions for Codex changes
 [2m2026-03-16T15:16:42.256702Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.claude/projects for Claude changes
+[2m2026-03-16T15:17:20.774450Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:17:21.557167Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:17:32.200643Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:17:33.004888Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:17:35.110364Z[0m [33m WARN[0m [2mfeather_rs::normalizer[0m[2m:[0m Error processing /home/feather-dev/.claude/projects/-home-user-feather/9d0ff190-3aa8-4957-9759-a14743441621.jsonl: Session has no messages
+[2m2026-03-16T15:17:41.788399Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 0
+[2m2026-03-16T15:18:41.903066Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:20:00.084277Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:21:00.601546Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:21:01.435935Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:23:14.809433Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:23:15.646247Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:23:56.203057Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:23:57.014712Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:24:12.591739Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:24:13.404034Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:24:17.626986Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:24:18.542692Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
