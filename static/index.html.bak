@@ -630,6 +630,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Search in chat</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+F</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle sidebar</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+B</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
@@ -5332,7 +5333,7 @@
             { label: 'Search sessions', shortcut: '/', action: () => { const s = document.getElementById('session-search'); if (s) { s.focus(); } } },
             { label: 'Search in chat', shortcut: 'Ctrl+F', action: () => openChatSearch() },
             { label: 'Toggle terminal', shortcut: 'Ctrl+`', action: () => toggleTerminal() },
-            { label: 'Toggle sidebar', shortcut: '', action: () => { const sb = document.getElementById('sidebar'); if (sb) sb.classList.toggle('-translate-x-full'); } },
+            { label: 'Toggle sidebar', shortcut: 'Ctrl+B', action: () => toggleSidebar() },
             { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('collapse-tools-btn'); if (btn) btn.click(); } },
             { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
@@ -5706,6 +5707,11 @@
                 if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
                     e.preventDefault();
                     newPiSession();
+                }
+                // Ctrl+B / Cmd+B to toggle sidebar
+                if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+                    e.preventDefault();
+                    toggleSidebar();
                 }
                 // Ctrl+F / Cmd+F to search in conversation
                 if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
