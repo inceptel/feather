@@ -817,7 +817,52 @@ async fn get_session_history(
         });
     }
 
-    // General path: read and parse all lines, then apply before/offset/limit
+    // Fast path for reverse pagination (before + limit): skip directly to the needed line range
+    // instead of reading + parsing the entire file. For a 21MB / 10k-line session, this avoids
+    // ~10k JSON parses per "load earlier" click.
+    if let (Some(before), Some(limit)) = (query.before, query.limit) {
+        if file_size > 100_000 && offset == 0 {
+            let total = count_lines_fast(&normalized_path);
+            let effective_before = before.min(total);
+            let start = effective_before.saturating_sub(limit);
+            let lines_to_parse = effective_before - start;
+
+            let mut messages = Vec::with_capacity(lines_to_parse);
+            if let Ok(file) = File::open(&normalized_path) {
+                let mut buf_reader = BufReader::with_capacity(65536, file);
+                let mut line_buf = String::new();
+                // Skip lines before our window
+                for _ in 0..start {
+                    line_buf.clear();
+                    if buf_reader.read_line(&mut line_buf).unwrap_or(0) == 0 {
+                        break;
+                    }
+                }
+                // Parse only the lines in our window [start..effective_before)
+                for _ in 0..lines_to_parse {
+                    line_buf.clear();
+                    if buf_reader.read_line(&mut line_buf).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    if let Ok(msg) = serde_json::from_str::<sessions::NormalizedMessage>(line_buf.trim_end()) {
+                        if let Some(hm) = convert_normalized_to_history(msg) {
+                            messages.push(hm);
+                        }
+                    }
+                }
+            }
+
+            return Json(SessionHistory {
+                session_id,
+                project: project_id,
+                messages,
+                total,
+                cursor: encode_cursor(file_size),
+            });
+        }
+    }
+
+    // General path: small files or unusual query combos — read and parse all lines
     let mut messages = Vec::new();
 
     if let Ok(content) = fs::read_to_string(&normalized_path) {
