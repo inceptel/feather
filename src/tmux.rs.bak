@@ -240,11 +240,10 @@ impl TmuxManager {
         Ok(info)
     }
 
-    /// Send a message to Claude CLI via tmux.
+    /// Send a message to Claude CLI via tmux send-keys.
     ///
-    /// For short messages (< 500 bytes), uses `send-keys -l` directly.
-    /// For long messages, writes to a temp file and uses `load-buffer`/`paste-buffer`
-    /// to bypass the OS command-line argument length limit.
+    /// The message is escaped for shell safety, then sent with literal mode (-l)
+    /// followed by Enter to submit.
     pub fn send_message(&self, session_id: &str, message: &str) -> Result<(), String> {
         let name = self.get_session_name(session_id);
 
@@ -252,18 +251,15 @@ impl TmuxManager {
             return Err("Session not active".to_string());
         }
 
-        // For long messages, use load-buffer/paste-buffer to avoid arg length limits
-        if message.len() >= 500 {
-            self.send_message_via_buffer(&name, message)?;
-        } else {
-            let send_text = Command::new("tmux")
-                .args(["send-keys", "-t", &name, "-l", message])
-                .output()
-                .map_err(|e| format!("Failed to send text: {}", e))?;
+        // Send the message text literally with a small delay before Enter
+        // This helps ensure the text is fully buffered before Enter is processed
+        let send_text = Command::new("tmux")
+            .args(["send-keys", "-t", &name, "-l", message])
+            .output()
+            .map_err(|e| format!("Failed to send text: {}", e))?;
 
-            if !send_text.status.success() {
-                return Err("Failed to send text to tmux".to_string());
-            }
+        if !send_text.status.success() {
+            return Err("Failed to send text to tmux".to_string());
         }
 
         // Small delay to ensure text is fully processed before Enter
@@ -277,54 +273,6 @@ impl TmuxManager {
 
         if !send_enter.status.success() {
             return Err("Failed to send Enter to tmux".to_string());
-        }
-
-        Ok(())
-    }
-
-    /// Send a long message via tmux load-buffer/paste-buffer.
-    ///
-    /// Writes the message to a temp file, loads it into a tmux buffer,
-    /// then pastes it into the target pane. This bypasses the OS limit
-    /// on command-line argument length that affects `send-keys`.
-    fn send_message_via_buffer(&self, tmux_name: &str, message: &str) -> Result<(), String> {
-        use std::io::Write;
-
-        // Write message to a temp file
-        let tmp_path = format!("/tmp/feather-tmux-buf-{}", std::process::id());
-        let mut file = std::fs::File::create(&tmp_path)
-            .map_err(|e| format!("Failed to create temp file: {}", e))?;
-        file.write_all(message.as_bytes())
-            .map_err(|e| format!("Failed to write temp file: {}", e))?;
-        drop(file);
-
-        // Load the file into a tmux buffer
-        let load = Command::new("tmux")
-            .args(["load-buffer", &tmp_path])
-            .output()
-            .map_err(|e| format!("Failed to load buffer: {}", e))?;
-
-        // Clean up temp file regardless of outcome
-        let _ = std::fs::remove_file(&tmp_path);
-
-        if !load.status.success() {
-            return Err(format!(
-                "Failed to load tmux buffer: {}",
-                String::from_utf8_lossy(&load.stderr)
-            ));
-        }
-
-        // Paste the buffer into the target pane
-        let paste = Command::new("tmux")
-            .args(["paste-buffer", "-t", tmux_name, "-p"])
-            .output()
-            .map_err(|e| format!("Failed to paste buffer: {}", e))?;
-
-        if !paste.status.success() {
-            return Err(format!(
-                "Failed to paste tmux buffer: {}",
-                String::from_utf8_lossy(&paste.stderr)
-            ));
         }
 
         Ok(())
