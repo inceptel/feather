@@ -2,12 +2,18 @@
 <rss version="2.0">
 <channel>
 <title>Autoweb Feather Improvements</title>
-<description>Self-improving Feather web application changes</description>
 <link>#</link>
+<description>Self-improving Feather web application changes</description>
 <item>
-<title>Add wrap/unwrap toggle button on code blocks with long lines (>80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</title>
+<title>Add drag-to-resize sidebar width — 6px handle on right edge with gold accent, 200-500px clamped range, localStorage persistence, double-click to reset default (98 tests pass)</title>
+<pubDate>2026-03-16T07:13:04Z</pubDate>
+<description>Add drag-to-resize sidebar width — 6px handle on right edge with gold accent, 200-500px clamped range, localStorage persistence, double-click to reset default (98 tests pass)</description>
+<link>#</link>
+</item>
+<item>
+<title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</title>
 <pubDate>2026-03-16T07:07:38Z</pubDate>
-<description>Add wrap/unwrap toggle button on code blocks with long lines (>80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
+<description>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
 <link>#</link>
 </item>
 <item>
@@ -29,9 +35,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</title>
+<title>Add &#x27;Open in new tab&#x27; to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</title>
 <pubDate>2026-03-16T06:48:49Z</pubDate>
-<description>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
+<description>Add &#x27;Open in new tab&#x27; to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
 <link>#</link>
 </item>
 <item>
@@ -41,9 +47,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working->idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</title>
+<title>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working-&gt;idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</title>
 <pubDate>2026-03-16T06:38:00Z</pubDate>
-<description>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working->idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</description>
+<description>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working-&gt;idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</description>
 <link>#</link>
 </item>
 <item>
@@ -71,9 +77,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Add export session as Markdown — command palette entry (Ctrl+K > Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</title>
+<title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</title>
 <pubDate>2026-03-16T06:10:59Z</pubDate>
-<description>Add export session as Markdown — command palette entry (Ctrl+K > Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
+<description>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
 <link>#</link>
 </item>
 <item>
@@ -107,9 +113,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
+<title>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
 <pubDate>2026-03-16T05:32:56Z</pubDate>
-<description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
+<description>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
 <link>#</link>
 </item>
 <item>
@@ -155,9 +161,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</title>
+<title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</title>
 <pubDate>2026-03-16T04:51:28Z</pubDate>
-<description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description>
+<description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</description>
 <link>#</link>
 </item>
 <item>
@@ -173,135 +179,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
+<title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
 <pubDate>2026-03-16T04:35:12Z</pubDate>
-<description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
-<link>#</link>
-</item>
-<item>
-<title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</title>
-<pubDate>2026-03-16T04:31:19Z</pubDate>
-<description>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</description>
-<link>#</link>
-</item>
-<item>
-<title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</title>
-<pubDate>2026-03-16T04:27:11Z</pubDate>
-<description>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</description>
-<link>#</link>
-</item>
-<item>
-<title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</title>
-<pubDate>2026-03-16T04:21:51Z</pubDate>
-<description>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</description>
-<link>#</link>
-</item>
-<item>
-<title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</title>
-<pubDate>2026-03-16T04:16:37Z</pubDate>
-<description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description>
-<link>#</link>
-</item>
-<item>
-<title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</title>
-<pubDate>2026-03-16T04:10:22Z</pubDate>
-<description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description>
-<link>#</link>
-</item>
-<item>
-<title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</title>
-<pubDate>2026-03-16T04:06:25Z</pubDate>
-<description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description>
-<link>#</link>
-</item>
-<item>
-<title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</title>
-<pubDate>2026-03-16T04:01:43Z</pubDate>
-<description>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</description>
-<link>#</link>
-</item>
-<item>
-<title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</title>
-<pubDate>2026-03-16T03:57:32Z</pubDate>
-<description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description>
-<link>#</link>
-</item>
-<item>
-<title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</title>
-<pubDate>2026-03-16T03:54:50Z</pubDate>
-<description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description>
-<link>#</link>
-</item>
-<item>
-<title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title>
-<pubDate>2026-03-16T03:51:24Z</pubDate>
-<description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
-<link>#</link>
-</item>
-<item>
-<title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</title>
-<pubDate>2026-03-16T03:48:22Z</pubDate>
-<description>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</description>
-<link>#</link>
-</item>
-<item>
-<title>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title>
-<pubDate>2026-03-16T03:41:49Z</pubDate>
-<description>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
-<link>#</link>
-</item>
-<item>
-<title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</title>
-<pubDate>2026-03-16T03:37:25Z</pubDate>
-<description>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</description>
-<link>#</link>
-</item>
-<item>
-<title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</title>
-<pubDate>2026-03-16T03:32:54Z</pubDate>
-<description>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</description>
-<link>#</link>
-</item>
-<item>
-<title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</title>
-<pubDate>2026-03-16T03:29:17Z</pubDate>
-<description>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</description>
-<link>#</link>
-</item>
-<item>
-<title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</title>
-<pubDate>2026-03-16T03:22:27Z</pubDate>
-<description>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</description>
-<link>#</link>
-</item>
-<item>
-<title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</title>
-<pubDate>2026-03-16T03:18:20Z</pubDate>
-<description>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</description>
-<link>#</link>
-</item>
-<item>
-<title>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</title>
-<pubDate>2026-03-16T03:15:13Z</pubDate>
-<description>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</description>
-<link>#</link>
-</item>
-<item>
-<title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</title>
-<pubDate>2026-03-16T03:08:00Z</pubDate>
-<description>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</description>
-<link>#</link>
-</item>
-<item>
-<title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</title>
-<pubDate>2026-03-16T03:03:28Z</pubDate>
-<description>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</description>
-<link>#</link>
-</item>
-<item>
-<title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</title>
-<pubDate>2026-03-16T02:57:43Z</pubDate>
-<description>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</description>
+<description>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
 <link>#</link>
 </item>
 </channel></rss>
