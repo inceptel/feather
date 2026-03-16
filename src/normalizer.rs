@@ -697,6 +697,35 @@ async fn normalize_session(
         meta.updated_at = last.timestamp.clone();
     }
 
+    // Fallback title: use first user message text if no summary record set the title
+    if meta.title.is_none() {
+        for msg in &sorted_messages {
+            if msg.role == "user" {
+                for block in &msg.content {
+                    if let ContentBlock::Text { text } = block {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            let title = if trimmed.len() > 60 {
+                                let mut end = 60;
+                                while end > 0 && !trimmed.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("{}...", &trimmed[..end])
+                            } else {
+                                trimmed.to_string()
+                            };
+                            // Take only the first line
+                            let title = title.lines().next().unwrap_or(&title).to_string();
+                            meta.title = Some(title);
+                            break;
+                        }
+                    }
+                }
+                if meta.title.is_some() { break; }
+            }
+        }
+    }
+
     // Write normalized file
     let normalized_path = config.normalized_dir.join(format!("{}.jsonl", session_id));
     write_normalized_file(&normalized_path, &sorted_messages)?;
