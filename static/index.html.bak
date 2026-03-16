@@ -160,6 +160,22 @@
         }
         #terminal-panel.open { display: flex; }
         body.terminal-open #autoweb-version-indicator { display: none; }
+        /* What's New popover */
+        #whats-new-popover {
+            display: none; position: absolute; top: 100%; left: -80px; margin-top: 6px;
+            width: 320px; max-height: 400px; overflow-y: auto; z-index: 100;
+            background: var(--smoke-2); border: 1px solid var(--smoke-5); border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3); padding: 0;
+        }
+        #whats-new-popover.open { display: block; animation: fadeInScale 0.15s ease-out; }
+        .wn-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--smoke-4); display: flex; align-items: center; justify-content: space-between; }
+        .wn-header h3 { font-size: 13px; font-weight: 600; color: var(--smoke-12); margin: 0; }
+        .wn-item { padding: 8px 14px; border-bottom: 1px solid var(--smoke-3); }
+        .wn-item:last-child { border-bottom: none; }
+        .wn-item-time { font-size: 10px; color: var(--smoke-7); font-family: ui-monospace, monospace; }
+        .wn-item-desc { font-size: 12px; color: var(--smoke-11); line-height: 1.4; margin-top: 2px; }
+        .wn-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+        .wn-empty { padding: 30px 14px; text-align: center; color: var(--smoke-7); font-size: 12px; }
         body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: 1 1 0% !important; min-width: 0 !important; }
         #terminal-resize-handle { height: 5px; background: var(--smoke-4); cursor: ns-resize; flex-shrink: 0; transition: background-color 0.15s; }
         #terminal-resize-handle:hover { background: #fab283; }
@@ -380,9 +396,17 @@
                     <span class="icon-svg text-gold-9"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg></span>
                     <h1 class="text-base font-bold text-gold-9 tracking-tight">Feather</h1>
                 </div>
-                <div class="flex items-center gap-1.5">
+                <div class="flex items-center gap-1.5 relative">
                     <span id="sse-dot" class="w-1.5 h-1.5 rounded-full bg-apple-9" title="Connected"></span>
+                    <button id="whats-new-btn" onclick="toggleWhatsNew()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="What's New">New</button>
                     <button id="theme-toggle" onclick="toggleTheme()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="Toggle theme">Dark</button>
+                    <div id="whats-new-popover">
+                        <div class="wn-header">
+                            <h3>What's New</h3>
+                            <button onclick="toggleWhatsNew()" class="text-smoke-7 hover:text-smoke-11 text-sm leading-none">&times;</button>
+                        </div>
+                        <div id="whats-new-list"><div class="wn-empty">Loading...</div></div>
+                    </div>
                 </div>
             </div>
             <div class="flex gap-1.5 mb-2">
@@ -853,6 +877,100 @@
 
         // Apply theme immediately to avoid flash
         initTheme();
+
+        // ========== What's New Popover ==========
+        let _whatsNewOpen = false;
+        let _whatsNewLoaded = false;
+        let _whatsNewLastSeen = localStorage.getItem('feather-whatsNewLastSeen') || '';
+
+        function toggleWhatsNew() {
+            const popover = document.getElementById('whats-new-popover');
+            if (!popover) return;
+            _whatsNewOpen = !_whatsNewOpen;
+            popover.classList.toggle('open', _whatsNewOpen);
+            if (_whatsNewOpen && !_whatsNewLoaded) {
+                loadWhatsNew();
+            }
+            if (_whatsNewOpen) {
+                // Mark as seen — store the latest timestamp
+                const list = document.getElementById('whats-new-list');
+                const firstTime = list?.querySelector('.wn-item-time');
+                if (firstTime) {
+                    _whatsNewLastSeen = firstTime.textContent;
+                    localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
+                }
+                updateWhatsNewBadge();
+            }
+        }
+
+        function loadWhatsNew() {
+            fetch('/api/autoweb-results/feather?_=' + Date.now())
+                .then(r => r.text())
+                .then(text => {
+                    _whatsNewLoaded = true;
+                    const lines = text.trim().split('\n');
+                    const items = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const parts = lines[i].split('\t');
+                        if (parts.length < 3) continue;
+                        let ts, status, desc;
+                        if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
+                            ts = parts[0]; status = parts[2]; desc = parts[3];
+                        } else {
+                            ts = parts[0]; status = parts[1]; desc = parts[2];
+                        }
+                        if (status === 'keep') items.push({ ts, desc });
+                    }
+                    items.reverse(); // newest first
+                    const recent = items.slice(0, 15);
+                    const list = document.getElementById('whats-new-list');
+                    if (!list) return;
+                    if (recent.length === 0) {
+                        list.innerHTML = '<div class="wn-empty">No improvements yet</div>';
+                        return;
+                    }
+                    list.innerHTML = recent.map(item => {
+                        const d = new Date(item.ts);
+                        const timeStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+                        return `<div class="wn-item">
+                            <div class="wn-item-time">${timeStr} ET</div>
+                            <div class="wn-item-desc">${escapeHtml(item.desc)}</div>
+                        </div>`;
+                    }).join('');
+                    // Update last seen
+                    if (_whatsNewOpen && recent.length > 0) {
+                        _whatsNewLastSeen = recent[0].ts;
+                        localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
+                        updateWhatsNewBadge();
+                    }
+                })
+                .catch(() => {
+                    const list = document.getElementById('whats-new-list');
+                    if (list) list.innerHTML = '<div class="wn-empty">Could not load changes</div>';
+                });
+        }
+
+        function updateWhatsNewBadge() {
+            const btn = document.getElementById('whats-new-btn');
+            if (!btn) return;
+            // Remove existing badge
+            const old = btn.querySelector('.wn-unseen-dot');
+            if (old) old.remove();
+            // If there are unseen changes, show a dot
+            if (!_whatsNewLastSeen) {
+                btn.insertAdjacentHTML('beforeend', '<span class="wn-unseen-dot" style="position:absolute;top:-1px;right:-1px;width:5px;height:5px;border-radius:50%;background:var(--gold-9);"></span>');
+            }
+        }
+
+        // Close popover when clicking outside
+        document.addEventListener('click', function(e) {
+            if (_whatsNewOpen && !e.target.closest('#whats-new-popover') && !e.target.closest('#whats-new-btn')) {
+                toggleWhatsNew();
+            }
+        });
+
+        // Show badge on load
+        updateWhatsNewBadge();
 
         // ========== State ==========
         let currentSessionId = null;
