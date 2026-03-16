@@ -77,6 +77,7 @@
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
         .session-item { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 8px; }
         .session-item:hover { transform: translateX(3px); background: rgba(250, 178, 131, 0.08); }
+        .session-item.keyboard-highlight { background: rgba(92, 156, 245, 0.15); border-left-color: #5c9cf5 !important; }
         .session-item.active { background: linear-gradient(90deg, rgba(250, 178, 131, 0.12) 0%, transparent 100%); border-left: 3px solid #fab283 !important; box-shadow: inset 0 0 0 1px rgba(250, 178, 131, 0.06); }
         /* Thin scrollbar */
         .thin-scrollbar::-webkit-scrollbar { width: 4px; }
@@ -390,6 +391,7 @@
                 <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-smoke-7" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input id="session-search" type="text" placeholder="Search sessions..."
                        oninput="filterSessions(this.value)"
+                       onkeydown="handleSessionSearchKeydown(event)"
                        class="w-full pl-8 pr-8 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-xs placeholder-smoke-8 focus:outline-none focus:border-gold-9/50 focus:ring-1 focus:ring-gold-9/30">
                 <kbd id="search-shortcut-hint" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-smoke-7 bg-smoke-4 border border-smoke-5 rounded px-1.5 py-0.5 font-mono leading-none pointer-events-none">/</kbd>
             </div>
@@ -573,6 +575,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -1326,10 +1329,48 @@
         }
 
         let currentSearchQuery = '';
+        let _kbHighlightIdx = -1;
 
         function filterSessions(query) {
             currentSearchQuery = query;
+            _kbHighlightIdx = -1;
             renderSessions();
+        }
+
+        function getVisibleSessionItems() {
+            return Array.from(document.querySelectorAll('#sessions .session-item'));
+        }
+
+        function updateKeyboardHighlight() {
+            const items = getVisibleSessionItems();
+            items.forEach((el, i) => {
+                if (i === _kbHighlightIdx) {
+                    el.classList.add('keyboard-highlight');
+                    el.scrollIntoView({ block: 'nearest' });
+                } else {
+                    el.classList.remove('keyboard-highlight');
+                }
+            });
+        }
+
+        function handleSessionSearchKeydown(e) {
+            const items = getVisibleSessionItems();
+            if (!items.length) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                _kbHighlightIdx = Math.min(_kbHighlightIdx + 1, items.length - 1);
+                updateKeyboardHighlight();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                _kbHighlightIdx = Math.max(_kbHighlightIdx - 1, 0);
+                updateKeyboardHighlight();
+            } else if (e.key === 'Enter' && _kbHighlightIdx >= 0 && _kbHighlightIdx < items.length) {
+                e.preventDefault();
+                items[_kbHighlightIdx].click();
+                document.getElementById('session-search')?.blur();
+                _kbHighlightIdx = -1;
+                updateKeyboardHighlight();
+            }
         }
 
         function formatTime(iso) {
@@ -4797,13 +4838,15 @@
                 }
             }
         });
-        // Show shortcut hint again when search loses focus
+        // Show shortcut hint again when search loses focus, and clear keyboard highlight
         document.getElementById('session-search')?.addEventListener('blur', () => {
             const hint = document.getElementById('search-shortcut-hint');
             const searchInput = document.getElementById('session-search');
             if (hint && (!searchInput.value || searchInput.value === '')) {
                 hint.style.display = '';
             }
+            _kbHighlightIdx = -1;
+            updateKeyboardHighlight();
         });
         // Hide hint when search has content
         document.getElementById('session-search')?.addEventListener('input', () => {
