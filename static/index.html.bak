@@ -5677,6 +5677,7 @@
             const starIcon = `<svg viewBox="0 0 24 24" fill="${isStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
             menu.innerHTML = `
                 <div class="ctx-item" onclick="ctxStar()">${starIcon} ${starLabel}</div>
+                <div class="ctx-item" onclick="ctxOpenNewTab()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open in new tab</div>
                 <div class="ctx-item" onclick="ctxCopyId()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy session ID</div>
                 <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
                 <div class="ctx-sep"></div>
@@ -5706,6 +5707,16 @@
                 navigator.clipboard.writeText(_ctxSessionId).then(() => {
                     showToast('Session ID copied');
                 }).catch(() => {});
+            }
+            closeSessionContextMenu();
+        }
+
+        function ctxOpenNewTab() {
+            if (_ctxSessionId) {
+                const s = allSessions.find(s => s.id === _ctxSessionId);
+                const folder = s && s.project ? s.project : (currentFolder || '');
+                const hash = folder ? `session=${encodeURIComponent(_ctxSessionId)}&folder=${encodeURIComponent(folder)}` : `session=${encodeURIComponent(_ctxSessionId)}`;
+                window.open(`${location.pathname}#${hash}`, '_blank');
             }
             closeSessionContextMenu();
         }

@@ -5,6 +5,12 @@
     <description>Self-improving Feather: automated improvements log</description>
     <link>#</link>
     <item>
+      <title>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</title>
+      <description>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
+      <pubDate>2026-03-16T06:48:49Z</pubDate>
+      <link>#</link>
+    </item>
+    <item>
       <title>Add character count indicator to message input — shows char count while typing, gold highlight at 500+ chars (WebSocket threshold), compact 2.5k format for 1000+ chars (92 tests pass)</title>
       <description>Add character count indicator to message input — shows char count while typing, gold highlight at 500+ chars (WebSocket threshold), compact 2.5k format for 1000+ chars (92 tests pass)</description>
       <pubDate>2026-03-16T06:45:15Z</pubDate>
