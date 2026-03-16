@@ -2,9 +2,15 @@
 <rss version="2.0">
   <channel>
     <title>Autoweb Feather Improvements</title>
-    <description>Autonomous improvements to the Feather web application</description>
     <link>http://localhost:4860</link>
-    <lastBuildDate>2026-03-16T15:06:22Z</lastBuildDate>
+    <description>Autonomous improvements to Feather web application</description>
+    <lastBuildDate>2026-03-16T15:12:02Z</lastBuildDate>
+    <item>
+      <title>Handle trailing JSONL parse errors gracefully — trim incomplete last lines before parsing (no-newline detection via rfin</title>
+      <description>Handle trailing JSONL parse errors gracefully — trim incomplete last lines before parsing (no-newline detection via rfind), log mid-file parse errors with line number + content preview for debugging (131 tests pass)</description>
+      <pubDate>2026-03-16T15:11:31Z</pubDate>
+      <link>#</link>
+    </item>
     <item>
       <title>SSE tail dedup — sent_lines HashMap tracks UUID+content, skips re-emitting unchanged messages on normalized file rewrite</title>
       <description>SSE tail dedup — sent_lines HashMap tracks UUID+content, skips re-emitting unchanged messages on normalized file rewrite, reducing resync bandwidth and frontend work (130 tests pass)</description>
@@ -42,8 +48,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add scroll position memory per session — saves scrollTop when switching away, restores when returning so users don't los</title>
-      <description>Add scroll position memory per session — saves scrollTop when switching away, restores when returning so users don't lose their place in long sessions (123 tests pass)</description>
+      <title>Add scroll position memory per session — saves scrollTop when switching away, restores when returning so users don&#x27;t los</title>
+      <description>Add scroll position memory per session — saves scrollTop when switching away, restores when returning so users don&#x27;t lose their place in long sessions (123 tests pass)</description>
       <pubDate>2026-03-16T09:08:54Z</pubDate>
       <link>#</link>
     </item>
@@ -156,13 +162,13 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads tex</title>
+      <title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text in</title>
       <description>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</description>
       <pubDate>2026-03-16T07:21:09Z</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improv</title>
+      <title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves </title>
       <description>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves readability in code-heavy sessions (99 tests pass)</description>
       <pubDate>2026-03-16T07:16:09Z</pubDate>
       <link>#</link>
@@ -174,7 +180,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, to</title>
+      <title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggl</title>
       <description>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
       <pubDate>2026-03-16T07:07:38Z</pubDate>
       <link>#</link>
@@ -198,8 +204,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for sid</title>
-      <description>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
+      <title>Add &#x27;Open in new tab&#x27; to session context menu — right-click sessions to open in new browser tab via hash routing for sid</title>
+      <description>Add &#x27;Open in new tab&#x27; to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
       <pubDate>2026-03-16T06:48:49Z</pubDate>
       <link>#</link>
     </item>
@@ -240,7 +246,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown wi</title>
+      <title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with </title>
       <description>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
       <pubDate>2026-03-16T06:10:59Z</pubDate>
       <link>#</link>
@@ -276,8 +282,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fe</title>
-      <description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
+      <title>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fe</title>
+      <description>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
       <pubDate>2026-03-16T05:32:56Z</pubDate>
       <link>#</link>
     </item>
@@ -324,8 +330,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') </title>
-      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description>
+      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) </title>
+      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</description>
       <pubDate>2026-03-16T04:51:28Z</pubDate>
       <link>#</link>
     </item>
@@ -342,8 +348,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of on</title>
-      <description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
+      <title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of on</title>
+      <description>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
       <pubDate>2026-03-16T04:35:12Z</pubDate>
       <link>#</link>
     </item>
@@ -366,8 +372,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improveme</title>
-      <description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description>
+      <title>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improveme</title>
+      <description>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil&#x27;s feature list)</description>
       <pubDate>2026-03-16T04:16:37Z</pubDate>
       <link>#</link>
     </item>
@@ -379,7 +385,7 @@
     </item>
     <item>
       <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionVie</title>
-      <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description>
+      <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</description>
       <pubDate>2026-03-16T04:06:25Z</pubDate>
       <link>#</link>
     </item>
@@ -402,8 +408,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghe</title>
-      <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
+      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghe</title>
+      <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
       <pubDate>2026-03-16T03:51:24Z</pubDate>
       <link>#</link>
     </item>
@@ -414,7 +420,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradie</title>
+      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fad</title>
       <description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
       <pubDate>2026-03-16T03:41:49Z</pubDate>
       <link>#</link>
@@ -516,8 +522,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM')</title>
-      <description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description>
+      <title>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;)</title>
+      <description>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;) using ISO timestamps from backend data</description>
       <pubDate>2026-03-16T02:14:45Z</pubDate>
       <link>#</link>
     </item>
@@ -540,8 +546,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_</title>
-      <description>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
+      <title>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_</title>
+      <description>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
       <pubDate>2026-03-16T01:46:53Z</pubDate>
       <link>#</link>
     </item>
@@ -582,7 +588,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length li</title>
+      <title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</title>
       <description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</description>
       <pubDate>2026-03-16T00:52:37Z</pubDate>
       <link>#</link>
@@ -630,8 +636,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows spec</title>
-      <description>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</description>
+      <title>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows spec</title>
+      <description>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows specific message instead of generic &quot;No sessions&quot;</description>
       <pubDate>2026-03-15T23:10:19Z</pubDate>
       <link>#</link>
     </item>
@@ -678,8 +684,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</title>
-      <description>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</description>
+      <title>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</title>
+      <description>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</description>
       <pubDate>2026-03-15T22:32:04Z</pubDate>
       <link>#</link>
     </item>
@@ -720,8 +726,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolba</title>
-      <description>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</description>
+      <title>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolba</title>
+      <description>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolbar on small screens</description>
       <pubDate>2026-03-15T21:57:58Z</pubDate>
       <link>#</link>
     </item>
@@ -756,8 +762,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with wh</title>
-      <description>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
+      <title>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with wh</title>
+      <description>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
       <pubDate>2026-03-15T20:28:59Z</pubDate>
       <link>#</link>
     </item>
@@ -774,8 +780,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-n</title>
-      <description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</description>
+      <title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-n</title>
+      <description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-nowrap class already handles it</description>
       <pubDate>2026-03-15T19:51:56Z</pubDate>
       <link>#</link>
     </item>
@@ -792,14 +798,14 @@
       <link>#</link>
     </item>
     <item>
-      <title>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape o</title>
-      <description>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
+      <title>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape o</title>
+      <description>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
       <pubDate>2026-03-15T19:27:42Z</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape i</title>
-      <description>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</description>
+      <title>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape i</title>
+      <description>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape instead of requiring a click elsewhere</description>
       <pubDate>2026-03-15T19:21:06Z</pubDate>
       <link>#</link>
     </item>
@@ -816,8 +822,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now sho</title>
-      <description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</description>
+      <title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now sho</title>
+      <description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now shows correct count (9)</description>
       <pubDate>2026-03-15T18:40:25Z</pubDate>
       <link>#</link>
     </item>
@@ -852,7 +858,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmu</title>
+      <title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux s</title>
       <description>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
       <pubDate>2026-03-15T18:18:00Z</pubDate>
       <link>#</link>
@@ -864,8 +870,8 @@
       <link>#</link>
     </item>
     <item>
-      <title>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
-      <description>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
+      <title>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
+      <description>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
       <pubDate>2026-03-15T18:07:00Z</pubDate>
       <link>#</link>
     </item>

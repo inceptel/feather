@@ -4612,6 +4612,15 @@
                 resetTailHeartbeat();  // Got data — connection is alive
                 try {
                     const events = JSON.parse(event.data);
+                    // Sort events by timestamp with role tiebreaker (user before assistant)
+                    // to ensure correct DOM ordering regardless of backend delivery order
+                    events.sort((a, b) => {
+                        const tsA = a.line?.timestamp || '';
+                        const tsB = b.line?.timestamp || '';
+                        if (tsA !== tsB) return tsA < tsB ? -1 : 1;
+                        const roleOrd = r => r === 'user' ? 0 : r === 'assistant' ? 1 : 2;
+                        return roleOrd(a.line?.type) - roleOrd(b.line?.type);
+                    });
                     for (const evt of events) {
                         // Update cursor for reconnection
                         tailCursor = evt.cursor;

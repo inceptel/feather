@@ -1,0 +1,13 @@
+[2m2026-03-16T15:16:33.806000Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Rebuilt 0 Pi session mappings
+[2m2026-03-16T15:16:33.806099Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m FEATHER_ANTHROPIC_API_KEY not set, memory extraction disabled
+[2m2026-03-16T15:16:33.806121Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Starting session normalizer (debounce: 100ms)
+[2m2026-03-16T15:16:33.806160Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Performing initial session scan...
+[2m2026-03-16T15:16:33.806663Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Feather-rs v1.2.0 listening on 0.0.0.0:4860
+[2m2026-03-16T15:16:35.803940Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Client reconnecting from event ID: 52
+[2m2026-03-16T15:16:35.851375Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:16:41.673209Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:16:42.249784Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Initial scan complete: 1285 sessions loaded (0 Codex, 0 Pi)
+[2m2026-03-16T15:16:42.249914Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Normalizer ready to receive file change events
+[2m2026-03-16T15:16:42.250247Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.pi/agent/sessions for Pi changes
+[2m2026-03-16T15:16:42.250334Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.codex/sessions for Codex changes
+[2m2026-03-16T15:16:42.256702Z[0m [32m INFO[0m [2mfeather_rs::normalizer[0m[2m:[0m Watching /home/feather-dev/.claude/projects for Claude changes
