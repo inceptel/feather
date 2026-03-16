@@ -635,9 +635,9 @@
                         <div style="display:flex;gap:4px;" id="aw-tabs">
                             <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Feather</button>
                             <button onclick="switchAwTab('trading')" id="aw-tab-trading" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Trading</button>
+                            <button onclick="switchAwTab('reviews')" id="aw-tab-reviews" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--gold-9);">Reviews</button>
                         </div>
                         <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
-                        <a id="aw-latest-review" href="#" onclick="loadLatestReview();return false;" style="font-size:11px;color:var(--gold-9);margin-left:8px;text-decoration:underline;cursor:pointer;">Latest Review</a>
                     </div>
                     <button onclick="document.getElementById('autoweb-overlay').style.display='none'" style="background:none;border:1px solid var(--smoke-5);color:var(--smoke-10);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;min-height:32px;">Close</button>
                 </div>
@@ -669,9 +669,13 @@
             document.querySelectorAll('#aw-tabs button').forEach(b => {
                 const isActive = b.id === 'aw-tab-' + tab;
                 b.style.background = isActive ? 'var(--smoke-4)' : 'transparent';
-                b.style.color = isActive ? 'var(--smoke-12)' : 'var(--smoke-9)';
+                b.style.color = isActive ? (tab === 'reviews' && isActive ? 'var(--gold-9)' : 'var(--smoke-12)') : (b.id === 'aw-tab-reviews' ? 'var(--gold-9)' : 'var(--smoke-9)');
             });
-            loadAutowebResults();
+            if (tab === 'reviews') {
+                loadAutowebReviews();
+            } else {
+                loadAutowebResults();
+            }
         }
 
         function loadAutowebResults() {
@@ -723,20 +727,63 @@
                 });
         }
 
-        function loadLatestReview() {
-            fetch('/aw-reviews/')
-                .then(r => r.text())
-                .then(html => {
-                    const matches = html.match(/href="(review-[^"]+\.md)"/g);
-                    if (!matches) return;
-                    const latest = matches[matches.length - 1].match(/href="([^"]+)"/)[1];
-                    return fetch('/aw-reviews/' + latest).then(r => r.text());
-                })
-                .then(md => {
-                    if (!md) return;
-                    const body = document.getElementById('autoweb-results-body');
-                    if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;"><pre style="white-space:pre-wrap;font-size:12px;color:var(--smoke-11);font-family:Inter,sans-serif;line-height:1.6;">' + md.replace(/</g,'&lt;') + '</pre></td></tr>';
+        function loadAutowebReviews() {
+            const body = document.getElementById('autoweb-results-body');
+            const stats = document.getElementById('autoweb-stats');
+            if (!body) return;
+            if (stats) stats.innerHTML = 'Loading reviews...';
+            // Try all instances and merge
+            const instances = ['feather', 'frontend', 'trading'];
+            Promise.all(instances.map(inst =>
+                fetch('/api/autoweb-reviews/' + inst + '?_=' + Date.now())
+                    .then(r => r.ok ? r.json() : [])
+                    .catch(() => [])
+            )).then(results => {
+                const allReviews = [];
+                instances.forEach((inst, i) => {
+                    (results[i] || []).forEach(r => allReviews.push({ ...r, instance: inst }));
                 });
+                allReviews.sort((a, b) => b.name.localeCompare(a.name)); // newest first
+                if (allReviews.length === 0) {
+                    body.innerHTML = '<tr><td colspan="3" style="padding:40px;color:var(--smoke-8);text-align:center;">No reviews found</td></tr>';
+                    if (stats) stats.innerHTML = '';
+                    return;
+                }
+                if (stats) stats.innerHTML = allReviews.length + ' review' + (allReviews.length !== 1 ? 's' : '');
+                const html = allReviews.map(r => {
+                    const instColors = { feather: '#73b8ff', frontend: '#c678dd', trading: '#e5c07b' };
+                    const badgeColor = instColors[r.instance] || '#888';
+                    // Extract date from filename like review-20260316-0114.md
+                    const dateMatch = r.name.match(/review-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
+                    let dateStr = r.name;
+                    if (dateMatch) {
+                        const d = new Date(Date.UTC(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3], +dateMatch[4], +dateMatch[5]));
+                        dateStr = d.toLocaleString('en-US', {timeZone:'America/New_York', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', hour12:true}) + ' ET';
+                    }
+                    const rendered = typeof marked !== 'undefined' ? marked.parse(r.content) : r.content.replace(/</g, '&lt;');
+                    return `<tr style="border-bottom:1px solid var(--smoke-4);">
+                        <td colspan="3" style="padding:0;">
+                            <details style="padding:0;">
+                                <summary style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--smoke-11);font-size:13px;list-style:none;">
+                                    <span style="color:var(--smoke-8);font-size:10px;">&#9654;</span>
+                                    <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:${badgeColor};background:${badgeColor}20;">${r.instance}</span>
+                                    <span style="font-weight:600;">${dateStr}</span>
+                                    <span style="color:var(--smoke-8);font-size:12px;margin-left:auto;">${r.name}</span>
+                                </summary>
+                                <div class="markdown-content" style="padding:8px 20px 20px;font-size:13px;line-height:1.6;color:var(--smoke-11);">${rendered}</div>
+                            </details>
+                        </td>
+                    </tr>`;
+                }).join('');
+                body.innerHTML = html;
+                // Rotate arrow on open
+                body.querySelectorAll('details').forEach(d => {
+                    d.addEventListener('toggle', () => {
+                        const arrow = d.querySelector('summary span:first-child');
+                        if (arrow) arrow.style.transform = d.open ? 'rotate(90deg)' : '';
+                    });
+                });
+            });
         }
 
         function toggleTheme() {

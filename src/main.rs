@@ -283,6 +283,36 @@ async fn autoweb_results(Path(instance): Path<String>) -> impl IntoResponse {
     }
 }
 
+async fn autoweb_reviews(Path(instance): Path<String>) -> impl IntoResponse {
+    let dir = match instance.as_str() {
+        "feather" => "/home/feather-dev/autoweb-feather/reviews",
+        "frontend" => "/home/user/autoweb/reviews",
+        "trading" => "/home/user/autoweb-trading/reviews",
+        _ => return axum::response::Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("not found"))
+            .unwrap(),
+    };
+    let mut reviews = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".md") {
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    reviews.push(serde_json::json!({ "name": name, "content": content }));
+                }
+            }
+        }
+    }
+    reviews.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    let json = serde_json::to_string(&reviews).unwrap_or_else(|_| "[]".to_string());
+    axum::response::Response::builder()
+        .status(200)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(json))
+        .unwrap()
+}
+
 // ============================================================================
 // Dashboards Endpoint
 // ============================================================================
@@ -2429,6 +2459,7 @@ async fn main() {
         .route("/api/projects", get(list_projects))
         .route("/api/dashboards", get(list_dashboards))
         .route("/api/autoweb-results/{instance}", get(autoweb_results))
+        .route("/api/autoweb-reviews/{instance}", get(autoweb_reviews))
         .route("/api/projects/{project_id}/sessions", get(list_sessions))
         .route("/api/projects/{project_id}/sessions/{session_id}/history", get(get_session_history))
         // Claude/tmux management
