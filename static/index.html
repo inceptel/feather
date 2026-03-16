@@ -632,9 +632,11 @@
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--smoke-2);border-bottom:1px solid var(--smoke-5);flex-wrap:wrap;gap:8px;">
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <span style="color:var(--smoke-12);font-size:14px;font-weight:700;letter-spacing:-0.3px;">Autoweb</span>
-                        <div style="display:flex;gap:4px;" id="aw-tabs">
-                            <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Feather</button>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;" id="aw-tabs">
+                            <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Full-Stack</button>
+                            <button onclick="switchAwTab('frontend')" id="aw-tab-frontend" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Frontend</button>
                             <button onclick="switchAwTab('trading')" id="aw-tab-trading" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Trading</button>
+                            <button onclick="switchAwTab('all')" id="aw-tab-all" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">All</button>
                         </div>
                         <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
                     </div>
@@ -658,10 +660,7 @@
         }
 
         let _awActiveTab = 'feather';
-        const _awUrls = {
-            feather: '/aw-dev-results.tsv',
-            trading: '/dashboards/aw-trading-results.tsv',
-        };
+        const _awInstances = ['feather', 'frontend', 'trading'];
 
         function switchAwTab(tab) {
             _awActiveTab = tab;
@@ -670,50 +669,95 @@
                 b.style.background = isActive ? 'var(--smoke-4)' : 'transparent';
                 b.style.color = isActive ? 'var(--smoke-12)' : 'var(--smoke-9)';
             });
+            // Update table header for All tab (add Source column)
+            const thead = document.querySelector('#autoweb-results-table thead tr');
+            if (thead) {
+                const srcTh = '<th style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Source</th>';
+                if (tab === 'all' && !thead.querySelector('.aw-src-col')) {
+                    thead.insertAdjacentHTML('afterbegin', '<th class="aw-src-col" style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Source</th>');
+                } else if (tab !== 'all') {
+                    const sc = thead.querySelector('.aw-src-col');
+                    if (sc) sc.remove();
+                }
+            }
             loadAutowebResults();
         }
 
+        function _parseAwTsv(text, source) {
+            const lines = text.trim().split('\n');
+            const entries = [];
+            for (let i = 1; i < lines.length; i++) {
+                const parts = lines[i].split('\t');
+                if (parts.length < 3) continue;
+                let ts, status, desc;
+                if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
+                    ts = parts[0]; status = parts[2]; desc = parts[3];
+                } else {
+                    ts = parts[0]; status = parts[1]; desc = parts[2];
+                }
+                entries.push({ ts, status, desc, source });
+            }
+            return entries;
+        }
+
+        function _renderAwEntries(entries, showSource) {
+            const body = document.getElementById('autoweb-results-body');
+            const stats = document.getElementById('autoweb-stats');
+            if (!body) return;
+            let keeps = 0, reverts = 0, crashes = 0, skips = 0;
+            entries.forEach(e => {
+                if (e.status === 'keep') keeps++;
+                else if (e.status === 'revert') reverts++;
+                else if (e.status === 'crash') crashes++;
+                else if (e.status === 'skip') skips++;
+            });
+            const colors = {
+                keep: ['#7fd88f', 'rgba(127,216,143,0.12)'],
+                revert: ['#e06c75', 'rgba(224,108,117,0.12)'],
+                crash: ['#e5c07b', 'rgba(229,192,123,0.12)'],
+                skip: ['#888', 'rgba(136,136,136,0.08)']
+            };
+            const sourceColors = { feather: '#73b8ff', frontend: '#c49cde', trading: '#e5c07b' };
+            const rows = entries.map(e => {
+                const [statusColor, statusBg] = colors[e.status] || colors.skip;
+                const srcCol = showSource ? `<td style="padding:8px 12px;white-space:nowrap;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:${sourceColors[e.source]||'#888'};background:${sourceColors[e.source]||'#888'}22;text-transform:capitalize;">${e.source}</span></td>` : '';
+                return `<tr style="border-bottom:1px solid var(--smoke-4);${e.status === 'skip' ? 'opacity:0.6;' : ''}">
+                    ${srcCol}
+                    <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${new Date(e.ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})} ET</td>
+                    <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${e.status}</span></td>
+                    <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${e.desc}</td>
+                </tr>`;
+            });
+            body.innerHTML = rows.join('');
+            const total = keeps + reverts + crashes + skips;
+            const label = {feather: 'Full-Stack', frontend: 'Frontend', trading: 'Trading', all: 'All'}[_awActiveTab] || 'All';
+            if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
+        }
+
         function loadAutowebResults() {
-            const url = _awUrls[_awActiveTab] || _awUrls.feather;
-            fetch(url + '?_=' + Date.now())
-                .then(r => r.text())
-                .then(text => {
-                    const lines = text.trim().split('\n');
-                    const body = document.getElementById('autoweb-results-body');
-                    const stats = document.getElementById('autoweb-stats');
-                    if (!body) return;
-                    let keeps = 0, reverts = 0, crashes = 0, skips = 0;
-                    const rows = [];
-                    for (let i = 1; i < lines.length; i++) {
-                        const parts = lines[i].split('\t');
-                        if (parts.length < 3) continue;
-                        const [ts, status, desc] = parts;
-                        if (status === 'keep') keeps++;
-                        else if (status === 'revert') reverts++;
-                        else if (status === 'crash') crashes++;
-                        else if (status === 'skip') skips++;
-                        const colors = {
-                            keep: ['#7fd88f', 'rgba(127,216,143,0.12)'],
-                            revert: ['#e06c75', 'rgba(224,108,117,0.12)'],
-                            crash: ['#e5c07b', 'rgba(229,192,123,0.12)'],
-                            skip: ['#888', 'rgba(136,136,136,0.08)']
-                        };
-                        const [statusColor, statusBg] = colors[status] || colors.skip;
-                        rows.push(`<tr style="border-bottom:1px solid var(--smoke-4);${status === 'skip' ? 'opacity:0.6;' : ''}">
-                            <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${ts.replace('T',' ').replace('Z','')}</td>
-                            <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${status}</span></td>
-                            <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${desc}</td>
-                        </tr>`);
-                    }
-                    body.innerHTML = rows.reverse().join('');
-                    const total = keeps + reverts + crashes + skips;
-                    const label = {feather: 'Feather', dev: 'Dev', trading: 'Trading'}[_awActiveTab] || 'Feather';
-                    if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
-                })
-                .catch(() => {
-                    const body = document.getElementById('autoweb-results-body');
-                    if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--smoke-8);text-align:center;">Could not load results.tsv</td></tr>';
+            if (_awActiveTab === 'all') {
+                Promise.all(_awInstances.map(inst =>
+                    fetch('/api/autoweb-results/' + inst + '?_=' + Date.now())
+                        .then(r => r.ok ? r.text() : '')
+                        .then(text => text ? _parseAwTsv(text, inst) : [])
+                        .catch(() => [])
+                )).then(results => {
+                    const all = results.flat().sort((a, b) => new Date(b.ts) - new Date(a.ts));
+                    _renderAwEntries(all, true);
                 });
+            } else {
+                fetch('/api/autoweb-results/' + _awActiveTab + '?_=' + Date.now())
+                    .then(r => r.text())
+                    .then(text => {
+                        const entries = _parseAwTsv(text, _awActiveTab);
+                        entries.reverse();
+                        _renderAwEntries(entries, false);
+                    })
+                    .catch(() => {
+                        const body = document.getElementById('autoweb-results-body');
+                        if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--smoke-8);text-align:center;">Could not load results.tsv</td></tr>';
+                    });
+            }
         }
 
         function toggleTheme() {
@@ -1923,11 +1967,6 @@
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
             div.setAttribute('data-optimistic', 'true');
-            // Set content hash so removeOptimisticMessage can find this element
-            if (content) div.setAttribute('data-content-hash', hashContent(content));
-            // Set image paths so removeOptimisticImageMessage can find this element
-            const imagePaths = files.filter(f => f.isImage && f.path).map(f => f.path);
-            if (imagePaths.length > 0) div.setAttribute('data-image-path', imagePaths[0]);
 
             let attachmentsHtml = files.map(f => {
                 if (f.isImage) {
@@ -2714,16 +2753,7 @@
                                 if (imgPathMatch) {
                                     removeOptimisticImageMessage(imgPathMatch[1]);
                                 }
-                                // Strip [Attached image: ...] and [Attached file: ...] markers before
-                                // matching optimistic messages, since the optimistic hash was set from
-                                // the original text before those markers were appended.
-                                const baseText = textContent
-                                    .replace(/\n*\[Attached image: [^\]]+\]/g, '')
-                                    .replace(/\n*\[Attached file: [^\]]+\]\s*\([^)]*\)/g, '')
-                                    .trim();
-                                if (baseText) removeOptimisticMessage(baseText);
-                                // Also try with the full text in case the optimistic used full text
-                                if (textContent && textContent !== baseText) removeOptimisticMessage(textContent);
+                                if (textContent) removeOptimisticMessage(textContent);
                                 addUserMessageWithImages(textContent, imageBlocks, false);
                             }
                             scrollToBottom();

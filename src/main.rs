@@ -265,6 +265,23 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
 }
 
 // ============================================================================
+// Autoweb Results Endpoint
+// ============================================================================
+
+async fn autoweb_results(Path(instance): Path<String>) -> impl IntoResponse {
+    let path = match instance.as_str() {
+        "feather" => "/home/feather-dev/autoweb-feather/results.tsv",
+        "frontend" => "/home/user/autoweb/results.tsv",
+        "trading" => "/home/user/autoweb-trading/results.tsv",
+        _ => return (axum::http::StatusCode::NOT_FOUND, "not found".to_string()),
+    };
+    match std::fs::read_to_string(path) {
+        Ok(content) => (axum::http::StatusCode::OK, content),
+        Err(_) => (axum::http::StatusCode::NOT_FOUND, "file not found".to_string()),
+    }
+}
+
+// ============================================================================
 // Dashboards Endpoint
 // ============================================================================
 
@@ -2397,6 +2414,7 @@ async fn main() {
         // Projects & Sessions
         .route("/api/projects", get(list_projects))
         .route("/api/dashboards", get(list_dashboards))
+        .route("/api/autoweb-results/{instance}", get(autoweb_results))
         .route("/api/projects/{project_id}/sessions", get(list_sessions))
         .route("/api/projects/{project_id}/sessions/{session_id}/history", get(get_session_history))
         // Claude/tmux management

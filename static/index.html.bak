@@ -687,7 +687,13 @@
                     for (let i = 1; i < lines.length; i++) {
                         const parts = lines[i].split('\t');
                         if (parts.length < 3) continue;
-                        const [ts, status, desc] = parts;
+                        // Handle both 3-col (ts,status,desc) and 4-col (ts,type,status,desc) formats
+                        let ts, status, desc;
+                        if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
+                            ts = parts[0]; status = parts[2]; desc = parts[3];
+                        } else {
+                            ts = parts[0]; status = parts[1]; desc = parts[2];
+                        }
                         if (status === 'keep') keeps++;
                         else if (status === 'revert') reverts++;
                         else if (status === 'crash') crashes++;
@@ -700,7 +706,7 @@
                         };
                         const [statusColor, statusBg] = colors[status] || colors.skip;
                         rows.push(`<tr style="border-bottom:1px solid var(--smoke-4);${status === 'skip' ? 'opacity:0.6;' : ''}">
-                            <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${ts.replace('T',' ').replace('Z','')}</td>
+                            <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${new Date(ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})} ET</td>
                             <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${status}</span></td>
                             <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${desc}</td>
                         </tr>`);
