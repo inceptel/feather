@@ -172,6 +172,8 @@
         .ctx-item:hover { background: rgba(250, 178, 131, 0.12); color: var(--smoke-12); }
         .ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; }
         .ctx-sep { height: 1px; background: var(--smoke-5); margin: 4px 8px; }
+        .ctx-item.ctx-danger { color: #e06c75; }
+        .ctx-item.ctx-danger:hover { background: rgba(224, 108, 117, 0.12); color: #f0a0a5; }
         /* Lightbox */
         #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 200; align-items: center; justify-content: center; cursor: zoom-out; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         #lightbox.open { display: flex; }
@@ -504,6 +506,9 @@
             </div>
             <div id="mark-all-read-bar" class="hidden mt-1">
                 <button onclick="markAllSessionsRead()" class="w-full text-[10px] text-smoke-7 hover:text-gold-9 transition-colors cursor-pointer py-0.5 text-center" title="Mark all sessions as read"><span id="mark-all-read-count"></span> unread &mdash; mark all read</button>
+            </div>
+            <div id="hidden-sessions-bar" class="hidden mt-1">
+                <button onclick="unhideAllSessions()" class="w-full text-[10px] text-smoke-7 hover:text-gold-9 transition-colors cursor-pointer py-0.5 text-center" title="Show all hidden sessions"><span id="hidden-sessions-count"></span> hidden &mdash; show all</button>
             </div>
         </div>
 
@@ -1589,6 +1594,23 @@
         let sessionViewTimes = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionViewTimes') || '{}'); } catch { return {}; } })();
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
         let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
+        let hiddenSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-hiddenSessions') || '[]')); } catch { return new Set(); } })();
+        function hideSession(sessionId) {
+            hiddenSessions.add(sessionId);
+            try { localStorage.setItem('feather-hiddenSessions', JSON.stringify([...hiddenSessions])); } catch {}
+            renderSessions();
+        }
+        function unhideSession(sessionId) {
+            hiddenSessions.delete(sessionId);
+            try { localStorage.setItem('feather-hiddenSessions', JSON.stringify([...hiddenSessions])); } catch {}
+            renderSessions();
+        }
+        function unhideAllSessions() {
+            hiddenSessions.clear();
+            try { localStorage.setItem('feather-hiddenSessions', '[]'); } catch {}
+            renderSessions();
+            showToast('All sessions unhidden');
+        }
         function getSessionTitle(s) {
             if (!s) return 'Untitled';
             return sessionRenames[s.id] || s.title || 'Untitled';
@@ -1729,6 +1751,23 @@
                 } else {
                     markAllBar.classList.add('hidden');
                 }
+            }
+
+            // Update hidden sessions bar
+            const hiddenBar = document.getElementById('hidden-sessions-bar');
+            const hiddenCount = document.getElementById('hidden-sessions-count');
+            if (hiddenBar) {
+                if (hiddenSessions.size > 0) {
+                    hiddenBar.classList.remove('hidden');
+                    if (hiddenCount) hiddenCount.textContent = hiddenSessions.size;
+                } else {
+                    hiddenBar.classList.add('hidden');
+                }
+            }
+
+            // Filter out hidden sessions
+            if (hiddenSessions.size > 0) {
+                sessions = sessions.filter(s => !hiddenSessions.has(s.id));
             }
 
             // Apply session filter (mine/auto/all)
@@ -6128,6 +6167,7 @@
                 <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
                 <div class="ctx-sep"></div>
                 <div class="ctx-item" onclick="ctxMarkRead()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Mark as read</div>
+                <div class="ctx-item ctx-danger" onclick="ctxHide()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Hide session</div>
             `;
             // Position menu at cursor, keeping within viewport
             const x = Math.min(e.clientX, window.innerWidth - 180);
@@ -6207,6 +6247,14 @@
             closeSessionContextMenu();
         }
 
+        function ctxHide() {
+            if (_ctxSessionId) {
+                hideSession(_ctxSessionId);
+                showToast('Session hidden');
+            }
+            closeSessionContextMenu();
+        }
+
         // Close context menu on click anywhere or Escape
         document.addEventListener('click', () => closeSessionContextMenu());
         document.addEventListener('contextmenu', (e) => {
@@ -6265,6 +6313,8 @@
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
             { label: 'Mark all sessions read', shortcut: '', action: () => markAllSessionsRead() },
+            { label: 'Hide current session', shortcut: '', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } else { showToast('No session selected'); } } },
+            { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
             { label: 'Rename current session', shortcut: '', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
