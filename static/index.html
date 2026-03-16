@@ -1520,7 +1520,7 @@
             currentFolder = folderId;
             localStorage.setItem('feather-folder', folderId);
             updateHash({ folder: folderId, session: null });
-            sessionsDisplayCount = 5;
+            sessionsDisplayCount = 20;
             initFolderTabs();
             loadSessions();
         }
@@ -1610,7 +1610,7 @@
 
         // ========== Sessions ==========
         let allSessions = [];       // Full merged list
-        let sessionsDisplayCount = 5;
+        let sessionsDisplayCount = 20;
         let sessionViewTimes = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionViewTimes') || '{}'); } catch { return {}; } })();
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
         let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
@@ -1957,7 +1957,7 @@
         }
 
         function loadMoreSessions() {
-            sessionsDisplayCount += 5;
+            sessionsDisplayCount += 50;
             renderSessions();
         }
 

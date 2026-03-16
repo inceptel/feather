@@ -2700,9 +2700,10 @@
                 // Remove old button
                 if (oldBtn) oldBtn.remove();
 
-                // Save scroll state
-                const prevScrollHeight = container.scrollHeight;
-                const prevScrollTop = container.scrollTop;
+                // Save scroll state from actual scroll container (#messages, not #message-container)
+                const scrollContainer = document.getElementById('messages');
+                const prevScrollHeight = scrollContainer.scrollHeight;
+                const prevScrollTop = scrollContainer.scrollTop;
 
                 // Render chunk into a temp container by swapping the ID
                 const tempDiv = document.createElement('div');
@@ -2748,10 +2749,10 @@
                 }
 
                 updateDateSeparatorCounts();
-                // Restore scroll position
+                // Restore scroll position on actual scroll container
                 requestAnimationFrame(() => {
-                    const newScrollHeight = container.scrollHeight;
-                    container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+                    const newScrollHeight = scrollContainer.scrollHeight;
+                    scrollContainer.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
                 });
             } catch (e) {
                 console.error('Failed to load earlier messages:', e);
