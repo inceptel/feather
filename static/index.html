@@ -522,6 +522,7 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg> Write code
                         </button>
                     </div>
+                    <div id="recent-sessions-cards" class="mt-8 w-full max-w-sm mx-auto"></div>
                 </div>
             </div>
             <div id="message-container" class="max-w-4xl mx-auto p-4 space-y-4 hidden mt-auto min-w-0 w-full"></div>
@@ -1483,6 +1484,7 @@
                 }
 
                 renderSessions();
+                renderRecentSessionCards();
             } catch (e) {
                 console.error('Failed to load sessions:', e);
             }
@@ -1651,6 +1653,48 @@
         function loadMoreSessions() {
             sessionsDisplayCount += 5;
             renderSessions();
+        }
+
+        function renderRecentSessionCards() {
+            const container = document.getElementById('recent-sessions-cards');
+            if (!container) return;
+            // Only show when empty state is visible (no session selected)
+            const emptyState = document.getElementById('empty-state');
+            if (!emptyState || emptyState.classList.contains('hidden')) return;
+            // Get top 3 non-autoweb sessions (user's own sessions)
+            const recent = allSessions.filter(s => !isAutowebSession(s)).slice(0, 3);
+            if (!recent.length) { container.innerHTML = ''; return; }
+            let html = '<div class="text-[10px] uppercase tracking-widest text-smoke-7 mb-2">Recent sessions</div>';
+            recent.forEach(s => {
+                const title = escapeHtml(s.title || 'Untitled');
+                const time = formatTime(s.lastUpdated);
+                const msgCount = s.message_count ? s.message_count + ' msg' : '';
+                const source = s.source || 'claude';
+                const isTerminalSession = source === 'codex' || source === 'pi'
+                    || s.id.startsWith('feather-codex-') || !!codexTmuxMapping[s.id];
+                const prefix = s.id.startsWith('feather-codex-')
+                    ? s.id.replace('feather-codex-', '').slice(-8)
+                    : s.id.substring(0, 8);
+                const tmuxKey = s.id.startsWith('feather-codex-') ? s.id : prefix;
+                const hasTmux = activeTmuxPrefixes.has(tmuxKey);
+                const tmuxName = tmuxNameLookup[tmuxKey];
+                const onclick = isTerminalSession
+                    ? `openCodexSession('${s.id}', '${s.project}', '${source}')`
+                    : (hasTmux && tmuxName
+                        ? `selectTmuxSession('${tmuxName}')`
+                        : `resumeSession('${s.id}', '${s.project}')`);
+                const dot = hasTmux
+                    ? '<span class="w-1.5 h-1.5 rounded-full bg-apple-9 shrink-0"></span>'
+                    : '<span class="w-1.5 h-1.5 rounded-full bg-smoke-6 shrink-0"></span>';
+                html += `<div class="flex items-center gap-2 px-3 py-2 bg-smoke-3/50 hover:bg-smoke-4/70 border border-smoke-5/50 hover:border-gold-9/30 rounded-lg cursor-pointer transition-all mb-1.5" onclick="${onclick}">
+                    ${dot}
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs text-smoke-11 truncate">${title}</div>
+                    </div>
+                    <span class="text-[10px] text-smoke-7 shrink-0">${msgCount ? msgCount + ' &middot; ' : ''}${time}</span>
+                </div>`;
+            });
+            container.innerHTML = html;
         }
 
         function markSessionRead(sessionId) {

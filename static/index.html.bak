@@ -142,6 +142,13 @@
         .tool-card.error { border-color: #e06c75; }
         .tool-header { transition: background-color 0.15s; border-radius: 0.75em; }
         .tool-header:hover { background: rgba(255,255,255,0.03); }
+        /* Session context menu */
+        #session-ctx-menu { display: none; position: fixed; z-index: 150; min-width: 160px; background: var(--smoke-2); border: 1px solid var(--smoke-5); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 4px; }
+        #session-ctx-menu.open { display: block; }
+        .ctx-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 12px; color: var(--smoke-11); cursor: pointer; white-space: nowrap; }
+        .ctx-item:hover { background: rgba(250, 178, 131, 0.12); color: var(--smoke-12); }
+        .ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+        .ctx-sep { height: 1px; background: var(--smoke-5); margin: 4px 8px; }
         /* Lightbox */
         #lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 200; align-items: center; justify-content: center; cursor: zoom-out; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         #lightbox.open { display: flex; }
@@ -607,6 +614,9 @@
             <span onclick="dismissTermUrl()" style="color:#666; cursor:pointer; font-size:18px; padding:2px 6px; line-height:1;">&times;</span>
         </div>
     </div>
+
+    <!-- Session context menu -->
+    <div id="session-ctx-menu"></div>
 
     <!-- Image lightbox -->
     <div id="lightbox" onclick="closeLightbox()">
@@ -1578,7 +1588,7 @@
 
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         onclick="${onclick}" title="${escapeHtml(s.title || 'Untitled')}">
+                         onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(s.title || 'Untitled')}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
@@ -5552,6 +5562,75 @@
             }
         }
 
+        // ========== Session Context Menu ==========
+        let _ctxSessionId = null;
+
+        function showSessionContextMenu(e, sessionId) {
+            e.preventDefault();
+            e.stopPropagation();
+            _ctxSessionId = sessionId;
+            const menu = document.getElementById('session-ctx-menu');
+            const isStarred = starredSessions.has(sessionId);
+            const starLabel = isStarred ? 'Unstar' : 'Star';
+            const starIcon = `<svg viewBox="0 0 24 24" fill="${isStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+            menu.innerHTML = `
+                <div class="ctx-item" onclick="ctxStar()">${starIcon} ${starLabel}</div>
+                <div class="ctx-item" onclick="ctxCopyId()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy session ID</div>
+                <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
+                <div class="ctx-sep"></div>
+                <div class="ctx-item" onclick="ctxMarkRead()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Mark as read</div>
+            `;
+            // Position menu at cursor, keeping within viewport
+            const x = Math.min(e.clientX, window.innerWidth - 180);
+            const y = Math.min(e.clientY, window.innerHeight - 160);
+            menu.style.left = x + 'px';
+            menu.style.top = y + 'px';
+            menu.classList.add('open');
+        }
+
+        function closeSessionContextMenu() {
+            const menu = document.getElementById('session-ctx-menu');
+            if (menu) menu.classList.remove('open');
+            _ctxSessionId = null;
+        }
+
+        function ctxStar() {
+            if (_ctxSessionId) toggleStarSession(new Event('click'), _ctxSessionId);
+            closeSessionContextMenu();
+        }
+
+        function ctxCopyId() {
+            if (_ctxSessionId) {
+                navigator.clipboard.writeText(_ctxSessionId).then(() => {
+                    showToast('Session ID copied');
+                }).catch(() => {});
+            }
+            closeSessionContextMenu();
+        }
+
+        function ctxExport() {
+            if (_ctxSessionId) {
+                const prev = currentSessionId;
+                currentSessionId = _ctxSessionId;
+                exportSessionMarkdown().finally(() => { currentSessionId = prev; });
+            }
+            closeSessionContextMenu();
+        }
+
+        function ctxMarkRead() {
+            if (_ctxSessionId) {
+                markSessionRead(_ctxSessionId);
+                renderSessions();
+            }
+            closeSessionContextMenu();
+        }
+
+        // Close context menu on click anywhere or Escape
+        document.addEventListener('click', () => closeSessionContextMenu());
+        document.addEventListener('contextmenu', (e) => {
+            if (!e.target.closest('.session-item')) closeSessionContextMenu();
+        });
+
         // ========== Image Lightbox ==========
         function openLightbox(src) {
             const lightbox = document.getElementById('lightbox');
@@ -5670,9 +5749,13 @@
             else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
         });
 
-        // Close lightbox/shortcuts on Escape
+        // Close lightbox/shortcuts/context-menu on Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                if (document.getElementById('session-ctx-menu')?.classList.contains('open')) {
+                    closeSessionContextMenu();
+                    return;
+                }
                 if (document.getElementById('command-palette-overlay')?.style.display === 'flex') {
                     closeCommandPalette();
                     return;
