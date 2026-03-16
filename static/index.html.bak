@@ -1051,12 +1051,14 @@
         // ========== Session Filter ==========
         let sessionFilterMode = localStorage.getItem('feather-session-filter') || 'mine';
         const AUTOWEB_PATTERN = /^(Time-Limited|Time-Controlled|Time-Constrained|Time-Based|Time-Boxed|Timed|Automost|Test Only|Automated|Automating|autoweb|Self-Improving|Autonomous|Auto-Web|Upgrading Autoweb)/i;
-        const AUTOWEB_KEYWORD_PATTERN = /\b(Experiment Loop|Experiment Iteration|Loop Iteration|Iteration Loop|Iteration Execution|Loop Execution|Loop Implementation|autoweb)\b/i;
+        const AUTOWEB_KEYWORD_PATTERN = /\b(Experiment Loop|Experiment Iteration|Loop Iteration|Iteration Loop|Iteration Execution|Loop Execution|Loop Implementation|autoweb|hard \d+-minute timeout|Do exactly ONE iteration)\b/i;
         // Catch autoweb sessions with descriptive fix/optimization titles
         const AUTOWEB_FIX_PATTERN = /^(Mobile|Responsive Design|Web Layout)\s.*(Fix|Optimization|Implementation|Testing|Iteration|Task)$/i;
         const AUTOWEB_SPECIFIC_PATTERN = /\b(Touch Target|Text Cutoff|Flexbox|Breakpoint Optimization|CSS Testing|Hamburger Menu|Deduplication Implementation|Nav(igation)? Pills|Layout Overlap|Message.*Wrapping|Responsive CSS|Mobile.*Responsive|Responsive.*Mobile|Improving Mobile|Mobile Navigation Layout|Message Length Bug Fix|CLI Output in Feather)\b/i;
 
         function isAutowebSession(s) {
+            // Use server-side is_autoweb flag if available (set by normalizer detecting boilerplate prompts)
+            if (s.is_autoweb) return true;
             const t = s.title || '';
             return AUTOWEB_PATTERN.test(t) || AUTOWEB_KEYWORD_PATTERN.test(t) || AUTOWEB_FIX_PATTERN.test(t) || AUTOWEB_SPECIFIC_PATTERN.test(t);
         }
