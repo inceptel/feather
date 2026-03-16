@@ -1281,6 +1281,7 @@
                                 <div class="flex items-center gap-1 text-[10px] text-smoke-7 leading-tight">
                                     ${sourceBadge}
                                     <span>${formatTime(s.lastUpdated)}</span>
+                                    ${s.message_count ? `<span class="text-smoke-8">&middot;</span><span>${s.message_count} msg</span>` : ''}
                                 </div>
                             </div>
                         </div>
