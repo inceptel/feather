@@ -1923,11 +1923,6 @@
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
             div.setAttribute('data-optimistic', 'true');
-            // Set content hash so removeOptimisticMessage can find this element
-            if (content) div.setAttribute('data-content-hash', hashContent(content));
-            // Set image paths so removeOptimisticImageMessage can find this element
-            const imagePaths = files.filter(f => f.isImage && f.path).map(f => f.path);
-            if (imagePaths.length > 0) div.setAttribute('data-image-path', imagePaths[0]);
 
             let attachmentsHtml = files.map(f => {
                 if (f.isImage) {
@@ -2714,16 +2709,7 @@
                                 if (imgPathMatch) {
                                     removeOptimisticImageMessage(imgPathMatch[1]);
                                 }
-                                // Strip [Attached image: ...] and [Attached file: ...] markers before
-                                // matching optimistic messages, since the optimistic hash was set from
-                                // the original text before those markers were appended.
-                                const baseText = textContent
-                                    .replace(/\n*\[Attached image: [^\]]+\]/g, '')
-                                    .replace(/\n*\[Attached file: [^\]]+\]\s*\([^)]*\)/g, '')
-                                    .trim();
-                                if (baseText) removeOptimisticMessage(baseText);
-                                // Also try with the full text in case the optimistic used full text
-                                if (textContent && textContent !== baseText) removeOptimisticMessage(textContent);
+                                if (textContent) removeOptimisticMessage(textContent);
                                 addUserMessageWithImages(textContent, imageBlocks, false);
                             }
                             scrollToBottom();
