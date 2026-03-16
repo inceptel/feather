@@ -560,7 +560,7 @@
 
         <!-- Desktop session header bar -->
         <div id="desktop-session-header" class="hidden md:hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10">
-            <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate"></span>
+            <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate cursor-pointer" ondblclick="renameCurrentSession()" title="Double-click to rename"></span>
             <span id="desktop-session-meta" class="text-[10px] text-smoke-8 whitespace-nowrap shrink-0"></span>
         </div>
 
@@ -6335,12 +6335,23 @@
             }
             try { localStorage.setItem('feather-sessionRenames', JSON.stringify(sessionRenames)); } catch {}
             renderSessions();
-            // Update mobile header if this is the current session
+            // Update mobile and desktop headers if this is the current session
+            const sessionTitle = getSessionTitle(s || { id: sid });
             const mobileHeader = document.getElementById('mobile-session-header-text');
             if (mobileHeader && currentSessionId === sid) {
-                mobileHeader.textContent = getSessionTitle(s || { id: sid });
+                mobileHeader.textContent = sessionTitle;
+            }
+            const desktopTitle = document.getElementById('desktop-session-title');
+            if (desktopTitle && currentSessionId === sid) {
+                desktopTitle.textContent = sessionTitle;
             }
             showToast(newName.trim() ? 'Session renamed' : 'Session name reset');
+        }
+
+        function renameCurrentSession() {
+            if (!currentSessionId) { showToast('No session selected'); return; }
+            _ctxSessionId = currentSessionId;
+            ctxRename();
         }
 
         function ctxMarkRead() {

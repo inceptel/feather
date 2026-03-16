@@ -81,6 +81,9 @@
         /* Message position indicator — shows "42 / 155" when scrolling long sessions */
         #msg-position-indicator { position: absolute; top: 6px; right: 12px; z-index: 31; font-size: 11px; font-family: ui-monospace, monospace; color: var(--smoke-9); background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; white-space: nowrap; }
         #msg-position-indicator.visible { opacity: 0.8; }
+        /* Focus mode — hides tool calls/results for clean conversation reading */
+        #message-container.focus-mode [data-msg-type="tool"] { display: none !important; }
+        #focus-mode-btn.active { color: var(--gold-9) !important; background: rgba(250, 178, 131, 0.12); }
         /* Sticky date separators in message list */
         .date-separator { position: sticky; top: 0; z-index: 10; background: var(--smoke-1); padding-left: 1rem; padding-right: 1rem; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -653,6 +656,9 @@
                             <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
                             </button>
+                            <button id="focus-mode-btn" onclick="toggleFocusMode()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Focus mode — hide tool calls (F)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            </button>
                             <button onclick="triggerScreenshot()" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Upload file">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                             </button>
@@ -749,6 +755,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -2814,6 +2821,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-msg-type', 'user');
             if (isOptimistic) {
                 div.setAttribute('data-optimistic', 'true');
                 div.setAttribute('data-content-hash', hashContent(content));
@@ -2900,6 +2908,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-msg-type', 'user');
             div.setAttribute('data-optimistic', 'true');
             div.setAttribute('data-image-path', imagePath);
             div.innerHTML = `
@@ -2925,6 +2934,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-msg-type', 'user');
             const icon = getFileIcon(fileName);
             div.innerHTML = `
                 <div class="max-w-[80%] user-msg-bubble px-4 py-3">
@@ -2945,6 +2955,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-msg-type', 'user');
             div.setAttribute('data-optimistic', 'true');
 
             let attachmentsHtml = files.map(f => {
@@ -2983,6 +2994,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter';
+            div.setAttribute('data-msg-type', 'assistant');
             if (uuid) div.setAttribute('data-uuid', uuid);
             div.setAttribute('data-raw-content', content);
             const timeStr = formatMessageTime(timestamp);
@@ -3234,6 +3246,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter flex justify-end';
+            div.setAttribute('data-msg-type', 'user');
             if (isOptimistic) {
                 div.setAttribute('data-optimistic', 'true');
                 if (textContent) div.setAttribute('data-content-hash', hashContent(textContent));
@@ -3533,6 +3546,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter';
+            div.setAttribute('data-msg-type', 'tool');
 
             const toolId = tool.id || Math.random().toString(36).substr(2, 8);
             const preview = getToolInputPreview(tool.name, tool.input);
@@ -3571,6 +3585,7 @@
             `;
             container.appendChild(div);
             updateToolsToggleButton();
+            updateFocusModeButton();
         }
 
         let thinkingBlocksCollapsed = false;
@@ -3579,6 +3594,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter thinking-block' + (thinkingBlocksCollapsed ? ' collapsed' : '');
+            div.setAttribute('data-msg-type', 'tool');
 
             const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
             const preview = text.trim().replace(/\n/g, ' ').substring(0, 80);
@@ -3659,6 +3675,43 @@
                 if (hasTools) {
                     btn.classList.remove('hidden');
                     btn.style.opacity = toolBlocksCollapsed ? '0.5' : '1';
+                } else {
+                    btn.classList.add('hidden');
+                }
+            }
+        }
+
+        // ========== Focus Mode (hide tool calls) ==========
+        let focusModeActive = false;
+
+        function toggleFocusMode() {
+            focusModeActive = !focusModeActive;
+            const container = document.getElementById('message-container');
+            const btn = document.getElementById('focus-mode-btn');
+            if (container) {
+                if (focusModeActive) {
+                    container.classList.add('focus-mode');
+                } else {
+                    container.classList.remove('focus-mode');
+                }
+            }
+            if (btn) {
+                if (focusModeActive) {
+                    btn.classList.add('active');
+                    btn.title = 'Focus mode ON — showing conversation only (F)';
+                } else {
+                    btn.classList.remove('active');
+                    btn.title = 'Focus mode — hide tool calls (F)';
+                }
+            }
+        }
+
+        function updateFocusModeButton() {
+            const btn = document.getElementById('focus-mode-btn');
+            const hasTools = document.querySelectorAll('[data-msg-type="tool"]').length > 0;
+            if (btn) {
+                if (hasTools) {
+                    btn.classList.remove('hidden');
                 } else {
                     btn.classList.add('hidden');
                 }
@@ -3838,6 +3891,7 @@
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter';
+            div.setAttribute('data-msg-type', 'tool');
 
             const isError = result.is_error === true;
             const borderColor = isError ? 'border-ember-9/50' : 'border-smoke-6';
@@ -3919,6 +3973,7 @@
             `;
             container.appendChild(div);
             updateToolsToggleButton();
+            updateFocusModeButton();
         }
 
         function renderMarkdown(text) {
@@ -6358,6 +6413,7 @@
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Toggle zen mode', shortcut: 'Z', action: () => toggleZenMode() },
+            { label: 'Focus mode — hide tool calls', shortcut: 'F', action: () => toggleFocusMode() },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
@@ -6535,6 +6591,14 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     toggleZenMode();
+                }
+            }
+            // F — toggle focus mode (hide tool calls, when not in input)
+            if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    toggleFocusMode();
                 }
             }
         });
