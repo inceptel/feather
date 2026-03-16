@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feather — Welcome!</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 520px;
+            padding: 0 24px;
+        }
+
+        .logo {
+            font-size: 14px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 32px;
+        }
+
+        .checkmark {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: #22c55e;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 32px;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 12px;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: #999;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .details {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: left;
+            margin-bottom: 32px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-size: 14px;
+            color: #888;
+        }
+
+        .detail-value {
+            font-size: 14px;
+            color: #fff;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: #0a0a0a;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid #222;
+        }
+
+        .detail-value a {
+            color: #a78bfa;
+            text-decoration: none;
+        }
+
+        .detail-value a:hover {
+            text-decoration: underline;
+        }
+
+        .steps {
+            text-align: left;
+            margin-bottom: 32px;
+        }
+
+        .steps h3 {
+            font-size: 16px;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+
+        .step {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            color: #999;
+            line-height: 1.5;
+        }
+
+        .step-num {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #1a1a1a;
+            color: #a78bfa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 14px 32px;
+            background: #7c3aed;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #6d28d9;
+        }
+
+        .loading {
+            color: #888;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Feather</div>
+        <div class="checkmark">&#10003;</div>
+        <h1>You're all set!</h1>
+        <p class="subtitle">Your workspace is being provisioned. It'll be ready in a moment.</p>
+
+        <div class="details" id="details" style="display:none">
+            <div class="detail-row">
+                <span class="detail-label">Workspace URL</span>
+                <span class="detail-value"><a id="workspace-url" href="#" target="_blank"></a></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Password</span>
+                <span class="detail-value" id="workspace-pass">...</span>
+            </div>
+        </div>
+
+        <div class="steps">
+            <h3>Next steps</h3>
+            <div class="step">
+                <span class="step-num">1</span>
+                <span>Visit your workspace URL and log in with your password</span>
+            </div>
+            <div class="step">
+                <span class="step-num">2</span>
+                <span>Open the terminal and set up your Claude API key for AI coding agents</span>
+            </div>
+            <div class="step">
+                <span class="step-num">3</span>
+                <span>Start building — your workspace auto-saves and persists across sessions</span>
+            </div>
+        </div>
+
+        <a class="btn" id="go-btn" href="#" style="display:none">Open your workspace</a>
+        <p class="loading" id="loading">Loading your workspace details...</p>
+    </div>
+
+    <script>
+        // Extract session_id from URL
+        const params = new URLSearchParams(window.location.search);
+        const sessionId = params.get('session_id');
+
+        const detailsEl = document.getElementById('details');
+        const urlEl = document.getElementById('workspace-url');
+        const passEl = document.getElementById('workspace-pass');
+        const goBtn = document.getElementById('go-btn');
+        const loadingEl = document.getElementById('loading');
+
+        // Poll status endpoint to find the new tenant
+        // (Stripe webhook may take a few seconds)
+        let attempts = 0;
+        const maxAttempts = 30;
+
+        function checkReady() {
+            attempts++;
+            if (attempts > maxAttempts) {
+                loadingEl.textContent = 'Provisioning is taking longer than expected. Check back in a minute.';
+                return;
+            }
+
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    // Find most recently created tenant
+                    const tenants = data.tenants || {};
+                    const names = Object.keys(tenants);
+                    if (names.length === 0) {
+                        setTimeout(checkReady, 3000);
+                        return;
+                    }
+
+                    // For now, show the latest tenant (webhook sets it up)
+                    // In production, correlate via session_id → customer → tenant
+                    const latest = names[names.length - 1];
+                    const t = tenants[latest];
+
+                    const url = `https://${t.subdomain}`;
+                    urlEl.textContent = t.subdomain;
+                    urlEl.href = url;
+                    goBtn.href = url;
+
+                    detailsEl.style.display = 'block';
+                    goBtn.style.display = 'inline-block';
+                    loadingEl.style.display = 'none';
+                })
+                .catch(() => {
+                    setTimeout(checkReady, 3000);
+                });
+        }
+
+        checkReady();
+    </script>
+</body>
+</html>

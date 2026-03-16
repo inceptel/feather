@@ -20,9 +20,12 @@ cp "$CADDY_CONFIG" "$CADDY_RUNTIME"
 
 if [ -n "${DOMAIN:-}" ]; then
     log "Domain: $DOMAIN"
+    # Update landing-page route host match and listen port
     jq --arg domain "$DOMAIN" '
         .apps.http.servers.main.listen = [":443"] |
-        .apps.http.servers.main.routes[0].match = [{"host": [$domain]}]
+        (.apps.http.servers.main.routes[] |
+            select(.["@id"] == "landing-page") |
+            .match) = [{"host": [$domain]}]
     ' "$CADDY_RUNTIME" > /tmp/caddy-tmp.json && mv /tmp/caddy-tmp.json "$CADDY_RUNTIME"
 
     if [ -n "${ACME_EMAIL:-}" ]; then
@@ -85,6 +88,19 @@ log "Work image ready"
 if [ -d /home/user ]; then
     chown -R 1000:1000 /home/user 2>/dev/null || true
     log "Set /home/user ownership to 1000:1000"
+fi
+
+# --- 2b. Start Provisioner ---
+log "Starting provisioner on port 9100..."
+export TENANT_FILE="${TENANT_FILE:-/data/tenants.json}"
+export DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-feather-cloud.dev}"
+python3 /opt/birth/provisioner.py &
+PROVISIONER_PID=$!
+sleep 1
+if kill -0 "$PROVISIONER_PID" 2>/dev/null; then
+    log "Provisioner started (PID: $PROVISIONER_PID)"
+else
+    log "WARN: Provisioner failed to start"
 fi
 
 # --- 4. Start work container ---
@@ -163,6 +179,7 @@ cleanup() {
         podman rm -f "$container" 2>/dev/null || true
     fi
     kill "$CADDY_PID" 2>/dev/null || true
+    kill "$PROVISIONER_PID" 2>/dev/null || true
     log "Shutdown complete"
     exit 0
 }
@@ -179,6 +196,14 @@ while true; do
         caddy run --config "$CADDY_RUNTIME" &
         CADDY_PID=$!
         sleep 2
+    fi
+
+    # Check provisioner
+    if ! kill -0 "$PROVISIONER_PID" 2>/dev/null; then
+        log "WARN: Provisioner died, restarting..."
+        python3 /opt/birth/provisioner.py &
+        PROVISIONER_PID=$!
+        sleep 1
     fi
 
     # Check work container

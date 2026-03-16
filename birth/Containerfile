@@ -18,6 +18,11 @@ RUN apt-get update && apt-get install -y ca-certificates curl gnupg \
 RUN curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/local/bin/caddy \
     && chmod +x /usr/local/bin/caddy
 
+# Python stripe SDK
+RUN apt-get update && apt-get install -y python3-pip \
+    && pip3 install stripe \
+    && rm -rf /var/lib/apt/lists/*
+
 # Podman configs for rootful nested operation
 COPY containers.conf /etc/containers/containers.conf
 COPY storage.conf /etc/containers/storage.conf
@@ -26,8 +31,20 @@ COPY storage.conf /etc/containers/storage.conf
 COPY caddy.json /opt/birth/caddy.json
 COPY entrypoint.sh /entrypoint.sh
 COPY swap.sh /usr/local/bin/swap.sh
+COPY tenant.sh /opt/birth/tenant.sh
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/swap.sh
+# Provisioner and HTML pages
+COPY provisioner.py /opt/birth/provisioner.py
+COPY splash.html /opt/birth/splash.html
+COPY success.html /opt/birth/success.html
+
+# Landing page
+COPY --from=site index.html /opt/birth/site/index.html
+
+# Persistent data directory
+RUN mkdir -p /data
+
+RUN chmod +x /entrypoint.sh /usr/local/bin/swap.sh /opt/birth/tenant.sh
 
 EXPOSE 80 443
 

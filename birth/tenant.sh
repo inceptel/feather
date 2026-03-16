@@ -7,14 +7,17 @@ set -euo pipefail
 # Usage:
 #   tenant.sh add <username>     Start a user container, add Caddy route
 #   tenant.sh remove <username>  Stop container, remove Caddy route
+#   tenant.sh stop <username>    Stop container (preserve volume + Caddy route)
+#   tenant.sh start <username>   Start a stopped container
+#   tenant.sh status <username>  Show container state as JSON
 #   tenant.sh list               Show all active tenants
 
 WORK_IMAGE="${WORK_IMAGE:-localhost/feather-work:latest}"
-TENANT_FILE="/tmp/tenants.json"
+TENANT_FILE="${TENANT_FILE:-/data/tenants.json}"
 PORT_MIN=9001
 PORT_MAX=9010
 HEALTH_TIMEOUT=120
-DOMAIN_SUFFIX="users.inceptel.ai"
+DOMAIN_SUFFIX="${DOMAIN_SUFFIX:-feather-cloud.dev}"
 
 log() { echo "[tenant] $(date '+%H:%M:%S') $*"; }
 
@@ -174,6 +177,8 @@ ROUTE
     log "Caddy route added for $subdomain"
 
     # Save to tenant file
+    local now
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     jq --arg name "$username" \
        --argjson port "$port" \
        --arg container "$container_name" \
@@ -181,7 +186,24 @@ ROUTE
        --arg subdomain "$subdomain" \
        --arg password "$password" \
        --arg route_id "$route_id" \
-       '.[$name] = {port: $port, container: $container, volume: $volume, subdomain: $subdomain, password: $password, route_id: $route_id}' \
+       --arg now "$now" \
+       --arg image "$WORK_IMAGE" \
+       '.[$name] = {
+           port: $port,
+           container: $container,
+           volume: $volume,
+           subdomain: $subdomain,
+           password: $password,
+           route_id: $route_id,
+           status: "running",
+           last_access: $now,
+           created_at: $now,
+           stripe_customer_id: null,
+           stripe_subscription_id: null,
+           image_tags: [$image],
+           active_image_tag: $image,
+           compute_seconds_this_period: 0
+       }' \
        "$TENANT_FILE" > /tmp/tenants-tmp.json && mv /tmp/tenants-tmp.json "$TENANT_FILE"
 
     log "Tenant provisioned successfully"
@@ -247,6 +269,149 @@ cmd_list() {
         done
 }
 
+# --- Stop tenant (preserve volume + route) ---
+cmd_stop() {
+    local username="$1"
+
+    local tenant
+    tenant=$(get_tenant "$username")
+    if [ -z "$tenant" ]; then
+        log "ERROR: Tenant '$username' not found"
+        exit 1
+    fi
+
+    local container_name status
+    container_name=$(echo "$tenant" | jq -r '.container')
+    status=$(echo "$tenant" | jq -r '.status // "running"')
+
+    if [ "$status" = "stopped" ]; then
+        log "Tenant '$username' is already stopped"
+        return 0
+    fi
+
+    log "Stopping tenant: $username"
+    podman stop -t 10 "$container_name" 2>/dev/null || true
+
+    # Update status in tenant file
+    local now
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    jq --arg name "$username" --arg now "$now" \
+       '.[$name].status = "stopped" | .[$name].last_access = $now' \
+       "$TENANT_FILE" > /tmp/tenants-tmp.json && mv /tmp/tenants-tmp.json "$TENANT_FILE"
+
+    log "Tenant '$username' stopped (volume and Caddy route preserved)"
+}
+
+# --- Start tenant ---
+cmd_start() {
+    local username="$1"
+
+    local tenant
+    tenant=$(get_tenant "$username")
+    if [ -z "$tenant" ]; then
+        log "ERROR: Tenant '$username' not found"
+        exit 1
+    fi
+
+    local container_name port status
+    container_name=$(echo "$tenant" | jq -r '.container')
+    port=$(echo "$tenant" | jq -r '.port')
+    status=$(echo "$tenant" | jq -r '.status // "running"')
+
+    if [ "$status" = "running" ]; then
+        log "Tenant '$username' is already running"
+        return 0
+    fi
+
+    log "Starting tenant: $username"
+
+    # Try podman start first (container exists but stopped)
+    if podman start "$container_name" 2>/dev/null; then
+        log "Container restarted"
+    else
+        # Container was removed — recreate it
+        log "Container gone, recreating..."
+        local volume_name password image
+        volume_name=$(echo "$tenant" | jq -r '.volume')
+        password=$(echo "$tenant" | jq -r '.password')
+        image=$(echo "$tenant" | jq -r '.active_image_tag // empty')
+        image="${image:-$WORK_IMAGE}"
+
+        # Collect env vars
+        local env_args=()
+        while IFS='=' read -r key value; do
+            case "$key" in
+                FEATHER_ANTHROPIC_API_KEY|ANTHROPIC_API_KEY|OPENAI_API_KEY|FEATHER_OPENAI_API_KEY)
+                    env_args+=(-e "${key}=${value}")
+                    ;;
+            esac
+        done < <(env)
+
+        podman rm -f "$container_name" 2>/dev/null || true
+        podman run -d \
+            --name "$container_name" \
+            --dns 8.8.8.8 --dns 1.1.1.1 \
+            -p "127.0.0.1:${port}:8080" \
+            -v "${volume_name}:/home/user:Z" \
+            -e "FEATHER_PASSWORD=${password}" \
+            "${env_args[@]}" \
+            "$image"
+    fi
+
+    # Health check
+    log "Waiting for health..."
+    local healthy=false
+    for i in $(seq 1 "$HEALTH_TIMEOUT"); do
+        if curl -sf "http://127.0.0.1:${port}/health" > /dev/null 2>&1; then
+            healthy=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$healthy" != "true" ]; then
+        log "ERROR: Container failed health check after ${HEALTH_TIMEOUT}s"
+        podman logs "$container_name" 2>&1 | tail -20
+        exit 1
+    fi
+
+    # Update status
+    local now
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    jq --arg name "$username" --arg now "$now" \
+       '.[$name].status = "running" | .[$name].last_access = $now' \
+       "$TENANT_FILE" > /tmp/tenants-tmp.json && mv /tmp/tenants-tmp.json "$TENANT_FILE"
+
+    log "Tenant '$username' started and healthy"
+}
+
+# --- Status ---
+cmd_status() {
+    local username="$1"
+
+    local tenant
+    tenant=$(get_tenant "$username")
+    if [ -z "$tenant" ]; then
+        log "ERROR: Tenant '$username' not found"
+        exit 1
+    fi
+
+    local container_name
+    container_name=$(echo "$tenant" | jq -r '.container')
+
+    # Get live container state from podman
+    local podman_state="removed"
+    local uptime=""
+    if podman inspect "$container_name" > /dev/null 2>&1; then
+        podman_state=$(podman inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "unknown")
+        uptime=$(podman inspect -f '{{.State.StartedAt}}' "$container_name" 2>/dev/null || echo "")
+    fi
+
+    # Output JSON
+    echo "$tenant" | jq --arg podman_state "$podman_state" --arg uptime "$uptime" \
+        '. + {podman_state: $podman_state, started_at: $uptime}'
+}
+
 # --- Main ---
 case "${1:-}" in
     add)
@@ -263,15 +428,39 @@ case "${1:-}" in
         fi
         cmd_remove "$2"
         ;;
+    stop)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: tenant.sh stop <username>"
+            exit 1
+        fi
+        cmd_stop "$2"
+        ;;
+    start)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: tenant.sh start <username>"
+            exit 1
+        fi
+        cmd_start "$2"
+        ;;
+    status)
+        if [ -z "${2:-}" ]; then
+            echo "Usage: tenant.sh status <username>"
+            exit 1
+        fi
+        cmd_status "$2"
+        ;;
     list)
         cmd_list
         ;;
     *)
-        echo "Usage: tenant.sh {add|remove|list} [username]"
+        echo "Usage: tenant.sh {add|remove|stop|start|status|list} [username]"
         echo ""
         echo "Commands:"
         echo "  add <username>     Provision a new user container"
         echo "  remove <username>  Stop and remove a user container"
+        echo "  stop <username>    Stop container (preserve data)"
+        echo "  start <username>   Start a stopped container"
+        echo "  status <username>  Show container state as JSON"
         echo "  list               Show all active tenants"
         exit 1
         ;;

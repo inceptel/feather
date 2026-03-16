@@ -2,12 +2,64 @@
   "admin": {
     "listen": "localhost:2020"
   },
+  "logging": {
+    "logs": {
+      "access": {
+        "writer": {
+          "output": "file",
+          "filename": "/tmp/caddy-access.log"
+        },
+        "encoder": {
+          "format": "json"
+        },
+        "include": ["http.log.access.main"]
+      }
+    }
+  },
   "apps": {
     "http": {
       "servers": {
         "main": {
           "listen": [":443"],
+          "logs": {
+            "logger_names": {
+              "*": "access"
+            }
+          },
           "routes": [
+            {
+              "@id": "api-route",
+              "match": [{"path": ["/api/*"]}],
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [{"dial": "127.0.0.1:9100"}]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "@id": "success-page",
+              "match": [{"path": ["/success"]}],
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [{"dial": "127.0.0.1:9100"}]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "@id": "landing-page",
+              "match": [{"host": ["DOMAIN_PLACEHOLDER"]}],
+              "handle": [
+                {
+                  "handler": "file_server",
+                  "root": "/opt/birth/site"
+                }
+              ],
+              "terminal": true
+            },
             {
               "handle": [
                 {

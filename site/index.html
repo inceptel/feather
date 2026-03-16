@@ -175,6 +175,31 @@
             margin-top: 16px;
         }
 
+        .billing-link {
+            display: block;
+            margin-top: 16px;
+            color: #888;
+            font-size: 13px;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .billing-link:hover {
+            color: #a78bfa;
+        }
+
+        .form-row button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error-msg {
+            display: none;
+            color: #ef4444;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+
         .links {
             text-align: center;
             padding-bottom: 64px;
@@ -238,15 +263,17 @@
         </div>
 
         <div class="signup">
-            <h2>Get early access</h2>
-            <p>Join the waitlist. We're onboarding the first users now.</p>
-            <form id="waitlist-form" action="https://formspree.io/f/xwpkgjez" method="POST">
+            <h2>Start building today</h2>
+            <p>$29/mo. Full AI workspace with Claude, persistent storage, and your own subdomain.</p>
+            <form id="checkout-form">
                 <div class="form-row">
-                    <input type="email" name="email" placeholder="you@example.com" required>
-                    <button type="submit">Join waitlist</button>
+                    <input type="email" name="email" id="checkout-email" placeholder="you@example.com" required>
+                    <button type="submit" id="checkout-btn">Start free trial</button>
                 </div>
             </form>
-            <p class="success-msg" id="success-msg">You're on the list. We'll be in touch.</p>
+            <p class="success-msg" id="success-msg">Redirecting to checkout...</p>
+            <p class="error-msg" id="error-msg"></p>
+            <a href="/api/billing-portal" class="billing-link">Already a member? Manage billing</a>
         </div>
 
         <div class="links">
@@ -256,25 +283,41 @@
     </div>
 
     <script>
-        const form = document.getElementById('waitlist-form');
+        const form = document.getElementById('checkout-form');
         const msg = document.getElementById('success-msg');
+        const errMsg = document.getElementById('error-msg');
+        const btn = document.getElementById('checkout-btn');
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const data = new FormData(form);
+            errMsg.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+
+            const email = document.getElementById('checkout-email').value;
+
             try {
-                const res = await fetch(form.action, {
+                const res = await fetch('/api/create-checkout', {
                     method: 'POST',
-                    body: data,
-                    headers: { 'Accept': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
                 });
-                if (res.ok) {
-                    form.style.display = 'none';
+                const data = await res.json();
+
+                if (res.ok && data.url) {
                     msg.style.display = 'block';
+                    window.location.href = data.url;
+                } else {
+                    errMsg.textContent = data.error || 'Something went wrong';
+                    errMsg.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Start free trial';
                 }
             } catch (err) {
-                // Fall back to normal form submission
-                form.submit();
+                errMsg.textContent = 'Connection error. Please try again.';
+                errMsg.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Start free trial';
             }
         });
     </script>
