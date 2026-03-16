@@ -483,6 +483,9 @@
                 <button onclick="setSessionFilter('all')" id="sf-all" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">All</button>
                 <button onclick="cycleSessionSort()" id="session-sort-btn" class="session-filter-pill text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border shrink-0 flex items-center gap-0.5" title="Sort sessions"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span id="sort-label">Latest</span></button>
             </div>
+            <div id="mark-all-read-bar" class="hidden mt-1">
+                <button onclick="markAllSessionsRead()" class="w-full text-[10px] text-smoke-7 hover:text-gold-9 transition-colors cursor-pointer py-0.5 text-center" title="Mark all sessions as read"><span id="mark-all-read-count"></span> unread &mdash; mark all read</button>
+            </div>
         </div>
 
         <!-- Live Pulse - compact -->
@@ -1660,6 +1663,22 @@
             if (sfAuto) sfAuto.textContent = 'Auto' + (autoCount ? ' ' + autoCount : '');
             if (sfAll) sfAll.textContent = 'All' + (allCount ? ' ' + allCount : '');
 
+            // Update mark-all-read bar
+            const unreadCount = allSessions.filter(s => {
+                const lv = sessionViewTimes[s.id];
+                return s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv)) && s.id !== currentSessionId;
+            }).length;
+            const markAllBar = document.getElementById('mark-all-read-bar');
+            const markAllCount = document.getElementById('mark-all-read-count');
+            if (markAllBar) {
+                if (unreadCount > 0) {
+                    markAllBar.classList.remove('hidden');
+                    if (markAllCount) markAllCount.textContent = unreadCount;
+                } else {
+                    markAllBar.classList.add('hidden');
+                }
+            }
+
             // Apply session filter (mine/auto/all)
             if (sessionFilterMode === 'mine') {
                 sessions = sessions.filter(s => !isAutowebSession(s));
@@ -1862,6 +1881,22 @@
             if (!sessionId) return;
             sessionViewTimes[sessionId] = new Date().toISOString();
             try { localStorage.setItem('feather-sessionViewTimes', JSON.stringify(sessionViewTimes)); } catch {}
+        }
+
+        function markAllSessionsRead() {
+            const now = new Date().toISOString();
+            let count = 0;
+            allSessions.forEach(s => {
+                const lastViewed = sessionViewTimes[s.id];
+                const isUnread = s.lastUpdated && (!lastViewed || new Date(s.lastUpdated) > new Date(lastViewed));
+                if (isUnread) {
+                    sessionViewTimes[s.id] = now;
+                    count++;
+                }
+            });
+            try { localStorage.setItem('feather-sessionViewTimes', JSON.stringify(sessionViewTimes)); } catch {}
+            renderSessions();
+            showToast(count > 0 ? `Marked ${count} session${count === 1 ? '' : 's'} as read` : 'All sessions already read');
         }
 
         let currentSearchQuery = '';
@@ -6157,6 +6192,7 @@
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
+            { label: 'Mark all sessions read', shortcut: '', action: () => markAllSessionsRead() },
             { label: 'Rename current session', shortcut: '', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
