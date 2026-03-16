@@ -3379,9 +3379,30 @@
                     const btn = document.getElementById('scroll-to-bottom-btn');
                     if (btn) btn.classList.add('hidden');
                     resetUnread();
+                    // Double-rAF: re-check after next paint in case layout shifted
+                    requestAnimationFrame(() => {
+                        if (container.scrollTop + container.clientHeight < container.scrollHeight - SCROLL_THRESHOLD) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    });
                 }
             });
         }
+
+        // ========== Auto-scroll reliability ==========
+        // When images/media load inside messages, they change scrollHeight.
+        // If user was at bottom, maintain scroll position by re-scrolling.
+        // Uses capture-phase 'load' listener to catch img/video load events.
+        (function initScrollReliability() {
+            const messagesEl = document.getElementById('messages');
+            if (!messagesEl) return;
+            messagesEl.addEventListener('load', function(e) {
+                const tag = e.target.tagName;
+                if ((tag === 'IMG' || tag === 'VIDEO' || tag === 'IFRAME') && userAtBottom) {
+                    scrollToBottom();
+                }
+            }, true); // capture phase — img load doesn't bubble
+        })();
 
         // ========== JSONL History Polling ==========
         // Poll for the most recent session and its messages

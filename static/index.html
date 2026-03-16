@@ -3603,6 +3603,7 @@
         let renderedContentHashes = new Set();  // Content-hash fallback for user message dedup
         let renderedTextHashes = new Set();  // Text-only dedup: same text with/without image = duplicate
         let tailReconnectDelay = 1000;  // Exponential backoff for SSE reconnection (module-scoped so it persists across recursive calls)
+        let tailReconnectTimer = null;  // Guard: prevent overlapping reconnection attempts
         let tailHeartbeatTimer = null;  // Heartbeat: detect zombie SSE connections
         const TAIL_HEARTBEAT_TIMEOUT = 60000;  // 60s without any SSE event = zombie
 
@@ -3622,6 +3623,10 @@
         }
 
         function startSessionTailing(projectId, sessionId, cursor = null) {
+            // Cancel any pending reconnection to prevent race conditions
+            clearTimeout(tailReconnectTimer);
+            tailReconnectTimer = null;
+
             if (tailingEventSource) {
                 tailingEventSource.close();
                 tailingEventSource = null;
@@ -3767,7 +3772,10 @@
                 // EventSource auto-reconnects, but we want to resume from cursor
                 if (tailingEventSource && tailingEventSource.readyState === EventSource.CLOSED) {
                     console.log(`Tail SSE closed, reconnecting in ${tailReconnectDelay}ms with cursor:`, tailCursor);
-                    setTimeout(() => {
+                    // Use tracked timer to prevent overlapping reconnect attempts
+                    clearTimeout(tailReconnectTimer);
+                    tailReconnectTimer = setTimeout(() => {
+                        tailReconnectTimer = null;
                         if (currentTailProjectId && currentTailSessionId) {
                             startSessionTailing(currentTailProjectId, currentTailSessionId, tailCursor);
                         }
@@ -3780,6 +3788,8 @@
         function stopSessionTailing() {
             clearTimeout(tailHeartbeatTimer);
             tailHeartbeatTimer = null;
+            clearTimeout(tailReconnectTimer);
+            tailReconnectTimer = null;
             if (tailingEventSource) {
                 tailingEventSource.close();
                 tailingEventSource = null;
