@@ -2620,33 +2620,29 @@
                     window._earlierSessionProject = projectId;
                     window._earlierSessionId = sessionId;
                 }
-                renderMessages(allMessages);
                 lastMessageCount = data.total;  // Track total for polling
-                // Restore saved scroll position or scroll to bottom
+                // Chunked render with scroll restoration on complete
                 const savedScroll = sessionScrollPositions.get(sessionId);
-                if (savedScroll !== undefined) {
-                    // Returning to a previously viewed session — restore position
-                    userAtBottom = false;
-                    requestAnimationFrame(() => {
+                renderMessages(allMessages, { onComplete: function() {
+                    if (savedScroll !== undefined) {
+                        // Returning to a previously viewed session — restore position
+                        userAtBottom = false;
                         requestAnimationFrame(() => {
                             const msgs = document.getElementById('messages');
                             if (msgs) {
                                 msgs.scrollTop = savedScroll;
-                                // Check if we're at bottom after restoring
                                 const SCROLL_THRESHOLD_CHECK = 80;
                                 if (msgs.scrollTop + msgs.clientHeight >= msgs.scrollHeight - SCROLL_THRESHOLD_CHECK) {
                                     userAtBottom = true;
                                 }
                             }
                         });
-                    });
-                } else {
-                    // First time viewing or new session — scroll to bottom
-                    userAtBottom = true;
-                    requestAnimationFrame(() => {
-                        requestAnimationFrame(() => scrollToBottom(true));
-                    });
-                }
+                    } else {
+                        // First time viewing or new session — scroll to bottom
+                        userAtBottom = true;
+                        scrollToBottom(true);
+                    }
+                }});
 
                 // Restore saved draft or clear input
                 const inp = document.getElementById('input');
@@ -2718,7 +2714,7 @@
                 tempDiv.style.display = '';
                 const savedDateKey = _lastRenderedDateKey;
                 _lastRenderedDateKey = null;
-                renderMessages(chunk);
+                renderMessages(chunk, {sync: true});
                 _lastRenderedDateKey = savedDateKey;
                 tempDiv.id = '_mc_temp';
                 container.id = realId;
@@ -2833,7 +2829,8 @@
             });
         }
 
-        function renderMessages(messages) {
+        function renderMessages(messages, options) {
+            options = options || {};
             const container = document.getElementById('message-container');
             // Track seenUuids within this batch to skip duplicate messages
             // (backend JSONL can contain multiple records for the same message UUID)
@@ -2842,7 +2839,8 @@
             const seenContentHashes = new Set();
             // Text-only hash: catch duplicates where one record has text+image and another has just text
             const seenTextHashes = new Set();
-            messages.forEach(msg => {
+
+            function renderOneMessage(msg) {
                 // Insert date separator if day changed
                 maybeInsertDateSeparator(container, msg.timestamp);
                 // Deduplicate by UUID - skip if we've already rendered this message
@@ -2904,13 +2902,43 @@
                         addAssistantMessage(content, msgUuid, msgTimestamp);
                     }
                 }
-            });
+            }
 
-            updateToolsToggleButton();
-            // Clear any leftover running dots from history load (all results already present)
-            document.querySelectorAll('.tool-running-dot').forEach(dot => dot.remove());
-            updateDateSeparatorCounts();
-            scrollToBottom();
+            function finalize() {
+                updateToolsToggleButton();
+                // Clear any leftover running dots from history load (all results already present)
+                document.querySelectorAll('.tool-running-dot').forEach(dot => dot.remove());
+                updateDateSeparatorCounts();
+                if (options.onComplete) options.onComplete();
+                else scrollToBottom();
+            }
+
+            // Chunked rendering: for large batches (>CHUNK_SIZE), render in rAF chunks
+            // to avoid blocking the main thread during marked.parse() calls
+            const CHUNK_SIZE = 30;
+            if (messages.length <= CHUNK_SIZE || options.sync) {
+                // Small batch or sync mode: render all at once
+                messages.forEach(renderOneMessage);
+                finalize();
+                return;
+            }
+
+            // Large batch: render first chunk immediately for instant visual feedback,
+            // then yield to browser between subsequent chunks via rAF
+            let idx = 0;
+            function processChunk() {
+                const end = Math.min(idx + CHUNK_SIZE, messages.length);
+                while (idx < end) {
+                    renderOneMessage(messages[idx]);
+                    idx++;
+                }
+                if (idx < messages.length) {
+                    requestAnimationFrame(processChunk);
+                } else {
+                    finalize();
+                }
+            }
+            processChunk();
         }
 
         function addUserMessage(content, isOptimistic = false, timestamp = null) {
@@ -4519,7 +4547,7 @@
                                         }
                                         console.log('Tracked', renderedUuids.size, 'UUIDs from history');
 
-                                        renderMessages(initHistData.messages);
+                                        renderMessages(initHistData.messages, { onComplete: function() { scrollToBottom(true); } });
                                         lastMessageCount = initHistData.messages.length;
                                     }
 
