@@ -1142,6 +1142,7 @@
         let currentSessionProjectId = null;
         let previousSessionId = null;
         let previousSessionProjectId = null;
+        const sessionScrollPositions = new Map(); // Save scroll position per session
         let currentTmuxSession = null;
         let isStreaming = false;
         let sseConnection = null;
@@ -2273,6 +2274,12 @@
             const folder = FOLDERS.find(f => f.id === projectId) || FOLDERS.find(f => f.id === currentFolder);
             if (!folder) return;
 
+            // Save scroll position of current session before switching
+            if (currentSessionId) {
+                const msgs = document.getElementById('messages');
+                if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
+            }
+
             // Track previous session for Ctrl+. quick-switch
             if (currentSessionId && currentSessionId !== sessionId) {
                 previousSessionId = currentSessionId;
@@ -2352,6 +2359,12 @@
             } else {
                 const mappedTmux = codexTmuxMapping[sessionId] || tmuxNameLookup[sessionId.substring(0, 8)];
                 setEngine(mappedTmux && mappedTmux.startsWith('feather-pi-') ? 'pi' : 'codex');
+            }
+
+            // Save scroll position of current session before switching
+            if (currentSessionId) {
+                const msgs = document.getElementById('messages');
+                if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
             }
 
             // Track previous session for Ctrl+. quick-switch
@@ -2599,11 +2612,31 @@
                 }
                 renderMessages(allMessages);
                 lastMessageCount = data.total;  // Track total for polling
-                // Delay scroll to ensure DOM has rendered - force scroll on initial load
-                userAtBottom = true;  // Reset scroll state for new session
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => scrollToBottom(true));
-                });
+                // Restore saved scroll position or scroll to bottom
+                const savedScroll = sessionScrollPositions.get(sessionId);
+                if (savedScroll !== undefined) {
+                    // Returning to a previously viewed session — restore position
+                    userAtBottom = false;
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const msgs = document.getElementById('messages');
+                            if (msgs) {
+                                msgs.scrollTop = savedScroll;
+                                // Check if we're at bottom after restoring
+                                const SCROLL_THRESHOLD_CHECK = 80;
+                                if (msgs.scrollTop + msgs.clientHeight >= msgs.scrollHeight - SCROLL_THRESHOLD_CHECK) {
+                                    userAtBottom = true;
+                                }
+                            }
+                        });
+                    });
+                } else {
+                    // First time viewing or new session — scroll to bottom
+                    userAtBottom = true;
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => scrollToBottom(true));
+                    });
+                }
 
                 // Return cursor for SSE tailing
                 return { cursor: data.cursor || null };

@@ -2727,11 +2727,12 @@
                 // Remove duplicate adjacent date separators
                 const seps = container.querySelectorAll('.date-separator');
                 for (let i = 1; i < seps.length; i++) {
-                    if (seps[i].textContent.trim() === seps[i-1].textContent.trim()) {
+                    if ((seps[i].getAttribute('data-date-label') || seps[i].textContent.trim()) === (seps[i-1].getAttribute('data-date-label') || seps[i-1].textContent.trim())) {
                         seps[i].remove();
                     }
                 }
 
+                updateDateSeparatorCounts();
                 // Restore scroll position
                 requestAnimationFrame(() => {
                     const newScrollHeight = container.scrollHeight;
@@ -2786,8 +2787,31 @@
             const sep = document.createElement('div');
             sep.className = 'date-separator flex items-center gap-3 py-2 max-w-3xl mx-auto';
             const label = formatDateSeparator(timestamp);
-            sep.innerHTML = `<div class="flex-1 h-px bg-smoke-5/50"></div><span class="text-[10px] font-medium uppercase tracking-widest text-smoke-8 bg-smoke-1 px-3 py-1 rounded-full border border-smoke-5/30">${label}</span><div class="flex-1 h-px bg-smoke-5/50"></div>`;
+            sep.setAttribute('data-date-label', label);
+            sep.innerHTML = `<div class="flex-1 h-px bg-smoke-5/50"></div><span class="date-sep-label text-[10px] font-medium uppercase tracking-widest text-smoke-8 bg-smoke-1 px-3 py-1 rounded-full border border-smoke-5/30">${label}</span><div class="flex-1 h-px bg-smoke-5/50"></div>`;
             container.appendChild(sep);
+        }
+
+        function updateDateSeparatorCounts() {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            const children = Array.from(container.children);
+            const seps = children.filter(c => c.classList.contains('date-separator'));
+            seps.forEach((sep, i) => {
+                const label = sep.getAttribute('data-date-label') || '';
+                const nextSep = seps[i + 1];
+                const startIdx = children.indexOf(sep);
+                const endIdx = nextSep ? children.indexOf(nextSep) : children.length;
+                let msgCount = 0;
+                for (let j = startIdx + 1; j < endIdx; j++) {
+                    const msgType = children[j].getAttribute('data-msg-type');
+                    if (msgType === 'user' || msgType === 'assistant') msgCount++;
+                }
+                const spanEl = sep.querySelector('.date-sep-label');
+                if (spanEl) {
+                    spanEl.textContent = msgCount > 0 ? `${label} (${msgCount})` : label;
+                }
+            });
         }
 
         function renderMessages(messages) {
@@ -2866,6 +2890,7 @@
             updateToolsToggleButton();
             // Clear any leftover running dots from history load (all results already present)
             document.querySelectorAll('.tool-running-dot').forEach(dot => dot.remove());
+            updateDateSeparatorCounts();
             scrollToBottom();
         }
 
