@@ -1,188 +1,58 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
-  <channel>
-    <title>Autoweb Feather Improvements</title>
-    <link>#</link>
-    <description>Self-improving Feather web application changelog</description>
-    <item>
-      <title>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</title>
-      <pubDate>2026-03-16T05:35:38Z</pubDate>
-      <description>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
-      <pubDate>2026-03-16T05:32:56Z</pubDate>
-      <description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</title>
-      <pubDate>2026-03-16T05:25:35Z</pubDate>
-      <description>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</title>
-      <pubDate>2026-03-16T05:22:22Z</pubDate>
-      <description>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</title>
-      <pubDate>2026-03-16T05:15:20Z</pubDate>
-      <description>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</title>
-      <pubDate>2026-03-16T05:12:01Z</pubDate>
-      <description>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</title>
-      <pubDate>2026-03-16T05:07:10Z</pubDate>
-      <description>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</title>
-      <pubDate>2026-03-16T05:03:30Z</pubDate>
-      <description>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</title>
-      <pubDate>2026-03-16T04:55:54Z</pubDate>
-      <description>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</title>
-      <pubDate>2026-03-16T04:51:28Z</pubDate>
-      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</title>
-      <pubDate>2026-03-16T04:46:08Z</pubDate>
-      <description>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</title>
-      <pubDate>2026-03-16T04:41:46Z</pubDate>
-      <description>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
-      <pubDate>2026-03-16T04:35:12Z</pubDate>
-      <description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</title>
-      <pubDate>2026-03-16T04:31:19Z</pubDate>
-      <description>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</title>
-      <pubDate>2026-03-16T04:27:11Z</pubDate>
-      <description>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</title>
-      <pubDate>2026-03-16T04:21:51Z</pubDate>
-      <description>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</title>
-      <pubDate>2026-03-16T04:16:37Z</pubDate>
-      <description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</title>
-      <pubDate>2026-03-16T04:10:22Z</pubDate>
-      <description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</title>
-      <pubDate>2026-03-16T04:06:25Z</pubDate>
-      <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</title>
-      <pubDate>2026-03-16T04:01:43Z</pubDate>
-      <description>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</title>
-      <pubDate>2026-03-16T03:57:32Z</pubDate>
-      <description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</title>
-      <pubDate>2026-03-16T03:54:50Z</pubDate>
-      <description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title>
-      <pubDate>2026-03-16T03:51:24Z</pubDate>
-      <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</title>
-      <pubDate>2026-03-16T03:48:22Z</pubDate>
-      <description>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title>
-      <pubDate>2026-03-16T03:41:49Z</pubDate>
-      <description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</title>
-      <pubDate>2026-03-16T03:37:25Z</pubDate>
-      <description>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</title>
-      <pubDate>2026-03-16T03:32:54Z</pubDate>
-      <description>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</title>
-      <pubDate>2026-03-16T03:29:17Z</pubDate>
-      <description>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</title>
-      <pubDate>2026-03-16T03:22:27Z</pubDate>
-      <description>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</description>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</title>
-      <pubDate>2026-03-16T03:18:20Z</pubDate>
-      <description>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</description>
-      <link>#</link>
-    </item>
-  </channel>
-</rss>
+<channel>
+<title>Feather Autoweb Improvements</title>
+<description>Live feed of autonomous improvements to the Feather web application</description>
+<link>http://localhost:4860</link>
+<lastBuildDate>Mon, 16 Mar 2026 05:39:00 GMT</lastBuildDate>
+<item><title>Add file language badges (Rust, JS, Python, etc.) to Read/Write/Edit/Grep/Glob tool call headers — colored pill badges based on file extension for quick scanning (81 tests pass)</title><pubDate>2026-03-16T05:38:51Z</pubDate><description>Add file language badges (Rust, JS, Python, etc.) to Read/Write/Edit/Grep/Glob tool call headers — colored pill badges based on file extension for quick scanning (81 tests pass)</description><link>#</link></item>
+<item><title>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</title><pubDate>2026-03-16T05:35:38Z</pubDate><description>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</description><link>#</link></item>
+<item><title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title><pubDate>2026-03-16T05:32:56Z</pubDate><description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description><link>#</link></item>
+<item><title>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</title><pubDate>2026-03-16T05:25:35Z</pubDate><description>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</description><link>#</link></item>
+<item><title>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</title><pubDate>2026-03-16T05:22:22Z</pubDate><description>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</description><link>#</link></item>
+<item><title>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</title><pubDate>2026-03-16T05:15:20Z</pubDate><description>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</description><link>#</link></item>
+<item><title>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</title><pubDate>2026-03-16T05:12:01Z</pubDate><description>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</description><link>#</link></item>
+<item><title>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</title><pubDate>2026-03-16T05:07:10Z</pubDate><description>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</description><link>#</link></item>
+<item><title>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</title><pubDate>2026-03-16T05:03:30Z</pubDate><description>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</description><link>#</link></item>
+<item><title>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</title><pubDate>2026-03-16T04:55:54Z</pubDate><description>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</description><link>#</link></item>
+<item><title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</title><pubDate>2026-03-16T04:51:28Z</pubDate><description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description><link>#</link></item>
+<item><title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</title><pubDate>2026-03-16T04:46:08Z</pubDate><description>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</description><link>#</link></item>
+<item><title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</title><pubDate>2026-03-16T04:41:46Z</pubDate><description>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</description><link>#</link></item>
+<item><title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title><pubDate>2026-03-16T04:35:12Z</pubDate><description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description><link>#</link></item>
+<item><title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</title><pubDate>2026-03-16T04:31:19Z</pubDate><description>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</description><link>#</link></item>
+<item><title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</title><pubDate>2026-03-16T04:27:11Z</pubDate><description>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</description><link>#</link></item>
+<item><title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</title><pubDate>2026-03-16T04:21:51Z</pubDate><description>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</description><link>#</link></item>
+<item><title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</title><pubDate>2026-03-16T04:16:37Z</pubDate><description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description><link>#</link></item>
+<item><title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</title><pubDate>2026-03-16T04:10:22Z</pubDate><description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description><link>#</link></item>
+<item><title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</title><pubDate>2026-03-16T04:06:25Z</pubDate><description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description><link>#</link></item>
+<item><title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</title><pubDate>2026-03-16T04:01:43Z</pubDate><description>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</description><link>#</link></item>
+<item><title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</title><pubDate>2026-03-16T03:57:32Z</pubDate><description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description><link>#</link></item>
+<item><title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</title><pubDate>2026-03-16T03:54:50Z</pubDate><description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description><link>#</link></item>
+<item><title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title><pubDate>2026-03-16T03:51:24Z</pubDate><description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description><link>#</link></item>
+<item><title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</title><pubDate>2026-03-16T03:48:22Z</pubDate><description>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</description><link>#</link></item>
+<item><title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title><pubDate>2026-03-16T03:41:49Z</pubDate><description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description><link>#</link></item>
+<item><title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</title><pubDate>2026-03-16T03:37:25Z</pubDate><description>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</description><link>#</link></item>
+<item><title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</title><pubDate>2026-03-16T03:32:54Z</pubDate><description>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</description><link>#</link></item>
+<item><title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</title><pubDate>2026-03-16T03:29:17Z</pubDate><description>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</description><link>#</link></item>
+<item><title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</title><pubDate>2026-03-16T03:22:27Z</pubDate><description>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</description><link>#</link></item>
+<item><title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</title><pubDate>2026-03-16T03:18:20Z</pubDate><description>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</description><link>#</link></item>
+<item><title>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</title><pubDate>2026-03-16T03:15:13Z</pubDate><description>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</description><link>#</link></item>
+<item><title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</title><pubDate>2026-03-16T03:08:00Z</pubDate><description>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</description><link>#</link></item>
+<item><title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</title><pubDate>2026-03-16T03:03:28Z</pubDate><description>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</description><link>#</link></item>
+<item><title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</title><pubDate>2026-03-16T02:57:43Z</pubDate><description>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</description><link>#</link></item>
+<item><title>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and tool-result bodies at once, with per-session state and auto-show/hide based on tool presence</title><pubDate>2026-03-16T02:54:21Z</pubDate><description>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and tool-result bodies at once, with per-session state and auto-show/hide based on tool presence</description><link>#</link></item>
+<item><title>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in long multi-day sessions, handles load-earlier dedup</title><pubDate>2026-03-16T02:48:31Z</pubDate><description>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in long multi-day sessions, handles load-earlier dedup</description><link>#</link></item>
+<item><title>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with animated shimmer gradient mimicking user/assistant/tool blocks</title><pubDate>2026-03-16T02:43:40Z</pubDate><description>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with animated shimmer gradient mimicking user/assistant/tool blocks</description><link>#</link></item>
+<item><title>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, resets on scroll-to-bottom or session switch</title><pubDate>2026-03-16T02:40:09Z</pubDate><description>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, resets on scroll-to-bottom or session switch</description><link>#</link></item>
+<item><title>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboard, with Copied! feedback; mobile: always-visible at 0.6 opacity</title><pubDate>2026-03-16T02:34:48Z</pubDate><description>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboard, with Copied! feedback; mobile: always-visible at 0.6 opacity</description><link>#</link></item>
+<item><title>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on last text block per turn; both initial history load and SSE tailing paths updated</title><pubDate>2026-03-16T02:27:39Z</pubDate><description>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on last text block per turn; both initial history load and SSE tailing paths updated</description><link>#</link></item>
+<item><title>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI tool results, fixing raw [32m/[0m text leaking into message display</title><pubDate>2026-03-16T02:20:36Z</pubDate><description>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI tool results, fixing raw [32m/[0m text leaking into message display</description><link>#</link></item>
+<item><title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</title><pubDate>2026-03-16T02:14:45Z</pubDate><description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description><link>#</link></item>
+<item><title>Add TodoWrite/AskUserQuestion/Skill tool rendering — checklist UI with status icons, question options display, and skill badges instead of raw JSON dump</title><pubDate>2026-03-16T02:07:11Z</pubDate><description>Add TodoWrite/AskUserQuestion/Skill tool rendering — checklist UI with status icons, question options display, and skill badges instead of raw JSON dump</description><link>#</link></item>
+<item><title>Compiled and deployed Rust binary with is_autoweb metadata flag and better session titles — 32/33 dev sessions correctly detected as autoweb</title><pubDate>2026-03-16T01:59:59Z</pubDate><description>Compiled and deployed Rust binary with is_autoweb metadata flag and better session titles — 32/33 dev sessions correctly detected as autoweb</description><link>#</link></item>
+<item><title>Better autoweb session titles: skip boilerplate prompts, use assistant first response as fallback title + is_autoweb metadata flag for filter detection (compile needed for full deploy)</title><pubDate>2026-03-16T01:56:40Z</pubDate><description>Better autoweb session titles: skip boilerplate prompts, use assistant first response as fallback title + is_autoweb metadata flag for filter detection (compile needed for full deploy)</description><link>#</link></item>
+<item><title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</title><pubDate>2026-03-16T01:46:53Z</pubDate><description>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description><link>#</link></item>
+<item><title>Fallback session titles — normalizer now extracts first user message (truncated to 60 chars, first line only) as title when no summary record exists; all 18 dev sessions now show titles instead of Untitled</title><pubDate>2026-03-16T01:38:55Z</pubDate><description>Fallback session titles — normalizer now extracts first user message (truncated to 60 chars, first line only) as title when no summary record exists; all 18 dev sessions now show titles instead of Untitled</description><link>#</link></item>
+<item><title>Add Reviews tab to AW dashboard — new /api/autoweb-reviews/{instance} endpoint serves review markdown files, Reviews tab renders them with marked.js using collapsible details/summary with instance badges and proper markdown styling</title><pubDate>2026-03-16T01:32:33Z</pubDate><description>Add Reviews tab to AW dashboard — new /api/autoweb-reviews/{instance} endpoint serves review markdown files, Reviews tab renders them with marked.js using collapsible details/summary with instance badges and proper markdown styling</description><link>#</link></item>
+<item><title>Chunked load-earlier messages — renders 50 at a time with scroll-position preservation instead of dumping all at once (fixes HIGH priority Safari/mobile crash on 1000+ message sessions)</title><pubDate>2026-03-16T01:28:57Z</pubDate><description>Chunked load-earlier messages — renders 50 at a time with scroll-position preservation instead of dumping all at once (fixes HIGH priority Safari/mobile crash on 1000+ message sessions)</description><link>#</link></item>
+</channel></rss>

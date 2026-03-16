@@ -2936,6 +2936,40 @@
             } catch { return ''; }
         }
 
+        function getFileLangBadge(filePath) {
+            if (!filePath) return '';
+            const ext = filePath.split('.').pop().toLowerCase();
+            const LANG_MAP = {
+                rs: ['Rust', '#dea584'],
+                js: ['JS', '#f7df1e'],
+                jsx: ['JSX', '#61dafb'],
+                ts: ['TS', '#3178c6'],
+                tsx: ['TSX', '#61dafb'],
+                py: ['Python', '#3572a5'],
+                html: ['HTML', '#e34c26'],
+                css: ['CSS', '#563d7c'],
+                json: ['JSON', '#a8a8a8'],
+                toml: ['TOML', '#9c4221'],
+                yaml: ['YAML', '#cb171e'],
+                yml: ['YAML', '#cb171e'],
+                md: ['MD', '#083fa1'],
+                sh: ['Shell', '#89e051'],
+                bash: ['Shell', '#89e051'],
+                go: ['Go', '#00add8'],
+                rb: ['Ruby', '#cc342d'],
+                java: ['Java', '#b07219'],
+                c: ['C', '#555555'],
+                cpp: ['C++', '#f34b7d'],
+                h: ['C/C++', '#555555'],
+                sql: ['SQL', '#e38c00'],
+                xml: ['XML', '#0060ac'],
+                svg: ['SVG', '#ff9900'],
+            };
+            const lang = LANG_MAP[ext];
+            if (!lang) return '';
+            return `<span class="lang-badge text-[9px] font-medium px-1.5 py-0.5 rounded" style="background:${lang[1]}22;color:${lang[1]};border:1px solid ${lang[1]}33">${lang[0]}</span>`;
+        }
+
         function addToolCall(tool) {
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
@@ -2946,6 +2980,18 @@
             const icon = TOOL_ICONS[tool.name] || '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
             const formattedInput = formatToolInput(tool.name, tool.input);
 
+            // Get language badge for file-based tools
+            let langBadge = '';
+            if (['Read', 'Write', 'Edit'].includes(tool.name) && tool.input?.file_path) {
+                langBadge = getFileLangBadge(tool.input.file_path);
+            } else if (tool.name === 'Grep' && tool.input?.path) {
+                langBadge = getFileLangBadge(tool.input.path);
+            } else if (tool.name === 'Glob' && tool.input?.pattern) {
+                // Try to extract extension from glob pattern like "**/*.rs"
+                const globExt = tool.input.pattern.match(/\*\.(\w+)$/);
+                if (globExt) langBadge = getFileLangBadge('x.' + globExt[1]);
+            }
+
             div.innerHTML = `
                 <div class="max-w-3xl mx-auto">
                     <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}">
@@ -2953,6 +2999,7 @@
                              onclick="this.parentElement.querySelector('.tool-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.tool-body').classList.contains('hidden') ? '▶' : '▼'">
                             <span class="text-sm">${icon}</span>
                             <span class="text-xs font-medium text-smoke-12">${escapeHtml(tool.name)}</span>
+                            ${langBadge}
                             <span class="text-xs text-smoke-8 font-mono truncate flex-1">${escapeHtml(preview)}</span>
                             <span class="tool-chevron text-[10px] text-smoke-7">▶</span>
                         </div>
