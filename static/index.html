@@ -3106,7 +3106,7 @@
 
             // Highlight code blocks and add copy buttons
             div.querySelectorAll('pre code').forEach(block => {
-                hljs.highlightElement(block);
+                lazyHighlight(block);
                 addCopyButton(block.parentElement);
             });
         }
@@ -3361,7 +3361,7 @@
                 markdownDiv.innerHTML = renderMarkdown(textContent);
                 // Re-highlight code blocks and add copy buttons
                 existing.querySelectorAll('pre code').forEach(block => {
-                    hljs.highlightElement(block);
+                    lazyHighlight(block);
                     addCopyButton(block.parentElement);
                 });
             }
@@ -4193,6 +4193,26 @@
             return text.replace(/[\x1b\u001b]\[[0-9;]*[a-zA-Z]/g, '')
                        .replace(/[\x1b\u001b]\][^\x07]*(?:\x07|[\x1b\u001b]\\)/g, '')
                        .replace(/[\x1b\u001b][()][0-9A-B]/g, '');
+        }
+
+        // Lazy syntax highlighting: defer hljs.highlightElement to when code blocks
+        // scroll into view. For large sessions (CRITICAL #6), this avoids highlighting
+        // hundreds of off-screen code blocks synchronously during initial render.
+        const _codeHighlightObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const block = entry.target;
+                    if (!block.dataset.hlReady) {
+                        hljs.highlightElement(block);
+                        block.dataset.hlReady = '1';
+                    }
+                    _codeHighlightObserver.unobserve(block);
+                }
+            });
+        }, { root: document.getElementById('messages'), rootMargin: '300px' });
+
+        function lazyHighlight(block) {
+            _codeHighlightObserver.observe(block);
         }
 
         // Track if user is at bottom of scroll (within threshold)
