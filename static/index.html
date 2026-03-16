@@ -883,6 +883,7 @@
         let _whatsNewOpen = false;
         let _whatsNewLoaded = false;
         let _whatsNewLastSeen = localStorage.getItem('feather-whatsNewLastSeen') || '';
+        let _whatsNewNewestTs = '';
 
         function toggleWhatsNew() {
             const popover = document.getElementById('whats-new-popover');
@@ -923,6 +924,8 @@
                         if (status === 'keep') items.push({ ts, desc });
                     }
                     items.reverse(); // newest first
+                    // Track newest timestamp for badge comparison
+                    if (items.length > 0) _whatsNewNewestTs = items[0].ts;
                     const recent = items.slice(0, 15);
                     const list = document.getElementById('whats-new-list');
                     if (!list) return;
@@ -957,8 +960,9 @@
             // Remove existing badge
             const old = btn.querySelector('.wn-unseen-dot');
             if (old) old.remove();
-            // If there are unseen changes, show a dot
-            if (!_whatsNewLastSeen) {
+            // Show dot if never viewed OR if newest change is newer than last-seen
+            const hasUnseen = !_whatsNewLastSeen || (_whatsNewNewestTs > _whatsNewLastSeen);
+            if (hasUnseen && _whatsNewNewestTs) {
                 btn.insertAdjacentHTML('beforeend', '<span class="wn-unseen-dot" style="position:absolute;top:-1px;right:-1px;width:5px;height:5px;border-radius:50%;background:var(--gold-9);"></span>');
             }
         }
@@ -970,8 +974,30 @@
             }
         });
 
-        // Show badge on load
-        updateWhatsNewBadge();
+        // Check for new changes on page load (lightweight fetch for badge)
+        function checkWhatsNewBadge() {
+            fetch('/api/autoweb-results/feather?_=' + Date.now())
+                .then(r => r.text())
+                .then(text => {
+                    const lines = text.trim().split('\n');
+                    let newestKeepTs = '';
+                    for (let i = lines.length - 1; i >= 1; i--) {
+                        const parts = lines[i].split('\t');
+                        if (parts.length < 3) continue;
+                        const status = parts.length >= 4 && ['rust','frontend','both'].includes(parts[1]) ? parts[2] : parts[1];
+                        if (status === 'keep') {
+                            newestKeepTs = parts[0];
+                            break;
+                        }
+                    }
+                    if (newestKeepTs) {
+                        _whatsNewNewestTs = newestKeepTs;
+                        updateWhatsNewBadge();
+                    }
+                })
+                .catch(() => {});
+        }
+        checkWhatsNewBadge();
 
         // ========== State ==========
         let currentSessionId = null;
