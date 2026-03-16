@@ -75,6 +75,9 @@
         /* Skeleton loading for session history */
         .skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
         .skeleton-block { border-radius: 12px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
+        /* Scroll progress indicator */
+        #scroll-progress { position: absolute; top: 0; left: 0; height: 2px; background: var(--gold-9); z-index: 30; transition: width 80ms linear, opacity 200ms ease; opacity: 0; pointer-events: none; border-radius: 0 1px 1px 0; }
+        #scroll-progress.visible { opacity: 0.6; }
         /* Sticky date separators in message list */
         .date-separator { position: sticky; top: 0; z-index: 10; background: var(--smoke-1); padding-left: 1rem; padding-right: 1rem; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -527,6 +530,9 @@
             <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
             <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
+
+        <!-- Scroll progress indicator -->
+        <div id="scroll-progress"></div>
 
         <!-- Messages -->
         <div id="messages" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
@@ -3838,6 +3844,22 @@
                     btn.classList.remove('hidden');
                 }
             }
+            updateScrollProgress();
+        }
+
+        function updateScrollProgress() {
+            const container = document.getElementById('messages');
+            const bar = document.getElementById('scroll-progress');
+            if (!container || !bar) return;
+            const scrollable = container.scrollHeight - container.clientHeight;
+            if (scrollable <= 50) {
+                bar.classList.remove('visible');
+                bar.style.width = '0%';
+                return;
+            }
+            const pct = Math.min(100, (container.scrollTop / scrollable) * 100);
+            bar.style.width = pct + '%';
+            bar.classList.toggle('visible', pct > 0 && pct < 99);
         }
 
         let scrollPending = false;
