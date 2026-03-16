@@ -1475,6 +1475,10 @@
         let sessionsDisplayCount = 5;
         let sessionViewTimes = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionViewTimes') || '{}'); } catch { return {}; } })();
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
+        let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
+        function getSessionTitle(s) {
+            return sessionRenames[s.id] || s.title || 'Untitled';
+        }
         function toggleStarSession(e, sessionId) {
             e.stopPropagation();
             if (starredSessions.has(sessionId)) {
@@ -1688,11 +1692,11 @@
 
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(s.title || 'Untitled')}">
+                         onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
-                                <div class="text-xs text-smoke-12 truncate leading-tight">${currentSearchQuery ? highlightSearch(s.title || 'Untitled', currentSearchQuery) : escapeHtml(s.title || 'Untitled')}</div>
+                                <div class="text-xs text-smoke-12 truncate leading-tight">${currentSearchQuery ? highlightSearch(getSessionTitle(s), currentSearchQuery) : escapeHtml(getSessionTitle(s))}</div>
                                 <div class="flex items-center gap-1 text-[10px] text-smoke-7 leading-tight">
                                     ${sourceBadge}
                                     <span class="session-time" data-last-updated="${s.lastUpdated}" title="${formatFullTime(s.lastUpdated)}">${formatTime(s.lastUpdated)}</span>
@@ -1764,7 +1768,7 @@
             if (!recent.length) { container.innerHTML = ''; return; }
             let html = '<div class="text-[10px] uppercase tracking-widest text-smoke-7 mb-2">Recent sessions</div>';
             recent.forEach(s => {
-                const title = escapeHtml(s.title || 'Untitled');
+                const title = escapeHtml(getSessionTitle(s));
                 const time = formatTime(s.lastUpdated);
                 const msgCount = s.message_count ? s.message_count + ' msg' : '';
                 const source = s.source || 'claude';
@@ -5897,6 +5901,7 @@
             menu.innerHTML = `
                 <div class="ctx-item" onclick="ctxStar()">${starIcon} ${starLabel}</div>
                 <div class="ctx-item" onclick="ctxOpenNewTab()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open in new tab</div>
+                <div class="ctx-item" onclick="ctxRename()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> Rename</div>
                 <div class="ctx-item" onclick="ctxCopyId()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy session ID</div>
                 <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
                 <div class="ctx-sep"></div>
@@ -5947,6 +5952,29 @@
                 exportSessionMarkdown().finally(() => { currentSessionId = prev; });
             }
             closeSessionContextMenu();
+        }
+
+        function ctxRename() {
+            if (!_ctxSessionId) { closeSessionContextMenu(); return; }
+            const sid = _ctxSessionId;
+            closeSessionContextMenu();
+            const s = allSessions.find(s => s.id === sid);
+            const current = sessionRenames[sid] || (s && s.title) || '';
+            const newName = prompt('Rename session:', current);
+            if (newName === null) return; // cancelled
+            if (newName.trim() === '') {
+                delete sessionRenames[sid];
+            } else {
+                sessionRenames[sid] = newName.trim();
+            }
+            try { localStorage.setItem('feather-sessionRenames', JSON.stringify(sessionRenames)); } catch {}
+            renderSessions();
+            // Update mobile header if this is the current session
+            const mobileHeader = document.getElementById('mobile-session-header-text');
+            if (mobileHeader && currentSessionId === sid) {
+                mobileHeader.textContent = getSessionTitle(s || { id: sid });
+            }
+            showToast(newName.trim() ? 'Session renamed' : 'Session name reset');
         }
 
         function ctxMarkRead() {
@@ -6009,6 +6037,7 @@
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
+            { label: 'Rename current session', shortcut: '', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
                 if ('Notification' in window && Notification.permission === 'default') {

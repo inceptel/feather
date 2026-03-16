@@ -244,8 +244,9 @@
             /* Mobile: code blocks — smaller padding, always-visible copy button (no hover on touch) */
             .markdown-content pre { padding: 0.7em; font-size: 0.82em; }
             .code-copy-btn { opacity: 0.7 !important; }
-            /* Mobile: message copy button always visible (no hover on touch) */
+            /* Mobile: message copy/edit buttons always visible (no hover on touch) */
             .assistant-msg-bubble .msg-copy-btn, .user-msg-bubble .msg-copy-btn { opacity: 0.6 !important; padding: 4px 8px; }
+            .user-msg-bubble .msg-edit-btn { opacity: 0.6 !important; padding: 4px 8px; }
             /* Mobile: reduce heading sizes to prevent overflow */
             .markdown-content h1 { font-size: 1.2em !important; }
             .markdown-content h2 { font-size: 1.1em !important; }
@@ -316,6 +317,9 @@
         .assistant-msg-bubble:hover .msg-copy-btn, .user-msg-bubble:hover .msg-copy-btn { opacity: 0.8; }
         .assistant-msg-bubble .msg-copy-btn:hover, .user-msg-bubble .msg-copy-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
         .assistant-msg-bubble .msg-copy-btn.copied, .user-msg-bubble .msg-copy-btn.copied { color: var(--apple-9); border-color: var(--apple-9); }
+        .user-msg-bubble .msg-edit-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
+        .user-msg-bubble:hover .msg-edit-btn { opacity: 0.8; }
+        .user-msg-bubble .msg-edit-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
         .user-msg-bubble { position: relative; }
         /* Modals */
         .modal-backdrop { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
@@ -2657,6 +2661,7 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
+                        <button class="msg-edit-btn" onclick="editAndResend(this)" title="Edit &amp; resend"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg><span>Edit</span></button>
                         <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
                         ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(textContent))}</div>` : ''}
                         ${attachmentHtml}
@@ -2795,6 +2800,28 @@
                 hljs.highlightElement(block);
                 addCopyButton(block.parentElement);
             });
+        }
+
+        function editAndResend(btn) {
+            const msgDiv = btn.closest('[data-raw-content]');
+            if (!msgDiv) return;
+            const rawContent = msgDiv.getAttribute('data-raw-content') || '';
+            // Strip attachment markers to get just the text
+            const text = rawContent
+                .replace(/\[(?:Attached image|Image: source): [^\]]+\]/g, '')
+                .replace(/\[Attached file: [^\]]+\]\s*\([^)]*\)/g, '')
+                .trim();
+            if (!text) return;
+            const input = document.getElementById('input');
+            if (!input) return;
+            input.value = text;
+            input.focus();
+            // Auto-resize textarea
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 300) + 'px';
+            // Scroll input into view on mobile
+            input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            showToast('Message loaded into input');
         }
 
         async function copyMessageContent(btn) {
@@ -3047,6 +3074,7 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
+                        <button class="msg-edit-btn" onclick="editAndResend(this)" title="Edit &amp; resend"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg><span>Edit</span></button>
                         <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
                         ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(displayText))}</div>` : ''}
                         ${attachmentHtml}
