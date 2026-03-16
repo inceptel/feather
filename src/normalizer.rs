@@ -360,8 +360,121 @@ async fn initial_scan(cache: &Arc<SessionCache>, config: &WatchConfig) -> Result
     let pi_count = scan_pi_sessions(cache, config).await?;
     session_count += pi_count;
 
-    info!("Initial scan complete: {} sessions loaded ({} Codex, {} Pi)", session_count, codex_count, pi_count);
+    // Scan normalized directory for orphaned sessions (e.g. copied from prod-sessions)
+    // that aren't already in the cache from Claude/Codex/Pi scans.
+    let orphan_count = scan_normalized_dir(cache, config);
+    session_count += orphan_count;
+
+    info!("Initial scan complete: {} sessions loaded ({} Codex, {} Pi, {} orphaned)", session_count, codex_count, pi_count, orphan_count);
     Ok(())
+}
+
+/// Scan the normalized directory for sessions that exist on disk but aren't in the cache.
+/// This picks up sessions copied from prod-sessions or other external sources.
+fn scan_normalized_dir(cache: &Arc<SessionCache>, config: &WatchConfig) -> usize {
+    use std::io::{BufRead, BufReader};
+    let dir = &config.normalized_dir;
+    if !dir.exists() {
+        return 0;
+    }
+    // Determine default project ID from Claude projects directory
+    let default_project = if config.claude_projects_dir.exists() {
+        fs::read_dir(&config.claude_projects_dir)
+            .ok()
+            .and_then(|mut entries| entries.find_map(|e| {
+                let e = e.ok()?;
+                if e.path().is_dir() {
+                    e.file_name().to_str().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            }))
+            .unwrap_or_else(|| "unknown".to_string())
+    } else {
+        "unknown".to_string()
+    };
+    let mut count = 0;
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().map_or(false, |e| e == "jsonl") {
+            continue;
+        }
+        let session_id = match path.file_stem().and_then(|n| n.to_str()) {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+        // Skip if already in cache (discovered from Claude/Codex/Pi scan)
+        if cache.get(&session_id).is_some() {
+            continue;
+        }
+        // Read first line for metadata + count lines for message_count
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        let mut first_msg: Option<NormalizedMessage> = None;
+        let mut last_timestamp = String::new();
+        let mut line_count = 0usize;
+        let mut title: Option<String> = None;
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            line_count += 1;
+            if let Ok(msg) = serde_json::from_str::<NormalizedMessage>(&line) {
+                if first_msg.is_none() {
+                    first_msg = Some(msg.clone());
+                }
+                // Extract title from first user text (like the normalizer's fallback)
+                if title.is_none() && msg.role == "user" {
+                    for block in &msg.content {
+                        if let ContentBlock::Text { text } = block {
+                            let t = text.lines().next().unwrap_or("").trim();
+                            if !t.is_empty() && t.len() > 5 {
+                                let truncated = if t.len() > 60 { &t[..60] } else { t };
+                                title = Some(truncated.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+                last_timestamp = msg.timestamp.clone();
+            }
+        }
+        if line_count == 0 {
+            continue;
+        }
+        let created = first_msg.as_ref().map(|m| m.timestamp.clone()).unwrap_or_default();
+        let meta = SessionMeta {
+            id: session_id.clone(),
+            project: default_project.clone(),
+            title,
+            created_at: created,
+            updated_at: last_timestamp,
+            message_count: line_count,
+            last_memory_uuid: None,
+            source: "claude".to_string(),
+            is_autoweb: false,
+        };
+        let session = NormalizedSession {
+            meta,
+            messages: Vec::new(), // Don't load all messages into memory
+            normalized_path: path.clone(),
+        };
+        cache.upsert(session);
+        count += 1;
+        debug!("Loaded orphaned session {} ({} messages) from {}", session_id, line_count, path.display());
+    }
+    count
 }
 
 /// Scan Codex sessions directory (walks YYYY/MM/DD structure)
