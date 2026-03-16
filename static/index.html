@@ -1777,6 +1777,7 @@
                 renderedUuids.clear();
                 renderedContentHashes.clear();
                 renderedTextHashes.clear();
+                _lastRenderedDateKey = null;
                 resetUnread();
                 for (const msg of data.messages) {
                     if (msg.uuid) renderedUuids.add(msg.uuid);
@@ -1849,7 +1850,10 @@
             container.id = '_mc_real';
             tempDiv.id = 'message-container';
             tempDiv.style.display = '';
+            const savedDateKey = _lastRenderedDateKey;
+            _lastRenderedDateKey = null;  // Reset for earlier chunk
             renderMessages(chunk);
+            _lastRenderedDateKey = savedDateKey;  // Restore for future messages
             tempDiv.id = '_mc_temp';
             container.id = realId;
 
@@ -1874,6 +1878,14 @@
             }
             tempDiv.remove();
 
+            // Remove duplicate adjacent date separators (earlier chunk may share a day with existing messages)
+            const seps = container.querySelectorAll('.date-separator');
+            for (let i = 1; i < seps.length; i++) {
+                if (seps[i].textContent.trim() === seps[i-1].textContent.trim()) {
+                    seps[i].remove();
+                }
+            }
+
             // Restore scroll position so view doesn't jump
             requestAnimationFrame(() => {
                 const newScrollHeight = container.scrollHeight;
@@ -1891,6 +1903,40 @@
             return text.trim();
         }
 
+        // Track last rendered date key to insert day separators between messages
+        let _lastRenderedDateKey = null;
+
+        function getDateKey(isoString) {
+            if (!isoString) return null;
+            try { return new Date(isoString).toDateString(); } catch { return null; }
+        }
+
+        function formatDateSeparator(isoString) {
+            if (!isoString) return '';
+            try {
+                const d = new Date(isoString);
+                const now = new Date();
+                const todayKey = now.toDateString();
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const dKey = d.toDateString();
+                if (dKey === todayKey) return 'Today';
+                if (dKey === yesterday.toDateString()) return 'Yesterday';
+                return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            } catch { return ''; }
+        }
+
+        function maybeInsertDateSeparator(container, timestamp) {
+            const dateKey = getDateKey(timestamp);
+            if (!dateKey || dateKey === _lastRenderedDateKey) return;
+            _lastRenderedDateKey = dateKey;
+            const sep = document.createElement('div');
+            sep.className = 'date-separator flex items-center gap-3 py-3 max-w-3xl mx-auto';
+            const label = formatDateSeparator(timestamp);
+            sep.innerHTML = `<div class="flex-1 h-px bg-smoke-5/50"></div><span class="text-[10px] font-medium uppercase tracking-widest text-smoke-7">${label}</span><div class="flex-1 h-px bg-smoke-5/50"></div>`;
+            container.appendChild(sep);
+        }
+
         function renderMessages(messages) {
             const container = document.getElementById('message-container');
             // Track seenUuids within this batch to skip duplicate messages
@@ -1901,6 +1947,8 @@
             // Text-only hash: catch duplicates where one record has text+image and another has just text
             const seenTextHashes = new Set();
             messages.forEach(msg => {
+                // Insert date separator if day changed
+                maybeInsertDateSeparator(container, msg.timestamp);
                 // Deduplicate by UUID - skip if we've already rendered this message
                 if (msg.uuid) {
                     if (seenUuids.has(msg.uuid)) return;
