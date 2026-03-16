@@ -274,6 +274,19 @@ fn epoch_millis() -> u128 {
         .as_millis()
 }
 
+/// Validate a session ID to prevent path traversal and injection attacks.
+/// Valid IDs contain only alphanumeric chars, hyphens, underscores, and dots.
+/// Rejects `..`, `/`, `\`, and empty strings.
+fn is_valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 256
+        && !id.contains("..")
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.contains('\0')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
 async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
@@ -695,6 +708,18 @@ async fn get_session_history(
 ) -> Json<SessionHistory> {
     let _ = project_id; // normalized-only (project_id kept for route compatibility)
 
+    // Reject malformed session IDs early (path traversal prevention)
+    if !is_valid_session_id(&session_id) {
+        tracing::warn!("Rejected invalid session_id in get_session_history: {:?}", session_id);
+        return Json(SessionHistory {
+            session_id,
+            project: String::new(),
+            messages: Vec::new(),
+            total: 0,
+            cursor: String::new(),
+        });
+    }
+
     // Only use normalized sessions (~/sessions/{session_id}.jsonl)
     let normalized_path = state.session_cache.normalized_dir.join(format!("{}.jsonl", session_id));
     let offset = query.offset.unwrap_or(0);
@@ -861,6 +886,13 @@ async fn claude_spawn(
     Path(session_id): Path<String>,
     Json(req): Json<SpawnRequest>,
 ) -> Json<SpawnResponse> {
+    if !is_valid_session_id(&session_id) {
+        return Json(SpawnResponse {
+            status: "error: invalid session_id".to_string(),
+            tmux_name: String::new(),
+            session_id: None,
+        });
+    }
     match state.tmux.spawn_claude_session(&session_id, req.cwd.as_deref()) {
         Ok(info) => {
             state.title_trigger.notify_one();
@@ -888,6 +920,13 @@ async fn claude_fork(
     Path(session_id): Path<String>,
     Json(req): Json<ForkClaudeRequest>,
 ) -> Json<SpawnResponse> {
+    if !is_valid_session_id(&session_id) {
+        return Json(SpawnResponse {
+            status: "error: invalid session_id".to_string(),
+            tmux_name: String::new(),
+            session_id: None,
+        });
+    }
     match state.tmux.fork_claude_session(&session_id, req.cwd.as_deref()) {
         Ok(tmux_name) => {
             state.title_trigger.notify_one();
@@ -1035,6 +1074,9 @@ async fn codex_send(
     Path(session_id): Path<String>,
     Json(req): Json<CodexSendRequest>,
 ) -> Json<SimpleResponse> {
+    if !is_valid_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     // Send message to tmux - Codex writes its own JSONL files that normalizer watches
     if let Err(e) = state.tmux.send_message(&session_id, &req.message) {
         return Json(SimpleResponse { status: format!("error: {}", e) });
@@ -1386,6 +1428,9 @@ async fn claude_send(
     Path(session_id): Path<String>,
     Json(req): Json<SendMessageRequest>,
 ) -> Json<SimpleResponse> {
+    if !is_valid_session_id(&session_id) {
+        return Json(SimpleResponse { status: "error: invalid session_id".to_string() });
+    }
     match state.tmux.send_message(&session_id, &req.message) {
         Ok(()) => {
             // Broadcast message event
@@ -1915,8 +1960,17 @@ async fn tail_session(
     Path((_project_id, session_id)): Path<(String, String)>,
     Query(_query): Query<TailQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    // Only use normalized session files
-    let file_path = state.session_cache.normalized_dir.join(format!("{}.jsonl", session_id));
+    // Reject malformed session IDs early (path traversal prevention)
+    if !is_valid_session_id(&session_id) {
+        tracing::warn!("Rejected invalid session_id in tail_session: {:?}", session_id);
+    }
+
+    // Only use normalized session files — invalid IDs will simply not match any file
+    let file_path = if is_valid_session_id(&session_id) {
+        state.session_cache.normalized_dir.join(format!("{}.jsonl", session_id))
+    } else {
+        PathBuf::from("/dev/null/nonexistent")
+    };
     let append_only = session_id.starts_with("feather-codex-") || session_id.starts_with("feather-pi-");
 
     // Always start from beginning of file - frontend dedupes by UUID
