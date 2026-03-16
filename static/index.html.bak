@@ -2522,6 +2522,9 @@
                 outputText = JSON.stringify(result.content, null, 2);
             }
 
+            // Strip ANSI escape codes from tool output (e.g. colored Bash results)
+            outputText = stripAnsi(outputText);
+
             // Create a summary for the header
             const lineCount = outputText.split('\n').length;
             const charCount = outputText.length;
@@ -2607,6 +2610,13 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function stripAnsi(text) {
+            if (!text) return '';
+            return text.replace(/[\x1b\u001b]\[[0-9;]*[a-zA-Z]/g, '')
+                       .replace(/[\x1b\u001b]\][^\x07]*(?:\x07|[\x1b\u001b]\\)/g, '')
+                       .replace(/[\x1b\u001b][()][0-9A-B]/g, '');
         }
 
         // Track if user is at bottom of scroll (within threshold)
