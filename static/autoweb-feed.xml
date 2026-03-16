@@ -1,10 +1,16 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0">
   <channel>
     <title>Feather Autoweb Improvements</title>
     <link>http://localhost:4860</link>
     <description>Self-improving Feather web application changes</description>
-    <lastBuildDate>Mon, 16 Mar 2026 04:31:28 GMT</lastBuildDate>
+    <lastBuildDate>Mon, 16 Mar 2026 04:35:22 GMT</lastBuildDate>
+    <item>
+      <title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
+      <pubDate>2026-03-16T04:35:12Z</pubDate>
+      <description>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
+      <link>#</link>
+    </item>
     <item>
       <title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</title>
       <pubDate>2026-03-16T04:31:19Z</pubDate>
