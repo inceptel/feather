@@ -699,6 +699,8 @@ async fn list_sessions(
 struct HistoryQuery {
     offset: Option<usize>,
     limit: Option<usize>,
+    /// Only return messages with index < before (for reverse pagination)
+    before: Option<usize>,
 }
 
 async fn get_session_history(
@@ -763,8 +765,15 @@ async fn get_session_history(
     // Track total before any slicing
     let total = messages.len();
 
-    // If offset specified, only return messages after that index
+    // If 'before' specified, only consider messages before that index (reverse pagination)
     let mut messages = messages;
+    if let Some(before) = query.before {
+        if before < messages.len() {
+            messages.truncate(before);
+        }
+    }
+
+    // If offset specified, only return messages after that index
     if offset > 0 && offset < messages.len() {
         messages = messages.split_off(offset);
     } else if offset >= messages.len() && offset > 0 {
