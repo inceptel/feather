@@ -29,3 +29,19 @@
 [2m2026-03-16T15:24:13.404034Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
 [2m2026-03-16T15:24:17.626986Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
 [2m2026-03-16T15:24:18.542692Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:24:56.280513Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:24:57.106626Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:25:07.781771Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:25:08.639427Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:25:10.702832Z[0m [33m WARN[0m [2mfeather_rs::normalizer[0m[2m:[0m Error processing /home/feather-dev/.claude/projects/-home-user-feather/e1aff6b1-e6fe-41cf-ad81-0e39f04d560e.jsonl: Session has no messages
+[2m2026-03-16T15:26:01.614426Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:27:01.626292Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 0
+[2m2026-03-16T15:28:08.005534Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:28:45.718051Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "bad\0id"
+[2m2026-03-16T15:28:46.544703Z[0m [33m WARN[0m [2mfeather_rs[0m[2m:[0m Rejected invalid session_id in get_session_history: "../../etc/passwd"
+[2m2026-03-16T15:29:08.142220Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 0
+[2m2026-03-16T15:30:08.259813Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:31:08.262167Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:32:08.264362Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:33:08.266792Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806
+[2m2026-03-16T15:34:08.268597Z[0m [32m INFO[0m [2mfeather_rs[0m[2m:[0m Starting tail for session 28b733e4-d424-4ad2-ba02-92f311cea858 from offset 300806

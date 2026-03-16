@@ -7069,38 +7069,43 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-16 07:07 UTC iter=119 keeps=119-->
+    <!--autoweb-version: 2026-03-16 15:22 UTC iter=153 keeps=147-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
         var el = document.getElementById('autoweb-version-indicator');
         if (!el) return;
-        function findComment(parent) {
-            for (var i = 0; i < parent.childNodes.length; i++) {
-                var n = parent.childNodes[i];
-                if (n.nodeType === 8 && n.data.indexOf('autoweb-version:') !== -1) return n.data;
-                if (n.childNodes && n.childNodes.length) {
-                    var r = findComment(n);
-                    if (r) return r;
+        function updateIndicator(keeps) {
+            var etTime = new Date().toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
+            el.textContent = "AW " + etTime + " ET" + (keeps != null ? " \u2022 " + keeps + " fixes" : "");
+        }
+        // Fetch live keeps count from all autoweb instances
+        fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).then(function(text) {
+            var keeps = 0;
+            text.split('\n').forEach(function(line) {
+                if (line && line.indexOf('\tkeep\t') !== -1) keeps++;
+            });
+            updateIndicator(keeps);
+        }).catch(function() {
+            // Fallback: parse from HTML comment
+            function findComment(parent) {
+                for (var i = 0; i < parent.childNodes.length; i++) {
+                    var n = parent.childNodes[i];
+                    if (n.nodeType === 8 && n.data.indexOf('autoweb-version:') !== -1) return n.data;
+                    if (n.childNodes && n.childNodes.length) { var r = findComment(n); if (r) return r; }
                 }
+                return null;
             }
-            return null;
-        }
-        var comment = findComment(document);
-        if (comment) {
-            var tsMatch = comment.match(/autoweb-version:\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})\s+UTC/);
-            var keepsMatch = comment.match(/keeps=(\d+)/);
-            var keeps = keepsMatch ? keepsMatch[1] : '0';
-            if (tsMatch) {
-                var utcDate = new Date(tsMatch[1] + 'T' + tsMatch[2] + ':' + tsMatch[3] + ':00Z');
-                var etTime = utcDate.toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
-                el.textContent = "AW " + etTime + ' ET \u2022 ' + keeps + ' fixes';
-            } else {
-                el.textContent = "AW " + keeps + ' fixes';
-            }
-        } else {
-            el.textContent = 'AW';
-        }
+            var comment = findComment(document);
+            var keepsMatch = comment && comment.match(/keeps=(\d+)/);
+            updateIndicator(keepsMatch ? keepsMatch[1] : null);
+        });
+        // Refresh time display every 60s
+        setInterval(function() {
+            var text = el.textContent;
+            var fixesMatch = text.match(/(\d+) fixes/);
+            updateIndicator(fixesMatch ? fixesMatch[1] : null);
+        }, 60000);
     })();
     </script>
 </body>

@@ -1769,6 +1769,8 @@ async fn terminal_stream(
     let lines = query.lines.unwrap_or(100);
     let last_content = String::new();
 
+    // Use filter_map to skip idle polls — only emit events when terminal content changes.
+    // Axum's KeepAlive handles connection liveness automatically.
     let stream = stream::unfold(
         (state, session_id, last_content, lines),
         |(state, session_id, mut last_content, lines)| async move {
@@ -1785,18 +1787,18 @@ async fn terminal_stream(
                 let data = serde_json::to_string(&event).unwrap_or_default();
 
                 Some((
-                    Ok(Event::default().event("terminal").data(data)),
+                    Some(Ok(Event::default().event("terminal").data(data))),
                     (state, session_id, last_content, lines),
                 ))
             } else {
-                // No change, send keepalive
+                // No change — skip event, KeepAlive handles connection liveness
                 Some((
-                    Ok(Event::default().comment("keepalive")),
+                    None,
                     (state, session_id, last_content, lines),
                 ))
             }
         },
-    );
+    ).filter_map(|opt| opt);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -2001,11 +2003,14 @@ async fn tail_session(
     // to avoid re-sending the entire session (reduces flash on SSE resync)
     let sent_lines: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
+    // Use filter_map to skip idle polls — Axum's KeepAlive handles connection keepalive,
+    // so we only emit SSE events when there's actual data. This reduces network traffic
+    // from ~10 events/s/client to near-zero for idle connections.
     let stream = stream::unfold(
         (file_path, start_offset, initial_mtime, false, sent_lines),
         move |(file_path, mut current_offset, mut last_mtime, mut missing_logged, mut sent_lines)| async move {
-            // Poll every 100ms for new content
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // Poll every 200ms for new content (balance of responsiveness vs resource usage)
+            tokio::time::sleep(Duration::from_millis(200)).await;
 
             // If file doesn't exist yet, keep the SSE open and wait
             if !file_path.exists() {
@@ -2014,7 +2019,7 @@ async fn tail_session(
                     missing_logged = true;
                 }
                 return Some((
-                    Ok(Event::default().comment("keepalive")),
+                    None, // No event — KeepAlive handles connection liveness
                     (file_path, current_offset, last_mtime, missing_logged, sent_lines),
                 ));
             } else if missing_logged {
@@ -2057,9 +2062,9 @@ async fn tail_session(
                     current_offset = new_offset;
 
                     if lines.is_empty() {
-                        // No new content, send keepalive comment
+                        // No new content — skip event emission
                         Some((
-                            Ok(Event::default().comment("keepalive")),
+                            None,
                             (file_path, current_offset, last_mtime, missing_logged, sent_lines),
                         ))
                     } else {
@@ -2104,13 +2109,13 @@ async fn tail_session(
 
                         if events.is_empty() {
                             Some((
-                                Ok(Event::default().comment("keepalive")),
+                                None, // All lines deduped — skip
                                 (file_path, current_offset, last_mtime, missing_logged, sent_lines),
                             ))
                         } else {
                             let data = serde_json::to_string(&events).unwrap_or_default();
                             Some((
-                                Ok(Event::default().event("lines").data(data)),
+                                Some(Ok(Event::default().event("lines").data(data))),
                                 (file_path, current_offset, last_mtime, missing_logged, sent_lines),
                             ))
                         }
@@ -2120,15 +2125,15 @@ async fn tail_session(
                     // File error - send error event and continue
                     tracing::warn!("Tail read error: {}", e);
                     Some((
-                        Ok(Event::default()
+                        Some(Ok(Event::default()
                             .event("error")
-                            .data(format!("{{\"error\":\"{}\"}}", e))),
+                            .data(format!("{{\"error\":\"{}\"}}", e)))),
                         (file_path, current_offset, last_mtime, missing_logged, sent_lines),
                     ))
                 }
             }
         },
-    );
+    ).filter_map(|opt| opt);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
