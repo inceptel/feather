@@ -1997,13 +1997,9 @@ async fn tail_session(
         .and_then(|m| m.modified())
         .ok();
 
-    // Track sent message content by UUID — on file rewrite, only emit new/changed lines
-    // to avoid re-sending the entire session (reduces flash on SSE resync)
-    let sent_lines: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-
     let stream = stream::unfold(
-        (file_path, start_offset, initial_mtime, false, sent_lines),
-        move |(file_path, mut current_offset, mut last_mtime, mut missing_logged, mut sent_lines)| async move {
+        (file_path, start_offset, initial_mtime, false),
+        move |(file_path, mut current_offset, mut last_mtime, mut missing_logged)| async move {
             // Poll every 100ms for new content
             tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -2015,7 +2011,7 @@ async fn tail_session(
                 }
                 return Some((
                     Ok(Event::default().comment("keepalive")),
-                    (file_path, current_offset, last_mtime, missing_logged, sent_lines),
+                    (file_path, current_offset, last_mtime, missing_logged),
                 ));
             } else if missing_logged {
                 tracing::info!("Tail file appeared: {}", file_path.display());
@@ -2060,58 +2056,50 @@ async fn tail_session(
                         // No new content, send keepalive comment
                         Some((
                             Ok(Event::default().comment("keepalive")),
-                            (file_path, current_offset, last_mtime, missing_logged, sent_lines),
+                            (file_path, current_offset, last_mtime, missing_logged),
                         ))
                     } else {
-                        // Build events, deduplicating by UUID+content to avoid
-                        // re-sending unchanged messages on file rewrite (SSE resync).
-                        // Only truly new or updated messages are emitted.
-                        let mut events: Vec<TailEvent> = Vec::new();
-                        for line in &lines {
-                            let parsed = match serde_json::from_str::<serde_json::Value>(line) {
-                                Ok(v) => v,
-                                Err(_) => continue,
-                            };
-                            let role = match parsed.get("role").and_then(|v| v.as_str()) {
-                                Some(r) => r,
-                                None => continue,
-                            };
-                            // Skip if we already sent this exact line (same UUID, same content)
-                            if let Some(uuid_str) = parsed.get("uuid").and_then(|v| v.as_str()) {
-                                if let Some(prev_line) = sent_lines.get(uuid_str) {
-                                    if prev_line == line {
-                                        continue; // Unchanged — skip
-                                    }
-                                }
-                                sent_lines.insert(uuid_str.to_string(), line.clone());
-                            }
-                            let content = parsed.get("content").cloned()
-                                .unwrap_or(serde_json::Value::Array(vec![]));
-                            let transformed = serde_json::json!({
-                                "type": role,
-                                "uuid": parsed.get("uuid").cloned().unwrap_or(serde_json::Value::Null),
-                                "timestamp": parsed.get("timestamp").cloned().unwrap_or(serde_json::Value::Null),
-                                "message": {
-                                    "role": role,
-                                    "content": content
-                                }
-                            });
-                            events.push(TailEvent {
-                                cursor: encode_cursor(current_offset),
-                                line: transformed,
-                            });
-                        }
+                        // Build event with all new lines
+                        // Transform normalized format to raw format for frontend compatibility
+                        // Normalized: {uuid, role, timestamp, content}
+                        // Raw format: {type, uuid, timestamp, message: {role, content}}
+                        let events: Vec<TailEvent> = lines.iter()
+                            .filter_map(|line| {
+                                serde_json::from_str::<serde_json::Value>(line).ok()
+                                    .and_then(|parsed| {
+                                        if let Some(role) = parsed.get("role").and_then(|v| v.as_str()) {
+                                            let content = parsed.get("content").cloned()
+                                                .unwrap_or(serde_json::Value::Array(vec![]));
+                                            let transformed = serde_json::json!({
+                                                "type": role,
+                                                "uuid": parsed.get("uuid").cloned().unwrap_or(serde_json::Value::Null),
+                                                "timestamp": parsed.get("timestamp").cloned().unwrap_or(serde_json::Value::Null),
+                                                "message": {
+                                                    "role": role,
+                                                    "content": content
+                                                }
+                                            });
+                                            Some(TailEvent {
+                                                cursor: encode_cursor(current_offset),
+                                                line: transformed,
+                                            })
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            })
+                            .collect();
 
                         if events.is_empty() {
                             Some((
                                 Ok(Event::default().comment("keepalive")),
-                                (file_path, current_offset, last_mtime, missing_logged, sent_lines),
+                                (file_path, current_offset, last_mtime, missing_logged),
                             ))
                         } else {
                             let data = serde_json::to_string(&events).unwrap_or_default();
                             Some((
                                 Ok(Event::default().event("lines").data(data)),
-                                (file_path, current_offset, last_mtime, missing_logged, sent_lines),
+                                (file_path, current_offset, last_mtime, missing_logged),
                             ))
                         }
                     }
@@ -2123,7 +2111,7 @@ async fn tail_session(
                         Ok(Event::default()
                             .event("error")
                             .data(format!("{{\"error\":\"{}\"}}", e))),
-                        (file_path, current_offset, last_mtime, missing_logged, sent_lines),
+                        (file_path, current_offset, last_mtime, missing_logged),
                     ))
                 }
             }
