@@ -107,6 +107,9 @@
         .result-copy-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
         @media (max-width: 767px) { .result-copy-btn { opacity: 0.6; } }
         .markdown-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; }
+        /* Code block line numbers */
+        .markdown-content pre.has-line-numbers { padding-left: 3.5em !important; }
+        .line-numbers-gutter { position: absolute; left: 0; top: 1em; bottom: 1em; width: 3em; text-align: right; padding-right: 0.75em; border-right: 1px solid var(--smoke-5); user-select: none; pointer-events: none; font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; line-height: 1.45; color: var(--smoke-7); box-sizing: border-box; overflow: hidden; }
         .markdown-content :not(pre) > code { background: var(--smoke-4); padding: 0.2em 0.4em; border-radius: 0.3em; color: #56b6c2; word-break: break-all; overflow-wrap: break-word; }
         .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
         .markdown-content li { margin: 0.25em 0; }
@@ -2855,6 +2858,23 @@
                 }
             };
             preElement.appendChild(btn);
+            addLineNumbers(preElement);
+        }
+
+        function addLineNumbers(preElement) {
+            if (preElement.querySelector('.line-numbers-gutter')) return;
+            const codeEl = preElement.querySelector('code');
+            if (!codeEl) return;
+            const text = codeEl.textContent || '';
+            const lineCount = text.split('\n').length;
+            if (lineCount < 3) return; // skip short snippets
+            const gutter = document.createElement('div');
+            gutter.className = 'line-numbers-gutter';
+            const nums = [];
+            for (let i = 1; i <= lineCount; i++) nums.push(i);
+            gutter.textContent = nums.join('\n');
+            preElement.classList.add('has-line-numbers');
+            preElement.appendChild(gutter);
         }
 
         function updateAssistantMessage(uuid, content) {

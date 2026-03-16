@@ -657,6 +657,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -2751,6 +2752,26 @@
             } catch {
                 label.textContent = 'Failed';
                 setTimeout(() => { label.textContent = 'Copy'; }, 1500);
+            }
+        }
+
+        async function copyLastAssistantMessage() {
+            const msgs = document.querySelectorAll('#message-container [data-raw-content]');
+            // Find last assistant message (has assistant-msg-bubble)
+            let lastAssistant = null;
+            for (let i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i].querySelector('.assistant-msg-bubble')) {
+                    lastAssistant = msgs[i];
+                    break;
+                }
+            }
+            if (!lastAssistant) { showToast('No assistant message to copy'); return; }
+            const raw = lastAssistant.getAttribute('data-raw-content') || '';
+            try {
+                await navigator.clipboard.writeText(raw);
+                showToast('Last response copied');
+            } catch {
+                showToast('Copy failed');
             }
         }
 
@@ -5787,6 +5808,7 @@
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
+            { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
@@ -6180,6 +6202,11 @@
                 if ((e.metaKey || e.ctrlKey) && e.key === '.') {
                     e.preventDefault();
                     switchToPreviousSession();
+                }
+                // Ctrl+Shift+C / Cmd+Shift+C to copy last assistant message
+                if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'C') {
+                    e.preventDefault();
+                    copyLastAssistantMessage();
                 }
             });
 
