@@ -854,6 +854,49 @@
         let currentEngine = localStorage.getItem('feather-engine') || 'pi';
         let codexMode = localStorage.getItem('feather-codex-mode') || 'yolo';
 
+        // ========== Dynamic Favicon & Title ==========
+        let _currentPageStatus = 'idle'; // 'idle' | 'working' | 'error'
+        let _currentSessionTitle = null;
+
+        function setFavicon(status) {
+            const colors = { idle: '#7fd88f', working: '#f5a742', error: '#e06c75' };
+            const color = colors[status] || colors.idle;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="${color}"/><text x="16" y="22" text-anchor="middle" font-size="18" fill="#0a0e14" font-family="sans-serif" font-weight="bold">F</text></svg>`;
+            let link = document.querySelector('link[rel="icon"]');
+            if (!link) {
+                link = document.createElement('link');
+                link.rel = 'icon';
+                document.head.appendChild(link);
+            }
+            link.href = 'data:image/svg+xml,' + encodeURIComponent(svg);
+        }
+
+        function updatePageTitle(statusText) {
+            const prefix = _currentPageStatus === 'working' ? '\u25CF ' : _currentPageStatus === 'error' ? '\u25CB ' : '';
+            const session = _currentSessionTitle || '';
+            if (session && statusText && _currentPageStatus === 'working') {
+                document.title = prefix + statusText + ' \u2014 ' + session + ' \u2014 Feather';
+            } else if (session) {
+                document.title = prefix + session + ' \u2014 Feather';
+            } else {
+                document.title = prefix + 'Feather';
+            }
+        }
+
+        function updateDynamicStatus(statusText, color) {
+            let newStatus = 'idle';
+            if (color === 'ember' || statusText === 'Disconnected' || statusText === 'Offline') {
+                newStatus = 'error';
+            } else if (color === 'gold' || color === 'amber' || statusText.includes('...') || statusText.includes('\u2026')) {
+                newStatus = 'working';
+            }
+            if (newStatus !== _currentPageStatus) {
+                _currentPageStatus = newStatus;
+                setFavicon(newStatus);
+            }
+            updatePageTitle(statusText);
+        }
+
         // Folder configuration - dynamically populated from /api/projects
         let FOLDERS = [];
         let currentFolder = localStorage.getItem('feather-folder') || null;
@@ -1049,6 +1092,8 @@
             const header = document.getElementById('mobile-session-header');
             const nameEl = document.getElementById('mobile-session-name');
             if (!header || !nameEl) return;
+            _currentSessionTitle = title || null;
+            updatePageTitle('');
             if (title) {
                 nameEl.textContent = title;
                 header.classList.remove('hidden');
@@ -4379,6 +4424,7 @@
             document.getElementById('status').textContent = text;
             document.getElementById('status-dot').style.backgroundColor = STATUS_COLORS[color] || STATUS_COLORS.apple;
             updateSessionButtons();
+            updateDynamicStatus(text, color);
         }
 
         // ========== Terminal Status Parsing ==========
@@ -5194,6 +5240,9 @@
             }
             setVH();
             window.addEventListener('resize', setVH);
+
+            // Initialize dynamic favicon
+            setFavicon('idle');
 
             // Check Claude auth status on load
             checkClaudeAuth();
