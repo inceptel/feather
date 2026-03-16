@@ -1561,7 +1561,7 @@
                                 <div class="text-xs text-smoke-12 truncate leading-tight">${currentSearchQuery ? highlightSearch(s.title || 'Untitled', currentSearchQuery) : escapeHtml(s.title || 'Untitled')}</div>
                                 <div class="flex items-center gap-1 text-[10px] text-smoke-7 leading-tight">
                                     ${sourceBadge}
-                                    <span>${formatTime(s.lastUpdated)}</span>
+                                    <span title="${formatFullTime(s.lastUpdated)}">${formatTime(s.lastUpdated)}</span>
                                     ${s.message_count ? `<span class="text-smoke-8">&middot;</span><span>${s.message_count} msg</span>` : ''}
                                     ${unreadDot}
                                 </div>
@@ -1707,6 +1707,13 @@
                 if (hours < 24) return `${hours}h`;
                 return `${days}d`;
             } catch { return iso; }
+        }
+
+        function formatFullTime(iso) {
+            try {
+                const d = new Date(iso);
+                return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET';
+            } catch { return iso || ''; }
         }
 
         // ========== Live Pulse ==========
