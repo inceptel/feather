@@ -53,7 +53,8 @@
             --smoke-5: #c5c5c5; --smoke-6: #aaaaaa; --smoke-7: #888888; --smoke-8: #666666;
             --smoke-9: #555555; --smoke-10: #444444; --smoke-11: #333333; --smoke-12: #1a1a1a;
         }
-        html, body { height: 100%; overflow: hidden; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        html, body { height: 100%; height: -webkit-fill-available; overflow: hidden; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        @supports (height: 100dvh) { html, body { height: 100dvh; } }
         html { overflow-x: hidden; -webkit-overflow-scrolling: touch; }
         #message-container { max-width: 100%; box-sizing: border-box; }
         #message-container > * { max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
@@ -280,7 +281,7 @@
         .icon-svg svg { width: 1em; height: 1em; }
     </style>
 </head>
-<body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: calc(var(--vh, 1vh) * 100);">
+<body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);">
     <!-- Onboarding Modal -->
     <div id="onboarding-modal" class="fixed inset-0 bg-black/80 modal-backdrop z-[100] hidden items-center justify-center">
         <div class="bg-smoke-2 border border-smoke-5 modal-panel max-w-lg w-full mx-4">
