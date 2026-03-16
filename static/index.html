@@ -53,7 +53,8 @@
             --smoke-5: #c5c5c5; --smoke-6: #aaaaaa; --smoke-7: #888888; --smoke-8: #666666;
             --smoke-9: #555555; --smoke-10: #444444; --smoke-11: #333333; --smoke-12: #1a1a1a;
         }
-        html, body { height: 100%; overflow: hidden; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        html, body { height: 100%; height: -webkit-fill-available; overflow: hidden; font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+        @supports (height: 100dvh) { html, body { height: 100dvh; } }
         html { overflow-x: hidden; -webkit-overflow-scrolling: touch; }
         #message-container { max-width: 100%; box-sizing: border-box; }
         #message-container > * { max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
@@ -254,10 +255,10 @@
         .project-select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%236a6a6a' stroke-width='2' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px; }
         /* User message styling */
         .user-msg-bubble { background: rgba(250, 178, 131, 0.1); border: 1px solid rgba(250, 178, 131, 0.2); border-radius: 16px 16px 4px 16px; overflow-wrap: break-word; word-wrap: break-word; min-width: 0; overflow: hidden; }
+        /* Collapsible user messages */
         .user-msg-collapsed .collapsible-text { max-height: 6em; overflow: hidden; position: relative; }
-        .user-msg-collapsed .collapsible-text::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2em; background: linear-gradient(transparent, rgba(250, 178, 131, 0.1)); pointer-events: none; }
-        .user-msg-toggle { display: block; margin-top: 4px; font-size: 11px; color: var(--accent); cursor: pointer; opacity: 0.8; border: none; background: none; padding: 0; text-align: left; }
-        .user-msg-toggle:hover { opacity: 1; text-decoration: underline; }
+        .user-msg-collapsed .collapsible-text::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2.5em; background: linear-gradient(transparent, rgba(250, 178, 131, 0.1)); pointer-events: none; }
+        .collapsible-toggle { display: block; margin-top: 4px; font-size: 12px; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; }
         /* Assistant message styling */
         .assistant-msg-bubble { background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 4px 16px 16px 16px; border-left: 3px solid var(--smoke-5); overflow-wrap: break-word; word-wrap: break-word; min-width: 0; overflow: hidden; position: relative; }
         .assistant-msg-bubble .msg-copy-btn { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
@@ -280,7 +281,7 @@
         .icon-svg svg { width: 1em; height: 1em; }
     </style>
 </head>
-<body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: calc(var(--vh, 1vh) * 100);">
+<body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);">
     <!-- Onboarding Modal -->
     <div id="onboarding-modal" class="fixed inset-0 bg-black/80 modal-backdrop z-[100] hidden items-center justify-center">
         <div class="bg-smoke-2 border border-smoke-5 modal-panel max-w-lg w-full mx-4">
@@ -2121,27 +2122,6 @@
             scrollToBottom();
         }
 
-        // Make long user messages collapsible (click to expand/collapse)
-        const COLLAPSE_CHAR_THRESHOLD = 300;
-        const COLLAPSE_LINE_THRESHOLD = 8;
-        function makeCollapsible(bubbleEl) {
-            const textDiv = bubbleEl.querySelector('.collapsible-text');
-            if (!textDiv) return;
-            const text = textDiv.textContent || '';
-            const lines = text.split('\n').length;
-            if (text.length < COLLAPSE_CHAR_THRESHOLD && lines < COLLAPSE_LINE_THRESHOLD) return;
-            bubbleEl.classList.add('user-msg-collapsed');
-            const toggle = document.createElement('button');
-            toggle.className = 'user-msg-toggle';
-            toggle.textContent = 'Show more';
-            toggle.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const collapsed = bubbleEl.classList.toggle('user-msg-collapsed');
-                toggle.textContent = collapsed ? 'Show more' : 'Show less';
-            });
-            bubbleEl.appendChild(toggle);
-        }
-
         function addUserMessage(content, isOptimistic = false, timestamp = null) {
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
@@ -2192,15 +2172,15 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
-                        ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap collapsible-text">${linkifyUrls(escapeHtml(textContent))}</div>` : ''}
+                        ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(textContent))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
                     ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
                 </div>
             `;
-            container.appendChild(div);
             const bubble = div.querySelector('.user-msg-bubble');
             if (bubble) makeCollapsible(bubble);
+            container.appendChild(div);
         }
 
         function hashContent(str) {
@@ -2454,15 +2434,15 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
-                        ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap collapsible-text">${linkifyUrls(escapeHtml(displayText))}</div>` : ''}
+                        ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(displayText))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
                     ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
                 </div>
             `;
-            container.appendChild(div);
             const bubble = div.querySelector('.user-msg-bubble');
             if (bubble) makeCollapsible(bubble);
+            container.appendChild(div);
         }
 
         // Tool icons for prettier display
@@ -3021,6 +3001,27 @@
                     return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">' + url + '</a>';
                 }
             );
+        }
+
+        const COLLAPSE_CHAR_THRESHOLD = 300;
+        const COLLAPSE_LINE_THRESHOLD = 8;
+
+        function makeCollapsible(bubble) {
+            const textEl = bubble.querySelector('.text-sm.text-smoke-12');
+            if (!textEl) return;
+            const text = textEl.textContent || '';
+            const lines = text.split('\n').length;
+            if (text.length < COLLAPSE_CHAR_THRESHOLD && lines < COLLAPSE_LINE_THRESHOLD) return;
+            textEl.classList.add('collapsible-text');
+            bubble.classList.add('user-msg-collapsed');
+            const toggle = document.createElement('button');
+            toggle.className = 'collapsible-toggle';
+            toggle.textContent = 'Show more';
+            toggle.addEventListener('click', function() {
+                const collapsed = bubble.classList.toggle('user-msg-collapsed');
+                toggle.textContent = collapsed ? 'Show more' : 'Show less';
+            });
+            bubble.appendChild(toggle);
         }
 
         function formatMessageTime(isoString) {
