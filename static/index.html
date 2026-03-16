@@ -188,6 +188,8 @@
             /* Mobile: code blocks — smaller padding, always-visible copy button (no hover on touch) */
             .markdown-content pre { padding: 0.7em; font-size: 0.82em; }
             .code-copy-btn { opacity: 0.7 !important; }
+            /* Mobile: message copy button always visible (no hover on touch) */
+            .assistant-msg-bubble .msg-copy-btn { opacity: 0.6 !important; padding: 4px 8px; }
             /* Mobile: reduce heading sizes to prevent overflow */
             .markdown-content h1 { font-size: 1.2em !important; }
             .markdown-content h2 { font-size: 1.1em !important; }
@@ -245,7 +247,11 @@
         /* User message styling */
         .user-msg-bubble { background: rgba(250, 178, 131, 0.1); border: 1px solid rgba(250, 178, 131, 0.2); border-radius: 16px 16px 4px 16px; overflow-wrap: break-word; word-wrap: break-word; min-width: 0; overflow: hidden; }
         /* Assistant message styling */
-        .assistant-msg-bubble { background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 4px 16px 16px 16px; border-left: 3px solid var(--smoke-5); overflow-wrap: break-word; word-wrap: break-word; min-width: 0; overflow: hidden; }
+        .assistant-msg-bubble { background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 4px 16px 16px 16px; border-left: 3px solid var(--smoke-5); overflow-wrap: break-word; word-wrap: break-word; min-width: 0; overflow: hidden; position: relative; }
+        .assistant-msg-bubble .msg-copy-btn { position: absolute; top: 6px; right: 6px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
+        .assistant-msg-bubble:hover .msg-copy-btn { opacity: 0.8; }
+        .assistant-msg-bubble .msg-copy-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
+        .assistant-msg-bubble .msg-copy-btn.copied { color: var(--apple-9); border-color: var(--apple-9); }
         /* Modals */
         .modal-backdrop { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         .modal-panel { border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
@@ -2087,9 +2093,11 @@
             const div = document.createElement('div');
             div.className = 'message-enter';
             if (uuid) div.setAttribute('data-uuid', uuid);
+            div.setAttribute('data-raw-content', content);
             const timeStr = formatMessageTime(timestamp);
             div.innerHTML = `
                 <div class="max-w-[90%] assistant-msg-bubble px-4 py-3">
+                    <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
                     <div class="markdown-content text-sm text-smoke-12">${renderMarkdown(content)}</div>
                 </div>
                 ${timeStr ? `<div class="text-[10px] text-smoke-7 mt-1 pl-1">${escapeHtml(timeStr)}</div>` : ''}
@@ -2101,6 +2109,21 @@
                 hljs.highlightElement(block);
                 addCopyButton(block.parentElement);
             });
+        }
+
+        async function copyMessageContent(btn) {
+            const msgDiv = btn.closest('[data-raw-content]');
+            const raw = msgDiv?.getAttribute('data-raw-content') || '';
+            const label = btn.querySelector('span');
+            try {
+                await navigator.clipboard.writeText(raw);
+                label.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => { label.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+            } catch {
+                label.textContent = 'Failed';
+                setTimeout(() => { label.textContent = 'Copy'; }, 1500);
+            }
         }
 
         function addCopyButton(preElement) {
@@ -2155,6 +2178,7 @@
             } else if (typeof content === 'string') {
                 textContent = content;
             }
+            if (textContent) existing.setAttribute('data-raw-content', textContent);
 
             const markdownDiv = existing.querySelector('.markdown-content');
             if (markdownDiv && textContent) {
