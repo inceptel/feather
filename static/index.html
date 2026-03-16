@@ -427,6 +427,7 @@
                        onkeydown="handleSessionSearchKeydown(event)"
                        class="w-full pl-8 pr-8 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-xs placeholder-smoke-8 focus:outline-none focus:border-gold-9/50 focus:ring-1 focus:ring-gold-9/30">
                 <kbd id="search-shortcut-hint" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-smoke-7 bg-smoke-4 border border-smoke-5 rounded px-1.5 py-0.5 font-mono leading-none pointer-events-none">/</kbd>
+                <button id="search-clear-btn" onclick="clearSessionSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 text-smoke-7 hover:text-smoke-11 transition-colors hidden" title="Clear search" aria-label="Clear search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <!-- Session filter toggle -->
             <div id="session-filter-bar" class="flex gap-1 mt-1.5">
@@ -1592,6 +1593,30 @@
             currentSearchQuery = query;
             _kbHighlightIdx = -1;
             renderSessions();
+            // Show/hide clear button
+            const clearBtn = document.getElementById('search-clear-btn');
+            const hint = document.getElementById('search-shortcut-hint');
+            if (clearBtn) {
+                if (query) {
+                    clearBtn.classList.remove('hidden');
+                    if (hint) hint.style.display = 'none';
+                } else {
+                    clearBtn.classList.add('hidden');
+                }
+            }
+        }
+
+        function clearSessionSearch() {
+            const searchInput = document.getElementById('session-search');
+            if (searchInput) {
+                searchInput.value = '';
+                filterSessions('');
+                searchInput.focus();
+            }
+            const hint = document.getElementById('search-shortcut-hint');
+            if (hint) hint.style.display = '';
+            const clearBtn = document.getElementById('search-clear-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
         }
 
         function getVisibleSessionItems() {

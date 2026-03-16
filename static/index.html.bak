@@ -1025,13 +1025,14 @@
 
         function updatePageTitle(statusText) {
             const prefix = _currentPageStatus === 'working' ? '\u25CF ' : _currentPageStatus === 'error' ? '\u25CB ' : '';
+            const unreadPrefix = (typeof unreadCount !== 'undefined' && unreadCount > 0) ? '(' + (unreadCount > 99 ? '99+' : unreadCount) + ') ' : '';
             const session = _currentSessionTitle || '';
             if (session && statusText && _currentPageStatus === 'working') {
-                document.title = prefix + statusText + ' \u2014 ' + session + ' \u2014 Feather';
+                document.title = unreadPrefix + prefix + statusText + ' \u2014 ' + session + ' \u2014 Feather';
             } else if (session) {
-                document.title = prefix + session + ' \u2014 Feather';
+                document.title = unreadPrefix + prefix + session + ' \u2014 Feather';
             } else {
-                document.title = prefix + 'Feather';
+                document.title = unreadPrefix + prefix + 'Feather';
             }
         }
 
@@ -3486,6 +3487,7 @@
                     badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
                     badge.classList.remove('hidden');
                 }
+                updatePageTitle('');
             }
         }
         function resetUnread() {
@@ -3495,6 +3497,7 @@
                 badge.classList.add('hidden');
                 badge.textContent = '';
             }
+            updatePageTitle('');
         }
 
         // ========== Session Tailing (SSE with byte-offset cursor) ==========
