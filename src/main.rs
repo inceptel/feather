@@ -161,6 +161,8 @@ struct SessionHistory {
     session_id: String,
     project: String,
     messages: Vec<HistoryMessage>,
+    /// Total number of messages in the session (before limit/offset)
+    total: usize,
     /// Opaque cursor for starting SSE tail (base64-encoded byte offset)
     cursor: String,
 }
@@ -636,6 +638,7 @@ async fn list_sessions(
 #[derive(Deserialize)]
 struct HistoryQuery {
     offset: Option<usize>,
+    limit: Option<usize>,
 }
 
 async fn get_session_history(
@@ -685,6 +688,9 @@ async fn get_session_history(
         }
     }
 
+    // Track total before any slicing
+    let total = messages.len();
+
     // If offset specified, only return messages after that index
     let mut messages = messages;
     if offset > 0 && offset < messages.len() {
@@ -693,10 +699,18 @@ async fn get_session_history(
         messages.clear();
     }
 
+    // If limit specified, return only the LAST N messages (most recent)
+    if let Some(limit) = query.limit {
+        if limit < messages.len() {
+            messages = messages.split_off(messages.len() - limit);
+        }
+    }
+
     Json(SessionHistory {
         session_id,
         project: project_id,
         messages,
+        total,
         cursor: encode_cursor(file_size),
     })
 }
