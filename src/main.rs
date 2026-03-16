@@ -117,6 +117,7 @@ struct Session {
     last_updated: String,    // ISO 8601 timestamp from file mtime
     source: String,          // "claude", "codex", or "pi"
     is_autoweb: bool,        // Whether session was created by autoweb agent
+    message_count: usize,    // Number of messages in the session
 }
 
 /// A content block within a message (text, thinking, tool_use, tool_result)
@@ -656,6 +657,7 @@ async fn list_sessions(
             last_updated,
             source: meta.source,
             is_autoweb: meta.is_autoweb,
+            message_count: meta.message_count,
         });
     }
 
