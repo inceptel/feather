@@ -141,7 +141,8 @@
         .markdown-content td { color: var(--smoke-10); }
         .markdown-content tr:nth-child(even) td { background: var(--smoke-2); }
         .markdown-content tr:hover td { background: rgba(250, 178, 131, 0.06); }
-        .markdown-content img { max-width: 100%; height: auto; border-radius: 0.5em; margin: 0.5em 0; }
+        .markdown-content img { max-width: 100%; height: auto; border-radius: 0.5em; margin: 0.5em 0; cursor: pointer; transition: opacity 0.15s; }
+        .markdown-content img:hover { opacity: 0.85; }
         .markdown-content blockquote { border-left: 3px solid #fab283; padding: 0.5em 1em; margin: 0.75em 0; background: rgba(250, 178, 131, 0.05); border-radius: 0 0.5em 0.5em 0; color: var(--smoke-10); }
         .markdown-content blockquote p { margin-bottom: 0.25em; }
         .markdown-content a { color: #5c9cf5; text-decoration: underline; text-decoration-color: rgba(92, 156, 245, 0.3); text-underline-offset: 2px; overflow-wrap: break-word; word-break: break-all; }
@@ -3744,6 +3745,8 @@
                 html = html.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
                 // Make links open in new tab (prevents navigating away from Feather)
                 html = html.replace(/<a href="/g, '<a target="_blank" rel="noopener noreferrer" href="');
+                // Make markdown images clickable for lightbox viewing
+                html = html.replace(/<img /g, '<img onclick="openLightbox(this.src)" ');
                 return html;
             } catch {
                 return escapeHtml(text);

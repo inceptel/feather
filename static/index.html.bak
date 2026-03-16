@@ -320,6 +320,9 @@
         .assistant-msg-bubble:hover .msg-copy-btn, .user-msg-bubble:hover .msg-copy-btn { opacity: 0.8; }
         .assistant-msg-bubble .msg-copy-btn:hover, .user-msg-bubble .msg-copy-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
         .assistant-msg-bubble .msg-copy-btn.copied, .user-msg-bubble .msg-copy-btn.copied { color: var(--apple-9); border-color: var(--apple-9); }
+        /* J/K message navigation highlight */
+        @keyframes msg-nav-flash { 0% { box-shadow: inset 0 0 0 2px rgba(250, 178, 131, 0.5); } 100% { box-shadow: none; } }
+        .msg-nav-highlight { animation: msg-nav-flash 0.8s ease-out; border-radius: 8px; }
         .user-msg-bubble .msg-edit-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
         .user-msg-bubble:hover .msg-edit-btn { opacity: 0.8; }
         .user-msg-bubble .msg-edit-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
@@ -687,6 +690,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -2366,6 +2370,7 @@
 
                 container.innerHTML = '';
                 toolBlocksCollapsed = false;
+                _msgNavIdx = -1;
                 updateToolsToggleButton();
                 const allMessages = data.messages;
                 const earlierCount = data.total - allMessages.length;
@@ -3887,6 +3892,36 @@
                 }
             });
         }
+
+        // ========== J/K Vim-style message navigation ==========
+        let _msgNavIdx = -1;
+        function navigateMessages(direction) {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            // Get all top-level message divs (user and assistant), skip date separators and non-message elements
+            const msgs = Array.from(container.children).filter(el =>
+                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
+            );
+            if (msgs.length === 0) return;
+            // Find current visible center message if _msgNavIdx is stale
+            if (_msgNavIdx < 0 || _msgNavIdx >= msgs.length) {
+                const messagesEl = document.getElementById('messages');
+                const centerY = messagesEl.getBoundingClientRect().top + messagesEl.clientHeight / 2;
+                _msgNavIdx = 0;
+                for (let i = 0; i < msgs.length; i++) {
+                    if (msgs[i].getBoundingClientRect().top <= centerY) _msgNavIdx = i;
+                }
+            }
+            _msgNavIdx = Math.max(0, Math.min(msgs.length - 1, _msgNavIdx + direction));
+            const target = msgs[_msgNavIdx];
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Flash highlight
+            target.classList.remove('msg-nav-highlight');
+            void target.offsetWidth; // force reflow
+            target.classList.add('msg-nav-highlight');
+        }
+        // Reset nav index on session switch
+        const _origSelectSession = typeof selectSession === 'function' ? selectSession : null;
 
         // ========== Auto-scroll reliability ==========
         // When images/media load inside messages, they change scrollHeight.
@@ -6050,6 +6085,8 @@
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
             { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },
             { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
+            { label: 'Next message', shortcut: 'J', action: () => navigateMessages(1) },
+            { label: 'Previous message', shortcut: 'K', action: () => navigateMessages(-1) },
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
             { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
@@ -6194,6 +6231,14 @@
             if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                 e.preventDefault();
                 switchSessionByDirection(e.key === 'ArrowUp' ? -1 : 1);
+            }
+            // J/K vim-style message navigation (when not in input)
+            if ((e.key === 'j' || e.key === 'k') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    navigateMessages(e.key === 'j' ? 1 : -1);
+                }
             }
         });
         // Show shortcut hint again when search loses focus, and clear keyboard highlight
