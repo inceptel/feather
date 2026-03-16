@@ -1689,9 +1689,12 @@
             container.innerHTML = '<div class="text-center text-smoke-9 py-8">Loading...</div>';
 
             try {
-                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
+                // Request only the last 50 messages initially to prevent Safari/iPadOS crashes on large sessions
+                const INITIAL_LIMIT = 50;
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history?limit=${INITIAL_LIMIT}`);
                 if (!res.ok) { console.error('API error:', res.status); throw new Error('API error ' + res.status); }
                 const data = await res.json();
+                const totalMessages = data.total || data.messages.length;
 
                 if (!data.messages || data.messages.length === 0) {
                     container.innerHTML = '<div class="text-center text-smoke-9 py-8">No messages in this session</div>';
@@ -1715,23 +1718,20 @@
                         if (text) renderedTextHashes.add(hashContent(text));
                     }
                 }
-                console.log('Tracked', renderedUuids.size, 'UUIDs from history');
+                console.log('Tracked', renderedUuids.size, 'UUIDs from history (showing', data.messages.length, 'of', totalMessages, ')');
 
                 container.innerHTML = '';
-                const MAX_INITIAL = 200;
-                const allMessages = data.messages;
-                let renderStart = 0;
-                if (allMessages.length > MAX_INITIAL) {
-                    renderStart = allMessages.length - MAX_INITIAL;
+                // If there are earlier messages not loaded, show "load earlier" button
+                const earlierCount = totalMessages - data.messages.length;
+                if (earlierCount > 0) {
                     const loadMoreBtn = document.createElement('div');
                     loadMoreBtn.className = 'text-center py-4';
-                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${renderStart} earlier messages &mdash; tap to load</button>`;
+                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); loadEarlierFromServer()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${earlierCount} earlier messages &mdash; tap to load</button>`;
                     loadMoreBtn.id = 'load-earlier-btn';
                     container.appendChild(loadMoreBtn);
-                    window._earlierMessages = allMessages;
                 }
-                renderMessages(allMessages.slice(renderStart));
-                lastMessageCount = allMessages.length;  // Track for polling
+                renderMessages(data.messages);
+                lastMessageCount = totalMessages;  // Track for polling
                 // Delay scroll to ensure DOM has rendered - force scroll on initial load
                 userAtBottom = true;  // Reset scroll state for new session
                 requestAnimationFrame(() => {
@@ -1747,17 +1747,45 @@
             }
         }
 
-        function renderEarlierMessages() {
-            if (!window._earlierMessages) return;
+        async function loadEarlierFromServer() {
+            if (!currentSessionId) return;
             const container = document.getElementById('message-container');
-            container.innerHTML = '<div class="text-center text-smoke-9 py-4">Rendering all messages...</div>';
-            const all = window._earlierMessages;
-            window._earlierMessages = null;
-            // Use setTimeout to let the "Rendering..." text show before the heavy work
-            setTimeout(() => {
+            // Show loading indicator at top
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'text-center text-smoke-9 py-4';
+            loadingDiv.textContent = 'Loading all messages...';
+            container.prepend(loadingDiv);
+
+            try {
+                // Fetch ALL messages (no limit)
+                const projId = currentSessionProjectId || 'default';
+                const res = await fetch(`/api/projects/${encodeURIComponent(projId)}/sessions/${currentSessionId}/history`);
+                if (!res.ok) throw new Error('API error ' + res.status);
+                const data = await res.json();
+
+                // Re-track all UUIDs/hashes
+                renderedUuids.clear();
+                renderedContentHashes.clear();
+                renderedTextHashes.clear();
+                for (const msg of data.messages) {
+                    if (msg.uuid) renderedUuids.add(msg.uuid);
+                    if ((msg.role === 'user' || msg.type === 'human') && Array.isArray(msg.content)) {
+                        const textBlocks = msg.content.filter(b => b.type === 'text');
+                        const imageBlocks = msg.content.filter(b => b.type === 'image');
+                        const text = textBlocks.map(b => b.text).join('\n');
+                        const contentKey = hashContent(text + imageBlocks.map(b => (b.source && b.source.data) || '').join('|'));
+                        renderedContentHashes.add(contentKey);
+                        if (text) renderedTextHashes.add(hashContent(text));
+                    }
+                }
+
+                // Re-render all messages
                 container.innerHTML = '';
-                renderMessages(all);
-            }, 50);
+                renderMessages(data.messages);
+            } catch (e) {
+                console.error('Failed to load earlier messages:', e);
+                loadingDiv.textContent = 'Failed to load earlier messages';
+            }
         }
 
         // Strip internal system XML tags from message content (e.g. <system-reminder>, <local-command-caveat>, <available-deferred-tools>)
@@ -2601,7 +2629,7 @@
 
                                 // First discovery: load full history, then switch to SSE tailing
                                 if (isFirstDiscovery) {
-                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history`);
+                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history?limit=50`);
                                     if (!initHistRes.ok) { console.error('API error:', initHistRes.status); return; }
                                     const initHistData = await initHistRes.json();
                                     if (myGeneration !== pollGeneration) return;
@@ -2629,8 +2657,19 @@
                                         }
                                         console.log('Tracked', renderedUuids.size, 'UUIDs from history');
 
+                                        // Show "load earlier" button if there are more messages
+                                        const discTotalMessages = initHistData.total || initHistData.messages.length;
+                                        const discEarlierCount = discTotalMessages - initHistData.messages.length;
+                                        if (discEarlierCount > 0) {
+                                            const loadMoreBtn = document.createElement('div');
+                                            loadMoreBtn.className = 'text-center py-4';
+                                            loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); loadEarlierFromServer()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${discEarlierCount} earlier messages &mdash; tap to load</button>`;
+                                            loadMoreBtn.id = 'load-earlier-btn';
+                                            container.appendChild(loadMoreBtn);
+                                        }
+
                                         renderMessages(initHistData.messages);
-                                        lastMessageCount = initHistData.messages.length;
+                                        lastMessageCount = discTotalMessages;
                                     }
 
                                     // Switch from polling to SSE tailing for live updates

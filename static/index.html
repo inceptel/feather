@@ -558,6 +558,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus search</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">/</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -632,13 +633,12 @@
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--smoke-2);border-bottom:1px solid var(--smoke-5);flex-wrap:wrap;gap:8px;">
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <span style="color:var(--smoke-12);font-size:14px;font-weight:700;letter-spacing:-0.3px;">Autoweb</span>
-                        <div style="display:flex;gap:4px;flex-wrap:wrap;" id="aw-tabs">
-                            <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Full-Stack</button>
-                            <button onclick="switchAwTab('frontend')" id="aw-tab-frontend" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Frontend</button>
+                        <div style="display:flex;gap:4px;" id="aw-tabs">
+                            <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Feather</button>
                             <button onclick="switchAwTab('trading')" id="aw-tab-trading" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Trading</button>
-                            <button onclick="switchAwTab('all')" id="aw-tab-all" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">All</button>
                         </div>
                         <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
+                        <a id="aw-latest-review" href="#" onclick="loadLatestReview();return false;" style="font-size:11px;color:var(--gold-9);margin-left:8px;text-decoration:underline;cursor:pointer;">Latest Review</a>
                     </div>
                     <button onclick="document.getElementById('autoweb-overlay').style.display='none'" style="background:none;border:1px solid var(--smoke-5);color:var(--smoke-10);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;min-height:32px;">Close</button>
                 </div>
@@ -660,7 +660,10 @@
         }
 
         let _awActiveTab = 'feather';
-        const _awInstances = ['feather', 'frontend', 'trading'];
+        const _awUrls = {
+            feather: '/aw-dev-results.tsv',
+            trading: '/dashboards/aw-trading-results.tsv',
+        };
 
         function switchAwTab(tab) {
             _awActiveTab = tab;
@@ -669,95 +672,72 @@
                 b.style.background = isActive ? 'var(--smoke-4)' : 'transparent';
                 b.style.color = isActive ? 'var(--smoke-12)' : 'var(--smoke-9)';
             });
-            // Update table header for All tab (add Source column)
-            const thead = document.querySelector('#autoweb-results-table thead tr');
-            if (thead) {
-                const srcTh = '<th style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Source</th>';
-                if (tab === 'all' && !thead.querySelector('.aw-src-col')) {
-                    thead.insertAdjacentHTML('afterbegin', '<th class="aw-src-col" style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Source</th>');
-                } else if (tab !== 'all') {
-                    const sc = thead.querySelector('.aw-src-col');
-                    if (sc) sc.remove();
-                }
-            }
             loadAutowebResults();
         }
 
-        function _parseAwTsv(text, source) {
-            const lines = text.trim().split('\n');
-            const entries = [];
-            for (let i = 1; i < lines.length; i++) {
-                const parts = lines[i].split('\t');
-                if (parts.length < 3) continue;
-                let ts, status, desc;
-                if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
-                    ts = parts[0]; status = parts[2]; desc = parts[3];
-                } else {
-                    ts = parts[0]; status = parts[1]; desc = parts[2];
-                }
-                entries.push({ ts, status, desc, source });
-            }
-            return entries;
-        }
-
-        function _renderAwEntries(entries, showSource) {
-            const body = document.getElementById('autoweb-results-body');
-            const stats = document.getElementById('autoweb-stats');
-            if (!body) return;
-            let keeps = 0, reverts = 0, crashes = 0, skips = 0;
-            entries.forEach(e => {
-                if (e.status === 'keep') keeps++;
-                else if (e.status === 'revert') reverts++;
-                else if (e.status === 'crash') crashes++;
-                else if (e.status === 'skip') skips++;
-            });
-            const colors = {
-                keep: ['#7fd88f', 'rgba(127,216,143,0.12)'],
-                revert: ['#e06c75', 'rgba(224,108,117,0.12)'],
-                crash: ['#e5c07b', 'rgba(229,192,123,0.12)'],
-                skip: ['#888', 'rgba(136,136,136,0.08)']
-            };
-            const sourceColors = { feather: '#73b8ff', frontend: '#c49cde', trading: '#e5c07b' };
-            const rows = entries.map(e => {
-                const [statusColor, statusBg] = colors[e.status] || colors.skip;
-                const srcCol = showSource ? `<td style="padding:8px 12px;white-space:nowrap;"><span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:${sourceColors[e.source]||'#888'};background:${sourceColors[e.source]||'#888'}22;text-transform:capitalize;">${e.source}</span></td>` : '';
-                return `<tr style="border-bottom:1px solid var(--smoke-4);${e.status === 'skip' ? 'opacity:0.6;' : ''}">
-                    ${srcCol}
-                    <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${new Date(e.ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})} ET</td>
-                    <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${e.status}</span></td>
-                    <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${e.desc}</td>
-                </tr>`;
-            });
-            body.innerHTML = rows.join('');
-            const total = keeps + reverts + crashes + skips;
-            const label = {feather: 'Full-Stack', frontend: 'Frontend', trading: 'Trading', all: 'All'}[_awActiveTab] || 'All';
-            if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
-        }
-
         function loadAutowebResults() {
-            if (_awActiveTab === 'all') {
-                Promise.all(_awInstances.map(inst =>
-                    fetch('/api/autoweb-results/' + inst + '?_=' + Date.now())
-                        .then(r => r.ok ? r.text() : '')
-                        .then(text => text ? _parseAwTsv(text, inst) : [])
-                        .catch(() => [])
-                )).then(results => {
-                    const all = results.flat().sort((a, b) => new Date(b.ts) - new Date(a.ts));
-                    _renderAwEntries(all, true);
+            const url = _awUrls[_awActiveTab] || _awUrls.feather;
+            fetch(url + '?_=' + Date.now())
+                .then(r => r.text())
+                .then(text => {
+                    const lines = text.trim().split('\n');
+                    const body = document.getElementById('autoweb-results-body');
+                    const stats = document.getElementById('autoweb-stats');
+                    if (!body) return;
+                    let keeps = 0, reverts = 0, crashes = 0, skips = 0;
+                    const rows = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const parts = lines[i].split('\t');
+                        if (parts.length < 3) continue;
+                        // Handle both 3-col (ts,status,desc) and 4-col (ts,type,status,desc) formats
+                        let ts, status, desc;
+                        if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
+                            ts = parts[0]; status = parts[2]; desc = parts[3];
+                        } else {
+                            ts = parts[0]; status = parts[1]; desc = parts[2];
+                        }
+                        if (status === 'keep') keeps++;
+                        else if (status === 'revert') reverts++;
+                        else if (status === 'crash') crashes++;
+                        else if (status === 'skip') skips++;
+                        const colors = {
+                            keep: ['#7fd88f', 'rgba(127,216,143,0.12)'],
+                            revert: ['#e06c75', 'rgba(224,108,117,0.12)'],
+                            crash: ['#e5c07b', 'rgba(229,192,123,0.12)'],
+                            skip: ['#888', 'rgba(136,136,136,0.08)']
+                        };
+                        const [statusColor, statusBg] = colors[status] || colors.skip;
+                        rows.push(`<tr style="border-bottom:1px solid var(--smoke-4);${status === 'skip' ? 'opacity:0.6;' : ''}">
+                            <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${new Date(ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})} ET</td>
+                            <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${status}</span></td>
+                            <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${desc}</td>
+                        </tr>`);
+                    }
+                    body.innerHTML = rows.reverse().join('');
+                    const total = keeps + reverts + crashes + skips;
+                    const label = {feather: 'Feather', dev: 'Dev', trading: 'Trading'}[_awActiveTab] || 'Feather';
+                    if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
+                })
+                .catch(() => {
+                    const body = document.getElementById('autoweb-results-body');
+                    if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--smoke-8);text-align:center;">Could not load results.tsv</td></tr>';
                 });
-            } else {
-                fetch('/api/autoweb-results/' + _awActiveTab + '?_=' + Date.now())
-                    .then(r => r.text())
-                    .then(text => {
-                        const entries = _parseAwTsv(text, _awActiveTab);
-                        entries.reverse();
-                        _renderAwEntries(entries, false);
-                    })
-                    .catch(() => {
-                        const body = document.getElementById('autoweb-results-body');
-                        if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--smoke-8);text-align:center;">Could not load results.tsv</td></tr>';
-                    });
-            }
+        }
+
+        function loadLatestReview() {
+            fetch('/aw-reviews/')
+                .then(r => r.text())
+                .then(html => {
+                    const matches = html.match(/href="(review-[^"]+\.md)"/g);
+                    if (!matches) return;
+                    const latest = matches[matches.length - 1].match(/href="([^"]+)"/)[1];
+                    return fetch('/aw-reviews/' + latest).then(r => r.text());
+                })
+                .then(md => {
+                    if (!md) return;
+                    const body = document.getElementById('autoweb-results-body');
+                    if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;"><pre style="white-space:pre-wrap;font-size:12px;color:var(--smoke-11);font-family:Inter,sans-serif;line-height:1.6;">' + md.replace(/</g,'&lt;') + '</pre></td></tr>';
+                });
         }
 
         function toggleTheme() {
@@ -1689,12 +1669,9 @@
             container.innerHTML = '<div class="text-center text-smoke-9 py-8">Loading...</div>';
 
             try {
-                // Request only the last 50 messages initially to prevent Safari/iPadOS crashes on large sessions
-                const INITIAL_LIMIT = 50;
-                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history?limit=${INITIAL_LIMIT}`);
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
                 if (!res.ok) { console.error('API error:', res.status); throw new Error('API error ' + res.status); }
                 const data = await res.json();
-                const totalMessages = data.total || data.messages.length;
 
                 if (!data.messages || data.messages.length === 0) {
                     container.innerHTML = '<div class="text-center text-smoke-9 py-8">No messages in this session</div>';
@@ -1718,20 +1695,23 @@
                         if (text) renderedTextHashes.add(hashContent(text));
                     }
                 }
-                console.log('Tracked', renderedUuids.size, 'UUIDs from history (showing', data.messages.length, 'of', totalMessages, ')');
+                console.log('Tracked', renderedUuids.size, 'UUIDs from history');
 
                 container.innerHTML = '';
-                // If there are earlier messages not loaded, show "load earlier" button
-                const earlierCount = totalMessages - data.messages.length;
-                if (earlierCount > 0) {
+                const MAX_INITIAL = 200;
+                const allMessages = data.messages;
+                let renderStart = 0;
+                if (allMessages.length > MAX_INITIAL) {
+                    renderStart = allMessages.length - MAX_INITIAL;
                     const loadMoreBtn = document.createElement('div');
                     loadMoreBtn.className = 'text-center py-4';
-                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); loadEarlierFromServer()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${earlierCount} earlier messages &mdash; tap to load</button>`;
+                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${renderStart} earlier messages &mdash; tap to load</button>`;
                     loadMoreBtn.id = 'load-earlier-btn';
                     container.appendChild(loadMoreBtn);
+                    window._earlierMessages = allMessages;
                 }
-                renderMessages(data.messages);
-                lastMessageCount = totalMessages;  // Track for polling
+                renderMessages(allMessages.slice(renderStart));
+                lastMessageCount = allMessages.length;  // Track for polling
                 // Delay scroll to ensure DOM has rendered - force scroll on initial load
                 userAtBottom = true;  // Reset scroll state for new session
                 requestAnimationFrame(() => {
@@ -1747,45 +1727,17 @@
             }
         }
 
-        async function loadEarlierFromServer() {
-            if (!currentSessionId) return;
+        function renderEarlierMessages() {
+            if (!window._earlierMessages) return;
             const container = document.getElementById('message-container');
-            // Show loading indicator at top
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'text-center text-smoke-9 py-4';
-            loadingDiv.textContent = 'Loading all messages...';
-            container.prepend(loadingDiv);
-
-            try {
-                // Fetch ALL messages (no limit)
-                const projId = currentSessionProjectId || 'default';
-                const res = await fetch(`/api/projects/${encodeURIComponent(projId)}/sessions/${currentSessionId}/history`);
-                if (!res.ok) throw new Error('API error ' + res.status);
-                const data = await res.json();
-
-                // Re-track all UUIDs/hashes
-                renderedUuids.clear();
-                renderedContentHashes.clear();
-                renderedTextHashes.clear();
-                for (const msg of data.messages) {
-                    if (msg.uuid) renderedUuids.add(msg.uuid);
-                    if ((msg.role === 'user' || msg.type === 'human') && Array.isArray(msg.content)) {
-                        const textBlocks = msg.content.filter(b => b.type === 'text');
-                        const imageBlocks = msg.content.filter(b => b.type === 'image');
-                        const text = textBlocks.map(b => b.text).join('\n');
-                        const contentKey = hashContent(text + imageBlocks.map(b => (b.source && b.source.data) || '').join('|'));
-                        renderedContentHashes.add(contentKey);
-                        if (text) renderedTextHashes.add(hashContent(text));
-                    }
-                }
-
-                // Re-render all messages
+            container.innerHTML = '<div class="text-center text-smoke-9 py-4">Rendering all messages...</div>';
+            const all = window._earlierMessages;
+            window._earlierMessages = null;
+            // Use setTimeout to let the "Rendering..." text show before the heavy work
+            setTimeout(() => {
                 container.innerHTML = '';
-                renderMessages(data.messages);
-            } catch (e) {
-                console.error('Failed to load earlier messages:', e);
-                loadingDiv.textContent = 'Failed to load earlier messages';
-            }
+                renderMessages(all);
+            }, 50);
         }
 
         // Strip internal system XML tags from message content (e.g. <system-reminder>, <local-command-caveat>, <available-deferred-tools>)
@@ -2629,7 +2581,7 @@
 
                                 // First discovery: load full history, then switch to SSE tailing
                                 if (isFirstDiscovery) {
-                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history?limit=50`);
+                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history`);
                                     if (!initHistRes.ok) { console.error('API error:', initHistRes.status); return; }
                                     const initHistData = await initHistRes.json();
                                     if (myGeneration !== pollGeneration) return;
@@ -2657,19 +2609,8 @@
                                         }
                                         console.log('Tracked', renderedUuids.size, 'UUIDs from history');
 
-                                        // Show "load earlier" button if there are more messages
-                                        const discTotalMessages = initHistData.total || initHistData.messages.length;
-                                        const discEarlierCount = discTotalMessages - initHistData.messages.length;
-                                        if (discEarlierCount > 0) {
-                                            const loadMoreBtn = document.createElement('div');
-                                            loadMoreBtn.className = 'text-center py-4';
-                                            loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); loadEarlierFromServer()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${discEarlierCount} earlier messages &mdash; tap to load</button>`;
-                                            loadMoreBtn.id = 'load-earlier-btn';
-                                            container.appendChild(loadMoreBtn);
-                                        }
-
                                         renderMessages(initHistData.messages);
-                                        lastMessageCount = discTotalMessages;
+                                        lastMessageCount = initHistData.messages.length;
                                     }
 
                                     // Switch from polling to SSE tailing for live updates
@@ -4698,6 +4639,11 @@
                     e.preventDefault();
                     toggleTerminal();
                 }
+                // Ctrl+N to start a new session
+                if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                    e.preventDefault();
+                    newPiSession();
+                }
             });
 
             // Handle browser back/forward
@@ -4735,7 +4681,7 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-15 23:38 UTC iter=26 keeps=47-->
+    <!--autoweb-version: 2026-03-16 01:20 UTC iter=54 keeps=54-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
