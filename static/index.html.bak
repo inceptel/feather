@@ -179,6 +179,8 @@
         .wn-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
         .wn-empty { padding: 30px 14px; text-align: center; color: var(--smoke-7); font-size: 12px; }
         body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: 1 1 0% !important; min-width: 0 !important; }
+        @keyframes tool-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .tool-running-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-9); animation: tool-pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
         #terminal-resize-handle { height: 5px; background: var(--smoke-4); cursor: ns-resize; flex-shrink: 0; transition: background-color 0.15s; }
         #terminal-resize-handle:hover { background: #fab283; }
         #terminal-container { flex: 1; overflow: hidden; min-height: 150px; padding: 4px; }
@@ -2420,6 +2422,8 @@
             });
 
             updateToolsToggleButton();
+            // Clear any leftover running dots from history load (all results already present)
+            document.querySelectorAll('.tool-running-dot').forEach(dot => dot.remove());
             scrollToBottom();
         }
 
@@ -3023,6 +3027,7 @@
                             <span class="text-xs font-medium text-smoke-12">${escapeHtml(tool.name)}</span>
                             ${langBadge}
                             <span class="text-xs text-smoke-8 font-mono truncate flex-1">${escapeHtml(preview)}</span>
+                            <span class="tool-running-dot" data-running-for="${toolId}"></span>
                             <span class="tool-chevron text-[10px] text-smoke-7">▶</span>
                         </div>
                         <div class="tool-body hidden border-t border-smoke-5/30 p-3">
@@ -3271,6 +3276,12 @@
         }
 
         function addToolResult(result) {
+            // Remove the pulsing "running" dot from the matching tool call
+            if (result.tool_use_id) {
+                const runningDot = document.querySelector(`.tool-running-dot[data-running-for="${result.tool_use_id}"]`);
+                if (runningDot) runningDot.remove();
+            }
+
             const container = document.getElementById('message-container');
             const div = document.createElement('div');
             div.className = 'message-enter';
