@@ -2122,7 +2122,7 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
-                        ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${escapeHtml(textContent)}</div>` : ''}
+                        ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(textContent))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
                     ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
@@ -2161,7 +2161,7 @@
             div.setAttribute('data-image-path', imagePath);
             div.innerHTML = `
                 <div class="max-w-[80%] user-msg-bubble px-4 py-3">
-                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${linkifyUrls(escapeHtml(content))}</div>` : ''}
                     <img src="${dataUrl}" class="max-w-full max-h-48 rounded border border-smoke-5 cursor-pointer" alt="Uploaded screenshot" onclick="openLightbox(this.src)">
                 </div>
             `;
@@ -2185,7 +2185,7 @@
             const icon = getFileIcon(fileName);
             div.innerHTML = `
                 <div class="max-w-[80%] user-msg-bubble px-4 py-3">
-                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${linkifyUrls(escapeHtml(content))}</div>` : ''}
                     <div class="flex items-center gap-2 px-3 py-2 bg-smoke-3/50 rounded-lg border border-smoke-5">
                         <span class="text-2xl">${icon}</span>
                         <div class="flex flex-col">
@@ -2228,7 +2228,7 @@
 
             div.innerHTML = `
                 <div class="max-w-[80%] user-msg-bubble px-4 py-3">
-                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${escapeHtml(content)}</div>` : ''}
+                    ${content ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap mb-2">${linkifyUrls(escapeHtml(content))}</div>` : ''}
                     <div class="flex flex-wrap gap-2">${attachmentsHtml}</div>
                 </div>
             `;
@@ -2382,7 +2382,7 @@
             div.innerHTML = `
                 <div class="max-w-[80%]">
                     <div class="user-msg-bubble px-4 py-3">
-                        ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${escapeHtml(displayText)}</div>` : ''}
+                        ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(displayText))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
                     ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
@@ -2934,6 +2934,19 @@
             } catch {
                 return escapeHtml(text);
             }
+        }
+
+        function linkifyUrls(escapedHtml) {
+            // Linkify bare URLs in already-escaped HTML (for user messages)
+            // Matches http(s) URLs not already inside an HTML tag
+            return escapedHtml.replace(
+                /(?:https?:\/\/)(?:[^\s<>&"']|&amp;)+/g,
+                function(url) {
+                    // Unescape &amp; back for the href, keep escaped for display
+                    const href = url.replace(/&amp;/g, '&');
+                    return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="text-accent hover:underline">' + url + '</a>';
+                }
+            );
         }
 
         function formatMessageTime(isoString) {

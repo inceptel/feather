@@ -232,6 +232,9 @@
         .nav-pill-tao .tao-pnl.pos { color: #7fd88f; }
         .nav-pill-tao .tao-pnl.neg { color: #e06c75; }
         .search-highlight { background: rgba(250, 178, 131, 0.3); color: var(--smoke-12); border-radius: 2px; padding: 0 1px; }
+        /* In-chat message search */
+        .chat-search-mark { background: rgba(250, 178, 131, 0.35); color: var(--smoke-12); border-radius: 2px; padding: 0 1px; }
+        .chat-search-mark.current { background: rgba(250, 178, 131, 0.7); box-shadow: 0 0 0 1px rgba(250, 178, 131, 0.5); }
         .session-filter-pill { background: transparent; border-color: var(--smoke-5); color: var(--smoke-8); }
         .session-filter-pill:hover { color: var(--smoke-11); border-color: var(--smoke-6); }
         .session-filter-pill.active { background: var(--smoke-4); border-color: var(--gold-9); color: var(--gold-11); }
@@ -443,6 +446,16 @@
             <span id="mobile-session-name" class="text-xs font-medium text-smoke-10 truncate"></span>
         </div>
 
+        <!-- In-chat search bar -->
+        <div id="chat-search-bar" class="hidden border-b border-smoke-5 bg-smoke-2/95 backdrop-blur-sm px-4 py-2 flex items-center gap-2 z-10">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-smoke-8 shrink-0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="chat-search-input" type="text" placeholder="Search in conversation..." class="flex-1 bg-transparent text-sm text-smoke-12 outline-none placeholder-smoke-7" autocomplete="off">
+            <span id="chat-search-count" class="text-[10px] text-smoke-8 whitespace-nowrap"></span>
+            <button onclick="chatSearchNav(-1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Previous (Shift+Enter)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+            <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+
         <!-- Messages -->
         <div id="messages" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
             <!-- Drop overlay -->
@@ -575,6 +588,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Search in chat</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
@@ -2678,6 +2692,131 @@
                 }
             }
         }
+
+        // ========== In-Chat Search ==========
+        let _chatSearchMarks = [];
+        let _chatSearchIdx = -1;
+
+        function openChatSearch() {
+            const bar = document.getElementById('chat-search-bar');
+            if (!bar) return;
+            bar.classList.remove('hidden');
+            const input = document.getElementById('chat-search-input');
+            input.value = '';
+            input.focus();
+            document.getElementById('chat-search-count').textContent = '';
+            clearChatSearchMarks();
+        }
+
+        function closeChatSearch() {
+            const bar = document.getElementById('chat-search-bar');
+            if (bar) bar.classList.add('hidden');
+            clearChatSearchMarks();
+            _chatSearchMarks = [];
+            _chatSearchIdx = -1;
+            document.getElementById('chat-search-count').textContent = '';
+        }
+
+        function clearChatSearchMarks() {
+            document.querySelectorAll('#message-container .chat-search-mark').forEach(mark => {
+                const parent = mark.parentNode;
+                parent.replaceChild(document.createTextNode(mark.textContent), mark);
+                parent.normalize();
+            });
+        }
+
+        function doChatSearch(query) {
+            clearChatSearchMarks();
+            _chatSearchMarks = [];
+            _chatSearchIdx = -1;
+            const countEl = document.getElementById('chat-search-count');
+
+            if (!query || query.length < 2) {
+                countEl.textContent = '';
+                return;
+            }
+
+            // Walk text nodes in message-container and highlight matches
+            const container = document.getElementById('message-container');
+            const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+                acceptNode: function(node) {
+                    // Skip nodes inside input, textarea, script, style, and the search bar itself
+                    const parent = node.parentElement;
+                    if (!parent) return NodeFilter.FILTER_REJECT;
+                    const tag = parent.tagName;
+                    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') return NodeFilter.FILTER_REJECT;
+                    if (parent.closest('#chat-search-bar')) return NodeFilter.FILTER_REJECT;
+                    // Only search in visible text content
+                    if (parent.closest('.tool-body.hidden') || parent.closest('.thinking-content') && parent.closest('.thinking-block.collapsed')) return NodeFilter.FILTER_REJECT;
+                    return NodeFilter.FILTER_ACCEPT;
+                }
+            });
+
+            const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const textNodes = [];
+            while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+            for (const node of textNodes) {
+                const text = node.textContent;
+                if (!regex.test(text)) continue;
+                regex.lastIndex = 0;
+
+                const frag = document.createDocumentFragment();
+                let lastIdx = 0;
+                let match;
+                while ((match = regex.exec(text)) !== null) {
+                    if (match.index > lastIdx) {
+                        frag.appendChild(document.createTextNode(text.slice(lastIdx, match.index)));
+                    }
+                    const mark = document.createElement('mark');
+                    mark.className = 'chat-search-mark';
+                    mark.textContent = match[0];
+                    frag.appendChild(mark);
+                    _chatSearchMarks.push(mark);
+                    lastIdx = regex.lastIndex;
+                }
+                if (lastIdx < text.length) {
+                    frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+                }
+                node.parentNode.replaceChild(frag, node);
+            }
+
+            const total = _chatSearchMarks.length;
+            if (total > 0) {
+                _chatSearchIdx = 0;
+                _chatSearchMarks[0].classList.add('current');
+                _chatSearchMarks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                countEl.textContent = `1 / ${total}`;
+            } else {
+                countEl.textContent = 'No results';
+            }
+        }
+
+        function chatSearchNav(dir) {
+            if (_chatSearchMarks.length === 0) return;
+            _chatSearchMarks[_chatSearchIdx].classList.remove('current');
+            _chatSearchIdx = (_chatSearchIdx + dir + _chatSearchMarks.length) % _chatSearchMarks.length;
+            _chatSearchMarks[_chatSearchIdx].classList.add('current');
+            _chatSearchMarks[_chatSearchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            document.getElementById('chat-search-count').textContent = `${_chatSearchIdx + 1} / ${_chatSearchMarks.length}`;
+        }
+
+        // Debounced search input
+        let _chatSearchTimer = null;
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.getElementById('chat-search-input');
+            if (input) {
+                input.addEventListener('input', () => {
+                    clearTimeout(_chatSearchTimer);
+                    _chatSearchTimer = setTimeout(() => doChatSearch(input.value), 200);
+                });
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') { closeChatSearch(); e.preventDefault(); }
+                    else if (e.key === 'Enter' && e.shiftKey) { chatSearchNav(-1); e.preventDefault(); }
+                    else if (e.key === 'Enter') { chatSearchNav(1); e.preventDefault(); }
+                });
+            }
+        });
 
         function addSystemMessage(text) {
             const container = document.getElementById('message-container');
@@ -4806,6 +4945,10 @@
         // Close lightbox/shortcuts on Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                if (!document.getElementById('chat-search-bar')?.classList.contains('hidden')) {
+                    closeChatSearch();
+                    return;
+                }
                 if (document.getElementById('shortcuts-modal')?.style.display === 'flex') {
                     closeShortcutsModal();
                     return;
@@ -5076,6 +5219,11 @@
                 if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
                     e.preventDefault();
                     newPiSession();
+                }
+                // Ctrl+F / Cmd+F to search in conversation
+                if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+                    e.preventDefault();
+                    openChatSearch();
                 }
             });
 
