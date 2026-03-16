@@ -6194,11 +6194,12 @@
                     document.getElementById('terminal-session').textContent = data.tmux_name;
                     setStatus(readyStatus(), 'apple');
 
-                    // Reconnect terminal SSE
-                    if (terminalEventSource) {
-                        terminalEventSource.close();
+                    // Reconnect terminal
+                    if (terminalSSE) {
+                        terminalSSE.close();
+                        terminalSSE = null;
                     }
-                    connectTerminalSSE(data.tmux_name);
+                    connectToTerminal(data.tmux_name);
                     console.log('Restarted session:', data.tmux_name);
                 } else {
                     console.error('Failed to respawn:', data);

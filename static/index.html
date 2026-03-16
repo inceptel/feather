@@ -256,6 +256,8 @@
             #sidebar { width: 100vw; max-width: 100vw; }
             #input { font-size: 16px !important; min-height: 48px; }
             #send-btn { min-height: 44px; min-width: 60px; }
+            /* Mobile: hide secondary toolbar buttons to prevent overflow — accessible via keyboard shortcuts (T, F) and command palette */
+            #tools-toggle-btn, #thinking-toggle-btn, #focus-mode-btn, #voice-btn { display: none !important; }
             #input + div > div:first-child { display: none; }
             /* Mobile: messages top padding is set dynamically by updateMobileSessionHeader */
             #messages { padding-top: 8px !important; }
