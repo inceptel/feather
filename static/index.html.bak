@@ -2136,7 +2136,8 @@
             showMessageSkeleton();
 
             try {
-                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
+                const INITIAL_LIMIT = 200;
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history?limit=${INITIAL_LIMIT}`);
                 if (!res.ok) { console.error('API error:', res.status); throw new Error('API error ' + res.status); }
                 const data = await res.json();
 
@@ -2164,25 +2165,27 @@
                         if (text) renderedTextHashes.add(hashContent(text));
                     }
                 }
-                console.log('Tracked', renderedUuids.size, 'UUIDs from history');
+                console.log('Tracked', renderedUuids.size, 'UUIDs from history (server-paginated, total:', data.total, ')');
 
                 container.innerHTML = '';
                 toolBlocksCollapsed = false;
                 updateToolsToggleButton();
-                const MAX_INITIAL = 200;
                 const allMessages = data.messages;
-                let renderStart = 0;
-                if (allMessages.length > MAX_INITIAL) {
-                    renderStart = allMessages.length - MAX_INITIAL;
+                const earlierCount = data.total - allMessages.length;
+                if (earlierCount > 0) {
                     const loadMoreBtn = document.createElement('div');
                     loadMoreBtn.className = 'text-center py-4';
-                    loadMoreBtn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${renderStart} earlier messages &mdash; tap to load</button>`;
+                    loadMoreBtn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${earlierCount} earlier messages &mdash; tap to load</button>`;
                     loadMoreBtn.id = 'load-earlier-btn';
                     container.appendChild(loadMoreBtn);
-                    window._earlierMessages = allMessages.slice(0, renderStart);
+                    // Server-side pagination state
+                    window._earlierMessages = null;
+                    window._earlierMessagesBefore = earlierCount;
+                    window._earlierSessionProject = projectId;
+                    window._earlierSessionId = sessionId;
                 }
-                renderMessages(allMessages.slice(renderStart));
-                lastMessageCount = allMessages.length;  // Track for polling
+                renderMessages(allMessages);
+                lastMessageCount = data.total;  // Track total for polling
                 // Delay scroll to ensure DOM has rendered - force scroll on initial load
                 userAtBottom = true;  // Reset scroll state for new session
                 requestAnimationFrame(() => {
@@ -2198,74 +2201,103 @@
             }
         }
 
-        function renderEarlierMessages() {
-            if (!window._earlierMessages || !window._earlierMessages.length) return;
+        async function renderEarlierMessages() {
+            const before = window._earlierMessagesBefore;
+            if (!before || before <= 0) return;
             const container = document.getElementById('message-container');
             const CHUNK = 50;
-            const earlier = window._earlierMessages;
-
-            // Take the last CHUNK from the unrendered portion
-            const startIdx = Math.max(0, earlier.length - CHUNK);
-            const chunk = earlier.slice(startIdx);
-            window._earlierMessages = startIdx > 0 ? earlier.slice(0, startIdx) : null;
 
             // Remove old load-earlier button
             const oldBtn = document.getElementById('load-earlier-btn');
-            if (oldBtn) oldBtn.remove();
-
-            // Save scroll state
-            const prevScrollHeight = container.scrollHeight;
-            const prevScrollTop = container.scrollTop;
-
-            // Render chunk into a temp container by swapping the ID
-            const tempDiv = document.createElement('div');
-            tempDiv.style.display = 'none';
-            document.body.appendChild(tempDiv);
-            const realId = container.id;
-            container.id = '_mc_real';
-            tempDiv.id = 'message-container';
-            tempDiv.style.display = '';
-            const savedDateKey = _lastRenderedDateKey;
-            _lastRenderedDateKey = null;  // Reset for earlier chunk
-            renderMessages(chunk);
-            _lastRenderedDateKey = savedDateKey;  // Restore for future messages
-            tempDiv.id = '_mc_temp';
-            container.id = realId;
-
-            // Reference point: insert before the first existing child
-            const firstChild = container.firstChild;
-
-            // Add new load-earlier button if more remain
-            if (window._earlierMessages && window._earlierMessages.length > 0) {
-                const btn = document.createElement('div');
-                btn.className = 'text-center py-4';
-                btn.id = 'load-earlier-btn';
-                btn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${window._earlierMessages.length} earlier messages &mdash; tap to load</button>`;
-                container.insertBefore(btn, firstChild);
+            if (oldBtn) {
+                oldBtn.querySelector('button').textContent = 'Loading...';
+                oldBtn.querySelector('button').disabled = true;
             }
 
-            // Move rendered chunk nodes before existing messages
-            const insertRef = document.getElementById('load-earlier-btn')
-                ? document.getElementById('load-earlier-btn').nextSibling
-                : container.firstChild;
-            while (tempDiv.firstChild) {
-                container.insertBefore(tempDiv.firstChild, insertRef);
-            }
-            tempDiv.remove();
+            try {
+                // Fetch chunk from server using before+limit params
+                const projectId = window._earlierSessionProject;
+                const sessionId = window._earlierSessionId;
+                const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history?before=${before}&limit=${CHUNK}`);
+                if (!res.ok) throw new Error('API error ' + res.status);
+                const data = await res.json();
+                const chunk = data.messages || [];
+                if (chunk.length === 0) {
+                    if (oldBtn) oldBtn.remove();
+                    return;
+                }
 
-            // Remove duplicate adjacent date separators (earlier chunk may share a day with existing messages)
-            const seps = container.querySelectorAll('.date-separator');
-            for (let i = 1; i < seps.length; i++) {
-                if (seps[i].textContent.trim() === seps[i-1].textContent.trim()) {
-                    seps[i].remove();
+                // Track UUIDs for dedup
+                for (const msg of chunk) {
+                    if (msg.uuid) renderedUuids.add(msg.uuid);
+                }
+
+                // Update pagination state
+                const remaining = before - chunk.length;
+                window._earlierMessagesBefore = remaining;
+
+                // Remove old button
+                if (oldBtn) oldBtn.remove();
+
+                // Save scroll state
+                const prevScrollHeight = container.scrollHeight;
+                const prevScrollTop = container.scrollTop;
+
+                // Render chunk into a temp container by swapping the ID
+                const tempDiv = document.createElement('div');
+                tempDiv.style.display = 'none';
+                document.body.appendChild(tempDiv);
+                const realId = container.id;
+                container.id = '_mc_real';
+                tempDiv.id = 'message-container';
+                tempDiv.style.display = '';
+                const savedDateKey = _lastRenderedDateKey;
+                _lastRenderedDateKey = null;
+                renderMessages(chunk);
+                _lastRenderedDateKey = savedDateKey;
+                tempDiv.id = '_mc_temp';
+                container.id = realId;
+
+                const firstChild = container.firstChild;
+
+                // Add new load-earlier button if more remain
+                if (remaining > 0) {
+                    const btn = document.createElement('div');
+                    btn.className = 'text-center py-4';
+                    btn.id = 'load-earlier-btn';
+                    btn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${remaining} earlier messages &mdash; tap to load</button>`;
+                    container.insertBefore(btn, firstChild);
+                }
+
+                // Move rendered chunk nodes before existing messages
+                const insertRef = document.getElementById('load-earlier-btn')
+                    ? document.getElementById('load-earlier-btn').nextSibling
+                    : container.firstChild;
+                while (tempDiv.firstChild) {
+                    container.insertBefore(tempDiv.firstChild, insertRef);
+                }
+                tempDiv.remove();
+
+                // Remove duplicate adjacent date separators
+                const seps = container.querySelectorAll('.date-separator');
+                for (let i = 1; i < seps.length; i++) {
+                    if (seps[i].textContent.trim() === seps[i-1].textContent.trim()) {
+                        seps[i].remove();
+                    }
+                }
+
+                // Restore scroll position
+                requestAnimationFrame(() => {
+                    const newScrollHeight = container.scrollHeight;
+                    container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+                });
+            } catch (e) {
+                console.error('Failed to load earlier messages:', e);
+                if (oldBtn) {
+                    oldBtn.querySelector('button').textContent = `${before} earlier messages — tap to load`;
+                    oldBtn.querySelector('button').disabled = false;
                 }
             }
-
-            // Restore scroll position so view doesn't jump
-            requestAnimationFrame(() => {
-                const newScrollHeight = container.scrollHeight;
-                container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
-            });
         }
 
         // Strip internal system XML tags from message content (e.g. <system-reminder>, <local-command-caveat>, <available-deferred-tools>)
@@ -3505,7 +3537,7 @@
 
                                 // First discovery: load full history, then switch to SSE tailing
                                 if (isFirstDiscovery) {
-                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history`);
+                                    const initHistRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${discovered.id}/history?limit=200`);
                                     if (!initHistRes.ok) { console.error('API error:', initHistRes.status); return; }
                                     const initHistData = await initHistRes.json();
                                     if (myGeneration !== pollGeneration) return;
