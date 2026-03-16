@@ -1892,8 +1892,7 @@ fn send_to_tmux(tmux_name: &str, text: &str) {
 #[derive(Deserialize, Default)]
 struct TailQuery {
     /// Base64-encoded byte offset (opaque cursor for client)
-    /// Currently unused - we always start from offset 0 and frontend dedupes by UUID
-    #[allow(dead_code)]
+    /// Used on reconnection for incremental catch-up (avoids full reload flash)
     cursor: Option<String>,
 }
 
@@ -1907,8 +1906,6 @@ struct TailEvent {
 }
 
 /// Decode cursor from base64 to byte offset
-/// Currently unused - kept for future reconnection support
-#[allow(dead_code)]
 fn decode_cursor(cursor: &str) -> Option<u64> {
     URL_SAFE_NO_PAD.decode(cursor).ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
@@ -1982,10 +1979,13 @@ async fn tail_session(
     };
     let append_only = session_id.starts_with("feather-codex-") || session_id.starts_with("feather-pi-");
 
-    // Always start from beginning of file - frontend dedupes by UUID
-    // This fixes race condition where messages added between history load
-    // and SSE start would be missed until the next file rewrite
-    let start_offset = 0u64;
+    // Use cursor for reconnection (incremental catch-up, no flash).
+    // No cursor = initial connection: start from 0 so no messages are missed
+    // between history load and SSE start (frontend dedupes by UUID).
+    let start_offset = _query.cursor
+        .as_deref()
+        .and_then(decode_cursor)
+        .unwrap_or(0u64);
 
     tracing::info!(
         "Starting tail for session {} from offset {}",
@@ -2037,6 +2037,15 @@ async fn tail_session(
             } else if last_mtime.is_none() {
                 // Set initial mtime for append-only files to avoid unnecessary resets
                 last_mtime = fs::metadata(&file_path).and_then(|m| m.modified()).ok();
+            }
+
+            // Safety: if file was rewritten and is now smaller than our cursor,
+            // reset to beginning to avoid missing messages
+            if let Ok(meta) = fs::metadata(&file_path) {
+                if current_offset > meta.len() {
+                    tracing::debug!("Cursor {} past file size {}, resetting to 0", current_offset, meta.len());
+                    current_offset = 0;
+                }
             }
 
             match read_from_offset(&file_path, current_offset) {
