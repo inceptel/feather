@@ -1090,6 +1090,31 @@
             }
         }
 
+        // ========== Desktop Notifications ==========
+        let _notificationsEnabled = localStorage.getItem('feather-notifications') !== 'false';
+
+        function requestNotificationPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        }
+
+        function sendDesktopNotification(title, body) {
+            if (!_notificationsEnabled) return;
+            if (!document.hidden) return; // Only notify when tab is in background
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            try {
+                const n = new Notification(title, {
+                    body: body,
+                    icon: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#7fd88f"/><text x="16" y="22" text-anchor="middle" font-size="18" fill="#0a0e14" font-family="sans-serif" font-weight="bold">F</text></svg>'),
+                    tag: 'feather-status', // Replace previous notification
+                    silent: false
+                });
+                n.onclick = () => { window.focus(); n.close(); };
+                setTimeout(() => n.close(), 5000);
+            } catch (e) { /* Notifications not supported */ }
+        }
+
         function updateDynamicStatus(statusText, color) {
             let newStatus = 'idle';
             if (color === 'ember' || statusText === 'Disconnected' || statusText === 'Offline') {
@@ -1098,6 +1123,11 @@
                 newStatus = 'working';
             }
             if (newStatus !== _currentPageStatus) {
+                // Notify when assistant finishes (working -> idle)
+                if (_currentPageStatus === 'working' && newStatus === 'idle') {
+                    const sessionTitle = _currentSessionTitle || 'Session';
+                    sendDesktopNotification('Feather', sessionTitle + ' — Response complete');
+                }
                 _currentPageStatus = newStatus;
                 setFavicon(newStatus);
             }
@@ -4579,6 +4609,8 @@
         }
 
         async function handleSend() {
+            // Request notification permission on first send (requires user gesture)
+            requestNotificationPermission();
             // Prevent double-submit
             if (isStreaming) return;
 
@@ -5725,6 +5757,16 @@
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
+            { label: 'Toggle desktop notifications', shortcut: '', action: () => {
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission().then(p => {
+                        if (p === 'granted') { _notificationsEnabled = true; localStorage.setItem('feather-notifications', 'true'); }
+                    });
+                } else {
+                    _notificationsEnabled = !_notificationsEnabled;
+                    localStorage.setItem('feather-notifications', _notificationsEnabled ? 'true' : 'false');
+                }
+            }},
         ];
         let _cmdPaletteIdx = 0;
 

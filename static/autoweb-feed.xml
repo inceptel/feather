@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>
-<title>Autoweb Feather Improvements</title>
+<title>Feather Autoweb Improvements</title>
+<description>Autonomous improvements to the Feather web application</description>
 <link>#</link>
-<description>Self-improving Feather web application changelog</description>
+<item>
+<title>Add copy button to tool result output — hover reveals Copy button (top-right) on tool result pre blocks, copies raw outp</title>
+<pubDate>2026-03-16T06:31:42Z</pubDate>
+<description>Add copy button to tool result output — hover reveals Copy button (top-right) on tool result pre blocks, copies raw output to clipboard with Copied\! feedback; mobile: always-visible at 0.6 opacity (90 tests pass)</description>
+<link>#</link>
+</item>
 <item>
 <title>Add recent sessions quick-access cards to empty state — shows top 3 non-autoweb sessions with title, time, and message c</title>
 <pubDate>2026-03-16T06:27:36Z</pubDate>
@@ -296,12 +302,6 @@
 <title>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI</title>
 <pubDate>2026-03-16T02:20:36Z</pubDate>
 <description>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI tool results, fixing raw [32m/[0m text leaking into message display</description>
-<link>#</link>
-</item>
-<item>
-<title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM')</title>
-<pubDate>2026-03-16T02:14:45Z</pubDate>
-<description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description>
 <link>#</link>
 </item>
 </channel></rss>
