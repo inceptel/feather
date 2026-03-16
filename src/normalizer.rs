@@ -681,9 +681,17 @@ async fn normalize_session(
         }
     }
 
-    // Sort messages by timestamp
+    // Sort messages by timestamp, with role as tiebreaker (user before assistant)
+    // to ensure correct conversation ordering when timestamps are equal.
+    // This fixes the SSE ordering bug where HashMap iteration order caused
+    // user messages to appear after assistant responses.
     let mut sorted_messages: Vec<_> = messages.into_values().collect();
-    sorted_messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    sorted_messages.sort_by(|a, b| {
+        a.timestamp.cmp(&b.timestamp).then_with(|| {
+            let role_order = |r: &str| match r { "user" => 0, "assistant" => 1, _ => 2 };
+            role_order(&a.role).cmp(&role_order(&b.role))
+        })
+    });
 
     // Skip sessions with no messages
     if sorted_messages.is_empty() {

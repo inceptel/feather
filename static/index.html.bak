@@ -3347,6 +3347,11 @@
             } else if (typeof content === 'string') {
                 textContent = content;
             }
+            // Skip DOM update if content hasn't changed — prevents flash during SSE resync
+            // where the entire file is re-sent but messages are identical
+            const existingRaw = existing.getAttribute('data-raw-content') || '';
+            if (textContent && textContent === existingRaw) return;
+
             if (textContent) existing.setAttribute('data-raw-content', textContent);
 
             const markdownDiv = existing.querySelector('.markdown-content');
