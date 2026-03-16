@@ -1,9 +1,16 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <title>Autoweb Feather Improvements</title>
-    <description>Autonomous improvements to Feather web application</description>
-    <link>#</link>
+    <description>Autonomous improvements to the Feather web application</description>
+    <link>http://localhost:4860</link>
+    <lastBuildDate>2026-03-16T15:06:22Z</lastBuildDate>
+    <item>
+      <title>SSE tail dedup — sent_lines HashMap tracks UUID+content, skips re-emitting unchanged messages on normalized file rewrite</title>
+      <description>SSE tail dedup — sent_lines HashMap tracks UUID+content, skips re-emitting unchanged messages on normalized file rewrite, reducing resync bandwidth and frontend work (130 tests pass)</description>
+      <pubDate>2026-03-16T15:05:56Z</pubDate>
+      <link>#</link>
+    </item>
     <item>
       <title>Fix SSE message ordering (HIGH) — add role tiebreaker to normalizer sort (user before assistant when timestamps equal) +</title>
       <description>Fix SSE message ordering (HIGH) — add role tiebreaker to normalizer sort (user before assistant when timestamps equal) + frontend defensive event sort, preventing user messages appearing below assistant responses (129 tests pass)</description>
@@ -149,13 +156,13 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text in</title>
+      <title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads tex</title>
       <description>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</description>
       <pubDate>2026-03-16T07:21:09Z</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves </title>
+      <title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improv</title>
       <description>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves readability in code-heavy sessions (99 tests pass)</description>
       <pubDate>2026-03-16T07:16:09Z</pubDate>
       <link>#</link>
@@ -167,7 +174,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggl</title>
+      <title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, to</title>
       <description>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
       <pubDate>2026-03-16T07:07:38Z</pubDate>
       <link>#</link>
@@ -233,7 +240,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with </title>
+      <title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown wi</title>
       <description>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
       <pubDate>2026-03-16T06:10:59Z</pubDate>
       <link>#</link>
@@ -407,7 +414,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fad</title>
+      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradie</title>
       <description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
       <pubDate>2026-03-16T03:41:49Z</pubDate>
       <link>#</link>
@@ -575,7 +582,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</title>
+      <title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length li</title>
       <description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</description>
       <pubDate>2026-03-16T00:52:37Z</pubDate>
       <link>#</link>
@@ -845,7 +852,7 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux s</title>
+      <title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmu</title>
       <description>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
       <pubDate>2026-03-15T18:18:00Z</pubDate>
       <link>#</link>

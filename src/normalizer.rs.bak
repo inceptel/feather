@@ -819,32 +819,12 @@ fn parse_jsonl_file(
     meta: &mut SessionMeta,
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let file_content = std::fs::read_to_string(path)?;
-
-    // Trim incomplete last line: if the file doesn't end with a newline,
-    // Claude Code is likely mid-write. Drop the partial line to avoid parse errors.
-    let content = if !file_content.ends_with('\n') && !file_content.is_empty() {
-        match file_content.rfind('\n') {
-            Some(pos) => {
-                debug!("Trimming incomplete last line from {} ({} bytes after last newline)",
-                    path.display(), file_content.len() - pos - 1);
-                &file_content[..=pos]
-            }
-            None => {
-                // Entire file is one incomplete line
-                debug!("Skipping single incomplete line in {}", path.display());
-                return Ok(true);
-            }
-        }
-    } else {
-        &file_content
-    };
-
-    let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = file_content.lines().filter(|l| !l.is_empty()).collect();
 
     // Track UUIDs of filtered messages so we can also skip their response chains
     let mut skip_chain_uuids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Track if any lines failed to parse (for caller retry logic)
+    // Track if the last line(s) failed to parse — likely a partial write in progress
     let mut trailing_parse_error = false;
 
     for (idx, line) in lines.iter().enumerate() {
@@ -853,10 +833,7 @@ fn parse_jsonl_file(
                 trailing_parse_error = false;
                 r
             }
-            Err(e) => {
-                // Log mid-file errors for debugging (truncate line to 120 chars)
-                let preview: String = line.chars().take(120).collect();
-                debug!("JSONL parse error in {} line {}: {} — {:?}", path.display(), idx + 1, e, preview);
+            Err(_) => {
                 // Only flag as trailing error if it's near the end of the file
                 if idx >= lines.len().saturating_sub(3) {
                     trailing_parse_error = true;
