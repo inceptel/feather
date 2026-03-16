@@ -2917,14 +2917,16 @@
             // to avoid blocking the main thread during marked.parse() calls
             const CHUNK_SIZE = 30;
             if (messages.length <= CHUNK_SIZE || options.sync) {
-                // Small batch or sync mode: render all at once
+                // Small batch or sync mode: render all at once (no lazy markdown)
                 messages.forEach(renderOneMessage);
                 finalize();
                 return;
             }
 
-            // Large batch: render first chunk immediately for instant visual feedback,
-            // then yield to browser between subsequent chunks via rAF
+            // Large batch: enable lazy markdown for off-screen assistant messages.
+            // marked.parse() is deferred until messages scroll into view via IntersectionObserver.
+            // This avoids 200+ synchronous markdown parses on initial history load (CRITICAL #6).
+            _deferMarkdown = true;
             let idx = 0;
             function processChunk() {
                 const end = Math.min(idx + CHUNK_SIZE, messages.length);
@@ -2935,6 +2937,7 @@
                 if (idx < messages.length) {
                     requestAnimationFrame(processChunk);
                 } else {
+                    _deferMarkdown = false;
                     finalize();
                 }
             }
@@ -3122,21 +3125,32 @@
             if (uuid) div.setAttribute('data-uuid', uuid);
             div.setAttribute('data-raw-content', content);
             const timeStr = formatMessageTime(timestamp);
+            // Lazy markdown: show escaped preview for off-screen messages during history loads
+            const useLazy = _deferMarkdown;
+            const mdHtml = useLazy
+                ? escapeHtml(content.substring(0, 300)) + (content.length > 300 ? '<span class="text-smoke-7">...</span>' : '')
+                : renderMarkdown(content);
             div.innerHTML = `
                 <div class="max-w-[90%] assistant-msg-bubble px-4 py-3">
                     <button class="msg-quote-btn" onclick="quoteReplyMessage(this)" title="Quote in reply"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Quote</span></button>
                     <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
-                    <div class="markdown-content text-sm text-smoke-12">${renderMarkdown(content)}</div>
+                    <div class="markdown-content text-sm text-smoke-12${useLazy ? ' lazy-md' : ''}">${mdHtml}</div>
                 </div>
                 ${timeStr ? `<div class="text-[10px] text-smoke-7 mt-1 pl-1">${escapeHtml(timeStr)}</div>` : ''}
             `;
             container.appendChild(div);
 
-            // Highlight code blocks and add copy buttons
-            div.querySelectorAll('pre code').forEach(block => {
-                lazyHighlight(block);
-                addCopyButton(block.parentElement);
-            });
+            if (useLazy) {
+                // Defer markdown parsing until element scrolls into view
+                const mdDiv = div.querySelector('.markdown-content.lazy-md');
+                if (mdDiv) _markdownObserver.observe(mdDiv);
+            } else {
+                // Highlight code blocks and add copy buttons immediately
+                div.querySelectorAll('pre code').forEach(block => {
+                    lazyHighlight(block);
+                    addCopyButton(block.parentElement);
+                });
+            }
         }
 
         function editAndResend(btn) {
@@ -4222,6 +4236,31 @@
                        .replace(/[\x1b\u001b]\][^\x07]*(?:\x07|[\x1b\u001b]\\)/g, '')
                        .replace(/[\x1b\u001b][()][0-9A-B]/g, '');
         }
+
+        // Lazy markdown rendering: defer marked.parse() for off-screen assistant messages
+        // during history loads (CRITICAL #6). Only messages near the viewport get parsed;
+        // off-screen messages show escaped text until scrolled into view.
+        let _deferMarkdown = false;
+        const _markdownObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const el = entry.target;
+                    if (el.classList.contains('lazy-md')) {
+                        const parent = el.closest('[data-raw-content]');
+                        const rawContent = parent ? parent.getAttribute('data-raw-content') : '';
+                        if (rawContent) {
+                            el.innerHTML = renderMarkdown(rawContent);
+                            el.classList.remove('lazy-md');
+                            el.querySelectorAll('pre code').forEach(block => {
+                                lazyHighlight(block);
+                                addCopyButton(block.parentElement);
+                            });
+                        }
+                    }
+                    _markdownObserver.unobserve(el);
+                }
+            });
+        }, { root: document.getElementById('messages'), rootMargin: '500px' });
 
         // Lazy syntax highlighting: defer hljs.highlightElement to when code blocks
         // scroll into view. For large sessions (CRITICAL #6), this avoids highlighting
