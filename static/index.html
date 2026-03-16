@@ -415,7 +415,7 @@
             <a href="/dashboards/mm-dashboard.html" target="_blank" class="nav-pill nav-pill-gold">MM</a>
             <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
-            <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-btn">AW</button>
+            <a href="/aw/" class="nav-pill nav-pill-gold font-semibold" id="autoweb-btn" style="text-decoration:none">AW</a>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
             <span id="sse-event-id" class="font-mono text-[9px] text-smoke-7 hidden md:inline">-</span>
@@ -558,7 +558,6 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus search</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">/</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -1705,10 +1704,10 @@
                     renderStart = allMessages.length - MAX_INITIAL;
                     const loadMoreBtn = document.createElement('div');
                     loadMoreBtn.className = 'text-center py-4';
-                    loadMoreBtn.innerHTML = `<button onclick="this.parentElement.remove(); renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${renderStart} earlier messages &mdash; tap to load</button>`;
+                    loadMoreBtn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${renderStart} earlier messages &mdash; tap to load</button>`;
                     loadMoreBtn.id = 'load-earlier-btn';
                     container.appendChild(loadMoreBtn);
-                    window._earlierMessages = allMessages;
+                    window._earlierMessages = allMessages.slice(0, renderStart);
                 }
                 renderMessages(allMessages.slice(renderStart));
                 lastMessageCount = allMessages.length;  // Track for polling
@@ -1728,16 +1727,62 @@
         }
 
         function renderEarlierMessages() {
-            if (!window._earlierMessages) return;
+            if (!window._earlierMessages || !window._earlierMessages.length) return;
             const container = document.getElementById('message-container');
-            container.innerHTML = '<div class="text-center text-smoke-9 py-4">Rendering all messages...</div>';
-            const all = window._earlierMessages;
-            window._earlierMessages = null;
-            // Use setTimeout to let the "Rendering..." text show before the heavy work
-            setTimeout(() => {
-                container.innerHTML = '';
-                renderMessages(all);
-            }, 50);
+            const CHUNK = 50;
+            const earlier = window._earlierMessages;
+
+            // Take the last CHUNK from the unrendered portion
+            const startIdx = Math.max(0, earlier.length - CHUNK);
+            const chunk = earlier.slice(startIdx);
+            window._earlierMessages = startIdx > 0 ? earlier.slice(0, startIdx) : null;
+
+            // Remove old load-earlier button
+            const oldBtn = document.getElementById('load-earlier-btn');
+            if (oldBtn) oldBtn.remove();
+
+            // Save scroll state
+            const prevScrollHeight = container.scrollHeight;
+            const prevScrollTop = container.scrollTop;
+
+            // Render chunk into a temp container by swapping the ID
+            const tempDiv = document.createElement('div');
+            tempDiv.style.display = 'none';
+            document.body.appendChild(tempDiv);
+            const realId = container.id;
+            container.id = '_mc_real';
+            tempDiv.id = 'message-container';
+            tempDiv.style.display = '';
+            renderMessages(chunk);
+            tempDiv.id = '_mc_temp';
+            container.id = realId;
+
+            // Reference point: insert before the first existing child
+            const firstChild = container.firstChild;
+
+            // Add new load-earlier button if more remain
+            if (window._earlierMessages && window._earlierMessages.length > 0) {
+                const btn = document.createElement('div');
+                btn.className = 'text-center py-4';
+                btn.id = 'load-earlier-btn';
+                btn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${window._earlierMessages.length} earlier messages &mdash; tap to load</button>`;
+                container.insertBefore(btn, firstChild);
+            }
+
+            // Move rendered chunk nodes before existing messages
+            const insertRef = document.getElementById('load-earlier-btn')
+                ? document.getElementById('load-earlier-btn').nextSibling
+                : container.firstChild;
+            while (tempDiv.firstChild) {
+                container.insertBefore(tempDiv.firstChild, insertRef);
+            }
+            tempDiv.remove();
+
+            // Restore scroll position so view doesn't jump
+            requestAnimationFrame(() => {
+                const newScrollHeight = container.scrollHeight;
+                container.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+            });
         }
 
         // Strip internal system XML tags from message content (e.g. <system-reminder>, <local-command-caveat>, <available-deferred-tools>)
@@ -4639,11 +4684,6 @@
                     e.preventDefault();
                     toggleTerminal();
                 }
-                // Ctrl+N to start a new session
-                if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-                    e.preventDefault();
-                    newPiSession();
-                }
             });
 
             // Handle browser back/forward
@@ -4681,7 +4721,7 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-16 01:20 UTC iter=54 keeps=54-->
+    <!--autoweb-version: 2026-03-15 23:38 UTC iter=26 keeps=47-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
