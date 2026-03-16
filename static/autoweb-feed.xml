@@ -5,6 +5,11 @@
 <description>Self-improving Feather web application changelog</description>
 <link>#</link>
 <item>
+<title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</title>
+<pubDate>2026-03-16T04:10:22Z</pubDate>
+<description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description>
+<link>#</link>
+</item><item>
 <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</title>
 <pubDate>2026-03-16T04:06:25Z</pubDate>
 <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</description>
