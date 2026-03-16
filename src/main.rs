@@ -59,7 +59,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::Infallible,
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     net::SocketAddr,
     path::PathBuf,
     sync::Arc,
@@ -703,6 +703,53 @@ struct HistoryQuery {
     before: Option<usize>,
 }
 
+/// Convert a NormalizedMessage to a HistoryMessage
+fn convert_normalized_to_history(msg: sessions::NormalizedMessage) -> Option<HistoryMessage> {
+    let blocks: Vec<ContentBlock> = msg.content.into_iter().map(|b| {
+        match b {
+            sessions::ContentBlock::Text { text } => ContentBlock::Text { text },
+            sessions::ContentBlock::Thinking { thinking } => ContentBlock::Thinking { text: thinking },
+            sessions::ContentBlock::ToolUse { id, name, input } => ContentBlock::ToolUse { id, name, input },
+            sessions::ContentBlock::ToolResult { tool_use_id, content, is_error } =>
+                ContentBlock::ToolResult { tool_use_id, content, is_error },
+            sessions::ContentBlock::Image { source } => ContentBlock::Image {
+                source: source.map(|s| serde_json::json!({
+                    "type": s.source_type,
+                    "media_type": s.media_type,
+                    "data": s.data
+                }))
+            },
+        }
+    }).collect();
+
+    if blocks.is_empty() {
+        return None;
+    }
+
+    Some(HistoryMessage {
+        role: msg.role,
+        content: blocks,
+        timestamp: msg.timestamp,
+        uuid: msg.uuid,
+    })
+}
+
+/// Count newlines in a file efficiently (byte scan, no string allocation or JSON parsing).
+fn count_lines_fast(path: &std::path::Path) -> usize {
+    let Ok(mut file) = File::open(path) else { return 0 };
+    let mut buf = [0u8; 65536];
+    let mut count = 0;
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        count += buf[..n].iter().filter(|&&b| b == b'\n').count();
+    }
+    count
+}
+
 async fn get_session_history(
     State(state): State<Arc<AppState>>,
     Path((project_id, session_id)): Path<(String, String)>,
@@ -727,36 +774,57 @@ async fn get_session_history(
     let offset = query.offset.unwrap_or(0);
 
     let file_size = fs::metadata(&normalized_path).map(|m| m.len()).unwrap_or(0);
+
+    // Fast path: initial load with limit, no before/offset — only parse last N lines
+    // This avoids reading + parsing the entire file for large sessions (CRITICAL #6).
+    if query.before.is_none() && offset == 0 && query.limit.is_some() && file_size > 100_000 {
+        let limit = query.limit.unwrap_or(200);
+        let total = count_lines_fast(&normalized_path);
+        let skip = total.saturating_sub(limit);
+
+        let mut messages = Vec::with_capacity(limit.min(total));
+        if let Ok(file) = File::open(&normalized_path) {
+            let reader = BufReader::with_capacity(65536, file);
+            let mut line_buf = String::new();
+            let mut buf_reader = reader;
+            // Skip early lines without JSON parsing (reuse buffer)
+            for _ in 0..skip {
+                line_buf.clear();
+                if buf_reader.read_line(&mut line_buf).unwrap_or(0) == 0 {
+                    break;
+                }
+            }
+            // Parse only the last N lines
+            loop {
+                line_buf.clear();
+                if buf_reader.read_line(&mut line_buf).unwrap_or(0) == 0 {
+                    break;
+                }
+                if let Ok(msg) = serde_json::from_str::<sessions::NormalizedMessage>(line_buf.trim_end()) {
+                    if let Some(hm) = convert_normalized_to_history(msg) {
+                        messages.push(hm);
+                    }
+                }
+            }
+        }
+
+        return Json(SessionHistory {
+            session_id,
+            project: project_id,
+            messages,
+            total,
+            cursor: encode_cursor(file_size),
+        });
+    }
+
+    // General path: read and parse all lines, then apply before/offset/limit
     let mut messages = Vec::new();
 
     if let Ok(content) = fs::read_to_string(&normalized_path) {
         for line in content.lines() {
             if let Ok(msg) = serde_json::from_str::<sessions::NormalizedMessage>(line) {
-                // Convert NormalizedMessage to HistoryMessage
-                let blocks: Vec<ContentBlock> = msg.content.into_iter().map(|b| {
-                    match b {
-                        sessions::ContentBlock::Text { text } => ContentBlock::Text { text },
-                        sessions::ContentBlock::Thinking { thinking } => ContentBlock::Thinking { text: thinking },
-                        sessions::ContentBlock::ToolUse { id, name, input } => ContentBlock::ToolUse { id, name, input },
-                        sessions::ContentBlock::ToolResult { tool_use_id, content, is_error } =>
-                            ContentBlock::ToolResult { tool_use_id, content, is_error },
-                        sessions::ContentBlock::Image { source } => ContentBlock::Image {
-                            source: source.map(|s| serde_json::json!({
-                                "type": s.source_type,
-                                "media_type": s.media_type,
-                                "data": s.data
-                            }))
-                        },
-                    }
-                }).collect();
-
-                if !blocks.is_empty() {
-                    messages.push(HistoryMessage {
-                        role: msg.role,
-                        content: blocks,
-                        timestamp: msg.timestamp,
-                        uuid: msg.uuid,
-                    });
+                if let Some(hm) = convert_normalized_to_history(msg) {
+                    messages.push(hm);
                 }
             }
         }
