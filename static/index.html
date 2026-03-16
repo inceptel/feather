@@ -2736,6 +2736,7 @@
             try {
                 switch (name) {
                     case 'Bash':
+                        if (input.description) return input.description.substring(0, 80);
                         return (input.command || '').split('\n')[0].substring(0, 80);
                     case 'Read':
                         return input.file_path || '';
