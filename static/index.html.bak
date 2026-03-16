@@ -455,6 +455,7 @@
                 <button onclick="setSessionFilter('mine')" id="sf-mine" class="session-filter-pill active flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">Mine</button>
                 <button onclick="setSessionFilter('auto')" id="sf-auto" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">Auto</button>
                 <button onclick="setSessionFilter('all')" id="sf-all" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">All</button>
+                <button onclick="cycleSessionSort()" id="session-sort-btn" class="session-filter-pill text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border shrink-0 flex items-center gap-0.5" title="Sort sessions"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span id="sort-label">Latest</span></button>
             </div>
         </div>
 
@@ -1420,6 +1421,36 @@
             }
         })();
 
+        // ========== Session Sort ==========
+        const SESSION_SORT_MODES = ['latest', 'messages', 'oldest'];
+        const SESSION_SORT_LABELS = { latest: 'Latest', messages: 'Most msgs', oldest: 'Oldest' };
+        const SESSION_SORT_ICONS = {
+            latest: '<path d="M12 5v14M5 12l7 7 7-7"/>',
+            messages: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+            oldest: '<path d="M12 19V5M5 12l7-7 7 7"/>'
+        };
+        let sessionSortMode = localStorage.getItem('feather-session-sort') || 'latest';
+
+        function cycleSessionSort() {
+            const idx = SESSION_SORT_MODES.indexOf(sessionSortMode);
+            sessionSortMode = SESSION_SORT_MODES[(idx + 1) % SESSION_SORT_MODES.length];
+            localStorage.setItem('feather-session-sort', sessionSortMode);
+            updateSortButton();
+            renderSessions();
+        }
+
+        function updateSortButton() {
+            const btn = document.getElementById('session-sort-btn');
+            const label = document.getElementById('sort-label');
+            const svg = btn?.querySelector('svg');
+            if (label) label.textContent = SESSION_SORT_LABELS[sessionSortMode] || 'Latest';
+            if (svg) svg.innerHTML = SESSION_SORT_ICONS[sessionSortMode] || SESSION_SORT_ICONS.latest;
+            if (btn) btn.title = 'Sort: ' + (SESSION_SORT_LABELS[sessionSortMode] || 'Latest');
+        }
+
+        // Initialize sort button state
+        updateSortButton();
+
         // ========== Sessions ==========
         let allSessions = [];       // Full merged list
         let sessionsDisplayCount = 5;
@@ -1560,6 +1591,14 @@
                     s.id.toLowerCase().includes(q)
                 );
             }
+
+            // Apply sort mode
+            if (sessionSortMode === 'oldest') {
+                sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
+            } else if (sessionSortMode === 'messages') {
+                sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+            }
+            // 'latest' is the default order from API (newest first), no sort needed
 
             // Sort starred sessions to the top (preserving relative order within each group)
             if (starredSessions.size > 0) {
@@ -5825,6 +5864,7 @@
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
             { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
+            { label: 'Cycle sort mode', shortcut: '', action: () => cycleSessionSort() },
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },

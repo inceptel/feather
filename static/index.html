@@ -98,9 +98,15 @@
         .markdown-content p:last-child { margin-bottom: 0; }
         .markdown-content pre { background: var(--smoke-2) !important; padding: 1em; border-radius: 0.75em; overflow-x: auto; margin: 1em 0; border: 1px solid var(--smoke-5); position: relative; max-width: 100%; box-sizing: border-box; }
         .code-copy-btn { position: absolute; top: 0.5em; right: 0.5em; padding: 0.25em 0.6em; background: var(--smoke-5); border: 1px solid var(--smoke-7); border-radius: 6px; color: var(--smoke-11); font-size: 0.7em; cursor: pointer; opacity: 0; transition: opacity 0.2s, background-color 0.2s; }
-        .markdown-content pre:hover .code-copy-btn { opacity: 1; }
+        .code-wrap-btn { position: absolute; top: 0.5em; right: 4.2em; padding: 0.25em 0.6em; background: var(--smoke-5); border: 1px solid var(--smoke-7); border-radius: 6px; color: var(--smoke-11); font-size: 0.7em; cursor: pointer; opacity: 0; transition: opacity 0.2s, background-color 0.2s; }
+        .code-wrap-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
+        .code-wrap-btn.active { background: var(--accent); color: var(--smoke-1); border-color: var(--accent); }
+        .markdown-content pre:hover .code-copy-btn, .markdown-content pre:hover .code-wrap-btn { opacity: 1; }
+        .markdown-content pre.wrapped code { white-space: pre-wrap !important; word-wrap: break-word; overflow-wrap: anywhere; }
+        .markdown-content pre.wrapped { overflow-x: hidden; }
         .code-copy-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
         .code-copy-btn.copied { background: #7fd88f; color: var(--smoke-1); }
+        @media (max-width: 767px) { .code-wrap-btn { opacity: 0.6; } }
         /* Copy button on tool result output */
         .result-copy-btn { position: absolute; top: 0.4em; right: 0.4em; padding: 0.15em 0.5em; background: var(--smoke-5); border: 1px solid var(--smoke-7); border-radius: 5px; color: var(--smoke-11); font-size: 0.65em; cursor: pointer; opacity: 0; transition: opacity 0.2s, background-color 0.2s; font-family: 'Inter', sans-serif; }
         .relative:hover .result-copy-btn { opacity: 1; }
@@ -2897,6 +2903,22 @@
                 }
             };
             preElement.appendChild(btn);
+            // Add wrap toggle button for code blocks with long lines
+            const codeText = preElement.querySelector('code')?.textContent || '';
+            const hasLongLines = codeText.split('\n').some(line => line.length > 80);
+            if (hasLongLines) {
+                const wrapBtn = document.createElement('button');
+                wrapBtn.className = 'code-wrap-btn';
+                wrapBtn.textContent = 'Wrap';
+                wrapBtn.title = 'Toggle line wrapping';
+                wrapBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const isWrapped = preElement.classList.toggle('wrapped');
+                    wrapBtn.textContent = isWrapped ? 'Unwrap' : 'Wrap';
+                    wrapBtn.classList.toggle('active', isWrapped);
+                };
+                preElement.appendChild(wrapBtn);
+            }
             addLineNumbers(preElement);
         }
 
