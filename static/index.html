@@ -101,6 +101,11 @@
         .markdown-content pre:hover .code-copy-btn { opacity: 1; }
         .code-copy-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
         .code-copy-btn.copied { background: #7fd88f; color: var(--smoke-1); }
+        /* Copy button on tool result output */
+        .result-copy-btn { position: absolute; top: 0.4em; right: 0.4em; padding: 0.15em 0.5em; background: var(--smoke-5); border: 1px solid var(--smoke-7); border-radius: 5px; color: var(--smoke-11); font-size: 0.65em; cursor: pointer; opacity: 0; transition: opacity 0.2s, background-color 0.2s; font-family: 'Inter', sans-serif; }
+        .relative:hover .result-copy-btn { opacity: 1; }
+        .result-copy-btn:hover { background: var(--smoke-7); color: var(--smoke-12); }
+        @media (max-width: 767px) { .result-copy-btn { opacity: 0.6; } }
         .markdown-content code { font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; }
         .markdown-content :not(pre) > code { background: var(--smoke-4); padding: 0.2em 0.4em; border-radius: 0.3em; color: #56b6c2; word-break: break-all; overflow-wrap: break-word; }
         .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
@@ -3512,7 +3517,7 @@
                         </div>
                         ${!isShort ? `<div class="result-body ${shouldExpand ? '' : 'hidden'} border-t border-smoke-5/30">
                             ${imageHtml ? `<div class="p-3 bg-smoke-4/30">${imageHtml}</div>` : ''}
-                            ${displayText ? `<pre class="text-xs text-smoke-10 bg-smoke-4/30 p-3 overflow-auto max-h-64 font-mono whitespace-pre-wrap">${escapeHtml(displayText)}</pre>` : ''}
+                            ${displayText ? `<div class="relative"><pre class="result-output text-xs text-smoke-10 bg-smoke-4/30 p-3 overflow-auto max-h-64 font-mono whitespace-pre-wrap">${escapeHtml(displayText)}</pre><button class="result-copy-btn" onclick="navigator.clipboard.writeText(this.parentElement.querySelector('.result-output').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1200)})">Copy</button></div>` : ''}
                         </div>` : ''}
                     </div>
                 </div>
