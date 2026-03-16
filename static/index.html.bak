@@ -515,7 +515,7 @@
                     <div class="flex items-center justify-between px-2 sm:px-3 py-2 border-t border-smoke-5/30 overflow-hidden">
                         <div class="flex items-center gap-2">
                             <span id="status-dot" class="status-dot bg-apple-9" title="Status"></span>
-                            <span id="status" class="hidden sm:inline text-[10px] text-smoke-8 font-medium">Ready, spaghetti</span>
+                            <span id="status" class="hidden sm:inline text-[10px] text-smoke-8 font-medium">Ready</span>
                         </div>
                         <div class="flex items-center gap-1">
                             <button id="tools-toggle-btn" onclick="toggleAllTools()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Collapse/expand all tool calls">
@@ -859,6 +859,24 @@
         let currentEngine = localStorage.getItem('feather-engine') || 'pi';
         let codexMode = localStorage.getItem('feather-codex-mode') || 'yolo';
 
+        // ========== Fun Status Phrases ==========
+        const STATUS_PHRASES = [
+            'Ready, spaghetti', 'Scampering along', 'Razmatazzing', 'Beboppin', 'Vibing quietly',
+            'Percolating', 'Noodling around', 'Idle mischief', 'Simmering gently', 'On standby, chef',
+            'Loitering elegantly', 'Twiddling bits', 'Daydreaming in hex', 'Purring softly',
+            'Coasting nicely', 'Drifting downstream', 'Humming along', 'All systems nominal',
+            'Chillin like a villain', 'Idly spectacular', 'Zen mode activated', 'At your service',
+            'Awaiting brilliance', 'Smooth operator', 'Freshly caffeinated'
+        ];
+        let _lastStatusPhraseIdx = -1;
+
+        function readyStatus() {
+            let idx;
+            do { idx = Math.floor(Math.random() * STATUS_PHRASES.length); } while (idx === _lastStatusPhraseIdx && STATUS_PHRASES.length > 1);
+            _lastStatusPhraseIdx = idx;
+            return STATUS_PHRASES[idx];
+        }
+
         // ========== Dynamic Favicon & Title ==========
         let _currentPageStatus = 'idle'; // 'idle' | 'working' | 'error'
         let _currentSessionTitle = null;
@@ -1034,7 +1052,7 @@
                 if (!currentFolder || FOLDERS.length === 0) {
                     setStatus('No folder selected', 'ember');
                 } else {
-                    setStatus('Ready, spaghetti', 'apple');
+                    setStatus(readyStatus(), 'apple');
                 }
             } catch (e) {
                 console.error('Failed to load projects:', e);
@@ -1643,7 +1661,7 @@
                 if (data.status === 'spawned' || data.status === 'ok') {
                     const tmuxName = data.tmux_name;
                     currentTmuxSession = tmuxName;
-                    setStatus('Ready, spaghetti', 'apple');
+                    setStatus(readyStatus(), 'apple');
 
 
                     // Open terminal and connect
@@ -1713,7 +1731,7 @@
                     toggleTerminal();
                 }
                 connectToTerminal(tmuxName);
-                setStatus('Ready, spaghetti', 'apple');
+                setStatus(readyStatus(), 'apple');
             } else {
                 currentTmuxSession = null;
                 setStatus('History loaded', 'gold');
@@ -1771,7 +1789,7 @@
             document.getElementById('empty-state').classList.add('hidden');
             document.getElementById('message-container').classList.remove('hidden');
             // project-name removed = name;
-            setStatus('Ready, spaghetti', 'apple');
+            setStatus(readyStatus(), 'apple');
 
             // Default: show "new session" message until we find history
             const container = document.getElementById('message-container');
@@ -3433,9 +3451,9 @@
                             if (hasTextContent) incrementUnread();
                             scrollToBottom();
 
-                            // Only show Ready, spaghetti when we get actual text content AND no terminal providing ground-truth
+                            // Only show ready status when we get actual text content AND no terminal providing ground-truth
                             if (hasTextContent && (!currentTmuxSession || !terminalDerivedStatus)) {
-                                setStatus('Ready, spaghetti', 'apple');
+                                setStatus(readyStatus(), 'apple');
                             }
                         }
                     }
@@ -3628,7 +3646,7 @@
                         if (name) {
                             selectTmuxSession(name);
                         } else {
-                            setStatus('Ready, spaghetti', 'apple');
+                            setStatus(readyStatus(), 'apple');
                         }
                     }, 2000);
                 }
@@ -4524,7 +4542,7 @@
                 // Not a status line — stop looking
                 break;
             }
-            return { state: 'ready', text: 'Ready, spaghetti', color: 'apple' };
+            return { state: 'ready', text: readyStatus(), color: 'apple' };
         }
 
         // ========== Terminal ==========
@@ -4867,7 +4885,7 @@
                 if (data.status === 'spawned' || data.status === 'ok') {
                     currentTmuxSession = data.tmux_name;
                     document.getElementById('terminal-session').textContent = data.tmux_name;
-                    setStatus('Ready, spaghetti', 'apple');
+                    setStatus(readyStatus(), 'apple');
 
                     // Reconnect terminal SSE
                     if (terminalEventSource) {
@@ -5118,7 +5136,7 @@
                 if (dot) { dot.className = 'w-1.5 h-1.5 rounded-full bg-apple-9'; dot.title = 'Connected'; }
                 lastHeartbeat = Date.now();
                 sseReconnectDelay = 1000; // Reset backoff on successful connect
-                setStatus('Ready, spaghetti', 'apple');
+                setStatus(readyStatus(), 'apple');
 
                 // Detect deploy: if server uptime dropped, it restarted
                 fetch('/health').then(r => r.json()).then(h => {
@@ -5153,7 +5171,7 @@
                 // Recover from disconnected state
                 const statusEl = document.getElementById('status');
                 if (statusEl.textContent === 'Disconnected' || statusEl.textContent === 'Offline') {
-                    setStatus('Ready, spaghetti', 'apple');
+                    setStatus(readyStatus(), 'apple');
                 }
             });
 
