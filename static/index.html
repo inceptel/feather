@@ -230,6 +230,7 @@
         .nav-pill-tao .tao-pnl { font-size: 8px; margin-left: 3px; font-weight: 700; }
         .nav-pill-tao .tao-pnl.pos { color: #7fd88f; }
         .nav-pill-tao .tao-pnl.neg { color: #e06c75; }
+        .search-highlight { background: rgba(250, 178, 131, 0.3); color: var(--smoke-12); border-radius: 2px; padding: 0 1px; }
         .session-filter-pill { background: transparent; border-color: var(--smoke-5); color: var(--smoke-8); }
         .session-filter-pill:hover { color: var(--smoke-11); border-color: var(--smoke-6); }
         .session-filter-pill.active { background: var(--smoke-4); border-color: var(--gold-9); color: var(--gold-11); }
@@ -1276,7 +1277,7 @@
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
-                                <div class="text-xs text-smoke-12 truncate leading-tight">${s.title || 'Untitled'}</div>
+                                <div class="text-xs text-smoke-12 truncate leading-tight">${currentSearchQuery ? highlightSearch(s.title || 'Untitled', currentSearchQuery) : escapeHtml(s.title || 'Untitled')}</div>
                                 <div class="flex items-center gap-1 text-[10px] text-smoke-7 leading-tight">
                                     ${sourceBadge}
                                     <span>${formatTime(s.lastUpdated)}</span>
@@ -2775,6 +2776,19 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function highlightSearch(text, query) {
+            if (!query || !text) return escapeHtml(text);
+            const escaped = escapeHtml(text);
+            const q = query.toLowerCase();
+            const idx = text.toLowerCase().indexOf(q);
+            if (idx === -1) return escaped;
+            // Re-escape each segment separately to keep positions aligned
+            const before = escapeHtml(text.substring(0, idx));
+            const match = escapeHtml(text.substring(idx, idx + query.length));
+            const after = escapeHtml(text.substring(idx + query.length));
+            return before + '<span class="search-highlight">' + match + '</span>' + after;
         }
 
         function stripAnsi(text) {

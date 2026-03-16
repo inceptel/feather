@@ -2745,6 +2745,8 @@
                 let html = marked.parse(text);
                 // Wrap tables in scrollable container for mobile
                 html = html.replace(/<table>/g, '<div class="table-wrapper"><table>').replace(/<\/table>/g, '</table></div>');
+                // Make links open in new tab (prevents navigating away from Feather)
+                html = html.replace(/<a href="/g, '<a target="_blank" rel="noopener noreferrer" href="');
                 return html;
             } catch {
                 return escapeHtml(text);
