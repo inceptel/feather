@@ -757,7 +757,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd> / <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Home</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+End</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
@@ -1898,6 +1898,20 @@
             const visible = sessions.slice(0, showCount);
             const hasMore = !q && sessions.length > showCount;
 
+            // Pre-compute group counts for visible sessions
+            const groupCounts = {};
+            let starredCount = 0;
+            let _countPassedStarred = false;
+            for (const s of visible) {
+                if (starredSessions.has(s.id) && !_countPassedStarred) {
+                    starredCount++;
+                } else {
+                    _countPassedStarred = true;
+                    const g = getTimeGroup(s.lastUpdated);
+                    groupCounts[g] = (groupCounts[g] || 0) + 1;
+                }
+            }
+
             // Build grouped HTML
             let html = '';
             let lastGroup = '';
@@ -1907,7 +1921,7 @@
                 if (isStarred && !passedStarred) {
                     if (lastGroup !== 'Starred') {
                         html += `<div class="px-1 pt-2 pb-0.5">
-                            <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>
+                            <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>${starredCount > 0 ? `<span class="text-[9px] text-gold-9/60 ml-1">${starredCount}</span>` : ''}
                         </div>`;
                         lastGroup = 'Starred';
                     }
@@ -1915,8 +1929,9 @@
                     passedStarred = true;
                     const group = getTimeGroup(s.lastUpdated);
                     if (group !== lastGroup) {
+                        const cnt = groupCounts[group] || 0;
                         html += `<div class="px-1 pt-2 pb-0.5">
-                            <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>
+                            <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>${cnt > 0 ? `<span class="text-[9px] text-smoke-7/60 ml-1">${cnt}</span>` : ''}
                         </div>`;
                         lastGroup = group;
                     }
@@ -6443,8 +6458,8 @@
             { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
             { label: 'Next message', shortcut: 'J', action: () => navigateMessages(1) },
             { label: 'Previous message', shortcut: 'K', action: () => navigateMessages(-1) },
-            { label: 'First message', shortcut: 'gg', action: () => jumpToMessage('first') },
-            { label: 'Last message', shortcut: 'G', action: () => jumpToMessage('last') },
+            { label: 'First message', shortcut: 'gg / Ctrl+Home', action: () => jumpToMessage('first') },
+            { label: 'Last message', shortcut: 'G / Ctrl+End', action: () => jumpToMessage('last') },
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
             { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
@@ -6589,6 +6604,11 @@
                     e.preventDefault();
                     openShortcutsModal();
                 }
+            }
+            // Ctrl+Home / Ctrl+End to jump to first/last message (standard shortcut)
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'Home' || e.key === 'End')) {
+                e.preventDefault();
+                jumpToMessage(e.key === 'Home' ? 'first' : 'last');
             }
             // Alt+ArrowUp / Alt+ArrowDown to switch between sessions
             if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {

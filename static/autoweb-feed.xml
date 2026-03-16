@@ -1,835 +1,848 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>
-<title>Autoweb Feather Improvements</title>
-<description>Self-improving Feather web application changelog</description>
+<title>Feather Autoweb Improvements</title>
 <link>#</link>
+<description>Autonomous improvements to the Feather web application</description>
+<lastBuildDate>Mon, 16 Mar 2026 09:03:54 GMT</lastBuildDate>
 <item>
-<title>Add 5 API contract tests (health, projects, sessions, history, session-ID validation) for test diver</title>
-<pubDate>2026-03-16T08:49:42Z</pubDate>
+<title>Add session count badges to sidebar time group headers — STARRED 1, TODAY 4, THIS WEEK 12 etc. shown next to group labels for quick volume overview (122 tests pass)</title>
+<description>Add session count badges to sidebar time group headers — STARRED 1, TODAY 4, THIS WEEK 12 etc. shown next to group labels for quick volume overview (122 tests pass)</description>
+<pubDate>2026-03-16T09:03:45Z</pubDate>
+<link>#</link>
+</item>
+<item>
+<title>Add Ctrl+Home/Ctrl+End keyboard shortcuts to jump to first/last message — standard alternatives to vim gg/G, added to shortcuts modal and command palette (121 tests pass)</title>
+<description>Add Ctrl+Home/Ctrl+End keyboard shortcuts to jump to first/last message — standard alternatives to vim gg/G, added to shortcuts modal and command palette (121 tests pass)</description>
+<pubDate>2026-03-16T08:56:57Z</pubDate>
+<link>#</link>
+</item>
+<item>
+<title>Add 5 API contract tests (health, projects, sessions, history, session-ID validation) for test diversity — validates JSON structure, field types, and ID rejection (120 tests pass)</title>
 <description>Add 5 API contract tests (health, projects, sessions, history, session-ID validation) for test diversity — validates JSON structure, field types, and ID rejection (120 tests pass)</description>
+<pubDate>2026-03-16T08:49:42Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add quote-reply button on assistant messages — hover reveals Quote button (top-right, left of Copy) </title>
-<pubDate>2026-03-16T08:44:38Z</pubDate>
+<title>Add quote-reply button on assistant messages — hover reveals Quote button (top-right, left of Copy) that excerpts first 5 lines as blockquote into input area, with mobile always-visible at 0.6 opacity (115 tests pass)</title>
 <description>Add quote-reply button on assistant messages — hover reveals Quote button (top-right, left of Copy) that excerpts first 5 lines as blockquote into input area, with mobile always-visible at 0.6 opacity (115 tests pass)</description>
+<pubDate>2026-03-16T08:44:38Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add double-click to rename on desktop session header — cursor-pointer + ondblclick on title span, re</title>
-<pubDate>2026-03-16T08:39:56Z</pubDate>
+<title>Add double-click to rename on desktop session header — cursor-pointer + ondblclick on title span, renameCurrentSession() helper, desktop header text update after rename (114 tests pass)</title>
 <description>Add double-click to rename on desktop session header — cursor-pointer + ondblclick on title span, renameCurrentSession() helper, desktop header text update after rename (114 tests pass)</description>
+<pubDate>2026-03-16T08:39:56Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add focus mode (F key) — eye icon button and keyboard shortcut to hide all tool calls/thinking block</title>
-<pubDate>2026-03-16T08:33:01Z</pubDate>
+<title>Add focus mode (F key) — eye icon button and keyboard shortcut to hide all tool calls/thinking blocks for clean conversation reading, with data-msg-type attributes on all message types, command palette and shortcuts modal entries (113 tests pass)</title>
 <description>Add focus mode (F key) — eye icon button and keyboard shortcut to hide all tool calls/thinking blocks for clean conversation reading, with data-msg-type attributes on all message types, command palette and shortcuts modal entries (113 tests pass)</description>
+<pubDate>2026-03-16T08:33:01Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add message position indicator (42/155) when scrolling long sessions — floating monospace badge in t</title>
-<pubDate>2026-03-16T08:23:49Z</pubDate>
+<title>Add message position indicator (42/155) when scrolling long sessions — floating monospace badge in top-right showing current message out of total, auto-hides after 1.5s, only for 10+ message sessions (112 tests pass)</title>
 <description>Add message position indicator (42/155) when scrolling long sessions — floating monospace badge in top-right showing current message out of total, auto-hides after 1.5s, only for 10+ message sessions (112 tests pass)</description>
+<pubDate>2026-03-16T08:23:49Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add hide session feature — right-click context menu Hide option (red danger styling), localStorage-b</title>
-<pubDate>2026-03-16T08:18:22Z</pubDate>
+<title>Add hide session feature — right-click context menu Hide option (red danger styling), localStorage-backed hiddenSessions set, N hidden show-all bar in sidebar, command palette entries for hide/unhide, unhideAllSessions (111 tests pass)</title>
 <description>Add hide session feature — right-click context menu Hide option (red danger styling), localStorage-backed hiddenSessions set, N hidden show-all bar in sidebar, command palette entries for hide/unhide, unhideAllSessions (111 tests pass)</description>
+<pubDate>2026-03-16T08:18:22Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add zen mode (Z key) — hides sidebar, toolbar, and terminal for distraction-free reading with floati</title>
-<pubDate>2026-03-16T08:10:34Z</pubDate>
+<title>Add zen mode (Z key) — hides sidebar, toolbar, and terminal for distraction-free reading with floating exit button, command palette entry, and shortcuts modal (110 tests pass)</title>
 <description>Add zen mode (Z key) — hides sidebar, toolbar, and terminal for distraction-free reading with floating exit button, command palette entry, and shortcuts modal (110 tests pass)</description>
+<pubDate>2026-03-16T08:10:34Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add G/gg vim-style jump to first/last message — G jumps to last message, gg (double-tap) to first, w</title>
-<pubDate>2026-03-16T08:05:33Z</pubDate>
+<title>Add G/gg vim-style jump to first/last message — G jumps to last message, gg (double-tap) to first, with command palette entries and shortcuts modal (109 tests pass)</title>
 <description>Add G/gg vim-style jump to first/last message — G jumps to last message, gg (double-tap) to first, with command palette entries and shortcuts modal (109 tests pass)</description>
+<pubDate>2026-03-16T08:05:33Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add typing indicator — animated bouncing dots appear below messages when assistant is working (statu</title>
-<pubDate>2026-03-16T08:01:35Z</pubDate>
+<title>Add typing indicator — animated bouncing dots appear below messages when assistant is working (status=working), hidden on idle; 3-dot bounce animation with staggered delays (108 tests pass)</title>
 <description>Add typing indicator — animated bouncing dots appear below messages when assistant is working (status=working), hidden on idle; 3-dot bounce animation with staggered delays (108 tests pass)</description>
+<pubDate>2026-03-16T08:01:35Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add mark-all-read button — unread count below filter pills with one-click clear, command palette ent</title>
-<pubDate>2026-03-16T07:57:35Z</pubDate>
+<title>Add mark-all-read button — unread count below filter pills with one-click clear, command palette entry, dynamically shown/hidden (107 tests pass)</title>
 <description>Add mark-all-read button — unread count below filter pills with one-click clear, command palette entry, dynamically shown/hidden (107 tests pass)</description>
+<pubDate>2026-03-16T07:57:35Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add keyboard shortcut hints (/, Ctrl+K, Ctrl+N, ?) to empty state for discoverability — styled kbd b</title>
-<pubDate>2026-03-16T07:51:18Z</pubDate>
+<title>Add keyboard shortcut hints (/, Ctrl+K, Ctrl+N, ?) to empty state for discoverability — styled kbd badges below suggestion buttons (106 tests pass)</title>
 <description>Add keyboard shortcut hints (/, Ctrl+K, Ctrl+N, ?) to empty state for discoverability — styled kbd badges below suggestion buttons (106 tests pass)</description>
+<pubDate>2026-03-16T07:51:18Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add desktop session header bar — shows session title, message count, and relative time on md+ screen</title>
-<pubDate>2026-03-16T07:46:31Z</pubDate>
+<title>Add desktop session header bar — shows session title, message count, and relative time on md+ screens when viewing a session; especially useful when sidebar is hidden via Ctrl+B (105 tests pass)</title>
 <description>Add desktop session header bar — shows session title, message count, and relative time on md+ screens when viewing a session; especially useful when sidebar is hidden via Ctrl+B (105 tests pass)</description>
+<pubDate>2026-03-16T07:46:31Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add lightbox click handlers to markdown images — cursor:pointer + onclick openLightbox in renderMark</title>
-<pubDate>2026-03-16T07:39:17Z</pubDate>
+<title>Add lightbox click handlers to markdown images — cursor:pointer + onclick openLightbox in renderMarkdown so inline images in assistant responses open full-size viewer on click (104 tests pass)</title>
 <description>Add lightbox click handlers to markdown images — cursor:pointer + onclick openLightbox in renderMarkdown so inline images in assistant responses open full-size viewer on click (104 tests pass)</description>
+<pubDate>2026-03-16T07:39:17Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add J/K vim-style message navigation — press J (next) or K (previous) to jump between messages with </title>
-<pubDate>2026-03-16T07:36:11Z</pubDate>
+<title>Add J/K vim-style message navigation — press J (next) or K (previous) to jump between messages with flash highlight, shortcuts modal and command palette entries, session-switch reset (103 tests pass)</title>
 <description>Add J/K vim-style message navigation — press J (next) or K (previous) to jump between messages with flash highlight, shortcuts modal and command palette entries, session-switch reset (103 tests pass)</description>
+<pubDate>2026-03-16T07:36:11Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add scroll progress indicator — thin gold bar at top of messages area showing scroll position in lon</title>
-<pubDate>2026-03-16T07:31:28Z</pubDate>
+<title>Add scroll progress indicator — thin gold bar at top of messages area showing scroll position in long sessions, hidden at top/bottom (102 tests pass)</title>
 <description>Add scroll progress indicator — thin gold bar at top of messages area showing scroll position in long sessions, hidden at top/bottom (102 tests pass)</description>
+<pubDate>2026-03-16T07:31:28Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session rename via right-click context menu and command palette — localStorage-backed custom tit</title>
-<pubDate>2026-03-16T07:26:21Z</pubDate>
+<title>Add session rename via right-click context menu and command palette — localStorage-backed custom titles with getSessionTitle() helper, pencil icon in context menu, empty input resets to original (101 tests pass)</title>
 <description>Add session rename via right-click context menu and command palette — localStorage-backed custom titles with getSessionTitle() helper, pencil icon in context menu, empty input resets to original (101 tests pass)</description>
+<pubDate>2026-03-16T07:26:21Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add edit & resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bu</title>
+<title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</title>
+<description>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</description>
 <pubDate>2026-03-16T07:21:09Z</pubDate>
-<description>Add edit & resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</description>
 <link>#</link>
 </item>
 <item>
-<title>Auto-collapse long code blocks (>25 lines) with gradient fade and Show N more lines / Collapse toggl</title>
-<pubDate>2026-03-16T07:16:09Z</pubDate>
+<title>Auto-collapse long code blocks (>25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves readability in code-heavy sessions (99 tests pass)</title>
 <description>Auto-collapse long code blocks (>25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves readability in code-heavy sessions (99 tests pass)</description>
+<pubDate>2026-03-16T07:16:09Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add drag-to-resize sidebar width — 6px handle on right edge with gold accent, 200-500px clamped rang</title>
-<pubDate>2026-03-16T07:13:04Z</pubDate>
+<title>Add drag-to-resize sidebar width — 6px handle on right edge with gold accent, 200-500px clamped range, localStorage persistence, double-click to reset default (98 tests pass)</title>
 <description>Add drag-to-resize sidebar width — 6px handle on right edge with gold accent, 200-500px clamped range, localStorage persistence, double-click to reset default (98 tests pass)</description>
+<pubDate>2026-03-16T07:13:04Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add wrap/unwrap toggle button on code blocks with long lines (>80 chars) — hover reveals Wrap button</title>
-<pubDate>2026-03-16T07:07:38Z</pubDate>
+<title>Add wrap/unwrap toggle button on code blocks with long lines (>80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</title>
 <description>Add wrap/unwrap toggle button on code blocks with long lines (>80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
+<pubDate>2026-03-16T07:07:38Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session sort button — cycle between Latest, Most msgs, Oldest sort order in sidebar with localSt</title>
-<pubDate>2026-03-16T07:02:47Z</pubDate>
+<title>Add session sort button — cycle between Latest, Most msgs, Oldest sort order in sidebar with localStorage persistence, command palette integration (96 tests pass)</title>
 <description>Add session sort button — cycle between Latest, Most msgs, Oldest sort order in sidebar with localStorage persistence, command palette integration (96 tests pass)</description>
+<pubDate>2026-03-16T07:02:47Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add line number gutter to code blocks (3+ lines) — positioned left gutter with border separator, aut</title>
-<pubDate>2026-03-16T06:58:40Z</pubDate>
+<title>Add line number gutter to code blocks (3+ lines) — positioned left gutter with border separator, auto-skips short snippets, integrates with existing copy button flow (95 tests pass)</title>
 <description>Add line number gutter to code blocks (3+ lines) — positioned left gutter with border separator, auto-skips short snippets, integrates with existing copy button flow (95 tests pass)</description>
+<pubDate>2026-03-16T06:58:40Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add Ctrl+Shift+C (Cmd+Shift+C) keyboard shortcut to copy last assistant message — copies raw markdow</title>
-<pubDate>2026-03-16T06:53:14Z</pubDate>
+<title>Add Ctrl+Shift+C (Cmd+Shift+C) keyboard shortcut to copy last assistant message — copies raw markdown to clipboard with toast feedback, added to command palette and shortcuts help modal (94 tests pass)</title>
 <description>Add Ctrl+Shift+C (Cmd+Shift+C) keyboard shortcut to copy last assistant message — copies raw markdown to clipboard with toast feedback, added to command palette and shortcuts help modal (94 tests pass)</description>
+<pubDate>2026-03-16T06:53:14Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via </title>
-<pubDate>2026-03-16T06:48:49Z</pubDate>
+<title>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</title>
 <description>Add 'Open in new tab' to session context menu — right-click sessions to open in new browser tab via hash routing for side-by-side comparison (93 tests pass)</description>
+<pubDate>2026-03-16T06:48:49Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add character count indicator to message input — shows char count while typing, gold highlight at 50</title>
-<pubDate>2026-03-16T06:45:15Z</pubDate>
+<title>Add character count indicator to message input — shows char count while typing, gold highlight at 500+ chars (WebSocket threshold), compact 2.5k format for 1000+ chars (92 tests pass)</title>
 <description>Add character count indicator to message input — shows char count while typing, gold highlight at 500+ chars (WebSocket threshold), compact 2.5k format for 1000+ chars (92 tests pass)</description>
+<pubDate>2026-03-16T06:45:15Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add desktop notifications when assistant finishes while tab is in background — Notification API with</title>
-<pubDate>2026-03-16T06:38:00Z</pubDate>
+<title>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working->idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</title>
 <description>Add desktop notifications when assistant finishes while tab is in background — Notification API with permission request on first send, working->idle transition trigger, command palette toggle, localStorage persistence (91 tests pass)</description>
+<pubDate>2026-03-16T06:38:00Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add copy button to tool result output — hover reveals Copy button (top-right) on tool result pre blo</title>
-<pubDate>2026-03-16T06:31:42Z</pubDate>
+<title>Add copy button to tool result output — hover reveals Copy button (top-right) on tool result pre blocks, copies raw output to clipboard with Copied\! feedback; mobile: always-visible at 0.6 opacity (90 tests pass)</title>
 <description>Add copy button to tool result output — hover reveals Copy button (top-right) on tool result pre blocks, copies raw output to clipboard with Copied\! feedback; mobile: always-visible at 0.6 opacity (90 tests pass)</description>
+<pubDate>2026-03-16T06:31:42Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add recent sessions quick-access cards to empty state — shows top 3 non-autoweb sessions with title,</title>
-<pubDate>2026-03-16T06:27:36Z</pubDate>
+<title>Add recent sessions quick-access cards to empty state — shows top 3 non-autoweb sessions with title, time, and message count for fast navigation when no session is selected (89 tests pass)</title>
 <description>Add recent sessions quick-access cards to empty state — shows top 3 non-autoweb sessions with title, time, and message count for fast navigation when no session is selected (89 tests pass)</description>
+<pubDate>2026-03-16T06:27:36Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session right-click context menu — star/unstar, copy session ID, export Markdown, mark as read; </title>
-<pubDate>2026-03-16T06:22:06Z</pubDate>
+<title>Add session right-click context menu — star/unstar, copy session ID, export Markdown, mark as read; positioned at cursor, closes on click-outside/Escape (88 tests pass)</title>
 <description>Add session right-click context menu — star/unstar, copy session ID, export Markdown, mark as read; positioned at cursor, closes on click-outside/Escape (88 tests pass)</description>
+<pubDate>2026-03-16T06:22:06Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Sticky date separators in message list — date headers (Today/Yesterday/Mar 15) pin to top when scrol</title>
-<pubDate>2026-03-16T06:17:33Z</pubDate>
+<title>Sticky date separators in message list — date headers (Today/Yesterday/Mar 15) pin to top when scrolling long sessions like Slack/WhatsApp, with pill-shaped label and solid background (87 tests pass)</title>
 <description>Sticky date separators in message list — date headers (Today/Yesterday/Mar 15) pin to top when scrolling long sessions like Slack/WhatsApp, with pill-shaped label and solid background (87 tests pass)</description>
+<pubDate>2026-03-16T06:17:33Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add export session as Markdown — command palette entry (Ctrl+K > Export) fetches all messages, forma</title>
-<pubDate>2026-03-16T06:10:59Z</pubDate>
+<title>Add export session as Markdown — command palette entry (Ctrl+K > Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</title>
 <description>Add export session as Markdown — command palette entry (Ctrl+K > Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
+<pubDate>2026-03-16T06:10:59Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add tool call duration display — shows elapsed time (1.2s/5s/1m 23s) on tool result headers during l</title>
-<pubDate>2026-03-16T05:55:10Z</pubDate>
+<title>Add tool call duration display — shows elapsed time (1.2s/5s/1m 23s) on tool result headers during live SSE streaming, hidden for batch history loads (84 tests pass)</title>
 <description>Add tool call duration display — shows elapsed time (1.2s/5s/1m 23s) on tool result headers during live SSE streaming, hidden for batch history loads (84 tests pass)</description>
+<pubDate>2026-03-16T05:55:10Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add pulsing gold running dot on tool call headers — dot appears when tool_use is rendered, auto-remo</title>
-<pubDate>2026-03-16T05:50:38Z</pubDate>
+<title>Add pulsing gold running dot on tool call headers — dot appears when tool_use is rendered, auto-removed when tool_result arrives via tool_use_id matching, cleared on history load (83 tests pass)</title>
 <description>Add pulsing gold running dot on tool call headers — dot appears when tool_use is rendered, auto-removed when tool_result arrives via tool_use_id matching, cleared on history load (83 tests pass)</description>
+<pubDate>2026-03-16T05:50:38Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Shorten file paths in tool call headers — shortenFilePath() strips /home/*/... prefixes to show mean</title>
-<pubDate>2026-03-16T05:43:04Z</pubDate>
+<title>Shorten file paths in tool call headers — shortenFilePath() strips /home/*/... prefixes to show meaningful tail (src/main.rs instead of /home/feather-dev/feather-dev/src/main.rs) in Read/Write/Edit/Grep previews (82 tests pass)</title>
 <description>Shorten file paths in tool call headers — shortenFilePath() strips /home/*/... prefixes to show meaningful tail (src/main.rs instead of /home/feather-dev/feather-dev/src/main.rs) in Read/Write/Edit/Grep previews (82 tests pass)</description>
+<pubDate>2026-03-16T05:43:04Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add file language badges (Rust, JS, Python, etc.) to Read/Write/Edit/Grep/Glob tool call headers — c</title>
-<pubDate>2026-03-16T05:38:51Z</pubDate>
+<title>Add file language badges (Rust, JS, Python, etc.) to Read/Write/Edit/Grep/Glob tool call headers — colored pill badges based on file extension for quick scanning (81 tests pass)</title>
 <description>Add file language badges (Rust, JS, Python, etc.) to Read/Write/Edit/Grep/Glob tool call headers — colored pill badges based on file extension for quick scanning (81 tests pass)</description>
+<pubDate>2026-03-16T05:38:51Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed</title>
-<pubDate>2026-03-16T05:35:38Z</pubDate>
+<title>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</title>
 <description>Thinking block collapsed preview — shows first 80 chars of thinking text + word count when collapsed, hidden when expanded; CSS + JS change with new test (80 tests pass)</description>
+<pubDate>2026-03-16T05:35:38Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial l</title>
-<pubDate>2026-03-16T05:32:56Z</pubDate>
+<title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
 <description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
+<pubDate>2026-03-16T05:32:56Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout canno</title>
-<pubDate>2026-03-16T05:25:35Z</pubDate>
+<title>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</title>
 <description>Fix SSE reconnect race condition — added tailReconnectTimer guard so onerror/heartbeat timeout cannot spawn overlapping reconnection attempts (MEDIUM priority from known issues)</description>
+<pubDate>2026-03-16T05:25:35Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malfor</title>
-<pubDate>2026-03-16T05:22:22Z</pubDate>
+<title>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</title>
 <description>Add session ID validation to API endpoints — is_valid_session_id() rejects path traversal and malformed IDs in 6 handlers (Phil priority: reject malformed IDs early)</description>
+<pubDate>2026-03-16T05:22:22Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls </title>
-<pubDate>2026-03-16T05:15:20Z</pubDate>
+<title>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</title>
 <description>Add auto-scroll reliability — capture-phase image/video/iframe load handler on #messages re-scrolls when media loads and user is at bottom, plus double-rAF in scrollToBottom for layout-shift correction (Phil: auto-scroll reliability fixes)</description>
+<pubDate>2026-03-16T05:15:20Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown han</title>
-<pubDate>2026-03-16T05:12:01Z</pubDate>
+<title>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</title>
 <description>Add Ctrl+B (Cmd+B) keyboard shortcut to toggle sidebar — standard IDE shortcut, added to keydown handler, command palette (shows shortcut badge), and shortcuts help modal (75 tests pass)</description>
+<pubDate>2026-03-16T05:12:01Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-la</title>
-<pubDate>2026-03-16T05:07:10Z</pubDate>
+<title>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</title>
 <description>Add session timestamp auto-refresh — sidebar relative times (now/5m/2h) update every 30s via data-last-updated attribute, so timestamps stay accurate without full re-render</description>
+<pubDate>2026-03-16T05:07:10Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full </title>
-<pubDate>2026-03-16T05:03:30Z</pubDate>
+<title>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</title>
 <description>Add full timestamp tooltip to session sidebar times — hovering relative time (now/6m/2h) shows full date-time in ET (formatFullTime helper), 73 tests pass</description>
+<pubDate>2026-03-16T05:03:30Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data </title>
-<pubDate>2026-03-16T04:55:54Z</pubDate>
+<title>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</title>
 <description>Add SSE heartbeat timeout (60s) for zombie connection detection — forces reconnect when no SSE data arrives, preventing silent disconnections from going unnoticed (Phil: harden SSE reliability)</description>
+<pubDate>2026-03-16T04:55:54Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. '</title>
-<pubDate>2026-03-16T04:51:28Z</pubDate>
+<title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</title>
 <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description>
+<pubDate>2026-03-16T04:51:28Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts mod</title>
-<pubDate>2026-03-16T04:46:08Z</pubDate>
+<title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</title>
 <description>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</description>
+<pubDate>2026-03-16T04:46:08Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now</title>
-<pubDate>2026-03-16T04:41:46Z</pubDate>
+<title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</title>
 <description>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</description>
+<pubDate>2026-03-16T04:41:46Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than las</title>
-<pubDate>2026-03-16T04:35:12Z</pubDate>
+<title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
 <description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
+<pubDate>2026-03-16T04:35:12Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add clear (X) button to session search input — hidden by default, appears when search has text, clea</title>
-<pubDate>2026-03-16T04:31:19Z</pubDate>
+<title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</title>
 <description>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</description>
+<pubDate>2026-03-16T04:31:19Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced</title>
-<pubDate>2026-03-16T04:27:11Z</pubDate>
+<title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</title>
 <description>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</description>
+<pubDate>2026-03-16T04:27:11Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tab</title>
-<pubDate>2026-03-16T04:21:51Z</pubDate>
+<title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</title>
 <description>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</description>
+<pubDate>2026-03-16T04:21:51Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most r</title>
-<pubDate>2026-03-16T04:16:37Z</pubDate>
+<title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</title>
 <description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description>
+<pubDate>2026-03-16T04:16:37Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group h</title>
-<pubDate>2026-03-16T04:10:22Z</pubDate>
+<title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</title>
 <description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description>
+<pubDate>2026-03-16T04:10:22Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tr</title>
-<pubDate>2026-03-16T04:06:25Z</pubDate>
+<title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</title>
 <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description>
+<pubDate>2026-03-16T04:06:25Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, En</title>
-<pubDate>2026-03-16T04:01:43Z</pubDate>
+<title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</title>
 <description>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</description>
+<pubDate>2026-03-16T04:01:43Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists acros</title>
-<pubDate>2026-03-16T03:57:32Z</pubDate>
+<title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</title>
 <description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description>
+<pubDate>2026-03-16T03:57:32Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-</title>
-<pubDate>2026-03-16T03:54:50Z</pubDate>
+<title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</title>
 <description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description>
+<pubDate>2026-03-16T03:54:50Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hard</title>
-<pubDate>2026-03-16T03:51:24Z</pubDate>
+<title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title>
 <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
+<pubDate>2026-03-16T03:51:24Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fi</title>
-<pubDate>2026-03-16T03:48:22Z</pubDate>
+<title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</title>
 <description>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</description>
+<pubDate>2026-03-16T03:48:22Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less </title>
-<pubDate>2026-03-16T03:41:49Z</pubDate>
+<title>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title>
 <description>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
+<pubDate>2026-03-16T03:41:49Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinki</title>
-<pubDate>2026-03-16T03:37:25Z</pubDate>
+<title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</title>
 <description>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</description>
+<pubDate>2026-03-16T03:37:25Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored lin</title>
-<pubDate>2026-03-16T03:32:54Z</pubDate>
+<title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</title>
 <description>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</description>
+<pubDate>2026-03-16T03:32:54Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/S</title>
-<pubDate>2026-03-16T03:29:17Z</pubDate>
+<title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</title>
 <description>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</description>
+<pubDate>2026-03-16T03:29:17Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter sel</title>
-<pubDate>2026-03-16T03:22:27Z</pubDate>
+<title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</title>
 <description>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</description>
+<pubDate>2026-03-16T03:22:27Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts</title>
-<pubDate>2026-03-16T03:18:20Z</pubDate>
+<title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</title>
 <description>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</description>
+<pubDate>2026-03-16T03:18:20Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add message_count to Session API response and display in sidebar session list — users can now see me</title>
-<pubDate>2026-03-16T03:15:13Z</pubDate>
+<title>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</title>
 <description>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</description>
+<pubDate>2026-03-16T03:15:13Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highl</title>
-<pubDate>2026-03-16T03:08:00Z</pubDate>
+<title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</title>
 <description>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</description>
+<pubDate>2026-03-16T03:08:00Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from F</title>
-<pubDate>2026-03-16T03:03:28Z</pubDate>
+<title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</title>
 <description>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</description>
+<pubDate>2026-03-16T03:03:28Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb fl</title>
-<pubDate>2026-03-16T02:57:43Z</pubDate>
+<title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</title>
 <description>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</description>
+<pubDate>2026-03-16T02:57:43Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expand</title>
-<pubDate>2026-03-16T02:54:21Z</pubDate>
+<title>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and tool-result bodies at once, with per-session state and auto-show/hide based on tool presence</title>
 <description>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and tool-result bodies at once, with per-session state and auto-show/hide based on tool presence</description>
+<pubDate>2026-03-16T02:54:21Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — impr</title>
-<pubDate>2026-03-16T02:48:31Z</pubDate>
+<title>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in long multi-day sessions, handles load-earlier dedup</title>
 <description>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in long multi-day sessions, handles load-earlier dedup</description>
+<pubDate>2026-03-16T02:48:31Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-sha</title>
-<pubDate>2026-03-16T02:43:40Z</pubDate>
+<title>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with animated shimmer gradient mimicking user/assistant/tool blocks</title>
 <description>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with animated shimmer gradient mimicking user/assistant/tool blocks</description>
+<pubDate>2026-03-16T02:43:40Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages </title>
-<pubDate>2026-03-16T02:40:09Z</pubDate>
+<title>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, resets on scroll-to-bottom or session switch</title>
 <description>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, resets on scroll-to-bottom or session switch</description>
+<pubDate>2026-03-16T02:40:09Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw</title>
-<pubDate>2026-03-16T02:34:48Z</pubDate>
+<title>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboard, with Copied! feedback; mobile: always-visible at 0.6 opacity</title>
 <description>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboard, with Copied! feedback; mobile: always-visible at 0.6 opacity</description>
+<pubDate>2026-03-16T02:34:48Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned</title>
-<pubDate>2026-03-16T02:27:39Z</pubDate>
+<title>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on last text block per turn; both initial history load and SSE tailing paths updated</title>
 <description>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on last text block per turn; both initial history load and SSE tailing paths updated</description>
+<pubDate>2026-03-16T02:27:39Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color</title>
-<pubDate>2026-03-16T02:20:36Z</pubDate>
+<title>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI tool results, fixing raw [32m/[0m text leaking into message display</title>
 <description>Strip ANSI escape codes from tool result output — adds stripAnsi() function to remove ESC[...m color codes from Bash/CLI tool results, fixing raw [32m/[0m text leaking into message display</description>
+<pubDate>2026-03-16T02:20:36Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', olde</title>
-<pubDate>2026-03-16T02:14:45Z</pubDate>
+<title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</title>
 <description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description>
+<pubDate>2026-03-16T02:14:45Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add TodoWrite/AskUserQuestion/Skill tool rendering — checklist UI with status icons, question option</title>
-<pubDate>2026-03-16T02:07:11Z</pubDate>
+<title>Add TodoWrite/AskUserQuestion/Skill tool rendering — checklist UI with status icons, question options display, and skill badges instead of raw JSON dump</title>
 <description>Add TodoWrite/AskUserQuestion/Skill tool rendering — checklist UI with status icons, question options display, and skill badges instead of raw JSON dump</description>
+<pubDate>2026-03-16T02:07:11Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Compiled and deployed Rust binary with is_autoweb metadata flag and better session titles — 32/33 de</title>
-<pubDate>2026-03-16T01:59:59Z</pubDate>
+<title>Compiled and deployed Rust binary with is_autoweb metadata flag and better session titles — 32/33 dev sessions correctly detected as autoweb</title>
 <description>Compiled and deployed Rust binary with is_autoweb metadata flag and better session titles — 32/33 dev sessions correctly detected as autoweb</description>
+<pubDate>2026-03-16T01:59:59Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Better autoweb session titles: skip boilerplate prompts, use assistant first response as fallback ti</title>
-<pubDate>2026-03-16T01:56:40Z</pubDate>
+<title>Better autoweb session titles: skip boilerplate prompts, use assistant first response as fallback title + is_autoweb metadata flag for filter detection (compile needed for full deploy)</title>
 <description>Better autoweb session titles: skip boilerplate prompts, use assistant first response as fallback title + is_autoweb metadata flag for filter detection (compile needed for full deploy)</description>
+<pubDate>2026-03-16T01:56:40Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns</title>
-<pubDate>2026-03-16T01:46:53Z</pubDate>
+<title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</title>
 <description>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
+<pubDate>2026-03-16T01:46:53Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fallback session titles — normalizer now extracts first user message (truncated to 60 chars, first l</title>
-<pubDate>2026-03-16T01:38:55Z</pubDate>
+<title>Fallback session titles — normalizer now extracts first user message (truncated to 60 chars, first line only) as title when no summary record exists; all 18 dev sessions now show titles instead of Untitled</title>
 <description>Fallback session titles — normalizer now extracts first user message (truncated to 60 chars, first line only) as title when no summary record exists; all 18 dev sessions now show titles instead of Untitled</description>
+<pubDate>2026-03-16T01:38:55Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add Reviews tab to AW dashboard — new /api/autoweb-reviews/{instance} endpoint serves review markdow</title>
-<pubDate>2026-03-16T01:32:33Z</pubDate>
+<title>Add Reviews tab to AW dashboard — new /api/autoweb-reviews/{instance} endpoint serves review markdown files, Reviews tab renders them with marked.js using collapsible details/summary with instance badges and proper markdown styling</title>
 <description>Add Reviews tab to AW dashboard — new /api/autoweb-reviews/{instance} endpoint serves review markdown files, Reviews tab renders them with marked.js using collapsible details/summary with instance badges and proper markdown styling</description>
+<pubDate>2026-03-16T01:32:33Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Chunked load-earlier messages — renders 50 at a time with scroll-position preservation instead of du</title>
-<pubDate>2026-03-16T01:28:57Z</pubDate>
+<title>Chunked load-earlier messages — renders 50 at a time with scroll-position preservation instead of dumping all at once (fixes HIGH priority Safari/mobile crash on 1000+ message sessions)</title>
 <description>Chunked load-earlier messages — renders 50 at a time with scroll-position preservation instead of dumping all at once (fixes HIGH priority Safari/mobile crash on 1000+ message sessions)</description>
+<pubDate>2026-03-16T01:28:57Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add Ctrl+N (Cmd+N) keyboard shortcut to start a new Pi session — also added to keyboard shortcuts he</title>
-<pubDate>2026-03-16T01:21:03Z</pubDate>
+<title>Add Ctrl+N (Cmd+N) keyboard shortcut to start a new Pi session — also added to keyboard shortcuts help modal (?)</title>
 <description>Add Ctrl+N (Cmd+N) keyboard shortcut to start a new Pi session — also added to keyboard shortcuts help modal (?)</description>
+<pubDate>2026-03-16T01:21:03Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Paginated message loading: backend limit/total params + frontend loads last 50 messages initially wi</title>
-<pubDate>2026-03-16T01:15:39Z</pubDate>
+<title>Paginated message loading: backend limit/total params + frontend loads last 50 messages initially with load-earlier button — prevents Safari/iPadOS crashes on large sessions (55%+ payload reduction)</title>
 <description>Paginated message loading: backend limit/total params + frontend loads last 50 messages initially with load-earlier button — prevents Safari/iPadOS crashes on large sessions (55%+ payload reduction)</description>
+<pubDate>2026-03-16T01:15:39Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>AW dashboard now aggregates all 3 autoweb instances (full-stack, frontend, trading) via /api/autoweb</title>
-<pubDate>2026-03-16T01:10:24Z</pubDate>
+<title>AW dashboard now aggregates all 3 autoweb instances (full-stack, frontend, trading) via /api/autoweb-results/{instance} endpoint — All tab merges and sorts chronologically with color-coded source badges</title>
 <description>AW dashboard now aggregates all 3 autoweb instances (full-stack, frontend, trading) via /api/autoweb-results/{instance} endpoint — All tab merges and sorts chronologically with color-coded source badges</description>
+<pubDate>2026-03-16T01:10:24Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix duplicate user messages with image attachments: set data-content-hash and data-image-path on opt</title>
-<pubDate>2026-03-16T01:05:40Z</pubDate>
+<title>Fix duplicate user messages with image attachments: set data-content-hash and data-image-path on optimistic messages, strip [Attached image:] markers before optimistic matching</title>
 <description>Fix duplicate user messages with image attachments: set data-content-hash and data-image-path on optimistic messages, strip [Attached image:] markers before optimistic matching</description>
+<pubDate>2026-03-16T01:05:40Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Add session fork endpoint: POST /api/claude-fork/{session_id} uses --resume --fork-session to branch</title>
-<pubDate>2026-03-16T00:55:46Z</pubDate>
+<title>Add session fork endpoint: POST /api/claude-fork/{session_id} uses --resume --fork-session to branch from existing sessions</title>
 <description>Add session fork endpoint: POST /api/claude-fork/{session_id} uses --resume --fork-session to branch from existing sessions</description>
+<pubDate>2026-03-16T00:55:46Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages >= 500 bytes to bypass</title>
-<pubDate>2026-03-16T00:52:37Z</pubDate>
+<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages >= 500 bytes to bypass OS arg length limit</title>
 <description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages >= 500 bytes to bypass OS arg length limit</description>
+<pubDate>2026-03-16T00:52:37Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Clean up all 13 compiler warnings: remove dead code (SUPERVISOR_CONF, run_command_with_output), add </title>
-<pubDate>2026-03-16T00:49:36Z</pubDate>
+<title>Clean up all 13 compiler warnings: remove dead code (SUPERVISOR_CONF, run_command_with_output), add #[allow(dead_code)] for future-use structs/methods, fix mut and unused var</title>
 <description>Clean up all 13 compiler warnings: remove dead code (SUPERVISOR_CONF, run_command_with_output), add #[allow(dead_code)] for future-use structs/methods, fix mut and unused var</description>
+<pubDate>2026-03-16T00:49:36Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Improved weekly trend display — large ratios now show multiplier format (37x last wk) instead of noi</title>
-<pubDate>2026-03-15T23:38:16Z</pubDate>
+<title>Improved weekly trend display — large ratios now show multiplier format (37x last wk) instead of noisy percentages (+3600% vs last wk)</title>
 <description>Improved weekly trend display — large ratios now show multiplier format (37x last wk) instead of noisy percentages (+3600% vs last wk)</description>
+<pubDate>2026-03-15T23:38:16Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Improved autoweb session filter detection — added AUTOWEB_FIX_PATTERN and AUTOWEB_SPECIFIC_PATTERN t</title>
-<pubDate>2026-03-15T23:35:31Z</pubDate>
+<title>Improved autoweb session filter detection — added AUTOWEB_FIX_PATTERN and AUTOWEB_SPECIFIC_PATTERN to catch Mobile/Responsive/Layout fix sessions, Mine count dropped from 37 to 22 (Auto from 83 to 98)</title>
 <description>Improved autoweb session filter detection — added AUTOWEB_FIX_PATTERN and AUTOWEB_SPECIFIC_PATTERN to catch Mobile/Responsive/Layout fix sessions, Mine count dropped from 37 to 22 (Auto from 83 to 98)</description>
+<pubDate>2026-03-15T23:35:31Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Expanded autoweb session filter pattern — added Timed/Time-Constrained/Time-Boxed/Automating prefixe</title>
-<pubDate>2026-03-15T23:30:29Z</pubDate>
+<title>Expanded autoweb session filter pattern — added Timed/Time-Constrained/Time-Boxed/Automating prefixes and keyword-based matching (Experiment Loop, Iteration Loop, etc.) to catch 81/118 sessions vs ~65 before</title>
 <description>Expanded autoweb session filter pattern — added Timed/Time-Constrained/Time-Boxed/Automating prefixes and keyword-based matching (Experiment Loop, Iteration Loop, etc.) to catch 81/118 sessions vs ~65 before</description>
+<pubDate>2026-03-15T23:30:29Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile-friendly AW dashboard header — flex-wrap for wrapping on small screens, compact title, 32px c</title>
-<pubDate>2026-03-15T23:26:46Z</pubDate>
+<title>Mobile-friendly AW dashboard header — flex-wrap for wrapping on small screens, compact title, 32px close button touch target</title>
 <description>Mobile-friendly AW dashboard header — flex-wrap for wrapping on small screens, compact title, 32px close button touch target</description>
+<pubDate>2026-03-15T23:26:46Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added session counts to Mine/Auto/All filter pills — users can see at a glance how many sessions in </title>
-<pubDate>2026-03-15T23:21:27Z</pubDate>
+<title>Added session counts to Mine/Auto/All filter pills — users can see at a glance how many sessions in each category</title>
 <description>Added session counts to Mine/Auto/All filter pills — users can see at a glance how many sessions in each category</description>
+<pubDate>2026-03-15T23:21:27Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Hide version indicator on mobile (< 768px) to prevent overlap with Send button — cleaner mobile inpu</title>
+<title>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button — cleaner mobile input area</title>
+<description>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button — cleaner mobile input area</description>
 <pubDate>2026-03-15T23:16:22Z</pubDate>
-<description>Hide version indicator on mobile (< 768px) to prevent overlap with Send button — cleaner mobile input area</description>
 <link>#</link>
 </item>
 <item>
-<title>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows qu</title>
-<pubDate>2026-03-15T23:10:19Z</pubDate>
+<title>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</title>
 <description>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</description>
+<pubDate>2026-03-15T23:10:19Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Conditional mobile header padding — messages top padding (56px) only applied when session header is </title>
-<pubDate>2026-03-15T23:06:54Z</pubDate>
+<title>Conditional mobile header padding — messages top padding (56px) only applied when session header is visible via body.has-mobile-header class, prevents unnecessary gap on empty state</title>
 <description>Conditional mobile header padding — messages top padding (56px) only applied when session header is visible via body.has-mobile-header class, prevents unnecessary gap on empty state</description>
+<pubDate>2026-03-15T23:06:54Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Hide SSE status/event-id text on mobile (hidden md:inline) — saves sidebar bottom bar space on small</title>
-<pubDate>2026-03-15T23:01:24Z</pubDate>
+<title>Hide SSE status/event-id text on mobile (hidden md:inline) — saves sidebar bottom bar space on small screens</title>
 <description>Hide SSE status/event-id text on mobile (hidden md:inline) — saves sidebar bottom bar space on small screens</description>
+<pubDate>2026-03-15T23:01:24Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added mobile session header bar — shows current session name at top of screen on mobile (md:hidden),</title>
-<pubDate>2026-03-15T22:57:58Z</pubDate>
+<title>Added mobile session header bar — shows current session name at top of screen on mobile (md:hidden), updates on session select/discover/new</title>
 <description>Added mobile session header bar — shows current session name at top of screen on mobile (md:hidden), updates on session select/discover/new</description>
+<pubDate>2026-03-15T22:57:58Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added Mine/Auto/All session filter toggle — filters autoweb sessions from sidebar, persists choice i</title>
-<pubDate>2026-03-15T22:52:08Z</pubDate>
+<title>Added Mine/Auto/All session filter toggle — filters autoweb sessions from sidebar, persists choice in localStorage, with gold-accent pill UI</title>
 <description>Added Mine/Auto/All session filter toggle — filters autoweb sessions from sidebar, persists choice in localStorage, with gold-accent pill UI</description>
+<pubDate>2026-03-15T22:52:08Z</pubDate>
 <link>#</link>
 </item>
 <item>
 <title>Hide search keyboard shortcut hint (/) on mobile — not useful on touch devices, frees up input space</title>
-<pubDate>2026-03-15T22:49:04Z</pubDate>
 <description>Hide search keyboard shortcut hint (/) on mobile — not useful on touch devices, frees up input space</description>
+<pubDate>2026-03-15T22:49:04Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Hide version indicator when terminal panel is open — prevents AW text from overlapping terminal cont</title>
-<pubDate>2026-03-15T22:42:40Z</pubDate>
+<title>Hide version indicator when terminal panel is open — prevents AW text from overlapping terminal content on mobile (CSS: body.terminal-open #autoweb-version-indicator display:none)</title>
 <description>Hide version indicator when terminal panel is open — prevents AW text from overlapping terminal content on mobile (CSS: body.terminal-open #autoweb-version-indicator display:none)</description>
+<pubDate>2026-03-15T22:42:40Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Reduced mobile terminal panel height (35vh/max-height:180px, min-height:80px) to give more room to m</title>
-<pubDate>2026-03-15T22:37:29Z</pubDate>
+<title>Reduced mobile terminal panel height (35vh/max-height:180px, min-height:80px) to give more room to message content on small screens</title>
 <description>Reduced mobile terminal panel height (35vh/max-height:180px, min-height:80px) to give more room to message content on small screens</description>
+<pubDate>2026-03-15T22:37:29Z</pubDate>
 <link>#</link>
 </item>
 <item>
 <title>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</title>
-<pubDate>2026-03-15T22:32:04Z</pubDate>
 <description>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</description>
+<pubDate>2026-03-15T22:32:04Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile markdown improvements — link word-break:break-all to prevent URL overflow, smaller headings (</title>
-<pubDate>2026-03-15T22:26:29Z</pubDate>
+<title>Mobile markdown improvements — link word-break:break-all to prevent URL overflow, smaller headings (h1:1.2em h2:1.1em h3:1em), tighter blockquote padding on mobile</title>
 <description>Mobile markdown improvements — link word-break:break-all to prevent URL overflow, smaller headings (h1:1.2em h2:1.1em h3:1em), tighter blockquote padding on mobile</description>
+<pubDate>2026-03-15T22:26:29Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added max-width:100% and height:auto to markdown images — prevents image overflow on mobile viewport</title>
-<pubDate>2026-03-15T22:21:13Z</pubDate>
+<title>Added max-width:100% and height:auto to markdown images — prevents image overflow on mobile viewports</title>
 <description>Added max-width:100% and height:auto to markdown images — prevents image overflow on mobile viewports</description>
+<pubDate>2026-03-15T22:21:13Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile scroll-to-bottom button — enlarged to 44px touch target and adjusted positioning for small sc</title>
-<pubDate>2026-03-15T22:18:41Z</pubDate>
+<title>Mobile scroll-to-bottom button — enlarged to 44px touch target and adjusted positioning for small screens</title>
 <description>Mobile scroll-to-bottom button — enlarged to 44px touch target and adjusted positioning for small screens</description>
+<pubDate>2026-03-15T22:18:41Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile suggestion buttons — stack vertically (flex-col) on small screens with 44px min-height touch </title>
-<pubDate>2026-03-15T22:13:57Z</pubDate>
+<title>Mobile suggestion buttons — stack vertically (flex-col) on small screens with 44px min-height touch targets, centered text; horizontal row on sm+ screens</title>
 <description>Mobile suggestion buttons — stack vertically (flex-col) on small screens with 44px min-height touch targets, centered text; horizontal row on sm+ screens</description>
+<pubDate>2026-03-15T22:13:57Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile code blocks — reduced padding (0.7em) and always-visible copy button (opacity 0.7) since touc</title>
-<pubDate>2026-03-15T22:10:55Z</pubDate>
+<title>Mobile code blocks — reduced padding (0.7em) and always-visible copy button (opacity 0.7) since touch devices have no hover</title>
 <description>Mobile code blocks — reduced padding (0.7em) and always-visible copy button (opacity 0.7) since touch devices have no hover</description>
+<pubDate>2026-03-15T22:10:55Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile-friendly load earlier messages button — 44px min-height touch target, full width on small scr</title>
-<pubDate>2026-03-15T22:04:54Z</pubDate>
+<title>Mobile-friendly load earlier messages button — 44px min-height touch target, full width on small screens, tap wording</title>
 <description>Mobile-friendly load earlier messages button — 44px min-height touch target, full width on small screens, tap wording</description>
+<pubDate>2026-03-15T22:04:54Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal s</title>
-<pubDate>2026-03-15T21:57:58Z</pubDate>
+<title>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</title>
 <description>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</description>
+<pubDate>2026-03-15T21:57:58Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Deeper duplicate message fix — added text-only hash dedup (seenTextHashes/renderedTextHashes) to cat</title>
-<pubDate>2026-03-15T21:51:20Z</pubDate>
+<title>Deeper duplicate message fix — added text-only hash dedup (seenTextHashes/renderedTextHashes) to catch same user text appearing with and without image attachments across initial load and SSE tailing</title>
 <description>Deeper duplicate message fix — added text-only hash dedup (seenTextHashes/renderedTextHashes) to catch same user text appearing with and without image attachments across initial load and SSE tailing</description>
+<pubDate>2026-03-15T21:51:20Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added command XML tags (local-command-stdout, command-message, command-args) to stripSystemTags — fi</title>
-<pubDate>2026-03-15T21:45:44Z</pubDate>
+<title>Added command XML tags (local-command-stdout, command-message, command-args) to stripSystemTags — fixes failing test-strip-command-xml-tags test</title>
 <description>Added command XML tags (local-command-stdout, command-message, command-args) to stripSystemTags — fixes failing test-strip-command-xml-tags test</description>
+<pubDate>2026-03-15T21:45:44Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed main content overflow when terminal is open — changed flex:none to flex:1 so main respects sid</title>
-<pubDate>2026-03-15T21:41:50Z</pubDate>
+<title>Fixed main content overflow when terminal is open — changed flex:none to flex:1 so main respects sidebar width instead of expanding to full viewport (1554px→992px)</title>
 <description>Fixed main content overflow when terminal is open — changed flex:none to flex:1 so main respects sidebar width instead of expanding to full viewport (1554px→992px)</description>
+<pubDate>2026-03-15T21:41:50Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Compacted mobile nav pills (11px font, 32px min-width, 28px right padding) so all pills including AW</title>
-<pubDate>2026-03-15T21:32:35Z</pubDate>
+<title>Compacted mobile nav pills (11px font, 32px min-width, 28px right padding) so all pills including AW are visible without scrolling on iPhone SE</title>
 <description>Compacted mobile nav pills (11px font, 32px min-width, 28px right padding) so all pills including AW are visible without scrolling on iPhone SE</description>
+<pubDate>2026-03-15T21:32:35Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed AW dashboard table on mobile — added overflow-x:auto and min-width:600px so description column</title>
-<pubDate>2026-03-15T20:36:54Z</pubDate>
+<title>Fixed AW dashboard table on mobile — added overflow-x:auto and min-width:600px so description column is no longer truncated, table scrolls horizontally</title>
 <description>Fixed AW dashboard table on mobile — added overflow-x:auto and min-width:600px so description column is no longer truncated, table scrolls horizontally</description>
+<pubDate>2026-03-15T20:36:54Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fi</title>
-<pubDate>2026-03-15T20:28:59Z</pubDate>
+<title>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</title>
 <description>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
+<pubDate>2026-03-15T20:28:59Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added mobile touch targets (44px min-height) for nav pills and scroll fade indicator on sidebar nav </title>
-<pubDate>2026-03-15T20:20:35Z</pubDate>
+<title>Added mobile touch targets (44px min-height) for nav pills and scroll fade indicator on sidebar nav bar — fixed 2 failing tests</title>
 <description>Added mobile touch targets (44px min-height) for nav pills and scroll fade indicator on sidebar nav bar — fixed 2 failing tests</description>
+<pubDate>2026-03-15T20:20:35Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed mobile input toolbar overflow — hid status text on small screens (hidden sm:inline), reduced S</title>
-<pubDate>2026-03-15T20:03:10Z</pubDate>
+<title>Fixed mobile input toolbar overflow — hid status text on small screens (hidden sm:inline), reduced Send/Interrupt button padding, added overflow-hidden to toolbar container</title>
 <description>Fixed mobile input toolbar overflow — hid status text on small screens (hidden sm:inline), reduced Send/Interrupt button padding, added overflow-hidden to toolbar container</description>
+<pubDate>2026-03-15T20:03:10Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!imp</title>
-<pubDate>2026-03-15T19:51:56Z</pubDate>
+<title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</title>
 <description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</description>
+<pubDate>2026-03-15T19:51:56Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed mobile sidebar width — changed from 85vw/280px to 100vw so sidebar covers full screen instead </title>
-<pubDate>2026-03-15T19:41:10Z</pubDate>
+<title>Fixed mobile sidebar width — changed from 85vw/280px to 100vw so sidebar covers full screen instead of showing content bleeding through on the right</title>
 <description>Fixed mobile sidebar width — changed from 85vw/280px to 100vw so sidebar covers full screen instead of showing content bleeding through on the right</description>
+<pubDate>2026-03-15T19:41:10Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed mobile sidebar header overlap — added left padding (pl-14) so Feather title no longer hidden b</title>
-<pubDate>2026-03-15T19:38:48Z</pubDate>
+<title>Fixed mobile sidebar header overlap — added left padding (pl-14) so Feather title no longer hidden behind hamburger menu button</title>
 <description>Fixed mobile sidebar header overlap — added left padding (pl-14) so Feather title no longer hidden behind hamburger menu button</description>
+<pubDate>2026-03-15T19:38:48Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismi</title>
-<pubDate>2026-03-15T19:27:42Z</pubDate>
+<title>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</title>
 <description>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
+<pubDate>2026-03-15T19:27:42Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately aft</title>
-<pubDate>2026-03-15T19:21:06Z</pubDate>
+<title>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</title>
 <description>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</description>
+<pubDate>2026-03-15T19:21:06Z</pubDate>
 <link>#</link>
 </item>
 <item>
 <title>Added title tooltip to session items — hovering truncated session names now shows full title</title>
-<pubDate>2026-03-15T19:08:06Z</pubDate>
 <description>Added title tooltip to session items — hovering truncated session names now shows full title</description>
+<pubDate>2026-03-15T19:08:06Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed flex overflow containment — added min-w-0 to message-container and tool-header elements to pre</title>
-<pubDate>2026-03-15T19:01:01Z</pubDate>
+<title>Fixed flex overflow containment — added min-w-0 to message-container and tool-header elements to prevent horizontal overflow in nested flex layouts (fixed failing test-message-overflow)</title>
 <description>Fixed flex overflow containment — added min-w-0 to message-container and tool-header elements to prevent horizontal overflow in nested flex layouts (fixed failing test-message-overflow)</description>
+<pubDate>2026-03-15T19:01:01Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 imp</title>
-<pubDate>2026-03-15T18:40:25Z</pubDate>
+<title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</title>
 <description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</description>
+<pubDate>2026-03-15T18:40:25Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed Edit tool diff rendering — proper line-by-line diff with red/green background lines instead of</title>
-<pubDate>2026-03-15T18:37:47Z</pubDate>
+<title>Fixed Edit tool diff rendering — proper line-by-line diff with red/green background lines instead of truncated line-through text (fixed failing test-edit-diff-view)</title>
 <description>Fixed Edit tool diff rendering — proper line-by-line diff with red/green background lines instead of truncated line-through text (fixed failing test-edit-diff-view)</description>
+<pubDate>2026-03-15T18:37:47Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Removed redundant filename link below image previews in addUserMessageWithImage — images now show in</title>
-<pubDate>2026-03-15T18:33:21Z</pubDate>
+<title>Removed redundant filename link below image previews in addUserMessageWithImage — images now show inline preview only, not both preview AND filename text</title>
 <description>Removed redundant filename link below image previews in addUserMessageWithImage — images now show inline preview only, not both preview AND filename text</description>
+<pubDate>2026-03-15T18:33:21Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed duplicate messages bug — added UUID-based deduplication in renderMessages to prevent same mess</title>
-<pubDate>2026-03-15T18:29:22Z</pubDate>
+<title>Fixed duplicate messages bug — added UUID-based deduplication in renderMessages to prevent same message rendering twice when backend JSONL contains duplicate records</title>
 <description>Fixed duplicate messages bug — added UUID-based deduplication in renderMessages to prevent same message rendering twice when backend JSONL contains duplicate records</description>
+<pubDate>2026-03-15T18:29:22Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added Autoweb Dashboard button (AW) in sidebar — opens full-screen modal with live results.tsv table</title>
-<pubDate>2026-03-15T18:26:23Z</pubDate>
+<title>Added Autoweb Dashboard button (AW) in sidebar — opens full-screen modal with live results.tsv table, color-coded status badges, and iteration stats</title>
 <description>Added Autoweb Dashboard button (AW) in sidebar — opens full-screen modal with live results.tsv table, color-coded status badges, and iteration stats</description>
+<pubDate>2026-03-15T18:26:23Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added responsive table CSS — tables now horizontally scroll on mobile instead of wrapping into verti</title>
-<pubDate>2026-03-15T18:22:14Z</pubDate>
+<title>Added responsive table CSS — tables now horizontally scroll on mobile instead of wrapping into vertical spaghetti, with proper styling (borders, alternating rows, sticky headers, min-width per cell)</title>
 <description>Added responsive table CSS — tables now horizontally scroll on mobile instead of wrapping into vertical spaghetti, with proper styling (borders, alternating rows, sticky headers, min-width per cell)</description>
+<pubDate>2026-03-15T18:22:14Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Fixed CRITICAL long message truncation — messages >500 chars now sent via WebSocket (PTY direct writ</title>
-<pubDate>2026-03-15T18:18:00Z</pubDate>
+<title>Fixed CRITICAL long message truncation — messages >500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</title>
 <description>Fixed CRITICAL long message truncation — messages >500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
+<pubDate>2026-03-15T18:18:00Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Added autoweb version indicator in bottom-right corner (fixed, 10px, opacity 0.3) with HTML comment </title>
-<pubDate>2026-03-15T18:14:08Z</pubDate>
+<title>Added autoweb version indicator in bottom-right corner (fixed, 10px, opacity 0.3) with HTML comment tag</title>
 <description>Added autoweb version indicator in bottom-right corner (fixed, 10px, opacity 0.3) with HTML comment tag</description>
+<pubDate>2026-03-15T18:14:08Z</pubDate>
 <link>#</link>
 </item>
 <item>
 <title>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
-<pubDate>2026-03-15T18:07:00Z</pubDate>
 <description>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
+<pubDate>2026-03-15T18:07:00Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Increased textarea auto-resize max height from 200px to 300px — long messages now more visible befor</title>
-<pubDate>2026-03-15T18:03:00Z</pubDate>
+<title>Increased textarea auto-resize max height from 200px to 300px — long messages now more visible before sending</title>
 <description>Increased textarea auto-resize max height from 200px to 300px — long messages now more visible before sending</description>
+<pubDate>2026-03-15T18:03:00Z</pubDate>
 <link>#</link>
 </item>
 </channel>
