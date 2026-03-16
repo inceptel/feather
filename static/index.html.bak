@@ -2222,7 +2222,10 @@
             'EnterPlanMode': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
             'TaskCreate': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
             'TaskUpdate': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
-            'TaskList': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'
+            'TaskList': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+            'TodoWrite': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+            'AskUserQuestion': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+            'Skill': '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
         };
 
         function getToolInputPreview(name, input) {
@@ -2260,6 +2263,18 @@
                         return `#${input.taskId || '?'} → ${input.status || 'update'}`;
                     case 'TaskList':
                         return 'List tasks';
+                    case 'TodoWrite': {
+                        const todos = input.todos || [];
+                        const done = todos.filter(t => t.status === 'completed').length;
+                        const total = todos.length;
+                        return `${done}/${total} done`;
+                    }
+                    case 'AskUserQuestion': {
+                        const qs = input.questions || [];
+                        return qs.length > 0 ? (qs[0].question || '').substring(0, 60) : '';
+                    }
+                    case 'Skill':
+                        return input.skill || '';
                     default:
                         const s = JSON.stringify(input);
                         return s.length > 60 ? s.substring(0, 60) + '...' : s;
@@ -2333,6 +2348,42 @@
                     }
                     case 'TaskList':
                         return `<div class="text-xs text-smoke-10">Listing all tasks</div>`;
+                    case 'TodoWrite': {
+                        const todos = input.todos || [];
+                        if (!todos.length) return `<div class="text-xs text-smoke-9 italic">Empty todo list</div>`;
+                        let todoHtml = '<div class="space-y-1">';
+                        todos.forEach(t => {
+                            const statusIcon = t.status === 'completed'
+                                ? '<span class="text-apple-9">&#10003;</span>'
+                                : t.status === 'in_progress'
+                                ? '<span class="text-gold-9">&#9679;</span>'
+                                : '<span class="text-smoke-7">&#9675;</span>';
+                            const textClass = t.status === 'completed' ? 'text-smoke-8 line-through' : 'text-smoke-11';
+                            const statusBadge = t.status === 'in_progress'
+                                ? ' <span class="text-[9px] px-1 py-0.5 rounded bg-gold-4/30 text-gold-9">running</span>'
+                                : '';
+                            todoHtml += `<div class="flex items-start gap-2 text-xs"><span class="shrink-0 w-4 text-center">${statusIcon}</span><span class="${textClass}">${escapeHtml(t.content || t.activeForm || '')}${statusBadge}</span></div>`;
+                        });
+                        todoHtml += '</div>';
+                        return todoHtml;
+                    }
+                    case 'AskUserQuestion': {
+                        const qs = input.questions || [];
+                        let aqHtml = '';
+                        qs.forEach(q => {
+                            aqHtml += `<div class="text-xs text-smoke-11 mb-2 font-medium">${escapeHtml(q.question || '')}</div>`;
+                            if (q.options && q.options.length) {
+                                aqHtml += '<div class="space-y-1 ml-2">';
+                                q.options.forEach(opt => {
+                                    aqHtml += `<div class="flex items-start gap-2 text-xs"><span class="text-smoke-7 shrink-0">&#9675;</span><div><span class="text-smoke-11">${escapeHtml(opt.label || '')}</span>${opt.description ? `<span class="text-smoke-8 ml-1">— ${escapeHtml(opt.description)}</span>` : ''}</div></div>`;
+                                });
+                                aqHtml += '</div>';
+                            }
+                        });
+                        return aqHtml || '<div class="text-xs text-smoke-9 italic">Question</div>';
+                    }
+                    case 'Skill':
+                        return `<div class="text-smoke-10 text-xs"><span class="text-smoke-8">Skill:</span> <span class="font-mono text-violet-9">${escapeHtml(input.skill || '')}</span>${input.args ? ` <span class="text-smoke-8">${escapeHtml(input.args)}</span>` : ''}</div>`;
                     default:
                         return `<pre class="text-xs text-smoke-10 whitespace-pre-wrap">${escapeHtml(JSON.stringify(input, null, 2) || '')}</pre>`;
                 }
