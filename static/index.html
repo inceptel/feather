@@ -525,6 +525,12 @@
             <span id="mobile-session-name" class="text-xs font-medium text-smoke-10 truncate"></span>
         </div>
 
+        <!-- Desktop session header bar -->
+        <div id="desktop-session-header" class="hidden md:hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10">
+            <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate"></span>
+            <span id="desktop-session-meta" class="text-[10px] text-smoke-8 whitespace-nowrap shrink-0"></span>
+        </div>
+
         <!-- In-chat search bar -->
         <div id="chat-search-bar" class="hidden border-b border-smoke-5 bg-smoke-2/95 backdrop-blur-sm px-4 py-2 flex items-center gap-2 z-10">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-smoke-8 shrink-0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1380,6 +1386,41 @@
             }
         }
 
+        function updateDesktopSessionHeader(title, sessionInfo) {
+            const header = document.getElementById('desktop-session-header');
+            const titleEl = document.getElementById('desktop-session-title');
+            const metaEl = document.getElementById('desktop-session-meta');
+            if (!header || !titleEl) return;
+            if (title) {
+                titleEl.textContent = title;
+                // Build meta info: message count + relative time
+                let metaParts = [];
+                if (sessionInfo?.message_count) {
+                    metaParts.push(sessionInfo.message_count + ' msg');
+                }
+                if (sessionInfo?.lastUpdated) {
+                    const d = new Date(sessionInfo.lastUpdated);
+                    const now = new Date();
+                    const diffMs = now - d;
+                    const diffMin = Math.floor(diffMs / 60000);
+                    const diffHr = Math.floor(diffMs / 3600000);
+                    const diffDay = Math.floor(diffMs / 86400000);
+                    if (diffMin < 1) metaParts.push('just now');
+                    else if (diffMin < 60) metaParts.push(diffMin + 'm ago');
+                    else if (diffHr < 24) metaParts.push(diffHr + 'h ago');
+                    else metaParts.push(diffDay + 'd ago');
+                }
+                if (metaEl) metaEl.textContent = metaParts.join(' \u00b7 ');
+                header.classList.remove('hidden');
+                header.classList.add('md:flex');
+            } else {
+                header.classList.add('hidden');
+                header.classList.remove('md:flex');
+                titleEl.textContent = '';
+                if (metaEl) metaEl.textContent = '';
+            }
+        }
+
         function initFolderTabs() {
             const select = document.getElementById('folder-select');
             select.innerHTML = FOLDERS.map(f => `
@@ -1488,6 +1529,7 @@
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
         let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
         function getSessionTitle(s) {
+            if (!s) return 'Untitled';
             return sessionRenames[s.id] || s.title || 'Untitled';
         }
         function toggleStarSession(e, sessionId) {
@@ -2062,6 +2104,7 @@
             // Update mobile session header
             const sessionInfo = allSessions.find(s => s.id === sessionId);
             updateMobileSessionHeader(sessionInfo?.title || 'Session');
+            updateDesktopSessionHeader(getSessionTitle(sessionInfo) || 'Session', sessionInfo);
             // IMPORTANT: Use projectId (where session was created), not currentFolder
             // This fixes a bug where switching folders before clicking resume would
             // send the wrong cwd to Claude CLI, causing resume to fail
@@ -2135,6 +2178,10 @@
             markSessionRead(sessionId);
             closeSidebarMobile();
             updateHash({ session: sessionId, folder: currentFolder });
+            // Update session headers
+            const _csi = allSessions.find(s => s.id === sessionId);
+            updateMobileSessionHeader(getSessionTitle(_csi) || 'Session');
+            updateDesktopSessionHeader(getSessionTitle(_csi) || 'Session', _csi);
             // Detect engine from source field, then fallback to tmux name mapping
             if (source === 'pi') {
                 setEngine('pi');
@@ -2207,6 +2254,7 @@
             // Update mobile header with session name from sidebar or tmux name
             const sessionInfo = allSessions.find(s => s.id === name || (tmuxNameLookup && tmuxNameLookup[s.id?.substring(0,8)] === name));
             updateMobileSessionHeader(sessionInfo?.title || name.replace(/^feather-/, '').substring(0, 20));
+            updateDesktopSessionHeader(getSessionTitle(sessionInfo) || name.replace(/^feather-/, '').substring(0, 20), sessionInfo);
             currentSessionId = null;  // Reset session ID - will be discovered from JSONL
             lastMessageCount = 0;  // Reset message tracking
             tmuxSessionStartTime = new Date().toISOString();  // Track when we selected this session
@@ -4036,7 +4084,10 @@
                                 const isFirstDiscovery = !currentSessionId;
                                 currentSessionId = discovered.id;
                                 updateHash({ session: discovered.id });
-                                if (discovered.title) updateMobileSessionHeader(discovered.title);
+                                if (discovered.title) {
+                                    updateMobileSessionHeader(discovered.title);
+                                    updateDesktopSessionHeader(getSessionTitle(discovered) || discovered.title, discovered);
+                                }
                                 console.log('Found active session:', discovered.id, discovered.title,
                                     newSession ? '(new JSONL)' : '(updated JSONL)');
 
@@ -4480,6 +4531,7 @@
                 if (data.status === 'spawned') {
                     setStatus('Starting session...', 'amber');
                     updateMobileSessionHeader('New Session');
+                    updateDesktopSessionHeader('New Session', null);
                     // Show spawn feedback in chat area
                     document.getElementById('empty-state').classList.add('hidden');
                     document.getElementById('message-container').classList.remove('hidden');
