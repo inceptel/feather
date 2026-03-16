@@ -2662,6 +2662,54 @@
             }
         }
 
+        async function exportSessionMarkdown() {
+            if (!currentSessionId || !currentFolder) return;
+            try {
+                const res = await fetch(`/api/projects/${encodeURIComponent(currentFolder)}/sessions/${currentSessionId}/history?limit=10000`);
+                if (!res.ok) throw new Error('Failed to fetch');
+                const data = await res.json();
+                if (!data.messages || !data.messages.length) return;
+
+                const sessionTitle = allSessions.find(s => s.id === currentSessionId)?.title || 'Untitled';
+                let md = `# ${sessionTitle}\n\n`;
+
+                for (const msg of data.messages) {
+                    const role = (msg.role === 'user' || msg.type === 'human') ? 'User' : 'Assistant';
+                    const content = msg.content;
+                    let text = '';
+                    if (Array.isArray(content)) {
+                        const parts = [];
+                        for (const block of content) {
+                            if (block.type === 'text') parts.push(block.text);
+                            else if (block.type === 'thinking') parts.push(`<thinking>\n${block.text}\n</thinking>`);
+                            else if (block.type === 'tool_use') parts.push(`**Tool: ${block.name}**\n\`\`\`json\n${JSON.stringify(block.input, null, 2)}\n\`\`\``);
+                            else if (block.type === 'tool_result') {
+                                const resultText = Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n') : (block.content || '');
+                                if (resultText) parts.push(`**Result:**\n\`\`\`\n${resultText}\n\`\`\``);
+                            }
+                        }
+                        text = stripSystemTags(parts.join('\n\n'));
+                    } else if (typeof content === 'string') {
+                        text = stripSystemTags(content);
+                    }
+                    if (!text.trim()) continue;
+                    md += `## ${role}\n\n${text}\n\n---\n\n`;
+                }
+
+                const blob = new Blob([md], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${sessionTitle.replace(/[^a-zA-Z0-9 -]/g, '').trim().replace(/\s+/g, '-').substring(0, 60) || 'session'}.md`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                console.error('Export failed:', e);
+            }
+        }
+
         function addCopyButton(preElement) {
             // Guard against duplicate copy buttons (called repeatedly during streaming updates)
             if (preElement.querySelector('.code-copy-btn')) return;
@@ -5545,6 +5593,7 @@
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
+            { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
         ];
         let _cmdPaletteIdx = 0;

@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
-<channel>
-<title>Autoweb Feather Improvements</title>
-<link>#</link>
-<description>Auto-generated feed of Feather UI/backend improvements</description>
+  <channel>
+    <title>Autoweb Feather Improvements</title>
+    <link>#</link>
+    <description>Self-improving Feather web app changes</description>
+    <item>
+      <title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</title>
+      <pubDate>2026-03-16T06:10:59Z</pubDate>
+      <description>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
+      <link>#</link>
+    </item>
     <item>
       <title>Add tool call duration display — shows elapsed time (1.2s/5s/1m 23s) on tool result headers during live SSE streaming, hidden for batch history loads (84 tests pass)</title>
       <pubDate>2026-03-16T05:55:10Z</pubDate>
@@ -35,9 +41,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
+      <title>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</title>
       <pubDate>2026-03-16T05:32:56Z</pubDate>
-      <description>Server-side pagination: backend 'before' param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
+      <description>Server-side pagination: backend &#x27;before&#x27; param for reverse pagination + frontend limit=200 initial load, load-earlier fetches 50-message chunks from server (79 tests pass)</description>
       <link>#</link>
     </item>
     <item>
@@ -83,9 +89,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</title>
+      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</title>
       <pubDate>2026-03-16T04:51:28Z</pubDate>
-      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. 'Build Rust binary') instead of raw command in tool call headers when description field is available</description>
+      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</description>
       <link>#</link>
     </item>
     <item>
@@ -101,9 +107,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
+      <title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</title>
       <pubDate>2026-03-16T04:35:12Z</pubDate>
-      <description>Fix What's New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
+      <description>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
       <link>#</link>
     </item>
     <item>
@@ -125,9 +131,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</title>
+      <title>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil&#x27;s feature list)</title>
       <pubDate>2026-03-16T04:16:37Z</pubDate>
-      <description>Add What's New changelog popover — 'New' button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil's feature list)</description>
+      <description>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil&#x27;s feature list)</description>
       <link>#</link>
     </item>
     <item>
@@ -137,9 +143,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</title>
+      <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</title>
       <pubDate>2026-03-16T04:06:25Z</pubDate>
-      <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil's feature list)</description>
+      <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</description>
       <link>#</link>
     </item>
     <item>
@@ -161,9 +167,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title>
+      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</title>
       <pubDate>2026-03-16T03:51:24Z</pubDate>
-      <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
+      <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
       <link>#</link>
     </item>
     <item>
@@ -275,9 +281,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</title>
+      <title>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;) using ISO timestamps from backend data</title>
       <pubDate>2026-03-16T02:14:45Z</pubDate>
-      <description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description>
+      <description>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;) using ISO timestamps from backend data</description>
       <link>#</link>
     </item>
     <item>
@@ -299,9 +305,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</title>
+      <title>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</title>
       <pubDate>2026-03-16T01:46:53Z</pubDate>
-      <description>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
+      <description>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
       <link>#</link>
     </item>
     <item>
@@ -401,9 +407,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</title>
+      <title>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows specific message instead of generic &quot;No sessions&quot;</title>
       <pubDate>2026-03-15T23:10:19Z</pubDate>
-      <description>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</description>
+      <description>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows specific message instead of generic &quot;No sessions&quot;</description>
       <link>#</link>
     </item>
     <item>
@@ -449,9 +455,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</title>
+      <title>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</title>
       <pubDate>2026-03-15T22:32:04Z</pubDate>
-      <description>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</description>
+      <description>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</description>
       <link>#</link>
     </item>
     <item>
@@ -491,9 +497,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</title>
+      <title>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolbar on small screens</title>
       <pubDate>2026-03-15T21:57:58Z</pubDate>
-      <description>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</description>
+      <description>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolbar on small screens</description>
       <link>#</link>
     </item>
     <item>
@@ -527,9 +533,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</title>
+      <title>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with white-space:nowrap and right:8px to prevent text overflow/truncation</title>
       <pubDate>2026-03-15T20:28:59Z</pubDate>
-      <description>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
+      <description>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
       <link>#</link>
     </item>
     <item>
@@ -545,9 +551,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</title>
+      <title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-nowrap class already handles it</title>
       <pubDate>2026-03-15T19:51:56Z</pubDate>
-      <description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</description>
+      <description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-nowrap class already handles it</description>
       <link>#</link>
     </item>
     <item>
@@ -563,15 +569,15 @@
       <link>#</link>
     </item>
     <item>
-      <title>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</title>
+      <title>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</title>
       <pubDate>2026-03-15T19:27:42Z</pubDate>
-      <description>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
+      <description>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
       <link>#</link>
     </item>
     <item>
-      <title>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</title>
+      <title>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape instead of requiring a click elsewhere</title>
       <pubDate>2026-03-15T19:21:06Z</pubDate>
-      <description>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</description>
+      <description>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape instead of requiring a click elsewhere</description>
       <link>#</link>
     </item>
     <item>
@@ -587,9 +593,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</title>
+      <title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now shows correct count (9)</title>
       <pubDate>2026-03-15T18:40:25Z</pubDate>
-      <description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</description>
+      <description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now shows correct count (9)</description>
       <link>#</link>
     </item>
     <item>
@@ -635,9 +641,9 @@
       <link>#</link>
     </item>
     <item>
-      <title>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
+      <title>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
       <pubDate>2026-03-15T18:07:00Z</pubDate>
-      <description>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
+      <description>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
       <link>#</link>
     </item>
     <item>
@@ -646,5 +652,5 @@
       <description>Increased textarea auto-resize max height from 200px to 300px — long messages now more visible before sending</description>
       <link>#</link>
     </item>
-</channel>
+  </channel>
 </rss>

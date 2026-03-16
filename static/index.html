@@ -57,7 +57,7 @@
         @supports (height: 100dvh) { html, body { height: 100dvh; } }
         html { overflow-x: hidden; -webkit-overflow-scrolling: touch; }
         #message-container { max-width: 100%; box-sizing: border-box; }
-        #message-container > * { max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
+        #message-container > *:not(.date-separator) { max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
         .message-enter { max-width: 100%; overflow: hidden; }
         * { transition-property: background-color, border-color, color, opacity, transform, box-shadow; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
         *:focus { transition-duration: 0ms; }
@@ -75,6 +75,8 @@
         /* Skeleton loading for session history */
         .skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
         .skeleton-block { border-radius: 12px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
+        /* Sticky date separators in message list */
+        .date-separator { position: sticky; top: 0; z-index: 10; background: var(--smoke-1); padding-left: 1rem; padding-right: 1rem; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
         .session-item { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 8px; }
         .session-item:hover { transform: translateX(3px); background: rgba(250, 178, 131, 0.08); }
@@ -2371,9 +2373,9 @@
             if (!dateKey || dateKey === _lastRenderedDateKey) return;
             _lastRenderedDateKey = dateKey;
             const sep = document.createElement('div');
-            sep.className = 'date-separator flex items-center gap-3 py-3 max-w-3xl mx-auto';
+            sep.className = 'date-separator flex items-center gap-3 py-2 max-w-3xl mx-auto';
             const label = formatDateSeparator(timestamp);
-            sep.innerHTML = `<div class="flex-1 h-px bg-smoke-5/50"></div><span class="text-[10px] font-medium uppercase tracking-widest text-smoke-7">${label}</span><div class="flex-1 h-px bg-smoke-5/50"></div>`;
+            sep.innerHTML = `<div class="flex-1 h-px bg-smoke-5/50"></div><span class="text-[10px] font-medium uppercase tracking-widest text-smoke-8 bg-smoke-1 px-3 py-1 rounded-full border border-smoke-5/30">${label}</span><div class="flex-1 h-px bg-smoke-5/50"></div>`;
             container.appendChild(sep);
         }
 
