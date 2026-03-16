@@ -801,6 +801,33 @@ async fn claude_spawn(
 }
 
 #[derive(Deserialize)]
+struct ForkClaudeRequest {
+    cwd: Option<String>,
+}
+
+async fn claude_fork(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Json(req): Json<ForkClaudeRequest>,
+) -> Json<SpawnResponse> {
+    match state.tmux.fork_claude_session(&session_id, req.cwd.as_deref()) {
+        Ok(tmux_name) => {
+            state.title_trigger.notify_one();
+            Json(SpawnResponse {
+                status: "forked".to_string(),
+                tmux_name,
+                session_id: None, // New session ID will be created by Claude CLI
+            })
+        }
+        Err(e) => Json(SpawnResponse {
+            status: format!("error: {}", e),
+            tmux_name: String::new(),
+            session_id: None,
+        }),
+    }
+}
+
+#[derive(Deserialize)]
 struct NewClaudeRequest {
     cwd: Option<String>,
 }
@@ -2377,6 +2404,7 @@ async fn main() {
         .route("/api/claude-status/{session_id}", get(claude_status))
         .route("/api/claude-spawn/{session_id}", post(claude_spawn))
         .route("/api/claude-new", post(claude_new))
+        .route("/api/claude-fork/{session_id}", post(claude_fork))
         .route("/api/create-project", post(create_project))
         .route("/api/claude-send/{session_id}", post(claude_send))
         .route("/api/claude-signal/{session_id}", post(claude_signal))

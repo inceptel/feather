@@ -240,6 +240,39 @@ impl TmuxManager {
         Ok(info)
     }
 
+    /// Fork an existing Claude session into a new tmux session.
+    ///
+    /// Uses `claude --resume {session_id} --fork-session` to create a new
+    /// conversation branch from the existing session's history.
+    /// Returns the tmux session name for the new forked session.
+    pub fn fork_claude_session(&self, session_id: &str, cwd: Option<&str>) -> Result<String, String> {
+        let working_dir = cwd.unwrap_or(&self.default_cwd);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before Unix epoch")
+            .as_millis();
+        let tmux_name = format!("feather-fork-{}", timestamp);
+
+        let command = format!(
+            r#"tmux new-session -d -s {} -c "{}" "bash --rcfile ~/.bashrc -ic 'claude --resume {} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \; set-option -t {} prefix M-a"#,
+            tmux_name, working_dir, session_id, tmux_name
+        );
+
+        let output = Command::new("sh")
+            .args(["-c", &command])
+            .output()
+            .map_err(|e| format!("Failed to execute tmux: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Failed to fork Claude session: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(tmux_name)
+    }
+
     /// Send a message to Claude CLI via tmux.
     ///
     /// For short messages (< 500 bytes), uses `send-keys -l` directly.
