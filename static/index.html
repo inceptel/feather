@@ -206,6 +206,9 @@
         .tool-running-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-9); animation: tool-pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
         #terminal-resize-handle { height: 5px; background: var(--smoke-4); cursor: ns-resize; flex-shrink: 0; transition: background-color 0.15s; }
         #terminal-resize-handle:hover { background: #fab283; }
+        #sidebar-resize-handle { position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 45; }
+        #sidebar-resize-handle::after { content: ''; position: absolute; top: 0; right: 2px; width: 2px; height: 100%; background: transparent; transition: background 0.15s; }
+        #sidebar-resize-handle:hover::after, body.sidebar-resizing #sidebar-resize-handle::after { background: var(--gold-9); }
         #terminal-container { flex: 1; overflow: hidden; min-height: 150px; padding: 4px; }
         #terminal-container .xterm { height: 100%; }
         #terminal-container .xterm-viewport { overflow-y: auto !important; }
@@ -416,6 +419,7 @@
 
     <!-- Sidebar -->
     <aside id="sidebar" class="fixed md:relative w-72 bg-gradient-to-b from-smoke-2 to-smoke-1 border-r border-smoke-4 flex flex-col h-full z-40 -translate-x-full md:translate-x-0 transition-transform">
+        <div id="sidebar-resize-handle" class="hidden md:block"></div>
         <!-- Header + Controls -->
         <div class="pl-14 md:pl-3 pr-3 pt-3 pb-2 safe-top">
             <div class="flex items-center justify-between mb-3">
@@ -5676,6 +5680,61 @@
                     document.body.style.cursor = '';
                     document.body.style.userSelect = '';
                     localStorage.setItem('terminalHeight', terminalHeight.toString());
+                }
+            });
+        }
+
+        // ========== Sidebar Resize ==========
+        {
+            const sidebarEl = document.getElementById('sidebar');
+            const sidebarHandle = document.getElementById('sidebar-resize-handle');
+            const termPanel = document.getElementById('terminal-panel');
+            let sidebarResizing = false;
+            let sidebarStartX = 0;
+            let sidebarStartW = 0;
+
+            // Restore saved width
+            const savedSidebarWidth = localStorage.getItem('sidebarWidth');
+            if (savedSidebarWidth) {
+                const w = parseInt(savedSidebarWidth, 10);
+                if (w >= 200 && w <= 500) {
+                    sidebarEl.style.width = w + 'px';
+                    termPanel.style.left = w + 'px';
+                }
+            }
+
+            sidebarHandle.addEventListener('mousedown', (e) => {
+                sidebarResizing = true;
+                sidebarStartX = e.clientX;
+                sidebarStartW = sidebarEl.offsetWidth;
+                document.body.classList.add('sidebar-resizing');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            // Double-click to reset sidebar width to default (288px)
+            sidebarHandle.addEventListener('dblclick', () => {
+                sidebarEl.style.width = '';
+                termPanel.style.left = '';
+                localStorage.removeItem('sidebarWidth');
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!sidebarResizing) return;
+                const deltaX = e.clientX - sidebarStartX;
+                const newW = Math.max(200, Math.min(500, sidebarStartW + deltaX));
+                sidebarEl.style.width = newW + 'px';
+                termPanel.style.left = newW + 'px';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (sidebarResizing) {
+                    sidebarResizing = false;
+                    document.body.classList.remove('sidebar-resizing');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    localStorage.setItem('sidebarWidth', sidebarEl.offsetWidth.toString());
                 }
             });
         }
