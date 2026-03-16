@@ -116,6 +116,11 @@
         /* Code block line numbers */
         .markdown-content pre.has-line-numbers { padding-left: 3.5em !important; }
         .line-numbers-gutter { position: absolute; left: 0; top: 1em; bottom: 1em; width: 3em; text-align: right; padding-right: 0.75em; border-right: 1px solid var(--smoke-5); user-select: none; pointer-events: none; font-family: ui-monospace, 'SF Mono', monospace; font-size: 0.875em; line-height: 1.45; color: var(--smoke-7); box-sizing: border-box; overflow: hidden; }
+        /* Auto-collapse long code blocks */
+        .markdown-content pre.code-collapsed { max-height: 360px; overflow: hidden; }
+        .markdown-content pre.code-collapsed::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(transparent, var(--smoke-2)); pointer-events: none; border-radius: 0 0 0.75em 0.75em; }
+        .code-expand-btn { display: block; width: 100%; padding: 4px 0; margin-top: -1px; background: var(--smoke-2); border: 1px solid var(--smoke-5); border-top: none; border-radius: 0 0 0.75em 0.75em; color: #fab283; font-size: 0.75em; font-family: 'Inter', sans-serif; cursor: pointer; text-align: center; transition: background-color 0.2s, color 0.2s; }
+        .code-expand-btn:hover { background: var(--smoke-3); color: #fcd9b8; }
         .markdown-content :not(pre) > code { background: var(--smoke-4); padding: 0.2em 0.4em; border-radius: 0.3em; color: #56b6c2; word-break: break-all; overflow-wrap: break-word; }
         .markdown-content ul, .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
         .markdown-content li { margin: 0.25em 0; }
@@ -2924,6 +2929,31 @@
                 preElement.appendChild(wrapBtn);
             }
             addLineNumbers(preElement);
+            addCodeCollapse(preElement);
+        }
+
+        function addCodeCollapse(preElement) {
+            if (preElement.querySelector('.code-expand-btn') || preElement.closest('.code-collapse-wrapper')) return;
+            const codeEl = preElement.querySelector('code');
+            if (!codeEl) return;
+            const lineCount = (codeEl.textContent || '').split('\n').length;
+            if (lineCount < 25) return;
+            const hiddenLines = lineCount - 15;
+            preElement.classList.add('code-collapsed');
+            // Wrap pre in a container so button sits right below
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-collapse-wrapper';
+            preElement.parentNode.insertBefore(wrapper, preElement);
+            wrapper.appendChild(preElement);
+            const btn = document.createElement('button');
+            btn.className = 'code-expand-btn';
+            btn.textContent = `Show ${hiddenLines} more lines`;
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const collapsed = preElement.classList.toggle('code-collapsed');
+                btn.textContent = collapsed ? `Show ${hiddenLines} more lines` : 'Collapse';
+            };
+            wrapper.appendChild(btn);
         }
 
         function addLineNumbers(preElement) {
