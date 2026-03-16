@@ -1190,6 +1190,17 @@
         let allSessions = [];       // Full merged list
         let sessionsDisplayCount = 5;
         let sessionViewTimes = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionViewTimes') || '{}'); } catch { return {}; } })();
+        let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
+        function toggleStarSession(e, sessionId) {
+            e.stopPropagation();
+            if (starredSessions.has(sessionId)) {
+                starredSessions.delete(sessionId);
+            } else {
+                starredSessions.add(sessionId);
+            }
+            try { localStorage.setItem('feather-starredSessions', JSON.stringify([...starredSessions])); } catch {}
+            renderSessions();
+        }
         let activeTmuxPrefixes = new Set(); // Session ID prefixes with tmux
         let tmuxNameLookup = {};    // session prefix → tmux name
         let codexTmuxMapping = {};  // Codex JSONL UUID → tmux session name (for sessions spawned by Feather)
@@ -1315,6 +1326,13 @@
                 );
             }
 
+            // Sort starred sessions to the top (preserving relative order within each group)
+            if (starredSessions.size > 0) {
+                const starred = sessions.filter(s => starredSessions.has(s.id));
+                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
+                sessions = [...starred, ...unstarred];
+            }
+
             if (!sessions.length) {
                 let emptyMsg = 'No sessions';
                 if (q) {
@@ -1372,9 +1390,11 @@
                     : '';
 
                 const unreadDot = isUnread ? '<span class="unread-indicator w-1.5 h-1.5 rounded-full bg-gold-9 shrink-0" title="New activity"></span>' : '';
+                const isStarred = starredSessions.has(s.id);
+                const starBtn = `<button class="star-btn shrink-0 text-[11px] leading-none ${isStarred ? 'text-gold-9' : 'text-smoke-6 opacity-0 group-hover:opacity-100'} hover:text-gold-9 transition-all" onclick="toggleStarSession(event, '${s.id}')" title="${isStarred ? 'Unstar' : 'Star'}" aria-label="${isStarred ? 'Unstar session' : 'Star session'}">&#9733;</button>`;
 
                 return `
-                    <div class="session-item px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
+                    <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
                          onclick="${onclick}" title="${escapeHtml(s.title || 'Untitled')}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
@@ -1387,6 +1407,7 @@
                                     ${unreadDot}
                                 </div>
                             </div>
+                            ${starBtn}
                         </div>
                     </div>
                 `;
@@ -1399,13 +1420,25 @@
             // Build grouped HTML
             let html = '';
             let lastGroup = '';
+            let passedStarred = false;
             for (const s of visible) {
-                const group = getTimeGroup(s.lastUpdated);
-                if (group !== lastGroup) {
-                    html += `<div class="px-1 pt-2 pb-0.5">
-                        <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>
-                    </div>`;
-                    lastGroup = group;
+                const isStarred = starredSessions.has(s.id);
+                if (isStarred && !passedStarred) {
+                    if (lastGroup !== 'Starred') {
+                        html += `<div class="px-1 pt-2 pb-0.5">
+                            <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>
+                        </div>`;
+                        lastGroup = 'Starred';
+                    }
+                } else {
+                    passedStarred = true;
+                    const group = getTimeGroup(s.lastUpdated);
+                    if (group !== lastGroup) {
+                        html += `<div class="px-1 pt-2 pb-0.5">
+                            <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>
+                        </div>`;
+                        lastGroup = group;
+                    }
                 }
                 html += renderSessionItem(s);
             }
@@ -5092,6 +5125,7 @@
             { label: 'Filter: My sessions', shortcut: '', action: () => { sessionFilter = 'mine'; applySessionFilter(); } },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => { sessionFilter = 'auto'; applySessionFilter(); } },
             { label: 'Filter: All sessions', shortcut: '', action: () => { sessionFilter = 'all'; applySessionFilter(); } },
+            { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
         ];

@@ -1189,6 +1189,7 @@
         // ========== Sessions ==========
         let allSessions = [];       // Full merged list
         let sessionsDisplayCount = 5;
+        let sessionViewTimes = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionViewTimes') || '{}'); } catch { return {}; } })();
         let activeTmuxPrefixes = new Set(); // Session ID prefixes with tmux
         let tmuxNameLookup = {};    // session prefix → tmux name
         let codexTmuxMapping = {};  // Codex JSONL UUID → tmux session name (for sessions spawned by Feather)
@@ -1351,6 +1352,8 @@
                 const hasTmux = activeTmuxPrefixes.has(tmuxKey);
                 const tmuxName = tmuxNameLookup[tmuxKey];
                 const isSelected = currentSessionId === s.id || currentTmuxSession === tmuxName;
+                const lastViewed = sessionViewTimes[s.id];
+                const isUnread = !isSelected && s.lastUpdated && (!lastViewed || new Date(s.lastUpdated) > new Date(lastViewed));
 
                 const dot = hasTmux
                     ? '<span class="w-2 h-2 rounded-full bg-apple-9 shadow-sm shadow-apple-9/50 shrink-0" title="Active (tmux)"></span>'
@@ -1368,6 +1371,8 @@
                     ? `<span class="px-1.5 py-0.5 text-[9px] rounded bg-smoke-4 text-smoke-9">Codex</span>`
                     : '';
 
+                const unreadDot = isUnread ? '<span class="unread-indicator w-1.5 h-1.5 rounded-full bg-gold-9 shrink-0" title="New activity"></span>' : '';
+
                 return `
                     <div class="session-item px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
                          onclick="${onclick}" title="${escapeHtml(s.title || 'Untitled')}">
@@ -1379,6 +1384,7 @@
                                     ${sourceBadge}
                                     <span>${formatTime(s.lastUpdated)}</span>
                                     ${s.message_count ? `<span class="text-smoke-8">&middot;</span><span>${s.message_count} msg</span>` : ''}
+                                    ${unreadDot}
                                 </div>
                             </div>
                         </div>
@@ -1419,6 +1425,12 @@
         function loadMoreSessions() {
             sessionsDisplayCount += 5;
             renderSessions();
+        }
+
+        function markSessionRead(sessionId) {
+            if (!sessionId) return;
+            sessionViewTimes[sessionId] = new Date().toISOString();
+            try { localStorage.setItem('feather-sessionViewTimes', JSON.stringify(sessionViewTimes)); } catch {}
         }
 
         let currentSearchQuery = '';
@@ -1630,6 +1642,7 @@
          */
         async function resumeSession(sessionId, projectId) {
             closeSidebarMobile();
+            markSessionRead(sessionId);
             setEngine('claude');
             updateHash({ session: sessionId, folder: currentFolder });
             // Update mobile session header
@@ -1699,6 +1712,7 @@
          * If a matching tmux session is active, connect to terminal output.
          */
         async function openCodexSession(sessionId, projectId, source) {
+            markSessionRead(sessionId);
             closeSidebarMobile();
             updateHash({ session: sessionId, folder: currentFolder });
             // Detect engine from source field, then fallback to tmux name mapping
