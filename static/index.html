@@ -637,6 +637,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle sidebar</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+B</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -1008,6 +1009,8 @@
         // ========== State ==========
         let currentSessionId = null;
         let currentSessionProjectId = null;
+        let previousSessionId = null;
+        let previousSessionProjectId = null;
         let currentTmuxSession = null;
         let isStreaming = false;
         let sseConnection = null;
@@ -1339,6 +1342,20 @@
             if (nextIdx < 0) nextIdx = items.length - 1;
             if (nextIdx >= items.length) nextIdx = 0;
             items[nextIdx]?.click();
+        }
+
+        // Switch to the previously viewed session (Ctrl+.)
+        function switchToPreviousSession() {
+            if (!previousSessionId || !previousSessionProjectId) return;
+            // Check if the session item is a codex/pi session
+            const prevSession = allSessions.find(s => s.id === previousSessionId);
+            if (!prevSession) return;
+            const isTerminal = prevSession.source === 'codex' || prevSession.source === 'pi';
+            if (isTerminal) {
+                openCodexSession(previousSessionId, previousSessionProjectId, prevSession.source);
+            } else {
+                resumeSession(previousSessionId, previousSessionProjectId);
+            }
         }
 
         // Initialize filter UI on load
@@ -1882,6 +1899,12 @@
             const folder = FOLDERS.find(f => f.id === projectId) || FOLDERS.find(f => f.id === currentFolder);
             if (!folder) return;
 
+            // Track previous session for Ctrl+. quick-switch
+            if (currentSessionId && currentSessionId !== sessionId) {
+                previousSessionId = currentSessionId;
+                previousSessionProjectId = currentSessionProjectId;
+            }
+
             currentSessionId = sessionId;
             currentSessionProjectId = projectId;
             currentTmuxSession = null;
@@ -1951,6 +1974,12 @@
             } else {
                 const mappedTmux = codexTmuxMapping[sessionId] || tmuxNameLookup[sessionId.substring(0, 8)];
                 setEngine(mappedTmux && mappedTmux.startsWith('feather-pi-') ? 'pi' : 'codex');
+            }
+
+            // Track previous session for Ctrl+. quick-switch
+            if (currentSessionId && currentSessionId !== sessionId) {
+                previousSessionId = currentSessionId;
+                previousSessionProjectId = currentSessionProjectId;
             }
 
             // Preserve existing tmux session - Codex sessions share a terminal
@@ -2630,6 +2659,54 @@
             } catch {
                 label.textContent = 'Failed';
                 setTimeout(() => { label.textContent = 'Copy'; }, 1500);
+            }
+        }
+
+        async function exportSessionMarkdown() {
+            if (!currentSessionId || !currentFolder) return;
+            try {
+                const res = await fetch(`/api/projects/${encodeURIComponent(currentFolder)}/sessions/${currentSessionId}/history?limit=10000`);
+                if (!res.ok) throw new Error('Failed to fetch');
+                const data = await res.json();
+                if (!data.messages || !data.messages.length) return;
+
+                const sessionTitle = allSessions.find(s => s.id === currentSessionId)?.title || 'Untitled';
+                let md = `# ${sessionTitle}\n\n`;
+
+                for (const msg of data.messages) {
+                    const role = (msg.role === 'user' || msg.type === 'human') ? 'User' : 'Assistant';
+                    const content = msg.content;
+                    let text = '';
+                    if (Array.isArray(content)) {
+                        const parts = [];
+                        for (const block of content) {
+                            if (block.type === 'text') parts.push(block.text);
+                            else if (block.type === 'thinking') parts.push(`<thinking>\n${block.text}\n</thinking>`);
+                            else if (block.type === 'tool_use') parts.push(`**Tool: ${block.name}**\n\`\`\`json\n${JSON.stringify(block.input, null, 2)}\n\`\`\``);
+                            else if (block.type === 'tool_result') {
+                                const resultText = Array.isArray(block.content) ? block.content.map(c => c.text || '').join('\n') : (block.content || '');
+                                if (resultText) parts.push(`**Result:**\n\`\`\`\n${resultText}\n\`\`\``);
+                            }
+                        }
+                        text = stripSystemTags(parts.join('\n\n'));
+                    } else if (typeof content === 'string') {
+                        text = stripSystemTags(content);
+                    }
+                    if (!text.trim()) continue;
+                    md += `## ${role}\n\n${text}\n\n---\n\n`;
+                }
+
+                const blob = new Blob([md], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${sessionTitle.replace(/[^a-zA-Z0-9 -]/g, '').trim().replace(/\s+/g, '-').substring(0, 60) || 'session'}.md`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                console.error('Export failed:', e);
             }
         }
 
@@ -5508,6 +5585,7 @@
             { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('collapse-tools-btn'); if (btn) btn.click(); } },
             { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
+            { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },
             { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
@@ -5515,6 +5593,7 @@
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
+            { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
         ];
         let _cmdPaletteIdx = 0;
@@ -5888,6 +5967,11 @@
                 if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
                     e.preventDefault();
                     openChatSearch();
+                }
+                // Ctrl+. / Cmd+. to switch to previous session
+                if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+                    e.preventDefault();
+                    switchToPreviousSession();
                 }
             });
 

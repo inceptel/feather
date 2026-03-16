@@ -637,6 +637,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle sidebar</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+B</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -1008,6 +1009,8 @@
         // ========== State ==========
         let currentSessionId = null;
         let currentSessionProjectId = null;
+        let previousSessionId = null;
+        let previousSessionProjectId = null;
         let currentTmuxSession = null;
         let isStreaming = false;
         let sseConnection = null;
@@ -1339,6 +1342,20 @@
             if (nextIdx < 0) nextIdx = items.length - 1;
             if (nextIdx >= items.length) nextIdx = 0;
             items[nextIdx]?.click();
+        }
+
+        // Switch to the previously viewed session (Ctrl+.)
+        function switchToPreviousSession() {
+            if (!previousSessionId || !previousSessionProjectId) return;
+            // Check if the session item is a codex/pi session
+            const prevSession = allSessions.find(s => s.id === previousSessionId);
+            if (!prevSession) return;
+            const isTerminal = prevSession.source === 'codex' || prevSession.source === 'pi';
+            if (isTerminal) {
+                openCodexSession(previousSessionId, previousSessionProjectId, prevSession.source);
+            } else {
+                resumeSession(previousSessionId, previousSessionProjectId);
+            }
         }
 
         // Initialize filter UI on load
@@ -1882,6 +1899,12 @@
             const folder = FOLDERS.find(f => f.id === projectId) || FOLDERS.find(f => f.id === currentFolder);
             if (!folder) return;
 
+            // Track previous session for Ctrl+. quick-switch
+            if (currentSessionId && currentSessionId !== sessionId) {
+                previousSessionId = currentSessionId;
+                previousSessionProjectId = currentSessionProjectId;
+            }
+
             currentSessionId = sessionId;
             currentSessionProjectId = projectId;
             currentTmuxSession = null;
@@ -1951,6 +1974,12 @@
             } else {
                 const mappedTmux = codexTmuxMapping[sessionId] || tmuxNameLookup[sessionId.substring(0, 8)];
                 setEngine(mappedTmux && mappedTmux.startsWith('feather-pi-') ? 'pi' : 'codex');
+            }
+
+            // Track previous session for Ctrl+. quick-switch
+            if (currentSessionId && currentSessionId !== sessionId) {
+                previousSessionId = currentSessionId;
+                previousSessionProjectId = currentSessionProjectId;
             }
 
             // Preserve existing tmux session - Codex sessions share a terminal
@@ -3020,7 +3049,7 @@
 
             div.innerHTML = `
                 <div class="max-w-3xl mx-auto">
-                    <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}">
+                    <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}" data-start-time="${Date.now()}">
                         <div class="tool-header min-w-0 flex items-center gap-2.5 px-3 py-2 cursor-pointer"
                              onclick="this.parentElement.querySelector('.tool-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.tool-body').classList.contains('hidden') ? '▶' : '▼'">
                             <span class="text-sm">${icon}</span>
@@ -3275,11 +3304,31 @@
             container.querySelectorAll('.system-message').forEach(el => el.remove());
         }
 
+        function formatToolDuration(ms) {
+            if (ms < 1000) return (ms / 1000).toFixed(1) + 's';
+            if (ms < 60000) return Math.round(ms / 1000) + 's';
+            const m = Math.floor(ms / 60000);
+            const s = Math.round((ms % 60000) / 1000);
+            return m + 'm ' + s + 's';
+        }
+
         function addToolResult(result) {
             // Remove the pulsing "running" dot from the matching tool call
+            let durationHtml = '';
             if (result.tool_use_id) {
                 const runningDot = document.querySelector(`.tool-running-dot[data-running-for="${result.tool_use_id}"]`);
                 if (runningDot) runningDot.remove();
+                // Compute tool duration from start time
+                const toolCard = document.querySelector(`.tool-card[data-tool-id="${result.tool_use_id}"]`);
+                if (toolCard) {
+                    const startTime = parseInt(toolCard.dataset.startTime, 10);
+                    if (startTime) {
+                        const elapsed = Date.now() - startTime;
+                        if (elapsed > 200) {
+                            durationHtml = `<span class="tool-duration text-[10px] text-smoke-7 font-mono whitespace-nowrap">${formatToolDuration(elapsed)}</span>`;
+                        }
+                    }
+                }
             }
 
             const container = document.getElementById('message-container');
@@ -3353,6 +3402,7 @@
                              ${isShort ? '' : `onclick="this.parentElement.querySelector('.result-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.result-body').classList.contains('hidden') ? '▶' : '▼'"`}>
                             <span class="text-xs ${isError ? 'text-ember-9' : 'text-apple-9'}">${icon}</span>
                             <span class="text-xs text-smoke-10 truncate flex-1 ${isShort ? 'font-mono' : ''}">${escapeHtml(summary)}</span>
+                            ${durationHtml}
                             ${hasImages ? `<span class="text-[10px] text-smoke-7 flex items-center gap-0.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg> ${images.length}</span>` : ''}
                             ${!isShort ? `<span class="tool-chevron text-[10px] text-smoke-7">${shouldExpand ? '▼' : '▶'}</span>` : ''}
                         </div>
@@ -5487,6 +5537,7 @@
             { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('collapse-tools-btn'); if (btn) btn.click(); } },
             { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
+            { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },
             { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
@@ -5867,6 +5918,11 @@
                 if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
                     e.preventDefault();
                     openChatSearch();
+                }
+                // Ctrl+. / Cmd+. to switch to previous session
+                if ((e.metaKey || e.ctrlKey) && e.key === '.') {
+                    e.preventDefault();
+                    switchToPreviousSession();
                 }
             });
 
