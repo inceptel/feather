@@ -2,187 +2,187 @@
 <rss version="2.0">
   <channel>
     <title>Feather Autoweb Improvements</title>
-    <link>http://localhost:4860</link>
-    <description>Autonomous improvements to the Feather web application</description>
-    <lastBuildDate>Mon, 16 Mar 2026 04:46:16 +0000</lastBuildDate>
+    <link>#</link>
+    <description>Autonomous improvements to Feather by autoweb</description>
+    <lastBuildDate>Mon, 16 Mar 2026 04:51:42 +0000</lastBuildDate>
     <item>
-      <title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palet</title>
+      <title>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;</title>
+      <description>Show Bash tool description in collapsed header preview — displays human-readable description (e.g. &#x27;Build Rust binary&#x27;) instead of raw command in tool call headers when description field is available</description>
+      <pubDate>Mon, 16 Mar 2026 04:51:28 +0000</pubDate>
+      <link>#</link>
+    </item>
+    <item>
+      <title>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts mod</title>
       <description>Add Alt+Up/Down keyboard shortcuts to switch between sessions — wraps around, shown in shortcuts modal and command palette (70 tests pass)</description>
       <pubDate>Mon, 16 Mar 2026 04:46:08 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls set</title>
+      <title>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now</title>
       <description>Fix command palette filter commands — was using non-existent sessionFilter/applySessionFilter(), now correctly calls setSessionFilter(); also added Toggle theme command to palette</description>
       <pubDate>Mon, 16 Mar 2026 04:41:46 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of on</title>
+      <title>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than las</title>
       <description>Fix What&#x27;s New badge timestamp comparison — badge now shows dot when newest change is newer than last-seen instead of only when never viewed, with lightweight page-load check via checkWhatsNewBadge()</description>
       <pubDate>Mon, 16 Mar 2026 04:35:12 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocus</title>
+      <title>Add clear (X) button to session search input — hidden by default, appears when search has text, clea</title>
       <description>Add clear (X) button to session search input — hidden by default, appears when search has text, clears input and refocuses on click; also shows/hides keyboard shortcut hint accordingly</description>
       <pubDate>Mon, 16 Mar 2026 04:31:19 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with ex</title>
+      <title>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced</title>
       <description>Remove all bare .unwrap() calls from Rust handlers — added epoch_secs/epoch_millis helpers, replaced 18 unwrap() with expect/unwrap_or_default (Phil priority: panic-proof error handling)</description>
       <pubDate>Mon, 16 Mar 2026 04:27:11 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with exist</title>
+      <title>Add unread message count (N) prefix to browser tab title — users can see new activity from other tab</title>
       <description>Add unread message count (N) prefix to browser tab title — users can see new activity from other tabs, synced with existing unread badge via incrementUnread/resetUnread calling updatePageTitle</description>
       <pubDate>Mon, 16 Mar 2026 04:21:51 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improveme</title>
+      <title>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most r</title>
       <description>Add What&#x27;s New changelog popover — &#x27;New&#x27; button in header opens scrollable popover showing 15 most recent kept improvements with timestamps, click-outside close, localStorage tracking (from Phil&#x27;s feature list)</description>
       <pubDate>Mon, 16 Mar 2026 04:16:37 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-</title>
+      <title>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group h</title>
       <description>Add session starring — star/pin button on sidebar sessions, starred sort to top with Starred group header, localStorage-backed, command palette integration</description>
       <pubDate>Mon, 16 Mar 2026 04:10:22 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionVie</title>
+      <title>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tr</title>
       <description>Add unread session indicators — gold dot on sidebar sessions with new activity since last viewed, tracked via sessionViewTimes in localStorage (from Phil&#x27;s feature list)</description>
       <pubDate>Mon, 16 Mar 2026 04:06:25 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Esca</title>
+      <title>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, En</title>
       <description>Add command palette (Ctrl+K) — searchable action launcher with 13 commands, arrow key navigation, Enter to execute, Escape to close; replaces old focus-input shortcut</description>
       <pubDate>Mon, 16 Mar 2026 04:01:43 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attem</title>
+      <title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists acros</title>
       <description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description>
       <pubDate>Mon, 16 Mar 2026 03:57:32 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clip</title>
+      <title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-</title>
       <description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description>
       <pubDate>Mon, 16 Mar 2026 03:54:50 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghe</title>
+      <title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hard</title>
       <description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
       <pubDate>Mon, 16 Mar 2026 03:51:24 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-fil</title>
+      <title>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fi</title>
       <description>Fix iOS Safari viewport height — added -webkit-fill-available and 100dvh progressive enhancement, fixed test-session-filter-toggle to use is_autoweb instead of removed AUTOWEB_PATTERN</description>
       <pubDate>Mon, 16 Mar 2026 03:48:22 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fad</title>
+      <title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less </title>
       <description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
       <pubDate>Mon, 16 Mar 2026 03:41:49 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), re</title>
+      <title>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinki</title>
       <description>Dynamic favicon and title showing session status — green F icon when idle, gold when working (Thinking/Running tool), red when disconnected; browser tab shows session name and status prefix (no test — visual only)</description>
       <pubDate>Mon, 16 Mar 2026 03:37:25 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), </title>
+      <title>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored lin</title>
       <description>URL linkification in user messages — bare https:// URLs now rendered as clickable accent-colored links (target=_blank), applied across all 5 user message rendering paths</description>
       <pubDate>Mon, 16 Mar 2026 03:32:54 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next</title>
+      <title>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/S</title>
       <description>Add in-chat message search (Ctrl+F) — search bar with gold-highlighted matches, 1/N counter, Enter/Shift+Enter prev/next navigation, Escape to close, added to keyboard shortcuts modal</description>
       <pubDate>Mon, 16 Mar 2026 03:29:17 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight</title>
+      <title>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter sel</title>
       <description>Add session keyboard navigation — ArrowUp/ArrowDown highlights sessions in sidebar search, Enter selects; blue highlight style, blur clears, documented in shortcuts modal</description>
       <pubDate>Mon, 16 Mar 2026 03:22:27 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</title>
+      <title>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts</title>
       <description>Restore Ctrl+N (Cmd+N) keyboard shortcut for new Pi session (lost in prior edits) + add to shortcuts help modal</description>
       <pubDate>Mon, 16 Mar 2026 03:18:20 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 1</title>
+      <title>Add message_count to Session API response and display in sidebar session list — users can now see me</title>
       <description>Add message_count to Session API response and display in sidebar session list — users can now see message counts (e.g. 148 msg) next to relative time for each session</description>
       <pubDate>Mon, 16 Mar 2026 03:15:13 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering</title>
+      <title>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highl</title>
       <description>Search highlight in session filter — matching substring in titles gets gold highlight (.search-highlight) when filtering sessions, also fixed title XSS by escaping non-search titles</description>
       <pubDate>Mon, 16 Mar 2026 03:08:00 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking</title>
+      <title>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from F</title>
       <description>Fix markdown links to open in new tab (target=_blank rel=noopener) — prevents navigating away from Feather when clicking links in messages</description>
       <pubDate>Mon, 16 Mar 2026 03:03:28 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-li</title>
+      <title>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb fl</title>
       <description>Removed 4 AUTOWEB regex patterns (CRITICAL #5) — isAutowebSession now uses server-side is_autoweb flag with minimal 2-line fallback, deleted ~20 lines of fragile NLP/regex matching</description>
       <pubDate>Mon, 16 Mar 2026 02:57:43 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and </title>
+      <title>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expand</title>
       <description>Added collapse/expand all tool calls toggle button (wrench icon) in input toolbar — collapses/expands all tool-call and tool-result bodies at once, with per-session state and auto-show/hide based on tool presence</description>
       <pubDate>Mon, 16 Mar 2026 02:54:21 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in l</title>
+      <title>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — impr</title>
       <description>Add date separator dividers (Today/Yesterday/Mon Mar 15) between messages from different days — improves navigation in long multi-day sessions, handles load-earlier dedup</description>
       <pubDate>Mon, 16 Mar 2026 02:48:31 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with an</title>
+      <title>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-sha</title>
       <description>Replace plain Loading text with shimmer skeleton UI when switching sessions — shows conversation-shaped skeleton with animated shimmer gradient mimicking user/assistant/tool blocks</description>
       <pubDate>Mon, 16 Mar 2026 02:43:40 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, r</title>
+      <title>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages </title>
       <description>Added unread message count badge to scroll-to-bottom button — gold pill shows count of new messages while scrolled up, resets on scroll-to-bottom or session switch</description>
       <pubDate>Mon, 16 Mar 2026 02:40:09 +0000</pubDate>
       <link>#</link>
     </item>
     <item>
-      <title>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboa</title>
+      <title>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw</title>
       <description>Add copy-message button to assistant bubbles — hover reveals Copy button (top-right) that copies raw markdown to clipboard, with Copied! feedback; mobile: always-visible at 0.6 opacity</description>
       <pubDate>Mon, 16 Mar 2026 02:34:48 +0000</pubDate>
-      <link>#</link>
-    </item>
-    <item>
-      <title>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on las</title>
-      <description>Add timestamps to assistant messages — subtle time display below each assistant bubble (left-aligned), only shown on last text block per turn; both initial history load and SSE tailing paths updated</description>
-      <pubDate>Mon, 16 Mar 2026 02:27:39 +0000</pubDate>
       <link>#</link>
     </item>
   </channel>

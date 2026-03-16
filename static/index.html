@@ -3574,6 +3574,23 @@
         let renderedContentHashes = new Set();  // Content-hash fallback for user message dedup
         let renderedTextHashes = new Set();  // Text-only dedup: same text with/without image = duplicate
         let tailReconnectDelay = 1000;  // Exponential backoff for SSE reconnection (module-scoped so it persists across recursive calls)
+        let tailHeartbeatTimer = null;  // Heartbeat: detect zombie SSE connections
+        const TAIL_HEARTBEAT_TIMEOUT = 60000;  // 60s without any SSE event = zombie
+
+        function resetTailHeartbeat() {
+            clearTimeout(tailHeartbeatTimer);
+            tailHeartbeatTimer = setTimeout(() => {
+                // No SSE data for 60s — connection may be zombied
+                if (tailingEventSource && tailingEventSource.readyState !== EventSource.CLOSED) {
+                    console.warn('SSE heartbeat timeout — forcing reconnect');
+                    tailingEventSource.close();
+                    tailingEventSource = null;
+                    if (currentTailProjectId && currentTailSessionId) {
+                        startSessionTailing(currentTailProjectId, currentTailSessionId, tailCursor);
+                    }
+                }
+            }, TAIL_HEARTBEAT_TIMEOUT);
+        }
 
         function startSessionTailing(projectId, sessionId, cursor = null) {
             if (tailingEventSource) {
@@ -3594,6 +3611,7 @@
             tailingEventSource = new EventSource(url);
 
             tailingEventSource.addEventListener('lines', (event) => {
+                resetTailHeartbeat();  // Got data — connection is alive
                 try {
                     const events = JSON.parse(event.data);
                     for (const evt of events) {
@@ -3715,7 +3733,7 @@
                 console.log('Tail SSE error, will auto-reconnect:', event);
             });
 
-            tailingEventSource.onopen = () => { tailReconnectDelay = 1000; };
+            tailingEventSource.onopen = () => { tailReconnectDelay = 1000; resetTailHeartbeat(); };
             tailingEventSource.onerror = () => {
                 // EventSource auto-reconnects, but we want to resume from cursor
                 if (tailingEventSource && tailingEventSource.readyState === EventSource.CLOSED) {
@@ -3731,6 +3749,8 @@
         }
 
         function stopSessionTailing() {
+            clearTimeout(tailHeartbeatTimer);
+            tailHeartbeatTimer = null;
             if (tailingEventSource) {
                 tailingEventSource.close();
                 tailingEventSource = null;
