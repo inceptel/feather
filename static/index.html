@@ -71,6 +71,9 @@
         @keyframes livePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(127, 216, 143, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(127, 216, 143, 0); } }
         .status-active { animation: pulse 1.5s ease-in-out infinite; }
         .message-enter { animation: fadeInScale 0.25s ease-out; }
+        /* Skeleton loading for session history */
+        .skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
+        .skeleton-block { border-radius: 12px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
         .session-item { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 8px; }
         .session-item:hover { transform: translateX(3px); background: rgba(250, 178, 131, 0.08); }
@@ -1719,9 +1722,45 @@
             loadSessions(); // Refresh sidebar
         }
 
+        function showMessageSkeleton() {
+            const container = document.getElementById('message-container');
+            // Build skeleton that mimics a real conversation
+            let html = '<div class="max-w-3xl mx-auto px-4 py-6 space-y-5" style="animation:fadeIn 0.2s ease-out">';
+            // Simulate alternating user (right-aligned) and assistant (left-aligned) messages
+            const pattern = [
+                { align: 'right', lines: 1, w: '40%' },
+                { align: 'left', lines: 3, w: '70%' },
+                { align: 'left', lines: 1, w: '30%', isTool: true },
+                { align: 'right', lines: 1, w: '55%' },
+                { align: 'left', lines: 4, w: '80%' },
+                { align: 'left', lines: 1, w: '25%', isTool: true },
+                { align: 'left', lines: 2, w: '60%' },
+            ];
+            pattern.forEach((msg, i) => {
+                const delay = i * 0.08;
+                if (msg.isTool) {
+                    // Tool call skeleton
+                    html += `<div style="animation-delay:${delay}s" class="flex justify-start"><div class="skeleton-block" style="width:${msg.w};height:32px;opacity:0.5"></div></div>`;
+                } else if (msg.align === 'right') {
+                    // User message skeleton (right-aligned bubble)
+                    html += `<div style="animation-delay:${delay}s" class="flex justify-end"><div class="skeleton-block" style="width:${msg.w};height:${20 + msg.lines * 14}px;border-radius:16px 16px 4px 16px"></div></div>`;
+                } else {
+                    // Assistant message skeleton (left-aligned)
+                    html += `<div style="animation-delay:${delay}s" class="space-y-2">`;
+                    for (let j = 0; j < msg.lines; j++) {
+                        const lineW = j === msg.lines - 1 ? `${parseInt(msg.w) * 0.6}%` : msg.w;
+                        html += `<div class="skeleton-line" style="width:${lineW}"></div>`;
+                    }
+                    html += '</div>';
+                }
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
         async function loadSessionHistory(projectId, sessionId) {
             const container = document.getElementById('message-container');
-            container.innerHTML = '<div class="text-center text-smoke-9 py-8">Loading...</div>';
+            showMessageSkeleton();
 
             try {
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history`);
