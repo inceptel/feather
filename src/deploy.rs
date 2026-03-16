@@ -193,35 +193,7 @@ pub async fn deploy_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-const SUPERVISOR_CONF: &str = "/etc/supervisor/conf.d/supervisord.conf";
 const BUILDS_DIR: &str = "/usr/local/bin/feather-builds";
-
-fn run_command_with_output(
-    cmd: &str,
-    args: &[&str],
-    tx: &broadcast::Sender<DeployEvent>,
-    track: &str,
-) {
-    let output = std::process::Command::new(cmd).args(args).output();
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            for line in stdout.lines().chain(stderr.lines()) {
-                let _ = tx.send(DeployEvent::Output {
-                    track: track.to_string(),
-                    line: line.to_string(),
-                });
-            }
-        }
-        Err(e) => {
-            let _ = tx.send(DeployEvent::Output {
-                track: track.to_string(),
-                line: format!("Error running {} {:?}: {}", cmd, args, e),
-            });
-        }
-    }
-}
 
 // ============================================================================
 // Track 2: App deploy (rebuild feather from source)
@@ -887,7 +859,7 @@ async fn do_container_deploy(tx: broadcast::Sender<DeployEvent>, target: String)
     let mut last_capture = String::new();
     let mut idle_count = 0;
 
-    for i in 0..150 {
+    for _i in 0..150 {
         // 5 minute max (150 * 2s)
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 

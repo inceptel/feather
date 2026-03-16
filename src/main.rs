@@ -173,6 +173,7 @@ struct SessionHistory {
 // - "tool_use", "tool_result": Tool interactions (skipped)
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JsonlRecord {
     #[serde(rename = "type")]
     record_type: Option<String>,
@@ -183,6 +184,7 @@ struct JsonlRecord {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JsonlMessage {
     role: Option<String>,
     content: Option<serde_json::Value>,  // Can be string or array of content blocks
@@ -1621,7 +1623,7 @@ async fn terminal_stream(
     Query(query): Query<TerminalStreamQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let lines = query.lines.unwrap_or(100);
-    let mut last_content = String::new();
+    let last_content = String::new();
 
     let stream = stream::unfold(
         (state, session_id, last_content, lines),

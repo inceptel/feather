@@ -81,6 +81,7 @@ fn default_source() -> String {
 
 /// A complete normalized session
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NormalizedSession {
     pub meta: SessionMeta,
     pub messages: Vec<NormalizedMessage>,
@@ -90,6 +91,7 @@ pub struct NormalizedSession {
 
 /// Events broadcast when sessions change
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SessionEvent {
     /// Session was created or updated
     Updated {
@@ -181,6 +183,7 @@ impl SessionCache {
     }
 
     /// Subscribe to session events
+    #[allow(dead_code)]
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         self.event_tx.subscribe()
     }
@@ -239,6 +242,7 @@ impl SessionCache {
 
     /// Append a normalized message to a session and persist to disk.
     /// Creates the session if it does not exist.
+    #[allow(dead_code)]
     pub fn append_message(
         &self,
         session_id: &str,

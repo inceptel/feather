@@ -23,6 +23,7 @@ use std::time::Instant;
 
 /// Information about an active tmux session
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TmuxSessionInfo {
     pub session_id: String,
     pub tmux_name: String,
@@ -359,6 +360,7 @@ impl TmuxManager {
     }
 
     /// Kill all feather tmux sessions
+    #[allow(dead_code)]
     pub fn kill_all_sessions(&self) {
         for session in self.list_tmux_sessions() {
             let _ = Command::new("tmux")
