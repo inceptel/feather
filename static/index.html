@@ -561,6 +561,7 @@
                         <div class="flex items-center gap-2">
                             <span id="status-dot" class="status-dot bg-apple-9" title="Status"></span>
                             <span id="status" class="hidden sm:inline text-[10px] text-smoke-8 font-medium">Ready</span>
+                            <span id="char-count" class="hidden text-[10px] text-smoke-6 font-mono ml-2" title="Character count"></span>
                         </div>
                         <div class="flex items-center gap-1">
                             <button id="tools-toggle-btn" onclick="toggleAllTools()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Collapse/expand all tool calls">
@@ -4532,6 +4533,26 @@
         function autoResize(el) {
             el.style.height = 'auto';
             el.style.height = Math.min(el.scrollHeight, 300) + 'px';
+            updateCharCount(el.value);
+        }
+
+        function updateCharCount(text) {
+            const el = document.getElementById('char-count');
+            if (!el) return;
+            const len = (text || '').length;
+            if (len === 0) {
+                el.classList.add('hidden');
+                return;
+            }
+            el.classList.remove('hidden');
+            el.textContent = len >= 1000 ? (len / 1000).toFixed(1) + 'k' : len;
+            if (len >= 500) {
+                el.style.color = '#fab283';
+                el.title = 'Long message — will use direct write';
+            } else {
+                el.style.color = '';
+                el.title = 'Character count';
+            }
         }
 
         // ========== Voice Recording ==========
