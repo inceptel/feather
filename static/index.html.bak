@@ -150,6 +150,8 @@
         /* Thinking blocks */
         .thinking-block { max-width: 100%; overflow: hidden; min-width: 0; box-sizing: border-box; }
         .thinking-block.collapsed .thinking-content { display: none; }
+        .thinking-block.collapsed .thinking-preview { display: inline; }
+        .thinking-block:not(.collapsed) .thinking-preview { display: none; }
         .thinking-content { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
         .thinking-toggle { cursor: pointer; user-select: none; }
         /* Terminal panel */
@@ -2971,11 +2973,16 @@
             const div = document.createElement('div');
             div.className = 'message-enter thinking-block' + (thinkingBlocksCollapsed ? ' collapsed' : '');
 
+            const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+            const preview = text.trim().replace(/\n/g, ' ').substring(0, 80);
+            const previewText = preview.length < text.trim().length ? preview + '...' : preview;
+            const wordLabel = wordCount === 1 ? 'word' : 'words';
+
             div.innerHTML = `
                 <div class="max-w-3xl mx-auto">
                     <div class="border-l-[3px] border-violet-9/30 pl-3 py-1">
                         <div class="thinking-toggle text-[10px] text-violet-9/70 font-medium mb-1"
-                             onclick="this.closest('.thinking-block').classList.toggle('collapsed');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="9" y1="22" x2="15" y2="22"/></svg> thinking</div>
+                             onclick="this.closest('.thinking-block').classList.toggle('collapsed');"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:3px"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="9" y1="22" x2="15" y2="22"/></svg> thinking <span class="thinking-preview text-smoke-7 font-normal ml-1">— ${escapeHtml(previewText)} <span class="text-smoke-6">(${wordCount} ${wordLabel})</span></span></div>
                         <div class="thinking-content text-xs text-smoke-9 italic whitespace-pre-wrap leading-relaxed">${escapeHtml(text)}</div>
                     </div>
                 </div>
