@@ -3330,6 +3330,7 @@
         let renderedUuids = new Set();  // Track rendered messages to prevent duplicates
         let renderedContentHashes = new Set();  // Content-hash fallback for user message dedup
         let renderedTextHashes = new Set();  // Text-only dedup: same text with/without image = duplicate
+        let tailReconnectDelay = 1000;  // Exponential backoff for SSE reconnection (module-scoped so it persists across recursive calls)
 
         function startSessionTailing(projectId, sessionId, cursor = null) {
             if (tailingEventSource) {
@@ -3471,7 +3472,6 @@
                 console.log('Tail SSE error, will auto-reconnect:', event);
             });
 
-            let tailReconnectDelay = 1000;
             tailingEventSource.onopen = () => { tailReconnectDelay = 1000; };
             tailingEventSource.onerror = () => {
                 // EventSource auto-reconnects, but we want to resume from cursor
@@ -3493,6 +3493,7 @@
                 tailingEventSource = null;
             }
             tailCursor = null;
+            tailReconnectDelay = 1000;
             currentTailProjectId = null;
             currentTailSessionId = null;
         }

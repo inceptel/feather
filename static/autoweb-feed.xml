@@ -5,15 +5,21 @@
 <description>Self-improving Feather web application changelog</description>
 <link>#</link>
 <item>
+<title>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</title>
+<pubDate>2026-03-16T03:57:32Z</pubDate>
+<description>Fix SSE exponential backoff bug — moved tailReconnectDelay to module scope so backoff persists across reconnection attempts instead of resetting to 1s each time</description>
+<link>#</link>
+</item>
+<item>
 <title>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</title>
 <pubDate>2026-03-16T03:54:50Z</pubDate>
 <description>Add copy buttons to user messages — hover reveals Copy button (top-right) on user bubbles with data-raw-content for clipboard, mobile always-visible at 0.6 opacity, matching assistant message behavior</description>
 <link>#</link>
 </item>
 <item>
-<title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status </title>
+<title>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status </title>
 <pubDate>2026-03-16T03:51:24Z</pubDate>
-<description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded 'Ready, spaghetti' with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
+<description>Add rotating fun status phrases (25 phrases like Scampering, Razmatazzing, Beboppin) — replaces hardcoded &#x27;Ready, spaghetti&#x27; with readyStatus() that picks a random phrase each time (fixes HIGH status text issue)</description>
 <link>#</link>
 </item>
 <item>
@@ -23,9 +29,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title>
+<title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</title>
 <pubDate>2026-03-16T03:41:49Z</pubDate>
-<description>Collapsible user messages — long prompts (>300 chars or >8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
+<description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
 <link>#</link>
 </item>
 <item>
@@ -125,9 +131,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</title>
+<title>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;) using ISO timestamps from backend data</title>
 <pubDate>2026-03-16T02:14:45Z</pubDate>
-<description>Add timestamps to user messages — subtle time display below each user bubble (today: '1:47 AM', older: 'Mar 15 3:30 PM') using ISO timestamps from backend data</description>
+<description>Add timestamps to user messages — subtle time display below each user bubble (today: &#x27;1:47 AM&#x27;, older: &#x27;Mar 15 3:30 PM&#x27;) using ISO timestamps from backend data</description>
 <link>#</link>
 </item>
 <item>
@@ -149,9 +155,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31</title>
+<title>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31</title>
 <pubDate>2026-03-16T01:46:53Z</pubDate>
-<description>Fixed autoweb session filter — added 'hard N-minute timeout' and 'Do exactly ONE iteration' patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
+<description>Fixed autoweb session filter — added &#x27;hard N-minute timeout&#x27; and &#x27;Do exactly ONE iteration&#x27; patterns to AUTOWEB_KEYWORD_PATTERN, fixing Mine/Auto classification (was Mine:30/Auto:1, now Mine:0/Auto:31)</description>
 <link>#</link>
 </item>
 <item>
@@ -203,9 +209,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages >= 500 bytes to bypass OS arg length limit</title>
+<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</title>
 <pubDate>2026-03-16T00:52:37Z</pubDate>
-<description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages >= 500 bytes to bypass OS arg length limit</description>
+<description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</description>
 <link>#</link>
 </item>
 <item>
@@ -245,15 +251,15 @@
 <link>#</link>
 </item>
 <item>
-<title>Hide version indicator on mobile (< 768px) to prevent overlap with Send button — cleaner mobile input area</title>
+<title>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button — cleaner mobile input area</title>
 <pubDate>2026-03-15T23:16:22Z</pubDate>
-<description>Hide version indicator on mobile (< 768px) to prevent overlap with Send button — cleaner mobile input area</description>
+<description>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button — cleaner mobile input area</description>
 <link>#</link>
 </item>
 <item>
-<title>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</title>
+<title>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows specific message instead of generic &quot;No sessions&quot;</title>
 <pubDate>2026-03-15T23:10:19Z</pubDate>
-<description>Contextual empty session list messages — Mine filter shows "Show all sessions" link, search shows query, Auto shows specific message instead of generic "No sessions"</description>
+<description>Contextual empty session list messages — Mine filter shows &quot;Show all sessions&quot; link, search shows query, Auto shows specific message instead of generic &quot;No sessions&quot;</description>
 <link>#</link>
 </item>
 <item>
@@ -299,9 +305,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</title>
+<title>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</title>
 <pubDate>2026-03-15T22:32:04Z</pubDate>
-<description>Fixed grammar in tool result summary — "1 lines" now correctly shows "1 line" (singular)</description>
+<description>Fixed grammar in tool result summary — &quot;1 lines&quot; now correctly shows &quot;1 line&quot; (singular)</description>
 <link>#</link>
 </item>
 <item>
@@ -341,9 +347,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</title>
+<title>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolbar on small screens</title>
 <pubDate>2026-03-15T21:57:58Z</pubDate>
-<description>Mobile interrupt button now shows compact stop icon instead of "Interrupt" text — saves horizontal space in input toolbar on small screens</description>
+<description>Mobile interrupt button now shows compact stop icon instead of &quot;Interrupt&quot; text — saves horizontal space in input toolbar on small screens</description>
 <link>#</link>
 </item>
 <item>
@@ -377,9 +383,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</title>
+<title>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with white-space:nowrap and right:8px to prevent text overflow/truncation</title>
 <pubDate>2026-03-15T20:28:59Z</pubDate>
-<description>Fixed version indicator — now shows ET timezone (America/New_York) in compact "AW 4:26 PM ET • 19 fixes" format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
+<description>Fixed version indicator — now shows ET timezone (America/New_York) in compact &quot;AW 4:26 PM ET • 19 fixes&quot; format, with white-space:nowrap and right:8px to prevent text overflow/truncation</description>
 <link>#</link>
 </item>
 <item>
@@ -395,9 +401,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</title>
+<title>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-nowrap class already handles it</title>
 <pubDate>2026-03-15T19:51:56Z</pubDate>
-<description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style="flex-wrap:nowrap!important" since flex-nowrap class already handles it</description>
+<description>Fixed failing test-sidebar-bottom-bar-no-wrap — removed redundant inline style=&quot;flex-wrap:nowrap!important&quot; since flex-nowrap class already handles it</description>
 <link>#</link>
 </item>
 <item>
@@ -413,15 +419,15 @@
 <link>#</link>
 </item>
 <item>
-<title>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</title>
+<title>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</title>
 <pubDate>2026-03-15T19:27:42Z</pubDate>
-<description>Added keyboard shortcuts help modal — press "?" to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
+<description>Added keyboard shortcuts help modal — press &quot;?&quot; to see all shortcuts (/, Ctrl+K, Ctrl+`, Esc), dismissible with Escape or click-outside</description>
 <link>#</link>
 </item>
 <item>
-<title>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</title>
+<title>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape instead of requiring a click elsewhere</title>
 <pubDate>2026-03-15T19:21:06Z</pubDate>
-<description>Escape key in chat input now also blurs the field — keyboard shortcuts like "/" work immediately after pressing Escape instead of requiring a click elsewhere</description>
+<description>Escape key in chat input now also blurs the field — keyboard shortcuts like &quot;/&quot; work immediately after pressing Escape instead of requiring a click elsewhere</description>
 <link>#</link>
 </item>
 <item>
@@ -437,9 +443,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</title>
+<title>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now shows correct count (9)</title>
 <pubDate>2026-03-15T18:40:25Z</pubDate>
-<description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded "3 improvements" — now shows correct count (9)</description>
+<description>Fixed version indicator to dynamically read iter/keeps from HTML comment instead of hardcoded &quot;3 improvements&quot; — now shows correct count (9)</description>
 <link>#</link>
 </item>
 <item>
@@ -473,9 +479,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed CRITICAL long message truncation — messages >500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</title>
+<title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</title>
 <pubDate>2026-03-15T18:18:00Z</pubDate>
-<description>Fixed CRITICAL long message truncation — messages >500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
+<description>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
 <link>#</link>
 </item>
 <item>
@@ -485,9 +491,9 @@
 <link>#</link>
 </item>
 <item>
-<title>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
+<title>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</title>
 <pubDate>2026-03-15T18:07:00Z</pubDate>
-<description>Added "/" keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
+<description>Added &quot;/&quot; keyboard shortcut to focus session search + visible kbd hint badge in search input</description>
 <link>#</link>
 </item>
 <item>
