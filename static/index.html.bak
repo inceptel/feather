@@ -277,6 +277,7 @@
             .code-copy-btn { opacity: 0.7 !important; }
             /* Mobile: message copy/edit buttons always visible (no hover on touch) */
             .assistant-msg-bubble .msg-copy-btn, .user-msg-bubble .msg-copy-btn { opacity: 0.6 !important; padding: 4px 8px; }
+            .assistant-msg-bubble .msg-quote-btn { opacity: 0.6 !important; padding: 4px 8px; }
             .user-msg-bubble .msg-edit-btn { opacity: 0.6 !important; padding: 4px 8px; }
             /* Mobile: reduce heading sizes to prevent overflow */
             .markdown-content h1 { font-size: 1.2em !important; }
@@ -348,6 +349,9 @@
         .assistant-msg-bubble:hover .msg-copy-btn, .user-msg-bubble:hover .msg-copy-btn { opacity: 0.8; }
         .assistant-msg-bubble .msg-copy-btn:hover, .user-msg-bubble .msg-copy-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
         .assistant-msg-bubble .msg-copy-btn.copied, .user-msg-bubble .msg-copy-btn.copied { color: var(--apple-9); border-color: var(--apple-9); }
+        .assistant-msg-bubble .msg-quote-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
+        .assistant-msg-bubble:hover .msg-quote-btn { opacity: 0.8; }
+        .assistant-msg-bubble .msg-quote-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
         /* J/K message navigation highlight */
         @keyframes msg-nav-flash { 0% { box-shadow: inset 0 0 0 2px rgba(250, 178, 131, 0.5); } 100% { box-shadow: none; } }
         .msg-nav-highlight { animation: msg-nav-flash 0.8s ease-out; border-radius: 8px; }
@@ -3000,6 +3004,7 @@
             const timeStr = formatMessageTime(timestamp);
             div.innerHTML = `
                 <div class="max-w-[90%] assistant-msg-bubble px-4 py-3">
+                    <button class="msg-quote-btn" onclick="quoteReplyMessage(this)" title="Quote in reply"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Quote</span></button>
                     <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
                     <div class="markdown-content text-sm text-smoke-12">${renderMarkdown(content)}</div>
                 </div>
@@ -3034,6 +3039,29 @@
             // Scroll input into view on mobile
             input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             showToast('Message loaded into input');
+        }
+
+        function quoteReplyMessage(btn) {
+            const msgDiv = btn.closest('[data-raw-content]');
+            if (!msgDiv) return;
+            const raw = msgDiv.getAttribute('data-raw-content') || '';
+            // Take first 5 lines or 300 chars, whichever is shorter
+            const lines = raw.split('\n');
+            let excerpt = lines.slice(0, 5).join('\n');
+            if (excerpt.length > 300) excerpt = excerpt.slice(0, 300) + '...';
+            else if (lines.length > 5) excerpt += '\n...';
+            // Format as blockquote
+            const quoted = excerpt.split('\n').map(l => '> ' + l).join('\n');
+            const input = document.getElementById('input');
+            if (!input) return;
+            // Append to existing input or set
+            const existing = input.value.trim();
+            input.value = (existing ? existing + '\n\n' : '') + quoted + '\n\n';
+            input.focus();
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 300) + 'px';
+            input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            showToast('Quoted in input');
         }
 
         async function copyMessageContent(btn) {
