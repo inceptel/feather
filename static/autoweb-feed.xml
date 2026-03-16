@@ -4,7 +4,13 @@
 <title>Autoweb Feather Improvements</title>
 <description>Autonomous improvements to the Feather web application</description>
 <link>http://localhost:4860</link>
-<lastBuildDate>Mon, 16 Mar 2026 15:55:27 +0000</lastBuildDate>
+<lastBuildDate>Mon, 16 Mar 2026 16:03:11 +0000</lastBuildDate>
+<item>
+<title>Hide secondary toolbar buttons (tools-toggle, thinking-toggle, focus-mode, voice</title>
+<description>Hide secondary toolbar buttons (tools-toggle, thinking-toggle, focus-mode, voice) on mobile (&lt;768px) to prevent Send button overflow — buttons still accessible via keyboard shortcuts T/F and command palette (136 tests pass)</description>
+<pubDate>2026-03-16T16:03:03Z</pubDate>
+<link>#</link>
+</item>
 <item>
 <title>Fix broken terminal restart button — terminalEventSource (undefined) changed to </title>
 <description>Fix broken terminal restart button — terminalEventSource (undefined) changed to terminalSSE, connectTerminalSSE (nonexistent) changed to connectToTerminal, preventing JS error and SSE connection leak on restart (135 tests pass)</description>
@@ -192,13 +198,13 @@
 <link>#</link>
 </item>
 <item>
-<title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon)</title>
+<title>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) nex</title>
 <description>Add edit &amp; resend button on user messages — hover reveals Edit (pencil icon) next to Copy on user bubbles, loads text into input for editing and resending, mobile always-visible (100 tests pass)</description>
 <pubDate>2026-03-16T07:21:09Z</pubDate>
 <link>#</link>
 </item>
 <item>
-<title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more</title>
+<title>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more li</title>
 <description>Auto-collapse long code blocks (&gt;25 lines) with gradient fade and Show N more lines / Collapse toggle button — improves readability in code-heavy sessions (99 tests pass)</description>
 <pubDate>2026-03-16T07:16:09Z</pubDate>
 <link>#</link>
@@ -210,7 +216,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — ho</title>
+<title>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover</title>
 <description>Add wrap/unwrap toggle button on code blocks with long lines (&gt;80 chars) — hover reveals Wrap button next to Copy, toggles pre-wrap with active state highlight, mobile always-visible (97 tests pass)</description>
 <pubDate>2026-03-16T07:07:38Z</pubDate>
 <link>#</link>
@@ -276,7 +282,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetc</title>
+<title>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches</title>
 <description>Add export session as Markdown — command palette entry (Ctrl+K &gt; Export) fetches all messages, formats as Markdown with user/assistant headings and tool call blocks, triggers .md file download (86 tests pass)</description>
 <pubDate>2026-03-16T06:10:59Z</pubDate>
 <link>#</link>
@@ -450,7 +456,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-col</title>
+<title>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse </title>
 <description>Collapsible user messages — long prompts (&gt;300 chars or &gt;8 lines) auto-collapse with Show more/less toggle, gradient fade, accent-colored link; applied to addUserMessage and addUserMessageWithImages</description>
 <pubDate>2026-03-16T03:41:49Z</pubDate>
 <link>#</link>
@@ -618,7 +624,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &g</title>
+<title>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;=</title>
 <description>Fix tmux send-keys character limit: use load-buffer/paste-buffer for messages &gt;= 500 bytes to bypass OS arg length limit</description>
 <pubDate>2026-03-16T00:52:37Z</pubDate>
 <link>#</link>
@@ -660,7 +666,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send butto</title>
+<title>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button —</title>
 <description>Hide version indicator on mobile (&lt; 768px) to prevent overlap with Send button — cleaner mobile input area</description>
 <pubDate>2026-03-15T23:16:22Z</pubDate>
 <link>#</link>
@@ -888,7 +894,7 @@
 <link>#</link>
 </item>
 <item>
-<title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via Web</title>
+<title>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSoc</title>
 <description>Fixed CRITICAL long message truncation — messages &gt;500 chars now sent via WebSocket (PTY direct write) instead of tmux send-keys, with bracketed paste for multi-line support</description>
 <pubDate>2026-03-15T18:18:00Z</pubDate>
 <link>#</link>

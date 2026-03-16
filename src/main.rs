@@ -1704,6 +1704,10 @@ async fn claude_output(
     Path(session_id): Path<String>,
     Query(query): Query<OutputQuery>,
 ) -> Json<OutputResponse> {
+    if !is_valid_session_id(&session_id) {
+        tracing::warn!("Rejected invalid session_id in claude_output: {:?}", session_id);
+        return Json(OutputResponse { output: String::new() });
+    }
     let lines = query.lines.unwrap_or(100);
     let output = state.tmux.capture_output(&session_id, lines);
     Json(OutputResponse { output })
@@ -1766,13 +1770,18 @@ async fn terminal_stream(
     Path(session_id): Path<String>,
     Query(query): Query<TerminalStreamQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    if !is_valid_session_id(&session_id) {
+        tracing::warn!("Rejected invalid session_id in terminal_stream: {:?}", session_id);
+    }
+    // Use sanitized session_id for tmux (invalid IDs simply won't match any tmux session)
+    let safe_session_id = if is_valid_session_id(&session_id) { session_id } else { "invalid".to_string() };
     let lines = query.lines.unwrap_or(100);
     let last_content = String::new();
 
     // Use filter_map to skip idle polls — only emit events when terminal content changes.
     // Axum's KeepAlive handles connection liveness automatically.
     let stream = stream::unfold(
-        (state, session_id, last_content, lines),
+        (state, safe_session_id, last_content, lines),
         |(state, session_id, mut last_content, lines)| async move {
             // Poll every 300ms
             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1812,7 +1821,11 @@ async fn terminal_ws(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_terminal_ws(socket, state, session_id))
+    if !is_valid_session_id(&session_id) {
+        tracing::warn!("Rejected invalid session_id in terminal_ws: {:?}", session_id);
+    }
+    let safe_session_id = if is_valid_session_id(&session_id) { session_id } else { "invalid".to_string() };
+    ws.on_upgrade(move |socket| handle_terminal_ws(socket, state, safe_session_id))
 }
 
 async fn handle_terminal_ws(mut socket: WebSocket, state: Arc<AppState>, session_id: String) {
