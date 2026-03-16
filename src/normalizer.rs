@@ -622,6 +622,7 @@ async fn normalize_session(
         message_count: 0,
         last_memory_uuid: None,
         source: "claude".to_string(),
+        is_autoweb: false,
     };
 
     // Read main file
@@ -697,31 +698,90 @@ async fn normalize_session(
         meta.updated_at = last.timestamp.clone();
     }
 
+    // Detect autoweb sessions by checking first user message for boilerplate
+    let autoweb_prefixes = [
+        "You have a hard",
+        "You are an autonomous agent",
+    ];
+    let mut detected_autoweb = false;
+    for msg in &sorted_messages {
+        if msg.role == "user" {
+            for block in &msg.content {
+                if let ContentBlock::Text { text } = block {
+                    let trimmed = text.trim();
+                    for prefix in &autoweb_prefixes {
+                        if trimmed.starts_with(prefix) {
+                            detected_autoweb = true;
+                            break;
+                        }
+                    }
+                    if detected_autoweb { break; }
+                }
+            }
+            break; // Only check first user message
+        }
+    }
+    if detected_autoweb {
+        meta.is_autoweb = true;
+    }
+
     // Fallback title: use first user message text if no summary record set the title
+    // Skip autoweb boilerplate messages (system prompts injected as user text)
     if meta.title.is_none() {
+        let extract_title = |text: &str| -> Option<String> {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            // Skip known boilerplate
+            for prefix in &autoweb_prefixes {
+                if trimmed.starts_with(prefix) {
+                    return None;
+                }
+            }
+            let title = if trimmed.len() > 60 {
+                let mut end = 60;
+                while end > 0 && !trimmed.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &trimmed[..end])
+            } else {
+                trimmed.to_string()
+            };
+            // Take only the first line
+            let title = title.lines().next().unwrap_or(&title).to_string();
+            Some(title)
+        };
+
+        // First pass: try user messages (skipping boilerplate)
         for msg in &sorted_messages {
             if msg.role == "user" {
                 for block in &msg.content {
                     if let ContentBlock::Text { text } = block {
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            let title = if trimmed.len() > 60 {
-                                let mut end = 60;
-                                while end > 0 && !trimmed.is_char_boundary(end) {
-                                    end -= 1;
-                                }
-                                format!("{}...", &trimmed[..end])
-                            } else {
-                                trimmed.to_string()
-                            };
-                            // Take only the first line
-                            let title = title.lines().next().unwrap_or(&title).to_string();
+                        if let Some(title) = extract_title(text) {
                             meta.title = Some(title);
                             break;
                         }
                     }
                 }
                 if meta.title.is_some() { break; }
+            }
+        }
+
+        // Second pass: try first assistant message if no user title found
+        if meta.title.is_none() {
+            for msg in &sorted_messages {
+                if msg.role == "assistant" {
+                    for block in &msg.content {
+                        if let ContentBlock::Text { text } = block {
+                            if let Some(title) = extract_title(text) {
+                                meta.title = Some(title);
+                                break;
+                            }
+                        }
+                    }
+                    if meta.title.is_some() { break; }
+                }
             }
         }
     }

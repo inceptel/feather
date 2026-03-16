@@ -320,6 +320,7 @@ pub fn to_session_meta(codex_meta: &CodexSessionMeta, project_id: &str, message_
         message_count,
         last_memory_uuid: None,
         source: "codex".to_string(),
+        is_autoweb: false,
     }
 }
 

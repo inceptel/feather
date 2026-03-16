@@ -116,6 +116,7 @@ struct Session {
     #[serde(rename = "lastUpdated")]
     last_updated: String,    // ISO 8601 timestamp from file mtime
     source: String,          // "claude", "codex", or "pi"
+    is_autoweb: bool,        // Whether session was created by autoweb agent
 }
 
 /// A content block within a message (text, thinking, tool_use, tool_result)
@@ -654,6 +655,7 @@ async fn list_sessions(
             title,
             last_updated,
             source: meta.source,
+            is_autoweb: meta.is_autoweb,
         });
     }
 

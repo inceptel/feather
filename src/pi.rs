@@ -439,6 +439,7 @@ pub fn to_session_meta(pi_meta: &PiSessionMeta, project_id: &str, message_count:
         message_count,
         last_memory_uuid: None,
         source: "pi".to_string(),
+        is_autoweb: false,
     }
 }
 

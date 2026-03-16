@@ -73,6 +73,9 @@ pub struct SessionMeta {
     /// Source agent: "claude", "codex", or "pi"
     #[serde(default = "default_source")]
     pub source: String,
+    /// Whether this session was created by an autoweb agent
+    #[serde(default)]
+    pub is_autoweb: bool,
 }
 
 fn default_source() -> String {
@@ -265,6 +268,7 @@ impl SessionCache {
                     message_count: 0,
                     last_memory_uuid: None,
                     source: "claude".to_string(),
+                    is_autoweb: false,
                 },
                 messages: Vec::new(),
                 normalized_path: self.normalized_dir.join(format!("{}.jsonl", session_id)),
