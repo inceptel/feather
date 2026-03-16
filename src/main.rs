@@ -258,6 +258,22 @@ struct HealthResponse {
     active_tmux_sessions: usize,
 }
 
+/// Get current Unix epoch seconds without panicking.
+fn epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Get current Unix epoch milliseconds without panicking.
+fn epoch_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
 async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
@@ -293,7 +309,7 @@ async fn autoweb_reviews(Path(instance): Path<String>) -> impl IntoResponse {
         _ => return axum::response::Response::builder()
             .status(404)
             .body(axum::body::Body::from("not found"))
-            .unwrap(),
+            .expect("valid 404 response"),
     };
     let mut reviews = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -312,7 +328,7 @@ async fn autoweb_reviews(Path(instance): Path<String>) -> impl IntoResponse {
         .status(200)
         .header("content-type", "application/json")
         .body(axum::body::Body::from(json))
-        .unwrap()
+        .expect("valid 200 response")
 }
 
 // ============================================================================
@@ -395,12 +411,9 @@ async fn stream_events(
             tokio::time::sleep(Duration::from_secs(15)).await;
             let seq = s.next_seq();
             let event = SseEvent::Heartbeat {
-                timestamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                timestamp: epoch_secs(),
             };
-            let data = serde_json::to_string(&event).unwrap();
+            let data = serde_json::to_string(&event).unwrap_or_default();
             Some((
                 Ok(Event::default()
                     .event("heartbeat")
@@ -421,7 +434,7 @@ async fn stream_events(
                     SseEvent::Terminal { .. } => "terminal",
                     SseEvent::Status { .. } => "status",
                 };
-                let data = serde_json::to_string(&event).unwrap();
+                let data = serde_json::to_string(&event).unwrap_or_default();
                 Some((
                     Ok(Event::default()
                         .event(event_type)
@@ -441,7 +454,7 @@ async fn stream_events(
             status: "connected".to_string(),
             details: Some(format!("seq: {}", init_seq)),
         };
-        let data = serde_json::to_string(&event).unwrap();
+        let data = serde_json::to_string(&event).unwrap_or_default();
         Ok(Event::default()
             .event("status")
             .id(init_seq.to_string())
@@ -978,10 +991,7 @@ async fn codex_new(
             format!("feather-codex-{}", id)
         }
     } else {
-        let ts = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
+        let ts = epoch_millis();
         format!("feather-codex-{}", ts)
     };
 
@@ -1084,10 +1094,7 @@ async fn pi_new(
         let found = find_pi_session_file(&pi_sessions_dir, resume_uuid);
         match found {
             Some(path) => {
-                let ts = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis();
+                let ts = epoch_millis();
                 let sid = format!("feather-pi-{}", ts);
                 (sid, path, true)
             }
@@ -1120,10 +1127,7 @@ async fn pi_new(
                 format!("feather-pi-{}", id)
             }
         } else {
-            let ts = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
+            let ts = epoch_millis();
             format!("feather-pi-{}", ts)
         };
 
@@ -1424,10 +1428,7 @@ async fn upload_image(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
         })
         .unwrap_or("png");
 
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
+    let timestamp = epoch_millis();
     let filename = format!("screenshot-{}.{}", timestamp, ext);
     let filepath = upload_dir.join(&filename);
 
@@ -1497,10 +1498,7 @@ async fn upload_file(headers: HeaderMap, body: Bytes) -> Json<UploadResponse> {
     let safe_name = if safe_name.is_empty() { "file".to_string() } else { safe_name };
 
     // Add timestamp to prevent collisions
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
+    let timestamp = epoch_millis();
 
     // Build filename: timestamp-originalname.ext
     let filename = if safe_name.contains('.') {
@@ -1574,7 +1572,7 @@ async fn transcribe(mut multipart: Multipart) -> Json<TranscribeResponse> {
     let part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name("recording.webm")
         .mime_str("audio/webm")
-        .unwrap();
+        .expect("valid mime type");
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-1")
         .part("file", part);
@@ -1730,7 +1728,7 @@ async fn terminal_stream(
                 last_content = content.clone();
 
                 let event = SseEvent::Terminal { data: content };
-                let data = serde_json::to_string(&event).unwrap();
+                let data = serde_json::to_string(&event).unwrap_or_default();
 
                 Some((
                     Ok(Event::default().event("terminal").data(data)),
@@ -2313,8 +2311,8 @@ async fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("feather_rs=info".parse().unwrap())
-            .add_directive("tower_http=info".parse().unwrap()))
+            .add_directive("feather_rs=info".parse().expect("valid directive"))
+            .add_directive("tower_http=info".parse().expect("valid directive")))
         .init();
 
     let (event_tx, _) = broadcast::channel::<(u64, SseEvent)>(100);
@@ -2431,10 +2429,7 @@ async fn main() {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
             heartbeat_state.broadcast(SseEvent::Heartbeat {
-                timestamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
+                timestamp: epoch_secs(),
             });
         }
     });
@@ -2521,6 +2516,6 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("Feather-rs v{} listening on {}", env!("CARGO_PKG_VERSION"), addr);
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("failed to bind port");
+    axum::serve(listener, app).await.expect("server error");
 }
