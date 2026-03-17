@@ -568,9 +568,16 @@
         </div>
 
         <!-- Desktop session header bar -->
-        <div id="desktop-session-header" class="hidden md:hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10">
+        <div id="desktop-session-header" class="hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10" style="display:none">
+            <button id="desktop-star-btn" onclick="if(currentSessionId)toggleStarSession(event,currentSessionId)" class="shrink-0 text-sm leading-none text-smoke-6 hover:text-gold-9 transition-colors" title="Star session (S)" aria-label="Star session">&#9733;</button>
             <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate cursor-pointer" ondblclick="renameCurrentSession()" title="Double-click to rename"></span>
             <span id="desktop-session-meta" class="text-[10px] text-smoke-8 whitespace-nowrap shrink-0"></span>
+            <button id="desktop-search-btn" onclick="openChatSearch()" class="shrink-0 text-smoke-6 hover:text-smoke-11 transition-colors" title="Search in conversation (Ctrl+F)" aria-label="Search in conversation" style="opacity:0.4;padding:2px 4px;font-size:11px;line-height:1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
+            <button id="desktop-copy-link-btn" onclick="copyCurrentSessionLink()" class="shrink-0 ml-auto text-smoke-6 hover:text-smoke-11 transition-colors opacity-0 group-hover:opacity-100" title="Copy session link" aria-label="Copy link" style="opacity:0.4;padding:2px 4px;font-size:11px;line-height:1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </button>
         </div>
 
         <!-- In-chat search bar -->
@@ -767,6 +774,12 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle thinking blocks</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">T</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Star/unstar session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">S</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Rename session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">R</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Cycle filter (Mine/Auto/All)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">M</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Cycle sort order</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">O</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Hide session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">D</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Export session as Markdown</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">E</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -844,6 +857,7 @@
                         <div style="display:flex;gap:4px;" id="aw-tabs">
                             <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Feather</button>
                             <button onclick="switchAwTab('trading')" id="aw-tab-trading" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Trading</button>
+                            <button onclick="switchAwTab('frontend')" id="aw-tab-frontend" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Frontend</button>
                             <button onclick="switchAwTab('reviews')" id="aw-tab-reviews" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--gold-9);">Reviews</button>
                         </div>
                         <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
@@ -871,6 +885,7 @@
         const _awUrls = {
             feather: '/api/autoweb-results/feather',
             trading: '/api/autoweb-results/trading',
+            frontend: '/api/autoweb-results/frontend',
         };
 
         function switchAwTab(tab) {
@@ -927,7 +942,7 @@
                     }
                     body.innerHTML = rows.reverse().join('');
                     const total = keeps + reverts + crashes + skips;
-                    const label = {feather: 'Feather', dev: 'Dev', trading: 'Trading'}[_awActiveTab] || 'Feather';
+                    const label = {feather: 'Feather', dev: 'Dev', trading: 'Trading', frontend: 'Frontend'}[_awActiveTab] || 'Feather';
                     if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
                 })
                 .catch(() => {
@@ -1483,29 +1498,31 @@
             if (!header || !titleEl) return;
             if (title) {
                 titleEl.textContent = title;
-                // Build meta info: message count + relative time
+                titleEl.title = title + '\n(double-click to rename)';
+                // Build meta info: project folder, message count, relative time
                 let metaParts = [];
+                if (sessionInfo?.project) {
+                    const folderName = (FOLDERS.find(f => f.id === sessionInfo.project) || {}).name;
+                    if (folderName) metaParts.push(folderName);
+                }
                 if (sessionInfo?.message_count) {
                     metaParts.push(sessionInfo.message_count + ' msg');
                 }
                 if (sessionInfo?.lastUpdated) {
-                    const d = new Date(sessionInfo.lastUpdated);
-                    const now = new Date();
-                    const diffMs = now - d;
-                    const diffMin = Math.floor(diffMs / 60000);
-                    const diffHr = Math.floor(diffMs / 3600000);
-                    const diffDay = Math.floor(diffMs / 86400000);
-                    if (diffMin < 1) metaParts.push('just now');
-                    else if (diffMin < 60) metaParts.push(diffMin + 'm ago');
-                    else if (diffHr < 24) metaParts.push(diffHr + 'h ago');
-                    else metaParts.push(diffDay + 'd ago');
+                    metaParts.push(formatTime(sessionInfo.lastUpdated));
                 }
                 if (metaEl) metaEl.textContent = metaParts.join(' \u00b7 ');
-                header.classList.remove('hidden');
-                header.classList.add('md:flex');
+                // Update star button state
+                const starBtn = document.getElementById('desktop-star-btn');
+                if (starBtn && currentSessionId) {
+                    const isStarred = starredSessions.has(currentSessionId);
+                    starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
+                    starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
+                }
+                // Only show on desktop (md+, 768px+)
+                header.style.display = window.innerWidth >= 768 ? 'flex' : 'none';
             } else {
-                header.classList.add('hidden');
-                header.classList.remove('md:flex');
+                header.style.display = 'none';
                 titleEl.textContent = '';
                 if (metaEl) metaEl.textContent = '';
             }
@@ -1545,6 +1562,12 @@
             document.querySelectorAll('.session-filter-pill').forEach(b => b.classList.remove('active'));
             document.getElementById('sf-' + mode).classList.add('active');
             renderSessions();
+        }
+
+        function cycleSessionFilter() {
+            const modes = ['mine', 'auto', 'all'];
+            const idx = modes.indexOf(sessionFilterMode);
+            setSessionFilter(modes[(idx + 1) % modes.length]);
         }
 
         // Switch to prev/next session in the visible sidebar list (Alt+Up/Down)
@@ -1648,6 +1671,15 @@
             }
             try { localStorage.setItem('feather-starredSessions', JSON.stringify([...starredSessions])); } catch {}
             renderSessions();
+            // Update desktop header star button if this is the current session
+            if (sessionId === currentSessionId) {
+                const starBtn = document.getElementById('desktop-star-btn');
+                if (starBtn) {
+                    const isStarred = starredSessions.has(sessionId);
+                    starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
+                    starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
+                }
+            }
         }
         let activeTmuxPrefixes = new Set(); // Session ID prefixes with tmux
         let tmuxNameLookup = {};    // session prefix → tmux name
@@ -1665,6 +1697,20 @@
                     container.innerHTML = '<div class="text-xs text-smoke-8 italic px-1 py-2 text-center">Select a project</div>';
                 }
                 return;
+            }
+
+            // Show sessions-skeleton on first load (when no sessions cached yet)
+            if (allSessions.length === 0) {
+                const container = document.getElementById('sessions');
+                if (container && !container.querySelector('.sessions-skeleton')) {
+                    const widths = ['60%','85%','45%','72%','55%'];
+                    const skeletonItems = widths.map(w => `
+                        <div class="sessions-skeleton px-2 py-1.5 rounded">
+                            <div class="skeleton-line mb-1" style="width:${w}"></div>
+                            <div class="skeleton-line" style="width:30%;height:9px;opacity:0.5"></div>
+                        </div>`).join('');
+                    container.innerHTML = skeletonItems;
+                }
             }
 
             try {
@@ -1762,7 +1808,10 @@
             if (sfAll) sfAll.textContent = 'All' + (allCount ? ' ' + allCount : '');
 
             // Update mark-all-read bar
-            const unreadCount = allSessions.filter(s => {
+            const unreadBase = sessionFilterMode === 'mine' ? allSessions.filter(s => !isAutowebSession(s))
+                             : sessionFilterMode === 'auto' ? allSessions.filter(s => isAutowebSession(s))
+                             : allSessions;
+            const unreadCount = unreadBase.filter(s => {
                 const lv = sessionViewTimes[s.id];
                 return s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv)) && s.id !== currentSessionId;
             }).length;
@@ -1958,11 +2007,42 @@
             }
 
             container.innerHTML = html;
+            if (hasMore) setupLoadMoreSessionsObserver();
         }
 
         function loadMoreSessions() {
             sessionsDisplayCount += 50;
             renderSessions();
+        }
+
+        let loadEarlierObserver = null;
+        function setupLoadEarlierObserver() {
+            if (loadEarlierObserver) { loadEarlierObserver.disconnect(); loadEarlierObserver = null; }
+            const btn = document.getElementById('load-earlier-btn');
+            if (!btn) return;
+            loadEarlierObserver = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) {
+                    loadEarlierObserver.disconnect();
+                    loadEarlierObserver = null;
+                    renderEarlierMessages();
+                }
+            }, { threshold: 0.1 });
+            loadEarlierObserver.observe(btn);
+        }
+
+        let loadMoreSessionsObserver = null;
+        function setupLoadMoreSessionsObserver() {
+            if (loadMoreSessionsObserver) { loadMoreSessionsObserver.disconnect(); loadMoreSessionsObserver = null; }
+            const btn = document.querySelector('[onclick="loadMoreSessions()"]');
+            if (!btn) return;
+            loadMoreSessionsObserver = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) {
+                    loadMoreSessionsObserver.disconnect();
+                    loadMoreSessionsObserver = null;
+                    loadMoreSessions();
+                }
+            }, { threshold: 0.1 });
+            loadMoreSessionsObserver.observe(btn);
         }
 
         function renderRecentSessionCards() {
@@ -2104,12 +2184,19 @@
                 const now = new Date();
                 const diff = now - d;
                 const mins = Math.floor(diff / 60000);
-                const hours = Math.floor(diff / 3600000);
                 const days = Math.floor(diff / 86400000);
+                const weeks = Math.floor(diff / (7 * 86400000));
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterday = new Date(today.getTime() - 86400000);
                 if (mins < 1) return 'now';
                 if (mins < 60) return `${mins}m`;
-                if (hours < 24) return `${hours}h`;
-                return `${days}d`;
+                // Today: show actual time (e.g. "3:45 PM") — group header already says "Today"
+                if (d >= today) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                // Yesterday: show time only — group header says "Yesterday"
+                if (d >= yesterday) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                if (days < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+                if (days >= 365) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             } catch { return iso; }
         }
 
@@ -2532,6 +2619,12 @@
             connectToTerminal(name);
 
             loadSessions(); // Refresh sidebar
+
+            // For new/unknown sessions, start polling to discover the JSONL and begin tailing.
+            // Without this, chat stays blank until the user manually sends a message.
+            if (!currentSessionId) {
+                startHistoryPolling();
+            }
         }
 
         function showMessageSkeleton() {
@@ -2618,6 +2711,7 @@
                     loadMoreBtn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${earlierCount} earlier messages &mdash; tap to load</button>`;
                     loadMoreBtn.id = 'load-earlier-btn';
                     container.appendChild(loadMoreBtn);
+                    setupLoadEarlierObserver();
                     // Server-side pagination state
                     window._earlierMessages = null;
                     window._earlierMessagesBefore = earlierCount;
@@ -2733,6 +2827,7 @@
                     btn.id = 'load-earlier-btn';
                     btn.innerHTML = `<button onclick="renderEarlierMessages()" class="w-full sm:w-auto px-4 py-3 min-h-[44px] bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 text-smoke-10 rounded-lg text-sm transition-all font-medium">${remaining} earlier messages &mdash; tap to load</button>`;
                     container.insertBefore(btn, firstChild);
+                    setupLoadEarlierObserver();
                 }
 
                 // Move rendered chunk nodes before existing messages
@@ -3245,11 +3340,12 @@
 
         async function exportSessionMarkdown() {
             if (!currentSessionId || !currentFolder) return;
+            showToast('Exporting session...', 2000);
             try {
                 const res = await fetch(`/api/projects/${encodeURIComponent(currentFolder)}/sessions/${currentSessionId}/history?limit=10000`);
                 if (!res.ok) throw new Error('Failed to fetch');
                 const data = await res.json();
-                if (!data.messages || !data.messages.length) return;
+                if (!data.messages || !data.messages.length) { showToast('No messages to export'); return; }
 
                 const sessionTitle = allSessions.find(s => s.id === currentSessionId)?.title || 'Untitled';
                 let md = `# ${sessionTitle}\n\n`;
@@ -3286,8 +3382,10 @@
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
+                showToast(`Exported: ${a.download}`);
             } catch (e) {
                 console.error('Export failed:', e);
+                showToast('Export failed — see console for details');
             }
         }
 
@@ -4673,6 +4771,7 @@
         let tailReconnectTimer = null;  // Guard: prevent overlapping reconnection attempts
         let tailHeartbeatTimer = null;  // Heartbeat: detect zombie SSE connections
         const TAIL_HEARTBEAT_TIMEOUT = 60000;  // 60s without any SSE event = zombie
+        let sendWatchdogTimer = null;  // Watchdog: if SSE is open but silent after sending, fall back to polling
 
         function resetTailHeartbeat() {
             clearTimeout(tailHeartbeatTimer);
@@ -4714,6 +4813,7 @@
 
             tailingEventSource.addEventListener('lines', (event) => {
                 resetTailHeartbeat();  // Got data — connection is alive
+                clearTimeout(sendWatchdogTimer); sendWatchdogTimer = null;  // SSE delivered, cancel polling fallback
                 try {
                     const events = JSON.parse(event.data);
                     // Sort events by timestamp with role tiebreaker (user before assistant)
@@ -4844,7 +4944,7 @@
                 console.log('Tail SSE error, will auto-reconnect:', event);
             });
 
-            tailingEventSource.onopen = () => { tailReconnectDelay = 1000; resetTailHeartbeat(); };
+            tailingEventSource.onopen = () => { tailReconnectDelay = 1000; resetTailHeartbeat(); clearInterval(historyPollInterval); historyPollInterval = null; };
             tailingEventSource.onerror = () => {
                 // EventSource auto-reconnects to the ORIGINAL URL, ignoring cursor updates in data.
                 // We must take over reconnection to use the latest tailCursor.
@@ -4872,6 +4972,8 @@
             tailHeartbeatTimer = null;
             clearTimeout(tailReconnectTimer);
             tailReconnectTimer = null;
+            clearTimeout(sendWatchdogTimer);
+            sendWatchdogTimer = null;
             if (tailingEventSource) {
                 tailingEventSource.close();
                 tailingEventSource = null;
@@ -5826,6 +5928,17 @@
                     const isSSEOpen = tailingEventSource && tailingEventSource.readyState === EventSource.OPEN;
                     if (!isSSEOpen) {
                         startHistoryPolling();
+                    } else {
+                        // SSE appears open — but it may be a zombie. Start a 10s watchdog:
+                        // if no SSE events arrive within 10s of sending, fall back to polling.
+                        clearTimeout(sendWatchdogTimer);
+                        sendWatchdogTimer = setTimeout(() => {
+                            sendWatchdogTimer = null;
+                            if (!historyPollInterval) {
+                                console.warn('Send watchdog: SSE open but no response in 10s — starting polling fallback');
+                                startHistoryPolling();
+                            }
+                        }, 10000);
                     }
                 }
             } catch (e) {
@@ -6189,8 +6302,15 @@
                 };
 
                 terminalWS.onerror = () => {
+                    // Fall back to SSE read-only mode on WS failure (e.g. iPad Safari)
+                    terminalInteractive = false;
+                    localStorage.setItem('terminalInteractive', 'false');
+                    updateInteractiveButton();
                     if (term) {
-                        term.writeln('\n\x1b[31mWebSocket error\x1b[0m');
+                        term.writeln('\n\x1b[33mWebSocket unavailable — switching to read-only mode\x1b[0m');
+                    }
+                    if (currentTmuxSession) {
+                        setTimeout(() => connectToTerminal(currentTmuxSession), 500);
                     }
                 };
 
@@ -6530,6 +6650,7 @@
                 <div class="ctx-item" onclick="ctxStar()">${starIcon} ${starLabel}</div>
                 <div class="ctx-item" onclick="ctxOpenNewTab()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open in new tab</div>
                 <div class="ctx-item" onclick="ctxRename()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> Rename</div>
+                <div class="ctx-item" onclick="ctxCopyLink()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Copy link</div>
                 <div class="ctx-item" onclick="ctxCopyId()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy session ID</div>
                 <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
                 <div class="ctx-sep"></div>
@@ -6562,6 +6683,30 @@
                 }).catch(() => {});
             }
             closeSessionContextMenu();
+        }
+
+        function ctxCopyLink() {
+            if (_ctxSessionId) {
+                const s = allSessions.find(s => s.id === _ctxSessionId);
+                const folder = s && s.project ? s.project : (currentFolder || '');
+                const hash = folder ? `session=${encodeURIComponent(_ctxSessionId)}&folder=${encodeURIComponent(folder)}` : `session=${encodeURIComponent(_ctxSessionId)}`;
+                const url = `${location.origin}${location.pathname}#${hash}`;
+                navigator.clipboard.writeText(url).then(() => {
+                    showToast('Session link copied');
+                }).catch(() => {});
+            }
+            closeSessionContextMenu();
+        }
+
+        function copyCurrentSessionLink() {
+            if (!currentSessionId) return;
+            const s = allSessions.find(s => s.id === currentSessionId);
+            const folder = s && s.project ? s.project : (currentFolder || '');
+            const hash = folder ? `session=${encodeURIComponent(currentSessionId)}&folder=${encodeURIComponent(folder)}` : `session=${encodeURIComponent(currentSessionId)}`;
+            const url = `${location.origin}${location.pathname}#${hash}`;
+            navigator.clipboard.writeText(url).then(() => {
+                showToast('Session link copied');
+            }).catch(() => {});
         }
 
         function ctxOpenNewTab() {
@@ -6683,19 +6828,21 @@
             { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
             { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
             { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
-            { label: 'Cycle sort mode', shortcut: '', action: () => cycleSessionSort() },
+            { label: 'Cycle session filter (Mine/Auto/All)', shortcut: 'M', action: () => cycleSessionFilter() },
+            { label: 'Hide current session', shortcut: 'D', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } } },
+            { label: 'Cycle sort mode (Latest/Oldest/Most messages)', shortcut: 'O', action: () => cycleSessionSort() },
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
-            { label: 'Star/unstar current session', shortcut: '', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
+            { label: 'Star/unstar current session', shortcut: 'S', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
             { label: 'Toggle zen mode', shortcut: 'Z', action: () => toggleZenMode() },
             { label: 'Focus mode — hide tool calls', shortcut: 'F', action: () => toggleFocusMode() },
             { label: 'Toggle thinking blocks', shortcut: 'T', action: () => toggleAllThinking() },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
-            { label: 'Export session as Markdown', shortcut: '', action: () => exportSessionMarkdown() },
+            { label: 'Export session as Markdown', shortcut: 'E', action: () => { if (currentSessionId) exportSessionMarkdown(); else showToast('No session selected'); } },
             { label: 'Mark all sessions read', shortcut: '', action: () => markAllSessionsRead() },
             { label: 'Hide current session', shortcut: '', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } else { showToast('No session selected'); } } },
             { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
-            { label: 'Rename current session', shortcut: '', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
+            { label: 'Rename current session', shortcut: 'R', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
             { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
                 if ('Notification' in window && Notification.permission === 'default') {
@@ -6895,6 +7042,56 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     toggleAllThinking();
+                }
+            }
+            // S — star/unstar current session
+            if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); }
+                    else { showToast('No session selected'); }
+                }
+            }
+            // R — rename current session
+            if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    renameCurrentSession();
+                }
+            }
+            // M — cycle session filter (Mine → Auto → All → Mine)
+            if (e.key === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    cycleSessionFilter();
+                }
+            }
+            // D — hide current session
+            if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); }
+                    else { showToast('No session selected'); }
+                }
+            }
+            if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) exportSessionMarkdown();
+                    else showToast('No session selected');
+                }
+            }
+            // O — cycle session sort order (order)
+            if (e.key === 'o' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    cycleSessionSort();
                 }
             }
         });
@@ -7215,9 +7412,10 @@
             var etTime = new Date().toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
             el.textContent = "AW " + etTime + " ET" + (keeps != null ? " \u2022 " + keeps + " fixes" : "");
         }
-        // Fetch live keeps count from all autoweb instances (feather + trading combined)
+        // Fetch live keeps count from all autoweb instances (feather + frontend + trading combined)
         Promise.all([
             fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).catch(function() { return ''; }),
+            fetch('/api/autoweb-results/frontend').then(function(r) { return r.text(); }).catch(function() { return ''; }),
             fetch('/api/autoweb-results/trading').then(function(r) { return r.text(); }).catch(function() { return ''; })
         ]).then(function(texts) {
             var keeps = 0;

@@ -440,7 +440,11 @@ fn scan_normalized_dir(cache: &Arc<SessionCache>, config: &WatchConfig) -> usize
                         if let ContentBlock::Text { text } = block {
                             let t = text.lines().next().unwrap_or("").trim();
                             if !t.is_empty() && t.len() > 5 {
-                                let truncated = if t.len() > 60 { &t[..60] } else { t };
+                                let truncated = if t.len() > 60 {
+                                    let mut end = 60;
+                                    while end > 0 && !t.is_char_boundary(end) { end -= 1; }
+                                    &t[..end]
+                                } else { t };
                                 title = Some(truncated.to_string());
                                 break;
                             }
