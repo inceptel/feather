@@ -1579,11 +1579,8 @@
         // ========== Session Filter ==========
         let sessionFilterMode = localStorage.getItem('feather-session-filter') || 'mine';
         function isAutowebSession(s) {
-            // Primary: server-side is_autoweb flag (set by normalizer detecting boilerplate prompts)
-            if (s.is_autoweb) return true;
-            // Minimal fallback for sessions without metadata (e.g. prod binary without is_autoweb support)
-            const t = s.title || '';
-            return /\bautoweb\b/i.test(t) || /\bDo exactly ONE iteration\b/i.test(t);
+            // Use server-side is_autoweb flag exclusively — backend normalizer classifies sessions accurately
+            return !!s.is_autoweb;
         }
 
         function setSessionFilter(mode) {
