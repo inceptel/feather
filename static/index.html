@@ -1515,6 +1515,34 @@
             }
         }
 
+        // Mobile long-press on session items to show context menu
+        (function() {
+            let lpTimer = null, lpSessionId = null, lpMoved = false;
+            const LP_DELAY = 550;
+            document.addEventListener('touchstart', function(e) {
+                const item = e.target.closest('.session-item[data-ctx-id]');
+                if (!item) return;
+                lpMoved = false;
+                lpSessionId = item.dataset.ctxId;
+                const touch = e.touches[0];
+                const syntheticEvent = { preventDefault: () => {}, stopPropagation: () => {}, clientX: touch.clientX, clientY: touch.clientY };
+                lpTimer = setTimeout(function() {
+                    if (!lpMoved && lpSessionId) {
+                        showSessionContextMenu(syntheticEvent, lpSessionId);
+                        if (navigator.vibrate) navigator.vibrate(30);
+                    }
+                    lpTimer = null;
+                }, LP_DELAY);
+            }, { passive: true });
+            document.addEventListener('touchmove', function() {
+                lpMoved = true;
+                if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+            }, { passive: true });
+            document.addEventListener('touchend', function() {
+                if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+            }, { passive: true });
+        })();
+
         // Mobile swipe gestures to open/close sidebar
         (function() {
             let swipeTouchStartX = 0, swipeTouchStartY = 0;
@@ -2077,7 +2105,7 @@
 
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
+                         data-ctx-id="${s.id}" onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
