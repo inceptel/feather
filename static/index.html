@@ -318,6 +318,8 @@
         .nav-pill-tao .tao-pnl { font-size: 8px; margin-left: 3px; font-weight: 700; }
         .nav-pill-tao .tao-pnl.pos { color: #7fd88f; }
         .nav-pill-tao .tao-pnl.neg { color: #e06c75; }
+        .nav-pill-env { color: #73b8ff; }
+        .nav-pill-env:hover { background: rgba(115,184,255,0.12); border-color: rgba(115,184,255,0.3); }
         .search-highlight { background: rgba(250, 178, 131, 0.3); color: var(--smoke-12); border-radius: 2px; padding: 0 1px; }
         /* In-chat message search */
         .chat-search-mark { background: rgba(250, 178, 131, 0.35); color: var(--smoke-12); border-radius: 2px; padding: 0 1px; }
@@ -548,6 +550,7 @@
             <a href="/dashboards/mm-dashboard.html" target="_blank" class="nav-pill nav-pill-gold">MM</a>
             <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
+            <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" target="_blank" title="Switch environment" style="display:none;"></a>
             <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
@@ -4874,6 +4877,22 @@
             currentTailProjectId = null;
             currentTailSessionId = null;
         }
+
+        // ========== Env Pill ==========
+        (function() {
+            const port = parseInt(location.port || (location.protocol === 'https:' ? 443 : 80));
+            const envPill = document.getElementById('env-pill');
+            if (!envPill) return;
+            if (port === 4850) {
+                envPill.href = 'http://localhost:4860';
+                envPill.textContent = 'DEV';
+                envPill.style.display = '';
+            } else if (port === 4860) {
+                envPill.href = 'http://localhost:4850';
+                envPill.textContent = 'PROD';
+                envPill.style.display = '';
+            }
+        })();
 
         // ========== New Session ==========
         async function newPiSession() {
