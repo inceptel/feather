@@ -4613,8 +4613,12 @@
                         // If we already have a session and are still polling, switch to tailing
                         if (targetSession && currentSessionId) {
                             console.log('Switching to SSE tailing for session:', currentSessionId);
+                            // Preserve tailCursor before stopHistoryPolling() clears it.
+                            // Without this, SSE restarts from end-of-file and misses messages
+                            // that arrived while SSE was in CONNECTING state (CRITICAL #5 fix).
+                            const savedCursor = tailCursor;
                             stopHistoryPolling();
-                            startSessionTailing(projectId, currentSessionId);
+                            startSessionTailing(projectId, currentSessionId, savedCursor);
                             return;
                         }
                     }
