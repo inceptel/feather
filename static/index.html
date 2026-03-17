@@ -2572,7 +2572,7 @@
             showMessageSkeleton();
 
             try {
-                const INITIAL_LIMIT = 200;
+                const INITIAL_LIMIT = 50;
                 const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/sessions/${sessionId}/history?limit=${INITIAL_LIMIT}`);
                 if (!res.ok) { console.error('API error:', res.status); throw new Error('API error ' + res.status); }
                 const data = await res.json();
