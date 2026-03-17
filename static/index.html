@@ -4694,6 +4694,7 @@
 
             currentTailProjectId = projectId;
             currentTailSessionId = sessionId;
+            tailCursor = cursor;  // Store cursor immediately so reconnects use the right position
 
             // Build URL with optional cursor for resumption
             let url = `/api/tail/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`;
