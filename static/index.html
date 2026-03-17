@@ -520,7 +520,9 @@
                        class="w-full pl-8 pr-8 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-xs placeholder-smoke-8 focus:outline-none focus:border-gold-9/50 focus:ring-1 focus:ring-gold-9/30">
                 <kbd id="search-shortcut-hint" class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-smoke-7 bg-smoke-4 border border-smoke-5 rounded px-1.5 py-0.5 font-mono leading-none pointer-events-none">/</kbd>
                 <button id="search-clear-btn" onclick="clearSessionSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 text-smoke-7 hover:text-smoke-11 transition-colors hidden" title="Clear search" aria-label="Clear search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                <svg id="search-spinner" class="absolute right-2 top-1/2 -translate-y-1/2 text-gold-9 hidden animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
             </div>
+            <div id="search-result-count" class="hidden text-[10px] text-smoke-6 px-1 mt-1"></div>
             <!-- Session filter toggle -->
             <div id="session-filter-bar" class="flex gap-1 mt-1.5">
                 <button onclick="setSessionFilter('mine')" id="sf-mine" class="session-filter-pill active flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">Mine</button>
@@ -552,17 +554,18 @@
 
         <!-- Bottom bar -->
         <div id="sidebar-nav-bar" class="px-2 py-2 border-t border-smoke-4 flex items-center gap-1 flex-wrap">
-            <a href="/terminal/" target="_blank" class="nav-pill">Term</a>
-            <a href="/code/" target="_blank" class="nav-pill">Code</a>
-            <a href="/jupyter/" target="_blank" class="nav-pill">Jupyter</a>
+            <a href="/terminal/" target="_blank" class="hidden md:inline-flex nav-pill">Term</a>
+            <a href="/code/" target="_blank" class="hidden md:inline-flex nav-pill">Code</a>
+            <a href="/jupyter/" target="_blank" class="hidden md:inline-flex nav-pill">Jupyter</a>
             <a href="/files/" target="_blank" class="nav-pill">Files</a>
             <a href="/dashboards/" target="_blank" class="nav-pill">Dash</a>
-            <a href="/dashboards/mm-dashboard.html" target="_blank" class="nav-pill nav-pill-gold">MM</a>
-            <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
+            <a href="/dashboards/mm-dashboard.html" target="_blank" class="hidden md:inline-flex nav-pill nav-pill-gold">MM</a>
+            <a href="/twap" target="_blank" class="hidden md:inline-flex nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
             <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" title="Switch environment"></a>
             <button id="promote-btn" onclick="runPromote()" class="nav-pill font-semibold" style="display:none;background:var(--teal-9);color:#fff;" title="Promote dev → prod">↑ Promote</button>
             <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
+            <button onclick="newClaudeSession()" class="md:hidden nav-pill font-semibold" id="mobile-new-session-btn" title="New Claude session" style="background:var(--gold-9);color:var(--smoke-1);min-height:32px;min-width:44px;">+ New</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
             <span id="sse-event-id" class="font-mono text-[9px] text-smoke-7 hidden md:inline">-</span>
@@ -576,6 +579,9 @@
         <!-- Mobile session header -->
         <div id="mobile-session-header" class="md:hidden hidden fixed top-0 left-0 right-0 z-40 bg-smoke-1/95 backdrop-blur-sm border-b border-smoke-4 px-14 py-2.5 min-h-[48px] flex items-center gap-2">
             <span id="mobile-session-name" class="text-xs font-medium text-smoke-10 truncate flex-1"></span>
+            <button id="mobile-search-btn" onclick="openChatSearch()" class="shrink-0 text-smoke-6 hover:text-smoke-11 transition-colors px-2 py-1 min-h-[44px] flex items-center" title="Search in conversation" aria-label="Search in conversation">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
             <button id="mobile-star-btn" onclick="if(currentSessionId)toggleStarSession(event,currentSessionId)" class="shrink-0 text-base leading-none text-smoke-6 hover:text-gold-9 transition-colors px-2 py-1 min-h-[44px] flex items-center" title="Star session" aria-label="Star session">&#9733;</button>
         </div>
 
@@ -1568,6 +1574,41 @@
             }, { passive: true });
         })();
 
+        function formatDuration(secs) {
+            if (!secs || secs < 60) return null;
+            const h = Math.floor(secs / 3600);
+            const m = Math.floor((secs % 3600) / 60);
+            if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
+            return `${m}m`;
+        }
+
+        async function fetchSessionStats(sessionId, projectId) {
+            if (!sessionId) return;
+            try {
+                const resp = await fetch(`/api/sessions/${sessionId}/stats`);
+                if (!resp.ok) return;
+                const data = await resp.json();
+                // Update meta element if still showing same session
+                if (currentSessionId !== sessionId) return;
+                const metaEl = document.getElementById('desktop-session-meta');
+                if (!metaEl) return;
+                const dur = formatDuration(data.duration_secs);
+                if (dur && metaEl.textContent && !metaEl.textContent.includes('·' + dur) && !metaEl.dataset.durAdded) {
+                    metaEl.textContent = metaEl.textContent + ' · ' + dur;
+                    metaEl.dataset.durAdded = '1';
+                }
+                // Set tooltip with role breakdown
+                if (data.by_role) {
+                    const parts = [];
+                    if (data.by_role.assistant) parts.push(data.by_role.assistant + ' assistant');
+                    if (data.by_role.user) parts.push(data.by_role.user + ' user');
+                    if (data.tool_calls) parts.push(data.tool_calls + ' tool calls');
+                    if (data.char_count) parts.push(Math.round(data.char_count / 1000) + 'k chars');
+                    if (parts.length) metaEl.title = parts.join(' · ');
+                }
+            } catch(e) {}
+        }
+
         function updateMobileSessionHeader(title) {
             const header = document.getElementById('mobile-session-header');
             const nameEl = document.getElementById('mobile-session-name');
@@ -1607,7 +1648,11 @@
                 if (sessionInfo?.lastUpdated) {
                     metaParts.push(formatTime(sessionInfo.lastUpdated));
                 }
-                if (metaEl) metaEl.textContent = metaParts.join(' \u00b7 ');
+                if (metaEl) { metaEl.textContent = metaParts.join(' \u00b7 '); delete metaEl.dataset.durAdded; }
+                // Fetch stats to add duration (async, non-blocking)
+                const _statsId = sessionInfo?.id || currentSessionId;
+                const _statsProj = sessionInfo?.project || currentSessionProjectId;
+                if (_statsId && _statsProj) setTimeout(() => fetchSessionStats(_statsId, _statsProj), 50);
                 // Update star button state
                 const starBtn = document.getElementById('desktop-star-btn');
                 if (starBtn && currentSessionId) {
@@ -1823,7 +1868,12 @@
         }
         function getSessionTitle(s) {
             if (!s) return 'Untitled';
-            return sessionRenames[s.id] || s.title || 'Untitled';
+            let raw = sessionRenames[s.id] || s.title || '';
+            // For command-message/command-name, keep inner text (strip only tags, not content)
+            raw = raw.replace(/<\/?(command-message|command-name)[^>]*>/gi, '');
+            // Strip remaining system tags (e.g. system-reminder) including their content
+            const clean = stripSystemTags(raw).trim();
+            return clean || 'Untitled';
         }
         function toggleStarSession(e, sessionId) {
             e.stopPropagation();
@@ -2017,7 +2067,16 @@
                 sessions = sessions.filter(s => isAutowebSession(s));
             }
 
-            if (q) {
+            if (searchApiResults !== null) {
+                // Use server-side search results (searches message content too)
+                // Apply filter mode so Mine/Auto/All is respected even in search
+                sessions = searchApiResults;
+                if (sessionFilterMode === 'mine') {
+                    sessions = sessions.filter(s => !isAutowebSession(s));
+                } else if (sessionFilterMode === 'auto') {
+                    sessions = sessions.filter(s => isAutowebSession(s));
+                }
+            } else if (q) {
                 sessions = sessions.filter(s =>
                     (s.title || '').toLowerCase().includes(q) ||
                     s.id.toLowerCase().includes(q)
@@ -2033,7 +2092,8 @@
             // 'latest' is the default order from API (newest first), no sort needed
 
             // Sort starred sessions to the top (preserving relative order within each group)
-            if (starredSessions.size > 0) {
+            // Skip in search mode — API returns results sorted by relevance, don't break that order
+            if (starredSessions.size > 0 && searchApiResults === null) {
                 const starred = sessions.filter(s => starredSessions.has(s.id));
                 const unstarred = sessions.filter(s => !starredSessions.has(s.id));
                 sessions = [...starred, ...unstarred];
@@ -2041,7 +2101,11 @@
 
             if (!sessions.length) {
                 let emptyMsg = 'No sessions';
-                if (q) {
+                if (searchApiResults !== null) {
+                    const filterLabel = sessionFilterMode === 'mine' ? ' in Mine' : sessionFilterMode === 'auto' ? ' in Auto' : '';
+                    emptyMsg = 'No results for "' + q.replace(/</g,'&lt;') + '"' + filterLabel
+                        + (sessionFilterMode !== 'all' ? '<br><span class="cursor-pointer underline" onclick="setSessionFilter(\'all\')">Search all sessions</span>' : '');
+                } else if (q) {
                     emptyMsg = 'No sessions matching "' + q.replace(/</g,'&lt;') + '"';
                 } else if (sessionFilterMode === 'mine') {
                     emptyMsg = 'No manual sessions in this project<br><span class="cursor-pointer underline" onclick="setSessionFilter(\'all\')">Show all sessions</span>';
@@ -2062,7 +2126,11 @@
                 if (d >= today) return 'Today';
                 if (d >= yesterday) return 'Yesterday';
                 if (d >= weekAgo) return 'This Week';
-                return 'Older';
+                const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                if (d >= thisMonth) return 'This Month';
+                if (d >= lastMonth) return lastMonth.toLocaleDateString('en-US', { month: 'long' });
+                return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
             }
 
             function renderSessionItem(s) {
@@ -2080,7 +2148,7 @@
                 const isUnread = !isSelected && s.lastUpdated && (!lastViewed || new Date(s.lastUpdated) > new Date(lastViewed));
 
                 const dot = hasTmux
-                    ? '<span class="w-2 h-2 rounded-full bg-apple-9 shadow-sm shadow-apple-9/50 shrink-0" title="Active (tmux)"></span>'
+                    ? '<span class="w-2 h-2 rounded-full bg-apple-9 shadow-sm shadow-apple-9/50 live-dot shrink-0" title="Active (tmux)"></span>'
                     : '<span class="w-2 h-2 rounded-full bg-smoke-6 shrink-0" title="Inactive"></span>';
 
                 const onclick = isTerminalSession
@@ -2103,6 +2171,9 @@
                 const sessionFolderName = s.project !== currentFolder ? (FOLDERS.find(f => f.id === s.project)?.name || s.project?.split('-').filter(Boolean).pop() || '') : '';
                 const folderBadge = sessionFolderName ? `<span class="text-smoke-8">&middot;</span><span class="text-smoke-5 truncate max-w-[60px]" title="${escapeHtml(sessionFolderName)}">${escapeHtml(sessionFolderName)}</span>` : '';
 
+                // Only show snippet for content matches (start with '...') — title-only snippets are redundant with the title above
+                const snippetLine = (s._snippet && s._snippet.startsWith('...')) ? `<div class="text-[10px] text-smoke-6 line-clamp-2 leading-tight mt-0.5">${highlightSearch(s._snippet, currentSearchQuery)}</div>` : '';
+
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
                          data-ctx-id="${s.id}" onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
@@ -2117,6 +2188,7 @@
                                     ${folderBadge}
                                     ${unreadDot}
                                 </div>
+                                ${snippetLine}
                             </div>
                             ${starBtn}
                         </div>
@@ -2146,24 +2218,28 @@
             let html = '';
             let lastGroup = '';
             let passedStarred = false;
+            const isSearchMode = searchApiResults !== null;
             for (const s of visible) {
                 const isStarred = starredSessions.has(s.id);
-                if (isStarred && !passedStarred) {
-                    if (lastGroup !== 'Starred') {
-                        html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
-                            <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>${starredCount > 0 ? `<span class="text-[9px] text-gold-9/60 ml-1">${starredCount}</span>` : ''}
-                        </div>`;
-                        lastGroup = 'Starred';
-                    }
-                } else {
-                    passedStarred = true;
-                    const group = getTimeGroup(s.lastUpdated);
-                    if (group !== lastGroup) {
-                        const cnt = groupCounts[group] || 0;
-                        html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
-                            <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>${cnt > 0 ? `<span class="text-[9px] text-smoke-7/60 ml-1">${cnt}</span>` : ''}
-                        </div>`;
-                        lastGroup = group;
+                if (!isSearchMode) {
+                    // Normal mode: show time/starred group headers
+                    if (isStarred && !passedStarred) {
+                        if (lastGroup !== 'Starred') {
+                            html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
+                                <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>${starredCount > 0 ? `<span class="text-[9px] text-gold-9/60 ml-1">${starredCount}</span>` : ''}
+                            </div>`;
+                            lastGroup = 'Starred';
+                        }
+                    } else {
+                        passedStarred = true;
+                        const group = getTimeGroup(s.lastUpdated);
+                        if (group !== lastGroup) {
+                            const cnt = groupCounts[group] || 0;
+                            html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
+                                <span class="text-[9px] font-medium uppercase tracking-widest text-smoke-7">${group}</span>${cnt > 0 ? `<span class="text-[9px] text-smoke-7/60 ml-1">${cnt}</span>` : ''}
+                            </div>`;
+                            lastGroup = group;
+                        }
                     }
                 }
                 html += renderSessionItem(s);
@@ -2223,8 +2299,12 @@
             // Only show when empty state is visible (no session selected)
             const emptyState = document.getElementById('empty-state');
             if (!emptyState || emptyState.classList.contains('hidden')) return;
-            // Get top 3 non-autoweb sessions (user's own sessions)
-            const recent = allSessions.filter(s => !isAutowebSession(s)).slice(0, 3);
+            // Get top 3 recently visited sessions (from recentSessionIds), falling back to newest
+            let recent = recentSessionIds
+                .map(id => allSessions.find(s => s.id === id))
+                .filter(s => s && !isAutowebSession(s))
+                .slice(0, 3);
+            if (!recent.length) recent = allSessions.filter(s => !isAutowebSession(s)).slice(0, 3);
             if (!recent.length) { container.innerHTML = ''; return; }
             let html = '<div class="text-[10px] uppercase tracking-widest text-smoke-7 mb-2">Recent sessions</div>';
             recent.forEach(s => {
@@ -2283,11 +2363,51 @@
 
         let currentSearchQuery = '';
         let _kbHighlightIdx = -1;
+        let searchApiResults = null;
+        let searchDebounceTimer = null;
+
+        async function performApiSearch(query) {
+            const spinner = document.getElementById('search-spinner');
+            const clearBtn = document.getElementById('search-clear-btn');
+            const countEl = document.getElementById('search-result-count');
+            if (spinner) { spinner.classList.remove('hidden'); if (clearBtn) clearBtn.classList.add('hidden'); }
+            if (countEl) countEl.classList.add('hidden');
+            try {
+                const resp = await fetch('/api/search?q=' + encodeURIComponent(query) + '&limit=30');
+                const data = await resp.json();
+                // Match results to allSessions, attach snippet
+                searchApiResults = data.results.map(r => {
+                    const session = allSessions.find(s => s.id === r.session_id) || {
+                        id: r.session_id, project: r.project, title: r.title,
+                        lastUpdated: r.updated_at, message_count: r.message_count, source: 'claude'
+                    };
+                    return {...session, _snippet: r.snippet, _score: r.score};
+                });
+                if (countEl) {
+                    const n = searchApiResults.length;
+                    const total = data.total || n;
+                    if (n === 0) {
+                        countEl.textContent = 'No results';
+                    } else if (total > n) {
+                        countEl.textContent = `${n} of ${total} results`;
+                    } else {
+                        countEl.textContent = `${n} result${n === 1 ? '' : 's'}`;
+                    }
+                    countEl.classList.remove('hidden');
+                }
+                renderSessions();
+            } catch(e) {
+                searchApiResults = null;
+                if (countEl) countEl.classList.add('hidden');
+                renderSessions();
+            } finally {
+                if (spinner) { spinner.classList.add('hidden'); if (clearBtn && currentSearchQuery) clearBtn.classList.remove('hidden'); }
+            }
+        }
 
         function filterSessions(query) {
             currentSearchQuery = query;
             _kbHighlightIdx = -1;
-            renderSessions();
             // Show/hide clear button
             const clearBtn = document.getElementById('search-clear-btn');
             const hint = document.getElementById('search-shortcut-hint');
@@ -2298,6 +2418,23 @@
                 } else {
                     clearBtn.classList.add('hidden');
                 }
+            }
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            if (query.length >= 3) {
+                searchDebounceTimer = setTimeout(() => performApiSearch(query), 300);
+            } else {
+                searchApiResults = null;
+                const countEl = document.getElementById('search-result-count');
+                if (countEl) {
+                    if (query.length > 0) {
+                        const need = 3 - query.length;
+                        countEl.textContent = `Type ${need} more character${need === 1 ? '' : 's'} to search`;
+                        countEl.classList.remove('hidden');
+                    } else {
+                        countEl.classList.add('hidden');
+                    }
+                }
+                renderSessions();
             }
         }
 
@@ -2312,6 +2449,8 @@
             if (hint) hint.style.display = '';
             const clearBtn = document.getElementById('search-clear-btn');
             if (clearBtn) clearBtn.classList.add('hidden');
+            const countEl = document.getElementById('search-result-count');
+            if (countEl) countEl.classList.add('hidden');
         }
 
         function getVisibleSessionItems() {
@@ -2331,6 +2470,12 @@
         }
 
         function handleSessionSearchKeydown(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                clearSessionSearch();
+                document.getElementById('session-search')?.blur();
+                return;
+            }
             const items = getVisibleSessionItems();
             if (!items.length) return;
             if (e.key === 'ArrowDown') {
@@ -2577,6 +2722,11 @@
             // Load history immediately so user sees the conversation
             const historyResult = await loadSessionHistory(projectId, sessionId);
             const historyCursor = historyResult?.cursor || null;
+
+            // If user selected this session from search results, auto-open in-chat search
+            if (currentSearchQuery) {
+                setTimeout(() => openChatSearch(currentSearchQuery), 150);
+            }
 
             // Spawn Claude CLI with --resume in a tmux session
             try {
@@ -2880,7 +3030,7 @@
                 console.log('Tracked', renderedUuids.size, 'UUIDs from history (server-paginated, total:', data.total, ')');
 
                 container.innerHTML = '';
-                toolBlocksCollapsed = false;
+                toolBlocksCollapsed = true;
                 _msgNavIdx = -1;
                 updateToolsToggleButton();
                 const allMessages = data.messages;
@@ -4045,7 +4195,7 @@
             updateFocusModeButton();
         }
 
-        let thinkingBlocksCollapsed = false;
+        let thinkingBlocksCollapsed = window.innerWidth < 768;
 
         function addThinkingBlock(text) {
             const container = document.getElementById('message-container');
@@ -4097,7 +4247,7 @@
             updateThinkingToggleButton();
         }
 
-        let toolBlocksCollapsed = false;
+        let toolBlocksCollapsed = true;
 
         function toggleAllTools() {
             toolBlocksCollapsed = !toolBlocksCollapsed;
@@ -4179,15 +4329,19 @@
         let _chatSearchMarks = [];
         let _chatSearchIdx = -1;
 
-        function openChatSearch() {
+        function openChatSearch(initialQuery = '') {
             const bar = document.getElementById('chat-search-bar');
             if (!bar) return;
             bar.classList.remove('hidden');
             const input = document.getElementById('chat-search-input');
-            input.value = '';
-            input.focus();
+            input.value = initialQuery || '';
+            if (!initialQuery) input.focus();
             document.getElementById('chat-search-count').textContent = '';
             clearChatSearchMarks();
+            if (initialQuery) {
+                doChatSearch(initialQuery);
+                input.focus();
+            }
         }
 
         function closeChatSearch() {
@@ -4509,15 +4663,19 @@
 
         function highlightSearch(text, query) {
             if (!query || !text) return escapeHtml(text);
-            const escaped = escapeHtml(text);
             const q = query.toLowerCase();
-            const idx = text.toLowerCase().indexOf(q);
-            if (idx === -1) return escaped;
-            // Re-escape each segment separately to keep positions aligned
-            const before = escapeHtml(text.substring(0, idx));
-            const match = escapeHtml(text.substring(idx, idx + query.length));
-            const after = escapeHtml(text.substring(idx + query.length));
-            return before + '<span class="search-highlight">' + match + '</span>' + after;
+            const lower = text.toLowerCase();
+            const qLen = query.length;
+            let result = '';
+            let pos = 0;
+            let idx;
+            while ((idx = lower.indexOf(q, pos)) !== -1) {
+                result += escapeHtml(text.substring(pos, idx));
+                result += '<span class="search-highlight">' + escapeHtml(text.substring(idx, idx + qLen)) + '</span>';
+                pos = idx + qLen;
+            }
+            result += escapeHtml(text.substring(pos));
+            return result || escapeHtml(text);
         }
 
         function stripAnsi(text) {
@@ -6896,11 +7054,18 @@
                 <div class="ctx-item" onclick="ctxMarkRead()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Mark as read</div>
                 <div class="ctx-item ctx-danger" onclick="ctxHide()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Hide session</div>
             `;
+            // Measure actual menu dimensions before positioning
+            menu.style.visibility = 'hidden';
+            menu.style.display = 'block';
+            const menuH = menu.offsetHeight;
+            const menuW = menu.offsetWidth;
+            menu.style.visibility = '';
+            menu.style.display = '';
             // Position menu at cursor, keeping within viewport
-            const x = Math.min(e.clientX, window.innerWidth - 180);
-            const y = Math.min(e.clientY, window.innerHeight - 160);
-            menu.style.left = x + 'px';
-            menu.style.top = y + 'px';
+            const x = Math.min(e.clientX, window.innerWidth - menuW - 4);
+            const y = Math.min(e.clientY, window.innerHeight - menuH - 4);
+            menu.style.left = Math.max(4, x) + 'px';
+            menu.style.top = Math.max(4, y) + 'px';
             menu.classList.add('open');
         }
 
@@ -7744,7 +7909,7 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-17 08:30 UTC iter=1 keeps=53-->
+    <!--autoweb-version: 2026-03-17 18:13 UTC iter=27 keeps=150-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
@@ -7754,10 +7919,10 @@
             var etTime = new Date().toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
             el.textContent = "AW " + etTime + " ET" + (keeps != null ? " \u2022 " + keeps + " fixes" : "");
         }
-        // Fetch live keeps count from all autoweb instances (feather + frontend + trading combined)
+        // Fetch live keeps count from feather + trading only
+        // ('frontend' maps to same file as 'feather' in backend — skip to avoid double-counting)
         Promise.all([
             fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).catch(function() { return ''; }),
-            fetch('/api/autoweb-results/frontend').then(function(r) { return r.text(); }).catch(function() { return ''; }),
             fetch('/api/autoweb-results/trading').then(function(r) { return r.text(); }).catch(function() { return ''; })
         ]).then(function(texts) {
             var keeps = 0;
