@@ -1,0 +1,12 @@
+#!/bin/bash
+# test-sse-cursor-preserved-on-reconnect.sh
+# Tests: When history polling switches to SSE tailing, tailCursor is saved first
+# Added: iteration 66 (CRITICAL #5 fix — prevents cursor-loss on SSE reconnect)
+
+# Check that savedCursor is used when switching from polling to SSE tailing
+grep -q 'const savedCursor = tailCursor;' /home/feather-dev/feather-dev/static/index.html || exit 1
+
+# Check that savedCursor is passed to startSessionTailing
+grep -q 'startSessionTailing(projectId, currentSessionId, savedCursor)' /home/feather-dev/feather-dev/static/index.html || exit 1
+
+exit 0

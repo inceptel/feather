@@ -1,0 +1,10 @@
+#!/bin/bash
+# test-tailcursor-init.sh
+# Tests: tailCursor is initialized with starting cursor in startSessionTailing
+# Added: iteration 63
+
+# Check that startSessionTailing sets tailCursor = cursor immediately
+# The pattern we look for: after setting currentTailSessionId, we set tailCursor = cursor
+grep -q 'tailCursor = cursor' /home/feather-dev/feather-dev/static/index.html || exit 1
+
+exit 0
