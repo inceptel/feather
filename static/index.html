@@ -7215,11 +7215,16 @@
             var etTime = new Date().toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
             el.textContent = "AW " + etTime + " ET" + (keeps != null ? " \u2022 " + keeps + " fixes" : "");
         }
-        // Fetch live keeps count from all autoweb instances
-        fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).then(function(text) {
+        // Fetch live keeps count from all autoweb instances (feather + trading combined)
+        Promise.all([
+            fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).catch(function() { return ''; }),
+            fetch('/api/autoweb-results/trading').then(function(r) { return r.text(); }).catch(function() { return ''; })
+        ]).then(function(texts) {
             var keeps = 0;
-            text.split('\n').forEach(function(line) {
-                if (line && line.indexOf('\tkeep\t') !== -1) keeps++;
+            texts.forEach(function(text) {
+                text.split('\n').forEach(function(line) {
+                    if (line && line.indexOf('\tkeep\t') !== -1) keeps++;
+                });
             });
             updateIndicator(keeps);
         }).catch(function() {
