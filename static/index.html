@@ -566,8 +566,9 @@
         <input type="file" id="screenshot-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.json,.csv" class="hidden" multiple onchange="handleFileUpload(event)">
 
         <!-- Mobile session header -->
-        <div id="mobile-session-header" class="md:hidden hidden fixed top-0 left-0 right-0 z-40 bg-smoke-1/95 backdrop-blur-sm border-b border-smoke-4 px-14 py-2.5 min-h-[48px] flex items-center">
-            <span id="mobile-session-name" class="text-xs font-medium text-smoke-10 truncate"></span>
+        <div id="mobile-session-header" class="md:hidden hidden fixed top-0 left-0 right-0 z-40 bg-smoke-1/95 backdrop-blur-sm border-b border-smoke-4 px-14 py-2.5 min-h-[48px] flex items-center gap-2">
+            <span id="mobile-session-name" class="text-xs font-medium text-smoke-10 truncate flex-1"></span>
+            <button id="mobile-star-btn" onclick="if(currentSessionId)toggleStarSession(event,currentSessionId)" class="shrink-0 text-base leading-none text-smoke-6 hover:text-gold-9 transition-colors px-2 py-1 min-h-[44px] flex items-center" title="Star session" aria-label="Star session">&#9733;</button>
         </div>
 
         <!-- Desktop session header bar -->
@@ -1549,6 +1550,11 @@
                     starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
                     starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
                 }
+                const mobileStarBtn = document.getElementById('mobile-star-btn');
+                if (mobileStarBtn && currentSessionId) {
+                    const isStarred = starredSessions.has(currentSessionId);
+                    mobileStarBtn.style.color = isStarred ? 'var(--gold-9)' : '';
+                }
                 // Only show on desktop (md+, 768px+)
                 header.style.display = window.innerWidth >= 768 ? 'flex' : 'none';
             } else {
@@ -1763,13 +1769,17 @@
             }
             try { localStorage.setItem('feather-starredSessions', JSON.stringify([...starredSessions])); } catch {}
             renderSessions();
-            // Update desktop header star button if this is the current session
+            // Update desktop/mobile header star buttons if this is the current session
             if (sessionId === currentSessionId) {
                 const starBtn = document.getElementById('desktop-star-btn');
                 if (starBtn) {
                     const isStarred = starredSessions.has(sessionId);
                     starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
                     starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
+                }
+                const mobileStarBtn = document.getElementById('mobile-star-btn');
+                if (mobileStarBtn) {
+                    mobileStarBtn.style.color = starredSessions.has(sessionId) ? 'var(--gold-9)' : '';
                 }
             }
         }
@@ -2024,6 +2034,10 @@
                 const isStarred = starredSessions.has(s.id);
                 const starBtn = `<button class="star-btn shrink-0 text-[11px] leading-none ${isStarred ? 'text-gold-9' : 'text-smoke-6 opacity-0 group-hover:opacity-100'} hover:text-gold-9 transition-all" onclick="toggleStarSession(event, '${s.id}')" title="${isStarred ? 'Unstar' : 'Star'}" aria-label="${isStarred ? 'Unstar session' : 'Star session'}">&#9733;</button>`;
 
+                // Show project folder name when session is from a different project (useful in search/All filter)
+                const sessionFolderName = s.project !== currentFolder ? (FOLDERS.find(f => f.id === s.project)?.name || s.project?.split('-').filter(Boolean).pop() || '') : '';
+                const folderBadge = sessionFolderName ? `<span class="text-smoke-8">&middot;</span><span class="text-smoke-5 truncate max-w-[60px]" title="${escapeHtml(sessionFolderName)}">${escapeHtml(sessionFolderName)}</span>` : '';
+
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
                          onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
@@ -2035,6 +2049,7 @@
                                     ${sourceBadge}
                                     <span class="session-time" data-last-updated="${s.lastUpdated}" title="${formatFullTime(s.lastUpdated)}">${formatTime(s.lastUpdated)}</span>
                                     ${s.message_count ? `<span class="text-smoke-8">&middot;</span><span>${s.message_count} msg</span>` : ''}
+                                    ${folderBadge}
                                     ${unreadDot}
                                 </div>
                             </div>
