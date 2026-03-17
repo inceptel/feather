@@ -31,6 +31,8 @@
         html, body { height: 100%; }
         ::selection { background: rgba(250, 178, 131, 0.3); }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes ssePulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(127, 216, 143, 0.4); } 50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(127, 216, 143, 0); } }
+        .sse-live { animation: ssePulse 2s ease-in-out infinite; }
         .thin-scrollbar::-webkit-scrollbar { width: 6px; }
         .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .thin-scrollbar::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
@@ -49,8 +51,33 @@
                 </div>
             </div>
             <div class="flex items-center gap-3">
+                <span id="last-updated" class="text-xs text-smoke-7" title="Last refreshed"></span>
                 <span id="sse-indicator" class="w-2 h-2 rounded-full bg-smoke-5" title="SSE disconnected"></span>
-                <button onclick="refreshStatus()" class="px-3 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-smoke-12 transition-all">Refresh</button>
+                <button onclick="refreshStatus()" title="Refresh (R)" class="px-3 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-smoke-12 transition-all">Refresh <kbd class="opacity-40 font-mono">r</kbd></button>
+                <button onclick="toggleShortcuts()" id="admin-shortcuts-btn" title="Keyboard shortcuts (?)" class="px-2 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-smoke-12 transition-all">?</button>
+            </div>
+        </div>
+
+        <!-- Keyboard shortcuts panel -->
+        <div id="admin-shortcuts-panel" class="hidden mb-6 bg-smoke-2 border border-smoke-5 rounded-lg px-4 py-3">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-smoke-9 uppercase tracking-wider">Keyboard Shortcuts</span>
+                <button onclick="toggleShortcuts()" class="text-smoke-7 hover:text-smoke-12 text-xs">&times;</button>
+            </div>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">/</kbd><span class="text-smoke-9">Focus service filter</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">R</kbd><span class="text-smoke-9">Refresh status</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">Esc</kbd><span class="text-smoke-9">Clear filter / close panel</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">?</kbd><span class="text-smoke-9">Toggle this panel</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">S</kbd><span class="text-smoke-9">Toggle stopped filter</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">J</kbd><span class="text-smoke-9">Focus next service</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">K</kbd><span class="text-smoke-9">Focus prev service</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">g</kbd><span class="text-smoke-9">Jump to first service</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">G</kbd><span class="text-smoke-9">Jump to last service</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">Enter</kbd><span class="text-smoke-9">Copy focused service name</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">c</kbd><span class="text-smoke-9">Copy restart/start cmd</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">t</kbd><span class="text-smoke-9">Copy tail log cmd</span></div>
+                <div class="flex items-center gap-2 col-span-2 mt-1 text-smoke-7"><span>Click service name to copy it · ≡ tail log · ↺ restart · ▶ start (stopped only)</span></div>
             </div>
         </div>
 
@@ -64,9 +91,20 @@
 
         <!-- Section 2: Services (read-only) -->
         <div class="mb-8">
-            <h2 class="text-xs font-semibold text-smoke-9 uppercase tracking-wider mb-3">Services</h2>
-            <div id="services-list" class="space-y-1.5">
-                <p class="text-smoke-8 text-sm">Loading...</p>
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-xs font-semibold text-smoke-9 uppercase tracking-wider">Services</h2>
+                    <span id="services-summary" class="text-xs text-smoke-8"></span>
+                    <button id="stopped-filter-btn" onclick="toggleStoppedFilter()" class="hidden px-1.5 py-0.5 rounded text-xs font-medium bg-ember-9/20 text-ember-9 hover:bg-ember-9/40 transition-all" title="Show only stopped services (S)"></button>
+                </div>
+                <div class="relative">
+                    <input id="service-filter" type="text" placeholder="Filter..." oninput="filterServices(this.value)"
+                        class="px-2 py-1 bg-smoke-3 border border-smoke-5 rounded text-xs text-smoke-11 placeholder-smoke-7 focus:outline-none focus:border-smoke-7 w-32 pr-6">
+                    <button id="filter-clear-btn" onclick="clearServiceFilter()" class="hidden absolute right-1 top-1/2 -translate-y-1/2 text-smoke-7 hover:text-smoke-12 transition-colors text-sm leading-none px-0.5" title="Clear filter (Esc)">&times;</button>
+                </div>
+            </div>
+            <div id="services-list" class="grid grid-cols-2 gap-1.5">
+                <p class="text-smoke-8 text-sm col-span-2">Loading...</p>
             </div>
         </div>
 
@@ -119,18 +157,34 @@
         // ========== State ==========
         let deploySSE = null;
         let statusData = null;
+        let lastRefreshTime = null;
+        let stoppedFilterActive = false;
+        let focusedServiceIndex = -1;
 
         // ========== Init ==========
         document.addEventListener('DOMContentLoaded', () => {
             refreshStatus();
             connectSSE();
+            setInterval(refreshStatus, 30000);
+            setInterval(updateLastUpdatedDisplay, 5000);
         });
+
+        function updateLastUpdatedDisplay() {
+            const el = document.getElementById('last-updated');
+            if (!el || !lastRefreshTime) return;
+            const secs = Math.round((Date.now() - lastRefreshTime) / 1000);
+            if (secs < 5) el.textContent = 'just now';
+            else if (secs < 60) el.textContent = secs + 's ago';
+            else el.textContent = Math.floor(secs / 60) + 'm ago';
+        }
 
         // ========== Status ==========
         async function refreshStatus() {
             try {
                 const resp = await fetch('/api/deploy/status');
                 statusData = await resp.json();
+                lastRefreshTime = Date.now();
+                updateLastUpdatedDisplay();
 
                 document.getElementById('admin-subtitle').textContent =
                     `v${statusData.version} ${statusData.is_admin ? '(admin)' : ''}`;
@@ -152,24 +206,92 @@
             fetchBuilds();
         }
 
+        function uptimeSeconds(uptime) {
+            if (!uptime) return null;
+            const hmsMatch = uptime.match(/^(\d+):(\d{2}):(\d{2})$/);
+            if (hmsMatch) return parseInt(hmsMatch[1]) * 3600 + parseInt(hmsMatch[2]) * 60 + parseInt(hmsMatch[3]);
+            const secs = parseInt(uptime);
+            return isNaN(secs) ? null : secs;
+        }
+
         function renderServices(services) {
             const list = document.getElementById('services-list');
             if (!services || services.length === 0) {
                 list.innerHTML = '<p class="text-smoke-8 text-sm">No managed services</p>';
                 return;
             }
-            list.innerHTML = services.map(svc => {
+            // Sort: non-running first (so problems are immediately visible), then running; each group alphabetical
+            const sorted = [...services].sort((a, b) => {
+                const aOk = a.status === 'RUNNING' ? 1 : 0;
+                const bOk = b.status === 'RUNNING' ? 1 : 0;
+                if (aOk !== bOk) return aOk - bOk;
+                return a.name.localeCompare(b.name);
+            });
+            const runningCount = services.filter(s => s.status === 'RUNNING').length;
+            const downCount = services.length - runningCount;
+            document.title = downCount > 0 ? `(${downCount} down) Feather Admin` : 'Feather Admin';
+            const summary = document.getElementById('services-summary');
+            if (summary) {
+                const allOk = runningCount === services.length;
+                summary.textContent = `${runningCount}/${services.length} running`;
+                summary.className = `text-xs ${allOk ? 'text-apple-9' : 'text-amber-9'}`;
+            }
+            // Update stopped filter badge
+            const stoppedBtn = document.getElementById('stopped-filter-btn');
+            if (stoppedBtn) {
+                if (downCount > 0) {
+                    stoppedBtn.textContent = stoppedFilterActive ? `${downCount} stopped ✕` : `${downCount} stopped`;
+                    stoppedBtn.classList.remove('hidden');
+                    stoppedBtn.classList.toggle('ring-1', stoppedFilterActive);
+                    stoppedBtn.classList.toggle('ring-ember-9', stoppedFilterActive);
+                } else {
+                    stoppedBtn.classList.add('hidden');
+                    stoppedFilterActive = false;
+                }
+            }
+            // Reset focused index on re-render
+            focusedServiceIndex = -1;
+            // Re-apply active filter after re-render (filter input retains value across refreshes)
+            const activeFilter = (document.getElementById('service-filter')?.value || '').trim().toLowerCase();
+            list.innerHTML = sorted.map(svc => {
                 const running = svc.status === 'RUNNING';
-                const dotColor = running ? 'bg-apple-9' : 'bg-ember-9';
-                const statusColor = running ? 'text-apple-9' : svc.status === 'STOPPED' ? 'text-ember-9' : 'text-amber-9';
-                const detail = svc.uptime ? `uptime ${svc.uptime}` : svc.pid ? `pid ${svc.pid}` : '';
-                return `<div class="flex items-center py-2.5 px-3 bg-smoke-3 rounded-lg gap-3">
-                    <span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0"></span>
-                    <span class="text-smoke-12 font-medium text-sm">${esc(svc.name)}</span>
-                    <span class="${statusColor} text-xs">${esc(svc.status)}</span>
-                    ${detail ? `<span class="text-smoke-8 text-xs">${esc(detail)}</span>` : ''}
+                const uptimeSecs = uptimeSeconds(svc.uptime);
+                // Amber if running but very recently started (< 60s) — possible crash-loop
+                const flapping = running && uptimeSecs !== null && uptimeSecs < 60;
+                const dotColor = flapping ? 'bg-amber-9' : running ? 'bg-apple-9' : 'bg-ember-9';
+                const statusColor = flapping ? 'text-amber-9' : running ? 'text-apple-9' : svc.status === 'STOPPED' ? 'text-ember-9' : 'text-amber-9';
+                const detail = svc.uptime ? `up ${formatUptime(svc.uptime)}` : svc.pid ? `pid ${svc.pid}` : '';
+                const titleAttr = `${svc.name} — ${svc.status}${detail ? ' · ' + detail : ''}${flapping ? ' (recently restarted)' : ''}`;
+                return `<div class="flex items-center py-2.5 px-3 bg-smoke-3 rounded-lg gap-3 min-w-0" data-svc-name="${esc(svc.name)}" title="${esc(titleAttr)}">
+                    <span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0${flapping ? ' sse-live' : ''}"></span>
+                    <button onclick="copyServiceName(this, '${esc(svc.name)}')" class="text-smoke-12 font-medium text-sm truncate cursor-pointer hover:text-azure-9 transition-colors text-left min-w-0" title="Click to copy name">${esc(svc.name)}</button>
+                    <span class="${statusColor} text-xs flex-shrink-0">${esc(svc.status)}</span>
+                    ${detail ? `<span class="text-smoke-8 text-xs flex-shrink-0">${esc(detail)}</span>` : ''}
+                    <div class="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                        <button onclick="copyTailCmd(this, '${esc(svc.name)}')" class="text-smoke-7 hover:text-cyan-9 transition-colors text-xs leading-none" title="Copy: supervisorctl tail ${esc(svc.name)}">≡</button>
+                        ${running || flapping
+                        ? `<button onclick="copyRestartCmd(this, '${esc(svc.name)}')" class="text-smoke-7 hover:text-gold-9 transition-colors text-xs leading-none" title="Copy: supervisorctl restart ${esc(svc.name)}">↺</button>`
+                        : `<button onclick="copyStartCmd(this, '${esc(svc.name)}')" class="text-smoke-7 hover:text-apple-9 transition-colors text-xs leading-none" title="Copy: supervisorctl start ${esc(svc.name)}">▶</button>`}
+                    </div>
                 </div>`;
             }).join('');
+            // Re-apply filter if active (state survives auto-refresh)
+            if (activeFilter) filterServices(activeFilter);
+            else if (stoppedFilterActive) {
+                // Stopped filter was active before this refresh — re-hide non-stopped services
+                const items = document.querySelectorAll('#services-list > div');
+                items.forEach(item => {
+                    const dot = item.querySelector('span.rounded-full');
+                    const isStopped = dot && dot.classList.contains('bg-ember-9');
+                    if (!isStopped) item.style.display = 'none';
+                });
+                const summary = document.getElementById('services-summary');
+                if (summary && statusData?.services) {
+                    const downCount = statusData.services.filter(s => s.status !== 'RUNNING').length;
+                    summary.textContent = `0/${downCount} running (filtered)`;
+                    summary.className = 'text-xs text-amber-9';
+                }
+            }
         }
 
         // ========== Builds ==========
@@ -195,11 +317,12 @@
                 const isActive = b.active;
                 const sizeMB = (b.size / 1024 / 1024).toFixed(1);
                 const ago = timeAgo(b.mtime);
+                const absDate = b.mtime ? new Date(b.mtime * 1000).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '';
                 return `<div class="flex items-center justify-between py-2.5 px-3 ${isActive ? 'bg-smoke-3 border border-apple-9/20' : 'bg-smoke-3 hover:bg-smoke-4'} rounded-lg transition-colors">
                     <div class="flex items-center gap-3 min-w-0">
                         <span class="font-mono text-sm ${isActive ? 'text-smoke-12' : 'text-smoke-11'}">${esc(b.version)}</span>
                         ${isActive ? '<span class="px-1.5 py-0.5 bg-apple-9/20 text-apple-9 rounded text-xs font-medium flex-shrink-0">ACTIVE</span>' : ''}
-                        <span class="text-smoke-8 text-xs flex-shrink-0">${esc(ago)}</span>
+                        <span class="text-smoke-8 text-xs flex-shrink-0 cursor-default" title="${esc(absDate)}">${esc(ago)}</span>
                         <span class="text-smoke-7 text-xs flex-shrink-0">${sizeMB} MB</span>
                     </div>
                     ${!isActive ? `<div class="flex items-center gap-1 flex-shrink-0">
@@ -246,7 +369,324 @@
             if (diff < 60) return 'just now';
             if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
             if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-            return Math.floor(diff / 86400) + 'd ago';
+            if (diff < 7 * 86400) return Math.floor(diff / 86400) + 'd ago';
+            if (diff < 30 * 86400) return Math.floor(diff / (7 * 86400)) + 'w ago';
+            return Math.floor(diff / (30 * 86400)) + 'mo ago';
+        }
+
+        // ========== Copy service name ==========
+        function copyServiceName(el, name) {
+            navigator.clipboard.writeText(name).then(() => {
+                const orig = el.textContent;
+                el.textContent = '✓ copied';
+                el.classList.add('text-apple-9');
+                el.classList.remove('hover:text-azure-9');
+                setTimeout(() => {
+                    el.textContent = orig;
+                    el.classList.remove('text-apple-9');
+                    el.classList.add('hover:text-azure-9');
+                }, 1200);
+            }).catch(() => {});
+        }
+
+        function copyRestartCmd(el, name) {
+            const cmd = `supervisorctl restart ${name}`;
+            navigator.clipboard.writeText(cmd).then(() => {
+                const orig = el.textContent;
+                el.textContent = '✓';
+                el.classList.add('text-apple-9');
+                setTimeout(() => {
+                    el.textContent = orig;
+                    el.classList.remove('text-apple-9');
+                }, 1200);
+            }).catch(() => {});
+        }
+
+        function copyStartCmd(el, name) {
+            const cmd = `supervisorctl start ${name}`;
+            navigator.clipboard.writeText(cmd).then(() => {
+                const orig = el.textContent;
+                el.textContent = '✓';
+                el.classList.add('text-apple-9');
+                setTimeout(() => {
+                    el.textContent = orig;
+                    el.classList.remove('text-apple-9');
+                }, 1200);
+            }).catch(() => {});
+        }
+
+        function copyTailCmd(el, name) {
+            const cmd = `supervisorctl tail -f ${name}`;
+            navigator.clipboard.writeText(cmd).then(() => {
+                const orig = el.textContent;
+                el.textContent = '✓';
+                el.classList.add('text-cyan-9');
+                setTimeout(() => {
+                    el.textContent = orig;
+                    el.classList.remove('text-cyan-9');
+                }, 1200);
+            }).catch(() => {});
+        }
+
+        // ========== Keyboard shortcuts ==========
+        function toggleShortcuts() {
+            const panel = document.getElementById('admin-shortcuts-panel');
+            if (panel) panel.classList.toggle('hidden');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+                if (e.key === 'Escape') {
+                    const filter = document.getElementById('service-filter');
+                    if (document.activeElement === filter) {
+                        filter.value = '';
+                        filterServices('');
+                        filter.blur();
+                        e.preventDefault();
+                    }
+                }
+                return;
+            }
+            if (e.key === 'Escape') {
+                const panel = document.getElementById('admin-shortcuts-panel');
+                if (panel && !panel.classList.contains('hidden')) {
+                    toggleShortcuts();
+                    e.preventDefault();
+                }
+            }
+            if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+                const filter = document.getElementById('service-filter');
+                if (filter) { filter.focus(); filter.select(); e.preventDefault(); }
+            }
+            if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {
+                refreshStatus();
+                e.preventDefault();
+            }
+            if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+                toggleShortcuts();
+                e.preventDefault();
+            }
+            if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) {
+                const btn = document.getElementById('stopped-filter-btn');
+                if (btn && !btn.classList.contains('hidden')) {
+                    toggleStoppedFilter();
+                    e.preventDefault();
+                }
+            }
+            if (e.key === 'j' && !e.ctrlKey && !e.metaKey) {
+                navigateServices(1);
+                e.preventDefault();
+            }
+            if (e.key === 'k' && !e.ctrlKey && !e.metaKey) {
+                navigateServices(-1);
+                e.preventDefault();
+            }
+            if (e.key === 'g' && !e.ctrlKey && !e.metaKey) {
+                navigateServicesTo(0);
+                e.preventDefault();
+            }
+            if (e.key === 'G' && !e.ctrlKey && !e.metaKey) {
+                navigateServicesTo(-1);
+                e.preventDefault();
+            }
+            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+                activateFocusedService();
+                e.preventDefault();
+            }
+            if (e.key === 'c' && !e.ctrlKey && !e.metaKey) {
+                copyFocusedServiceCmd();
+                e.preventDefault();
+            }
+            if (e.key === 't' && !e.ctrlKey && !e.metaKey) {
+                tailFocusedService();
+                e.preventDefault();
+            }
+        });
+
+        function navigateServices(delta) {
+            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
+            const visible = items.filter(el => el.style.display !== 'none');
+            if (visible.length === 0) return;
+            focusedServiceIndex = Math.max(0, Math.min(visible.length - 1, focusedServiceIndex + delta));
+            items.forEach(el => el.classList.remove('ring-1', 'ring-gold-9'));
+            const target = visible[focusedServiceIndex];
+            if (target) {
+                target.classList.add('ring-1', 'ring-gold-9');
+                target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+
+        function navigateServicesTo(index) {
+            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
+            const visible = items.filter(el => el.style.display !== 'none');
+            if (visible.length === 0) return;
+            focusedServiceIndex = index < 0 ? visible.length - 1 : Math.min(index, visible.length - 1);
+            items.forEach(el => el.classList.remove('ring-1', 'ring-gold-9'));
+            const target = visible[focusedServiceIndex];
+            if (target) {
+                target.classList.add('ring-1', 'ring-gold-9');
+                target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        }
+
+        function activateFocusedService() {
+            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
+            const visible = items.filter(el => el.style.display !== 'none');
+            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
+            const card = visible[focusedServiceIndex];
+            if (!card) return;
+            // Click the service name button (primary action: copy name)
+            const nameBtn = card.querySelector('button.font-medium');
+            if (nameBtn) nameBtn.click();
+        }
+
+        function copyFocusedServiceCmd() {
+            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
+            const visible = items.filter(el => el.style.display !== 'none');
+            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
+            const card = visible[focusedServiceIndex];
+            if (!card) return;
+            // Click restart or start button depending on service state
+            const restartBtn = card.querySelector('button[title^="Copy: supervisorctl restart"]');
+            const startBtn = card.querySelector('button[title^="Copy: supervisorctl start"]');
+            if (restartBtn) restartBtn.click();
+            else if (startBtn) startBtn.click();
+        }
+
+        function tailFocusedService() {
+            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
+            const visible = items.filter(el => el.style.display !== 'none');
+            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
+            const card = visible[focusedServiceIndex];
+            if (!card) return;
+            const tailBtn = card.querySelector('button[title^="Copy: supervisorctl tail"]');
+            if (tailBtn) tailBtn.click();
+        }
+
+        function clearServiceFilter() {
+            const filter = document.getElementById('service-filter');
+            if (filter) { filter.value = ''; filter.focus(); }
+            filterServices('');
+        }
+
+        function filterServices(query) {
+            const q = query.trim().toLowerCase();
+            // If user typed in the text filter, deactivate stopped-only filter
+            if (q && stoppedFilterActive) {
+                stoppedFilterActive = false;
+                const btn = document.getElementById('stopped-filter-btn');
+                if (btn && statusData?.services) {
+                    const downCount = statusData.services.filter(s => s.status !== 'RUNNING').length;
+                    btn.textContent = `${downCount} stopped`;
+                    btn.classList.remove('ring-1', 'ring-ember-9');
+                }
+            }
+            const clearBtn = document.getElementById('filter-clear-btn');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !q);
+            const items = document.querySelectorAll('#services-list > div');
+            let visibleTotal = 0, visibleRunning = 0;
+            items.forEach(item => {
+                const nameEl = item.querySelector('button.font-medium');
+                if (!nameEl) return;
+                const visible = !q || nameEl.textContent.toLowerCase().includes(q);
+                item.style.display = visible ? '' : 'none';
+                if (visible) {
+                    visibleTotal++;
+                    const dotEl = item.querySelector('span.rounded-full');
+                    // Count apple-9 (normal running) AND amber-9 (flapping = running but recently restarted)
+                    if (dotEl && (dotEl.classList.contains('bg-apple-9') || dotEl.classList.contains('bg-amber-9'))) visibleRunning++;
+                }
+            });
+            // Show empty state when filter matches nothing
+            let emptyState = document.getElementById('services-filter-empty');
+            if (visibleTotal === 0 && q) {
+                if (!emptyState) {
+                    emptyState = document.createElement('p');
+                    emptyState.id = 'services-filter-empty';
+                    emptyState.className = 'text-smoke-8 text-sm col-span-2 py-2 text-center';
+                    document.getElementById('services-list').appendChild(emptyState);
+                }
+                emptyState.textContent = `No services matching "${q}"`;
+                emptyState.style.display = '';
+            } else if (emptyState) {
+                emptyState.style.display = 'none';
+            }
+
+            // Update summary to reflect filtered count when filter is active
+            const summary = document.getElementById('services-summary');
+            if (summary && statusData?.services) {
+                if (q) {
+                    const allOk = visibleRunning === visibleTotal;
+                    summary.textContent = `${visibleRunning}/${visibleTotal} running (filtered)`;
+                    summary.className = `text-xs ${allOk ? 'text-apple-9' : 'text-amber-9'}`;
+                } else {
+                    // Reset to full count
+                    const total = statusData.services.length;
+                    const running = statusData.services.filter(s => s.status === 'RUNNING').length;
+                    const allOk = running === total;
+                    summary.textContent = `${running}/${total} running`;
+                    summary.className = `text-xs ${allOk ? 'text-apple-9' : 'text-amber-9'}`;
+                }
+            }
+        }
+
+        function toggleStoppedFilter() {
+            stoppedFilterActive = !stoppedFilterActive;
+            // Clear text filter when activating stopped filter
+            const filterInput = document.getElementById('service-filter');
+            if (stoppedFilterActive && filterInput) { filterInput.value = ''; filterServices(''); }
+            const items = document.querySelectorAll('#services-list > div');
+            let visibleTotal = 0;
+            items.forEach(item => {
+                const dot = item.querySelector('span.rounded-full');
+                // Use ember-9 (stopped) not absence of apple-9 — flapping services are amber but still running
+                const isStopped = dot && dot.classList.contains('bg-ember-9');
+                const visible = !stoppedFilterActive || isStopped;
+                item.style.display = visible ? '' : 'none';
+                if (visible) visibleTotal++;
+            });
+            const btn = document.getElementById('stopped-filter-btn');
+            if (btn && statusData?.services) {
+                const downCount = statusData.services.filter(s => s.status !== 'RUNNING').length;
+                btn.textContent = stoppedFilterActive ? `${downCount} stopped ✕` : `${downCount} stopped`;
+                btn.classList.toggle('ring-1', stoppedFilterActive);
+                btn.classList.toggle('ring-ember-9', stoppedFilterActive);
+            }
+            // Update summary to reflect stopped-filter state
+            const summary = document.getElementById('services-summary');
+            if (summary && statusData?.services) {
+                if (stoppedFilterActive) {
+                    const downCount = statusData.services.filter(s => s.status !== 'RUNNING').length;
+                    summary.textContent = `0/${downCount} running (filtered)`;
+                    summary.className = 'text-xs text-amber-9';
+                } else {
+                    const total = statusData.services.length;
+                    const running = statusData.services.filter(s => s.status === 'RUNNING').length;
+                    summary.textContent = `${running}/${total} running`;
+                    summary.className = `text-xs ${running === total ? 'text-apple-9' : 'text-amber-9'}`;
+                }
+            }
+        }
+
+        function formatUptime(s) {
+            if (!s) return '';
+            // H:MM:SS format from supervisorctl
+            const hmsMatch = s.match(/^(\d+):(\d{2}):(\d{2})$/);
+            if (hmsMatch) {
+                const h = parseInt(hmsMatch[1]);
+                const m = parseInt(hmsMatch[2]);
+                if (h > 0) return h + 'h ' + m + 'm';
+                if (m > 0) return m + 'm';
+                return parseInt(hmsMatch[3]) + 's';
+            }
+            // Plain number (seconds)
+            const secs = parseInt(s);
+            if (!isNaN(secs)) {
+                if (secs < 60) return secs + 's';
+                if (secs < 3600) return Math.floor(secs / 60) + 'm';
+                return Math.floor(secs / 3600) + 'h ' + (Math.floor(secs / 60) % 60) + 'm';
+            }
+            return s;
         }
 
         function esc(s) {
@@ -264,7 +704,7 @@
 
             deploySSE.onopen = () => {
                 indicator.classList.remove('bg-smoke-5', 'bg-ember-9');
-                indicator.classList.add('bg-apple-9');
+                indicator.classList.add('bg-apple-9', 'sse-live');
                 indicator.title = 'SSE connected';
             };
 
@@ -279,7 +719,7 @@
             });
 
             deploySSE.onerror = () => {
-                indicator.classList.remove('bg-apple-9');
+                indicator.classList.remove('bg-apple-9', 'sse-live');
                 indicator.classList.add('bg-ember-9');
                 indicator.title = 'SSE disconnected, reconnecting...';
                 setTimeout(() => {
