@@ -257,7 +257,7 @@
             #input { font-size: 16px !important; min-height: 48px; }
             #send-btn { min-height: 44px; min-width: 60px; }
             /* Mobile: hide secondary toolbar buttons to prevent overflow — accessible via keyboard shortcuts (T, F) and command palette */
-            #tools-toggle-btn, #thinking-toggle-btn, #focus-mode-btn, #voice-btn { display: none !important; }
+            #tools-toggle-btn, #thinking-toggle-btn, #focus-mode-btn, #voice-btn, #terminal-toggle { display: none !important; }
             #input + div > div:first-child { display: none; }
             /* Mobile: messages top padding is set dynamically by updateMobileSessionHeader */
             #messages { padding-top: 8px !important; }
@@ -1504,6 +1504,31 @@
                 overlay.classList.add('hidden');
             }
         }
+
+        // Mobile swipe gestures to open/close sidebar
+        (function() {
+            let swipeTouchStartX = 0, swipeTouchStartY = 0;
+            const SWIPE_THRESHOLD = 50, EDGE_ZONE = 40;
+            document.addEventListener('touchstart', function(e) {
+                swipeTouchStartX = e.touches[0].clientX;
+                swipeTouchStartY = e.touches[0].clientY;
+            }, { passive: true });
+            document.addEventListener('touchend', function(e) {
+                if (window.innerWidth >= 768) return;
+                const dx = e.changedTouches[0].clientX - swipeTouchStartX;
+                const dy = e.changedTouches[0].clientY - swipeTouchStartY;
+                if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll, ignore
+                const sidebar = document.getElementById('sidebar');
+                const isOpen = !sidebar.classList.contains('-translate-x-full');
+                if (dx > SWIPE_THRESHOLD && swipeTouchStartX < EDGE_ZONE && !isOpen) {
+                    // Swipe right from left edge: open sidebar
+                    toggleSidebar();
+                } else if (dx < -SWIPE_THRESHOLD && isOpen) {
+                    // Swipe left: close sidebar
+                    closeSidebarMobile();
+                }
+            }, { passive: true });
+        })();
 
         function updateMobileSessionHeader(title) {
             const header = document.getElementById('mobile-session-header');
