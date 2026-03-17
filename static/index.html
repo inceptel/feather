@@ -7027,7 +7027,7 @@
             { label: 'Search in chat', shortcut: 'Ctrl+F', action: () => openChatSearch() },
             { label: 'Toggle terminal', shortcut: 'Ctrl+`', action: () => toggleTerminal() },
             { label: 'Toggle sidebar', shortcut: 'Ctrl+B', action: () => toggleSidebar() },
-            { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('collapse-tools-btn'); if (btn) btn.click(); } },
+            { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('tools-toggle-btn'); if (btn) btn.click(); } },
             { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
             { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },

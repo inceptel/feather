@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; height: 100vh; display: flex; flex-direction: column; }
+        iframe { flex: 1; border: none; width: 100%; }
+        #url-bar {
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            padding: 6px 12px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+        }
+        #url-bar a {
+            color: #7ec8e3;
+            font-size: 13px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            text-decoration: underline;
+            word-break: break-all;
+            flex: 1;
+        }
+        #url-bar .label {
+            color: #666;
+            font-size: 11px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            white-space: nowrap;
+        }
+        #url-bar .dismiss {
+            color: #666;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            font-family: sans-serif;
+        }
+        #url-bar .dismiss:hover { color: #aaa; }
+    </style>
+</head>
+<body>
+    <iframe id="term" src="/term-raw/"></iframe>
+    <div id="url-bar">
+        <span class="label">Link:</span>
+        <a id="url-link" href="#" target="_blank"></a>
+        <span class="dismiss" onclick="dismissUrl()">&times;</span>
+    </div>
+    <script>
+        const urlBar = document.getElementById('url-bar');
+        const urlLink = document.getElementById('url-link');
+        const termFrame = document.getElementById('term');
+        let lastUrl = '';
+        let dismissed = new Set();
+
+        function dismissUrl() {
+            dismissed.add(lastUrl);
+            urlBar.style.display = 'none';
+        }
+
+        function readBuffer(buf) {
+            let text = '';
+            for (let i = 0; i < buf.length; i++) {
+                const line = buf.getLine(i);
+                // translateToString(true) trims trailing nulls/spaces
+                // join with no separator so wrapped URLs stay intact
+                if (line) text += line.translateToString(true);
+            }
+            return text;
+        }
+
+        function scanTerminal() {
+            try {
+                const term = termFrame.contentWindow.term;
+                if (!term || !term.buffer) return;
+
+                // Scan BOTH normal and active buffers (Claude Code uses alt screen)
+                let text = '';
+                if (term.buffer.normal) text += readBuffer(term.buffer.normal);
+                if (term.buffer.active !== term.buffer.normal) {
+                    text += readBuffer(term.buffer.active);
+                }
+
+                // Debug: log to console
+                const httpIdx = text.indexOf('https://claude.ai');
+                if (httpIdx >= 0) {
+                    console.log('Found claude.ai at index', httpIdx, 'context:', JSON.stringify(text.substring(httpIdx, httpIdx + 100)));
+                }
+
+                // Find URLs
+                const urls = text.match(/https?:\/\/[^\s\x00-\x1f"'<>]+/g);
+                if (urls && urls.length > 0) {
+                    // Show the last (most recent) URL
+                    const url = urls[urls.length - 1];
+                    if (url !== lastUrl && !dismissed.has(url)) {
+                        lastUrl = url;
+                        urlLink.href = url;
+                        // Show truncated text for display
+                        const display = url.length > 80 ? url.substring(0, 80) + '...' : url;
+                        urlLink.textContent = display;
+                        urlBar.style.display = 'flex';
+                    }
+                }
+            } catch (e) {
+                // iframe not ready yet
+            }
+        }
+
+        // Scan every 2 seconds
+        setInterval(scanTerminal, 2000);
+    </script>
+</body>
+</html>

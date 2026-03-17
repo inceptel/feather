@@ -1053,3 +1053,111 @@ fn estimate_container_progress(output: &str) -> u8 {
     if output.contains("Installing") { return 70; }
     50 // default
 }
+
+// ============================================================================
+// Promote dev → prod
+// ============================================================================
+
+#[derive(Serialize)]
+pub struct CommitInfo {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+}
+
+#[derive(Serialize)]
+pub struct PromotePendingResponse {
+    pub commits: Vec<CommitInfo>,
+    pub has_pending: bool,
+}
+
+/// GET /api/promote/pending — show dev commits not yet in prod
+pub async fn promote_pending() -> Json<PromotePendingResponse> {
+    let output = std::process::Command::new("git")
+        .args(["-C", "/opt/feather", "log",
+               "--pretty=format:%h\t%s\t%an\t%ar",
+               "master..dev"])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let commits: Vec<CommitInfo> = stdout.lines()
+                .filter(|l| !l.is_empty())
+                .map(|line| {
+                    let parts: Vec<&str> = line.splitn(4, '\t').collect();
+                    CommitInfo {
+                        hash: parts.first().unwrap_or(&"").to_string(),
+                        message: parts.get(1).unwrap_or(&"").to_string(),
+                        author: parts.get(2).unwrap_or(&"").to_string(),
+                        date: parts.get(3).unwrap_or(&"").to_string(),
+                    }
+                })
+                .collect();
+            let has_pending = !commits.is_empty();
+            Json(PromotePendingResponse { commits, has_pending })
+        }
+        _ => Json(PromotePendingResponse { commits: vec![], has_pending: false }),
+    }
+}
+
+/// POST /api/promote — merge dev branch into master and rebuild
+pub async fn promote_dev(
+    State(state): State<Arc<AppState>>,
+) -> Json<AppDeployResponse> {
+    let tx = state.deploy_tx.clone();
+    tokio::spawn(async move {
+        run_promote(tx).await;
+    });
+    Json(AppDeployResponse {
+        status: "started".to_string(),
+        message: "Promote dev→prod started".to_string(),
+    })
+}
+
+async fn run_promote(tx: broadcast::Sender<DeployEvent>) {
+    let send = |line: &str| {
+        let _ = tx.send(DeployEvent::Output {
+            track: "app".to_string(),
+            line: line.to_string(),
+        });
+    };
+
+    send("=== Promote dev → prod ===");
+    send("[1/2] Merging dev into master...");
+
+    let result = std::process::Command::new("git")
+        .args(["-C", "/opt/feather", "merge", "dev", "--no-edit",
+               "--strategy-option=theirs"])
+        .output();
+
+    match result {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            send(&format!("Merged: {}", stdout.trim()));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            send(&format!("Merge failed: {}", stderr.trim()));
+            let _ = tx.send(DeployEvent::Complete {
+                track: "app".to_string(),
+                success: false,
+                message: "Merge failed — check for conflicts".to_string(),
+            });
+            return;
+        }
+        Err(e) => {
+            send(&format!("Merge error: {}", e));
+            let _ = tx.send(DeployEvent::Complete {
+                track: "app".to_string(),
+                success: false,
+                message: "Merge error".to_string(),
+            });
+            return;
+        }
+    }
+
+    send("[2/2] Building and deploying...");
+    do_app_deploy(tx).await;
+}

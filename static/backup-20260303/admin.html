@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feather Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        smoke: {
+                            1: '#121212', 2: '#1a1a1a', 3: '#212121', 4: '#252525',
+                            5: '#303030', 6: '#3a3a3a', 7: '#4b4c5c', 8: '#5e5e5e',
+                            9: '#6a6a6a', 10: '#8a8a8a', 11: '#a0a0a0', 12: '#e0e0e0'
+                        },
+                        gold: { 9: '#fab283', 10: '#f5a742', 11: '#fcd9b8' },
+                        azure: { 9: '#5c9cf5', 10: '#4a8ae6', 11: '#8cbcff' },
+                        violet: { 9: '#9d7cd8', 10: '#8b6bc5', 11: '#c4aef0' },
+                        apple: { 9: '#7fd88f', 11: '#a8e8b5' },
+                        ember: { 9: '#e06c75', 11: '#f0a0a5' },
+                        cyan: { 9: '#56b6c2', 11: '#8cd4dd' },
+                        amber: { 9: '#e5c07b', 11: '#f0d9a8' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        html, body { height: 100%; }
+        ::selection { background: rgba(250, 178, 131, 0.3); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .thin-scrollbar::-webkit-scrollbar { width: 6px; }
+        .thin-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .thin-scrollbar::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+        .log-area { font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace; }
+    </style>
+</head>
+<body class="bg-smoke-1 text-smoke-12 min-h-screen">
+    <div class="max-w-3xl mx-auto p-6">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div class="flex items-center gap-3">
+                <a href="/" class="text-smoke-8 hover:text-smoke-12 transition-colors text-lg" title="Back to Feather">&larr;</a>
+                <div>
+                    <h1 class="text-xl font-bold text-smoke-12">Feather</h1>
+                    <p class="text-xs text-smoke-8" id="admin-subtitle">Loading...</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="sse-indicator" class="w-2 h-2 rounded-full bg-smoke-5" title="SSE disconnected"></span>
+                <button onclick="refreshStatus()" class="px-3 py-1.5 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded text-xs text-smoke-10 hover:text-smoke-12 transition-all">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Section 1: Version History -->
+        <div class="mb-8">
+            <h2 class="text-xs font-semibold text-smoke-9 uppercase tracking-wider mb-3">Versions</h2>
+            <div id="builds-list" class="space-y-1.5">
+                <p class="text-smoke-8 text-sm py-4 text-center">Loading...</p>
+            </div>
+        </div>
+
+        <!-- Section 2: Services (read-only) -->
+        <div class="mb-8">
+            <h2 class="text-xs font-semibold text-smoke-9 uppercase tracking-wider mb-3">Services</h2>
+            <div id="services-list" class="space-y-1.5">
+                <p class="text-smoke-8 text-sm">Loading...</p>
+            </div>
+        </div>
+
+        <!-- Section 3: Host Deploy (admin-only, collapsed) -->
+        <div id="container-section" class="mb-8 hidden">
+            <details>
+                <summary class="text-xs font-semibold text-smoke-9 uppercase tracking-wider mb-3 cursor-pointer hover:text-smoke-11 transition-colors">Host Deploy</summary>
+                <div class="bg-smoke-2 border border-smoke-5 rounded-lg p-5 mt-3">
+                    <p class="text-sm text-smoke-9 mb-4">Rebuild container image and redeploy via host. Runs <code class="bg-smoke-4 px-1.5 py-0.5 rounded text-cyan-9 text-xs">deploy.sh</code> on the host machine.</p>
+                    <div class="flex items-center gap-3">
+                        <div>
+                            <label class="block text-xs text-smoke-9 mb-1">Target</label>
+                            <select id="container-target" class="px-3 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-sm text-smoke-11 focus:outline-none focus:border-gold-9 min-w-[120px]">
+                                <option value="user0">user0</option>
+                                <option value="user1">user1</option>
+                                <option value="all">all</option>
+                            </select>
+                        </div>
+                        <div class="flex gap-2 self-end">
+                            <button onclick="deployContainer()" id="container-deploy-btn" class="px-4 py-2 bg-gold-10 hover:bg-gold-9 text-smoke-1 rounded-lg text-sm font-medium transition-colors">Deploy</button>
+                            <button onclick="rollbackContainer()" class="px-4 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 rounded-lg text-sm text-smoke-10 hover:text-amber-9 transition-all">Rollback</button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+        </div>
+
+        <!-- Section 4: Log (shared, hidden until output) -->
+        <div id="log-section" class="hidden mb-8">
+            <div id="progress-section" class="hidden mb-3">
+                <div class="bg-smoke-2 border border-gold-9/30 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-3">
+                        <div class="w-4 h-4 border-2 border-gold-9 border-t-transparent rounded-full" style="animation: spin 1s linear infinite"></div>
+                        <span id="progress-stage" class="text-sm text-gold-9">Working...</span>
+                    </div>
+                    <div class="w-full bg-smoke-4 rounded-full h-1.5">
+                        <div id="progress-bar" class="bg-gold-9 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-xs text-smoke-9 uppercase tracking-wider">Log</h3>
+                <button onclick="clearLog()" class="text-xs text-smoke-8 hover:text-smoke-12">Clear</button>
+            </div>
+            <div id="log-area" class="log-area bg-smoke-2 border border-smoke-5 rounded-lg p-4 text-xs text-smoke-10 max-h-96 overflow-y-auto thin-scrollbar"></div>
+        </div>
+    </div>
+
+    <script>
+        // ========== State ==========
+        let deploySSE = null;
+        let statusData = null;
+
+        // ========== Init ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshStatus();
+            connectSSE();
+        });
+
+        // ========== Status ==========
+        async function refreshStatus() {
+            try {
+                const resp = await fetch('/api/deploy/status');
+                statusData = await resp.json();
+
+                document.getElementById('admin-subtitle').textContent =
+                    `v${statusData.version} ${statusData.is_admin ? '(admin)' : ''}`;
+
+                // Container section visibility
+                const containerSection = document.getElementById('container-section');
+                if (statusData.is_admin) {
+                    containerSection.classList.remove('hidden');
+                } else {
+                    containerSection.classList.add('hidden');
+                }
+
+                renderServices(statusData.services);
+            } catch (e) {
+                document.getElementById('admin-subtitle').textContent = 'Failed to load status';
+                console.error('Status error:', e);
+            }
+
+            fetchBuilds();
+        }
+
+        function renderServices(services) {
+            const list = document.getElementById('services-list');
+            if (!services || services.length === 0) {
+                list.innerHTML = '<p class="text-smoke-8 text-sm">No managed services</p>';
+                return;
+            }
+            list.innerHTML = services.map(svc => {
+                const running = svc.status === 'RUNNING';
+                const dotColor = running ? 'bg-apple-9' : 'bg-ember-9';
+                const statusColor = running ? 'text-apple-9' : svc.status === 'STOPPED' ? 'text-ember-9' : 'text-amber-9';
+                const detail = svc.uptime ? `uptime ${svc.uptime}` : svc.pid ? `pid ${svc.pid}` : '';
+                return `<div class="flex items-center py-2.5 px-3 bg-smoke-3 rounded-lg gap-3">
+                    <span class="w-2 h-2 rounded-full ${dotColor} flex-shrink-0"></span>
+                    <span class="text-smoke-12 font-medium text-sm">${esc(svc.name)}</span>
+                    <span class="${statusColor} text-xs">${esc(svc.status)}</span>
+                    ${detail ? `<span class="text-smoke-8 text-xs">${esc(detail)}</span>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        // ========== Builds ==========
+        async function fetchBuilds() {
+            try {
+                const resp = await fetch('/api/deploy/builds');
+                const data = await resp.json();
+                renderBuilds(data.builds, data.active_version);
+            } catch (e) {
+                document.getElementById('builds-list').innerHTML =
+                    '<p class="text-smoke-8 text-sm py-4 text-center">Failed to load builds</p>';
+                console.error('Builds error:', e);
+            }
+        }
+
+        function renderBuilds(builds, activeVersion) {
+            const list = document.getElementById('builds-list');
+            if (!builds || builds.length === 0) {
+                list.innerHTML = '<p class="text-smoke-8 text-sm py-4 text-center">No archived builds</p>';
+                return;
+            }
+            list.innerHTML = builds.map(b => {
+                const isActive = b.active;
+                const sizeMB = (b.size / 1024 / 1024).toFixed(1);
+                const ago = timeAgo(b.mtime);
+                return `<div class="flex items-center justify-between py-2.5 px-3 ${isActive ? 'bg-smoke-3 border border-apple-9/20' : 'bg-smoke-3 hover:bg-smoke-4'} rounded-lg transition-colors">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="font-mono text-sm ${isActive ? 'text-smoke-12' : 'text-smoke-11'}">${esc(b.version)}</span>
+                        ${isActive ? '<span class="px-1.5 py-0.5 bg-apple-9/20 text-apple-9 rounded text-xs font-medium flex-shrink-0">ACTIVE</span>' : ''}
+                        <span class="text-smoke-8 text-xs flex-shrink-0">${esc(ago)}</span>
+                        <span class="text-smoke-7 text-xs flex-shrink-0">${sizeMB} MB</span>
+                    </div>
+                    ${!isActive ? `<div class="flex items-center gap-1 flex-shrink-0">
+                        <button onclick="activateVersion('${esc(b.version)}')" class="px-3 py-1 bg-smoke-4 hover:bg-gold-9 hover:text-smoke-1 rounded text-xs text-smoke-10 transition-all">Activate</button>
+                        <button onclick="deleteBuild('${esc(b.version)}')" class="px-2 py-1 rounded text-smoke-7 hover:text-ember-9 hover:bg-ember-9/10 transition-all text-xs" title="Delete build">&times;</button>
+                    </div>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        async function activateVersion(version) {
+            if (!confirm(`Activate build "${version}"?\nThis will stop feather, swap the binary, and restart.`)) return;
+            clearLog();
+            try {
+                await fetch('/api/deploy/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version })
+                });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function deleteBuild(version) {
+            if (!confirm(`Delete build "${version}"?`)) return;
+            try {
+                const resp = await fetch(`/api/deploy/builds/${encodeURIComponent(version)}`, {
+                    method: 'DELETE'
+                });
+                const data = await resp.json();
+                if (data.status === 'error') {
+                    alert(data.message);
+                }
+                fetchBuilds();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function timeAgo(epochSecs) {
+            const now = Date.now() / 1000;
+            const diff = now - epochSecs;
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+            return Math.floor(diff / 86400) + 'd ago';
+        }
+
+        function esc(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        // ========== SSE ==========
+        function connectSSE() {
+            if (deploySSE) deploySSE.close();
+            deploySSE = new EventSource('/api/deploy/stream');
+
+            const indicator = document.getElementById('sse-indicator');
+
+            deploySSE.onopen = () => {
+                indicator.classList.remove('bg-smoke-5', 'bg-ember-9');
+                indicator.classList.add('bg-apple-9');
+                indicator.title = 'SSE connected';
+            };
+
+            ['app', 'container'].forEach(track => {
+                deploySSE.addEventListener(`deploy-${track}`, (e) => {
+                    try {
+                        handleEvent(track, JSON.parse(e.data));
+                    } catch (err) {
+                        console.error('SSE parse error:', err);
+                    }
+                });
+            });
+
+            deploySSE.onerror = () => {
+                indicator.classList.remove('bg-apple-9');
+                indicator.classList.add('bg-ember-9');
+                indicator.title = 'SSE disconnected, reconnecting...';
+                setTimeout(() => {
+                    appendLog('--- Reconnecting... ---');
+                    connectSSE();
+                    setTimeout(refreshStatus, 2000);
+                }, 3000);
+            };
+        }
+
+        function handleEvent(track, data) {
+            if (data.type === 'output') {
+                appendLog(data.line);
+            } else if (data.type === 'progress') {
+                showProgress(data.stage, data.pct);
+            } else if (data.type === 'complete') {
+                hideProgress();
+                const prefix = data.success ? 'DONE' : 'FAILED';
+                appendLog(`--- ${prefix}: ${data.message} ---`);
+                if (track === 'container') resetContainerButton();
+                setTimeout(refreshStatus, 1500);
+            }
+        }
+
+        // ========== Logging ==========
+        function appendLog(line) {
+            const section = document.getElementById('log-section');
+            const log = document.getElementById('log-area');
+            section.classList.remove('hidden');
+            const div = document.createElement('div');
+            div.textContent = line;
+            div.className = 'py-0.5';
+            if (line.includes('FAILED') || line.includes('Error') || line.includes('error[')) {
+                div.classList.add('text-ember-9');
+            } else if (line.includes('DONE') || line.includes('complete') || line.includes('Compiling')) {
+                div.classList.add('text-apple-9');
+            } else if (line.includes('warning')) {
+                div.classList.add('text-amber-9');
+            }
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            const log = document.getElementById('log-area');
+            if (log) log.innerHTML = '';
+            const section = document.getElementById('log-section');
+            if (section) section.classList.add('hidden');
+            hideProgress();
+        }
+
+        // ========== Progress ==========
+        function showProgress(stage, pct) {
+            const section = document.getElementById('progress-section');
+            section.classList.remove('hidden');
+            // Also show parent log section
+            document.getElementById('log-section').classList.remove('hidden');
+            const stageEl = document.getElementById('progress-stage');
+            const barEl = document.getElementById('progress-bar');
+            if (stageEl) stageEl.textContent = stage || 'Working...';
+            if (barEl && pct != null) barEl.style.width = pct + '%';
+        }
+
+        function hideProgress() {
+            const section = document.getElementById('progress-section');
+            if (section) section.classList.add('hidden');
+        }
+
+        function resetContainerButton() {
+            const btn = document.getElementById('container-deploy-btn');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Deploy';
+                btn.classList.remove('opacity-50', 'cursor-wait');
+            }
+        }
+
+        // ========== Track 3: Container ==========
+        async function deployContainer() {
+            const target = document.getElementById('container-target').value;
+            if (!confirm(`Deploy container for "${target}"?\nThis runs deploy.sh on the host (podman build + redeploy). Takes 2-5 minutes.`)) return;
+
+            const btn = document.getElementById('container-deploy-btn');
+            btn.disabled = true;
+            btn.textContent = 'Deploying...';
+            btn.classList.add('opacity-50', 'cursor-wait');
+            clearLog();
+
+            try {
+                await fetch('/api/deploy/container', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+            } catch (e) {
+                resetContainerButton();
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function rollbackContainer() {
+            const target = document.getElementById('container-target').value;
+            if (!confirm(`Rollback container for "${target}"?\nThis runs rollback.sh on the host.`)) return;
+            clearLog();
+            try {
+                await fetch('/api/deploy/container/rollback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target })
+                });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -303,8 +303,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
 
 async fn autoweb_results(Path(instance): Path<String>) -> impl IntoResponse {
     let path = match instance.as_str() {
-        "feather" => "/home/feather-dev/autoweb-feather/results.tsv",
-        "frontend" => "/home/user/autoweb/results.tsv",
+        "feather" | "frontend" => "/home/user/autoweb/results.tsv",
         "trading" => "/home/user/autoweb-trading/results.tsv",
         _ => return (axum::http::StatusCode::NOT_FOUND, "not found".to_string()),
     };
@@ -316,8 +315,7 @@ async fn autoweb_results(Path(instance): Path<String>) -> impl IntoResponse {
 
 async fn autoweb_reviews(Path(instance): Path<String>) -> impl IntoResponse {
     let dir = match instance.as_str() {
-        "feather" => "/home/feather-dev/autoweb-feather/reviews",
-        "frontend" => "/home/user/autoweb/reviews",
+        "feather" | "frontend" => "/home/user/autoweb/reviews",
         "trading" => "/home/user/autoweb-trading/reviews",
         _ => return axum::response::Response::builder()
             .status(404)
@@ -2701,6 +2699,8 @@ async fn main() {
         .route("/api/deploy/status", get(deploy::deploy_status))
         .route("/api/deploy/stream", get(deploy::deploy_stream))
         .route("/api/deploy/app", post(deploy::app_deploy))
+        .route("/api/promote/pending", get(deploy::promote_pending))
+        .route("/api/promote", post(deploy::promote_dev))
         .route("/api/deploy/builds", get(deploy::list_builds))
         .route("/api/deploy/builds/{version}", delete(deploy::delete_build))
         .route("/api/deploy/activate", post(deploy::activate_build))

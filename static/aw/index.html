@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate">
+<title>Autoweb</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0e14;color:#bfbdb6;font-family:Inter,system-ui,sans-serif;padding:16px}
+h1{font-size:18px;color:#e0ddd8;margin-bottom:12px}
+.tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.tab{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #2a2e36;background:transparent;color:#888}
+.tab.active{background:#1a1e26;border-color:#d4a72c;color:#e8c547}
+.stats{font-size:13px;color:#888;margin-bottom:16px}
+.stats span{margin-right:12px}
+.stats .keep{color:#7fd88f} .stats .revert{color:#e06c75} .stats .crash{color:#e5c07b}
+#content{min-height:200px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;color:#666;border-bottom:1px solid #1a1e26;font-size:11px;text-transform:uppercase}
+td{padding:8px 12px;border-bottom:1px solid #141820}
+.ts{color:#666;font-family:ui-monospace,monospace;font-size:11px;white-space:nowrap}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.badge-keep{color:#7fd88f;background:rgba(127,216,143,0.12)}
+.badge-revert{color:#e06c75;background:rgba(224,108,117,0.12)}
+.badge-crash{color:#e5c07b;background:rgba(229,192,123,0.12)}
+.badge-skip{color:#888;background:rgba(136,136,136,0.08)}
+.desc{color:#bfbdb6;line-height:1.4}
+.review-content{white-space:pre-wrap;font-size:13px;color:#bfbdb6;line-height:1.7;font-family:Inter,sans-serif;padding:12px 0}
+.review-content h1,.review-content h2,.review-content h3{color:#e0ddd8;margin:16px 0 8px}
+a{color:#e8c547}
+@media(max-width:600px){td,th{padding:6px 8px}body{padding:10px}.ts{font-size:10px}.desc{font-size:12px}}
+</style>
+</head><body>
+<h1>Autoweb</h1>
+<div id="current" style="font-size:12px;color:#e8c547;margin-bottom:12px;padding:8px 12px;background:#1a1e26;border-radius:6px;border:1px solid #2a2e36;display:none"></div>
+<div class="tabs" id="tabs"></div>
+<div class="stats" id="stats"></div>
+<div id="content"></div>
+
+<script>
+let active = 'feather';
+
+function renderTabs() {
+  document.getElementById('tabs').innerHTML = ['feather','trading','feather-reviews','trading-reviews'].map(t => {
+    const label = {feather:'Feather',trading:'Trading','feather-reviews':'Feather Reviews','trading-reviews':'Trading Reviews'}[t];
+    return `<button class="tab ${t===active?'active':''}" onclick="switchTab('${t}')">${label}</button>`;
+  }).join('');
+}
+
+function switchTab(t) { active = t; renderTabs(); load(); }
+
+function load() {
+  if (active === 'feather-reviews') return loadReviews('/aw-reviews/');
+  if (active === 'trading-reviews') return loadReviews('/aw-trading-reviews/');
+  const url = active === 'feather' ? '/api/autoweb-results/feather' : '/api/autoweb-results/trading';
+  fetch(url + '?_=' + Date.now()).then(r => r.text()).then(text => {
+    const lines = text.trim().split('\n');
+    let keeps=0, reverts=0, crashes=0, skips=0;
+    const rows = [];
+    for (let i=1; i<lines.length; i++) {
+      const p = lines[i].split('\t');
+      if (p.length < 3) continue;
+      let ts, status, desc;
+      if (p.length >= 4 && ['rust','frontend','both'].includes(p[1])) { ts=p[0]; status=p[2]; desc=p[3]; }
+      else { ts=p[0]; status=p[1]; desc=p[2]; }
+      if (status==='keep') keeps++; else if (status==='revert') reverts++; else if (status==='crash') crashes++; else skips++;
+      const et = new Date(ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true});
+      rows.push(`<tr><td class="ts">${et} ET</td><td><span class="badge badge-${status}">${status}</span></td><td class="desc">${(desc||'').replace(/</g,'&lt;')}</td></tr>`);
+    }
+    document.getElementById('stats').innerHTML =
+      `<span class="keep">${keeps} kept</span><span class="revert">${reverts} reverted</span><span class="crash">${crashes} crashed</span><span>${skips} skipped</span><span style="color:#555">${keeps+reverts+crashes+skips} total</span>`;
+    document.getElementById('content').innerHTML =
+      `<table><thead><tr><th>Time</th><th>Status</th><th>Change</th></tr></thead><tbody>${rows.reverse().join('')}</tbody></table>`;
+  });
+}
+
+function loadReviews(baseUrl) {
+  document.getElementById('stats').innerHTML = '';
+  fetch(baseUrl + 'index.txt?_=' + Date.now()).then(r => r.text()).then(text => {
+    const files = text.trim().split('\n').filter(f => f.endsWith('.md')).reverse();
+    if (!files.length) { document.getElementById('content').innerHTML = '<p style="color:#666">No reviews yet</p>'; return; }
+    document.getElementById('stats').innerHTML = files.map(f =>
+      `<button class="tab" onclick="showReview('${f}','${baseUrl}')" style="font-size:11px;padding:4px 10px">${f.replace('review-','').replace('.md','')}</button>`
+    ).join(' ');
+    showReview(files[0], baseUrl);
+  });
+}
+
+function showReview(filename, baseUrl) {
+  baseUrl = baseUrl || '/aw-reviews/';
+  fetch(baseUrl + filename).then(r => r.text()).then(md => {
+    document.getElementById('content').innerHTML = `<div class="review-content">${marked.parse(md)}</div>`;
+  });
+}
+
+function loadCurrent() {
+  fetch('/aw-current.txt?_=' + Date.now()).then(r => r.text()).then(text => {
+    const el = document.getElementById('current');
+    const t = text.trim();
+    if (t) { el.textContent = 'Working on: ' + t; el.style.display = 'block'; }
+    else { el.style.display = 'none'; }
+  }).catch(() => {});
+}
+renderTabs(); load(); loadCurrent();
+setInterval(() => { if (!active.includes('reviews')) load(); loadCurrent(); }, 10000);
+</script>
+</body></html>
