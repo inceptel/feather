@@ -548,7 +548,7 @@
             <a href="/dashboards/mm-dashboard.html" target="_blank" class="nav-pill nav-pill-gold">MM</a>
             <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
-            <a href="/aw/" class="nav-pill nav-pill-gold font-semibold" id="autoweb-btn" style="text-decoration:none">AW</a>
+            <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
             <span id="sse-event-id" class="font-mono text-[9px] text-smoke-7 hidden md:inline">-</span>
@@ -748,6 +748,7 @@
                 <span onclick="closeShortcutsModal()" style="cursor:pointer; color:var(--smoke-8); font-size:18px; line-height:1;">&times;</span>
             </div>
             <div style="display:flex; flex-direction:column; gap:10px; font-size:13px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">I</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus search</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">/</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Command palette</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
@@ -3085,6 +3086,11 @@
             div.className = 'message-enter flex justify-end';
             div.setAttribute('data-msg-type', 'user');
             div.setAttribute('data-optimistic', 'true');
+            // Set content-hash so removeOptimisticMessage() can find and remove this element
+            // when SSE delivers the real message — prevents duplicate display of image messages
+            if (content) div.setAttribute('data-content-hash', hashContent(content));
+            // Also track text in renderedTextHashes to block SSE re-render
+            if (content) renderedTextHashes.add(hashContent(content));
 
             let attachmentsHtml = files.map(f => {
                 if (f.isImage) {
@@ -4832,10 +4838,15 @@
 
             tailingEventSource.onopen = () => { tailReconnectDelay = 1000; resetTailHeartbeat(); };
             tailingEventSource.onerror = () => {
-                // EventSource auto-reconnects, but we want to resume from cursor
-                if (tailingEventSource && tailingEventSource.readyState === EventSource.CLOSED) {
-                    console.log(`Tail SSE closed, reconnecting in ${tailReconnectDelay}ms with cursor:`, tailCursor);
-                    // Use tracked timer to prevent overlapping reconnect attempts
+                // EventSource auto-reconnects to the ORIGINAL URL, ignoring cursor updates in data.
+                // We must take over reconnection to use the latest tailCursor.
+                // NOTE: When the server closes, readyState is CONNECTING (0) — never CLOSED (2) —
+                // so the old `readyState === CLOSED` check never fired, causing stale-cursor reconnects.
+                if (tailingEventSource) {
+                    const src = tailingEventSource;
+                    tailingEventSource = null;  // Prevent re-entry
+                    src.close();  // Stop EventSource's built-in retry to original URL
+                    console.log(`Tail SSE disconnected, reconnecting in ${tailReconnectDelay}ms with cursor:`, tailCursor);
                     clearTimeout(tailReconnectTimer);
                     tailReconnectTimer = setTimeout(() => {
                         tailReconnectTimer = null;
@@ -5725,7 +5736,7 @@
             try {
                 // For long messages, use WebSocket to bypass tmux send-keys length limit.
                 // tmux send-keys truncates text beyond ~500 chars. Writing directly to the
-                // PTY via WebSocket has no such limit. Uses bracketed paste mode for multi-line.
+                // PTY via WebSocket has no such limit. Claude CLI auto-detects large pastes.
                 const WS_SEND_THRESHOLD = 500;
                 const needsWsSend = sendMessage.length > WS_SEND_THRESHOLD;
                 let wsToUse = (terminalWS && terminalWS.readyState === WebSocket.OPEN) ? terminalWS : null;
@@ -5750,11 +5761,12 @@
 
                 if (needsWsSend && wsToUse) {
                     console.log(`Long message (${sendMessage.length} chars) — sending via WebSocket to bypass tmux send-keys limit`);
-                    // Bracketed paste mode: \x1b[200~ ... \x1b[201~ tells the terminal app
-                    // this is pasted text, so newlines aren't interpreted as submit until end
-                    wsToUse.send('\x1b[200~' + sendMessage + '\x1b[201~');
-                    // Small delay then send Enter to submit
-                    await new Promise(r => setTimeout(r, 50));
+                    // Send raw message text — Claude CLI does not support bracketed paste mode
+                    // (sending \x1b[200~...\x1b[201~ makes them appear as literal raw text).
+                    // tmux handles large sends automatically via its paste buffer.
+                    wsToUse.send(sendMessage);
+                    // Longer delay for tmux to flush large buffers before Enter
+                    await new Promise(r => setTimeout(r, 200));
                     wsToUse.send('\r');
                     // Close temporary WS if we opened one
                     if (wsToUse !== terminalWS) {
@@ -5785,9 +5797,10 @@
                 if (isTerminalAgent) {
                     // Terminal agents (Codex/Pi) use terminal as primary view
                 } else {
-                    // If tailing is active, it will pick up new messages automatically
-                    // Only start polling if we're not already tailing
-                    if (!tailingEventSource) {
+                    // If tailing is active AND connected, it will pick up new messages automatically.
+                    // Fall back to polling if SSE is null, CONNECTING, or CLOSED (not delivering messages).
+                    const isSSEOpen = tailingEventSource && tailingEventSource.readyState === EventSource.OPEN;
+                    if (!isSSEOpen) {
                         startHistoryPolling();
                     }
                 }
@@ -6767,6 +6780,14 @@
                     return;
                 }
             }
+            // Press "i" to focus chat input (vim-style, when not already in an input)
+            if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    document.getElementById('input')?.focus();
+                }
+            }
             // Press "/" to focus session search (when not already in an input)
             if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const tag = document.activeElement?.tagName?.toLowerCase();
@@ -7160,7 +7181,7 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-16 15:22 UTC iter=153 keeps=147-->
+    <!--autoweb-version: 2026-03-17 08:30 UTC iter=1 keeps=53-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
