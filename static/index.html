@@ -274,6 +274,8 @@
             /* Mobile: empty state text smaller */
             #empty-state h2 { font-size: 1.25rem !important; }
             #empty-state .max-w-md { padding-left: 16px; padding-right: 16px; }
+            /* Mobile: hide keyboard shortcut hints — useless on touch devices */
+            #empty-state-shortcuts { display: none; }
             /* Mobile: code blocks — smaller padding, always-visible copy button (no hover on touch) */
             .markdown-content pre { padding: 0.7em; font-size: 0.82em; }
             .code-copy-btn { opacity: 0.7 !important; }
@@ -550,7 +552,7 @@
             <a href="/dashboards/mm-dashboard.html" target="_blank" class="nav-pill nav-pill-gold">MM</a>
             <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
-            <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" target="_blank" title="Switch environment" style="display:none;"></a>
+            <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" title="Switch environment"></a>
             <button id="promote-btn" onclick="runPromote()" class="nav-pill font-semibold" style="display:none;background:var(--teal-9);color:#fff;" title="Promote dev → prod">↑ Promote</button>
             <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
             <span class="flex-1"></span>
@@ -748,41 +750,52 @@
                 <input id="command-palette-input" type="text" placeholder="Type a command..." autocomplete="off" style="width:100%; background:transparent; border:none; outline:none; color:var(--smoke-12); font-size:15px; font-family:Inter,system-ui,sans-serif;">
             </div>
             <div id="command-palette-list" style="overflow-y:auto; padding:6px 0; max-height:340px;"></div>
+            <div id="command-palette-footer" style="padding:6px 14px; border-top:1px solid var(--smoke-4); display:flex; gap:12px; align-items:center; flex-shrink:0;">
+                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↑↓</kbd> Navigate</span>
+                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↵</kbd> Select</span>
+                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">Esc</kbd> Close</span>
+            </div>
         </div>
     </div>
 
     <!-- Keyboard shortcuts help modal -->
     <div id="shortcuts-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);" onclick="if(event.target===this)closeShortcutsModal()">
-        <div style="background:var(--smoke-2); border:1px solid var(--smoke-5); border-radius:12px; padding:24px 28px; max-width:380px; width:90%; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="background:var(--smoke-2); border:1px solid var(--smoke-5); border-radius:12px; padding:24px 28px; max-width:380px; width:90%; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-shrink:0;">
                 <span style="font-size:14px; font-weight:600; color:var(--smoke-12);">Keyboard Shortcuts</span>
                 <span onclick="closeShortcutsModal()" style="cursor:pointer; color:var(--smoke-8); font-size:18px; line-height:1;">&times;</span>
             </div>
-            <div style="display:flex; flex-direction:column; gap:10px; font-size:13px;">
+            <div style="display:flex; flex-direction:column; gap:10px; font-size:13px; overflow-y:auto; padding-right:4px;">
+                <div style="padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">Input &amp; Search</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">I</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus search</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">/</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Command palette</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Search in chat</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+F</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle sidebar</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+B</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Command palette</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input / close</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
+                <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">Navigation</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate sessions (in search)</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">&#x2191;&#x2193;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Enter</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Previous session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Last viewed session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next / prev unread</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">U</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">P</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd> / <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Home</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+End</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
+                <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">View</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle thinking blocks</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">T</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle sidebar</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+B</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle terminal</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+`</kbd></div>
+                <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">Sessions</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Star/unstar session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">S</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Rename session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">R</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Cycle filter (Mine/Auto/All)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">M</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Cycle sort order</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">O</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Hide session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">D</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Export session as Markdown</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">E</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next unread session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">U</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Claude session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">N</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Mark all sessions read</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">A</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
         </div>
@@ -842,11 +855,18 @@
             document.body.appendChild(overlay);
         }
 
+        let _awRefreshTimer = null;
         function toggleAutowebPanel() {
             let overlay = document.getElementById('autoweb-overlay');
             if (overlay) {
-                overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
-                if (overlay.style.display === 'flex') loadAutowebResults();
+                const visible = overlay.style.display !== 'none';
+                overlay.style.display = visible ? 'none' : 'flex';
+                if (!visible) {
+                    loadAutowebResults();
+                    _awRefreshTimer = setInterval(loadAutowebResults, 15000);
+                } else {
+                    clearInterval(_awRefreshTimer);
+                }
                 return;
             }
             overlay = document.createElement('div');
@@ -864,7 +884,10 @@
                         </div>
                         <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
                     </div>
-                    <button onclick="document.getElementById('autoweb-overlay').style.display='none'" style="background:none;border:1px solid var(--smoke-5);color:var(--smoke-10);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;min-height:32px;">Close</button>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span id="aw-current" style="font-size:11px;color:var(--teal-9);font-family:ui-monospace,monospace;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+                        <button onclick="document.getElementById('autoweb-overlay').style.display='none';clearInterval(_awRefreshTimer);" style="background:none;border:1px solid var(--smoke-5);color:var(--smoke-10);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;min-height:32px;">Close</button>
+                    </div>
                 </div>
                 <div style="flex:1;overflow-y:auto;overflow-x:auto;padding:16px 20px;-webkit-overflow-scrolling:touch;">
                     <table id="autoweb-results-table" style="width:100%;min-width:600px;border-collapse:collapse;font-size:13px;font-family:'Inter',sans-serif;">
@@ -905,6 +928,10 @@
         }
 
         function loadAutowebResults() {
+            fetch('/aw-current.txt?_=' + Date.now()).then(r => r.text()).then(t => {
+                const el = document.getElementById('aw-current');
+                if (el) el.textContent = t.trim() ? '⚡ ' + t.trim() : '';
+            }).catch(() => {});
             const url = _awUrls[_awActiveTab] || _awUrls.feather;
             fetch(url + '?_=' + Date.now())
                 .then(r => r.text())
@@ -1166,6 +1193,7 @@
         let currentSessionProjectId = null;
         let previousSessionId = null;
         let previousSessionProjectId = null;
+        let recentSessionIds = JSON.parse(localStorage.getItem('recentSessionIds') || '[]');
         const sessionScrollPositions = new Map(); // Save scroll position per session
         const sessionDrafts = new Map(); // Save input drafts per session
         let currentTmuxSession = null;
@@ -1569,7 +1597,10 @@
         function cycleSessionFilter() {
             const modes = ['mine', 'auto', 'all'];
             const idx = modes.indexOf(sessionFilterMode);
-            setSessionFilter(modes[(idx + 1) % modes.length]);
+            const next = modes[(idx + 1) % modes.length];
+            setSessionFilter(next);
+            const labels = { mine: 'Mine', auto: 'Auto', all: 'All' };
+            showToast('Filter: ' + (labels[next] || next), 1500);
         }
 
         // Switch to prev/next session in the visible sidebar list (Alt+Up/Down)
@@ -1629,6 +1660,36 @@
             showToast('No unread sessions');
         }
 
+        function jumpToPrevUnreadSession() {
+            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
+            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
+            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
+            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
+            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+            if (starredSessions.size > 0) {
+                const starred = sessions.filter(s => starredSessions.has(s.id));
+                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
+                sessions = [...starred, ...unstarred];
+            }
+            if (!sessions.length) { showToast('No sessions'); return; }
+            const isUnread = s => {
+                const lv = sessionViewTimes[s.id];
+                return s.id !== currentSessionId && s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv));
+            };
+            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
+            const start = currentIdx >= 0 ? currentIdx - 1 : sessions.length - 1;
+            for (let i = 0; i < sessions.length; i++) {
+                const idx = (start - i + sessions.length) % sessions.length;
+                if (isUnread(sessions[idx])) {
+                    const s = sessions[idx];
+                    if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+                    else resumeSession(s.id, s.project);
+                    return;
+                }
+            }
+            showToast('No unread sessions');
+        }
+
         // Initialize filter UI on load
         (function initFilterUI() {
             const el = document.getElementById('sf-' + sessionFilterMode);
@@ -1654,6 +1715,7 @@
             localStorage.setItem('feather-session-sort', sessionSortMode);
             updateSortButton();
             renderSessions();
+            showToast('Sort: ' + (SESSION_SORT_LABELS[sessionSortMode] || sessionSortMode), 1500);
         }
 
         function updateSortButton() {
@@ -2417,6 +2479,10 @@
                 previousSessionProjectId = currentSessionProjectId;
             }
 
+            // Track recent sessions for command palette
+            recentSessionIds = [sessionId, ...recentSessionIds.filter(id => id !== sessionId)].slice(0, 8);
+            localStorage.setItem('recentSessionIds', JSON.stringify(recentSessionIds));
+
             currentSessionId = sessionId;
             currentSessionProjectId = projectId;
             currentTmuxSession = null;
@@ -2506,6 +2572,10 @@
                 previousSessionId = currentSessionId;
                 previousSessionProjectId = currentSessionProjectId;
             }
+
+            // Track recent sessions for command palette
+            recentSessionIds = [sessionId, ...recentSessionIds.filter(id => id !== sessionId)].slice(0, 8);
+            localStorage.setItem('recentSessionIds', JSON.stringify(recentSessionIds));
 
             // Preserve existing tmux session - Codex sessions share a terminal
             const previousTmux = currentTmuxSession;
@@ -3372,10 +3442,12 @@
         }
 
         async function exportSessionMarkdown() {
-            if (!currentSessionId || !currentFolder) return;
+            if (!currentSessionId) return;
+            const exportProjectId = currentSessionProjectId || currentFolder;
+            if (!exportProjectId) return;
             showToast('Exporting session...', 2000);
             try {
-                const res = await fetch(`/api/projects/${encodeURIComponent(currentFolder)}/sessions/${currentSessionId}/history?limit=10000`);
+                const res = await fetch(`/api/projects/${encodeURIComponent(exportProjectId)}/sessions/${currentSessionId}/history?limit=10000`);
                 if (!res.ok) throw new Error('Failed to fetch');
                 const data = await res.json();
                 if (!data.messages || !data.messages.length) { showToast('No messages to export'); return; }
@@ -5019,19 +5091,17 @@
 
         // ========== Env Pill ==========
         (function() {
-            const port = parseInt(location.port || (location.protocol === 'https:' ? 443 : 80));
+            const isDev = location.pathname.startsWith('/dev') || location.port === '4860';
             const envPill = document.getElementById('env-pill');
             if (!envPill) return;
-            if (port === 4850) {
-                envPill.href = 'http://localhost:4860';
-                envPill.textContent = 'DEV';
-                envPill.style.display = '';
-            } else if (port === 4860) {
-                envPill.href = 'http://localhost:4850';
-                envPill.textContent = 'PROD';
-                envPill.style.display = '';
+            if (isDev) {
+                envPill.href = '/';
+                envPill.textContent = '→ PROD';
                 const promoteBtn = document.getElementById('promote-btn');
                 if (promoteBtn) promoteBtn.style.display = '';
+            } else {
+                envPill.href = '/dev/';
+                envPill.textContent = '→ DEV';
             }
         })();
 
@@ -6932,7 +7002,9 @@
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: 'E', action: () => { if (currentSessionId) exportSessionMarkdown(); else showToast('No session selected'); } },
             { label: 'Next unread session', shortcut: 'U', action: () => jumpToNextUnreadSession() },
-            { label: 'Mark all sessions read', shortcut: '', action: () => markAllSessionsRead() },
+            { label: 'Previous unread session', shortcut: 'P', action: () => jumpToPrevUnreadSession() },
+            { label: 'New Claude session', shortcut: 'N', action: () => newClaudeSession() },
+            { label: 'Mark all sessions read', shortcut: 'A', action: () => markAllSessionsRead() },
             { label: 'Hide current session', shortcut: '', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } else { showToast('No session selected'); } } },
             { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
             { label: 'Rename current session', shortcut: 'R', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
@@ -6966,9 +7038,50 @@
         }
 
         function getFilteredCommands(query) {
-            if (!query) return COMMAND_PALETTE_ITEMS;
+            if (!query) {
+                // Show recent sessions at top for quick navigation (VS Code Ctrl+P style)
+                const recents = recentSessionIds
+                    .map(id => allSessions.find(s => s.id === id))
+                    .filter(Boolean)
+                    .slice(0, 5)
+                    .map(s => {
+                        const projName = (FOLDERS.find(f => f.id === s.project) || {}).name;
+                        const meta = [s.lastUpdated ? formatTime(s.lastUpdated) : '', s.message_count ? s.message_count + ' msg' : ''].filter(Boolean).join(' · ');
+                        return {
+                            label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
+                            shortcut: meta,
+                            group: 'recent',
+                            action: () => {
+                                if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+                                else resumeSession(s.id, s.project);
+                            }
+                        };
+                    });
+                return [...recents, ...COMMAND_PALETTE_ITEMS.map(c => ({...c, group: 'command'}))];
+            }
             const q = query.toLowerCase();
-            return COMMAND_PALETTE_ITEMS.filter(c => c.label.toLowerCase().includes(q));
+            const cmds = COMMAND_PALETTE_ITEMS.filter(c => c.label.toLowerCase().includes(q)).map(c => ({...c, group: 'command'}));
+            // Also search sessions for quick navigation
+            const sessionItems = allSessions
+                .filter(s => {
+                    const title = getSessionTitle(s).toLowerCase();
+                    return title.includes(q) || s.id.toLowerCase().startsWith(q);
+                })
+                .slice(0, 5)
+                .map(s => {
+                    const projName = (FOLDERS.find(f => f.id === s.project) || {}).name;
+                    const meta = [s.lastUpdated ? formatTime(s.lastUpdated) : '', s.message_count ? s.message_count + ' msg' : ''].filter(Boolean).join(' · ');
+                    return {
+                        label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
+                        shortcut: meta,
+                        group: 'session',
+                        action: () => {
+                            if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+                            else resumeSession(s.id, s.project);
+                        }
+                    };
+                });
+            return [...sessionItems, ...cmds];
         }
 
         function renderCommandPaletteList(query) {
@@ -6980,13 +7093,22 @@
                 list.innerHTML = '<div style="padding:12px 16px; color:var(--smoke-8); font-size:13px;">No matching commands</div>';
                 return;
             }
+            const GROUP_LABELS = { recent: 'Recent', session: 'Sessions', command: 'Commands' };
+            let lastGroup = null;
             list.innerHTML = filtered.map((cmd, i) => {
                 const active = i === _cmdPaletteIdx;
-                return `<div class="cmd-palette-item" data-idx="${i}" style="padding:8px 16px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:13px; background:${active ? 'var(--smoke-4)' : 'transparent'}; color:${active ? 'var(--smoke-12)' : 'var(--smoke-10)'};" onmouseenter="highlightCmdItem(${i})" onclick="executeCmdItem(${i})">
+                let header = '';
+                if (cmd.group && cmd.group !== lastGroup) {
+                    lastGroup = cmd.group;
+                    header = `<div style="padding:6px 16px 2px; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7); font-weight:600; pointer-events:none;">${GROUP_LABELS[cmd.group] || cmd.group}</div>`;
+                }
+                return header + `<div class="cmd-palette-item" data-idx="${i}" style="padding:7px 16px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:13px; background:${active ? 'var(--smoke-4)' : 'transparent'}; color:${active ? 'var(--smoke-12)' : 'var(--smoke-10)'};" onmouseenter="highlightCmdItem(${i})" onclick="executeCmdItem(${i})">
                     <span>${escapeHtml(cmd.label)}</span>
-                    ${cmd.shortcut ? `<kbd style="background:var(--smoke-3); border:1px solid var(--smoke-5); border-radius:4px; padding:1px 6px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-8);">${escapeHtml(cmd.shortcut)}</kbd>` : ''}
+                    ${cmd.shortcut ? `<kbd style="background:var(--smoke-3); border:1px solid var(--smoke-5); border-radius:4px; padding:1px 6px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-8); flex-shrink:0; margin-left:8px;">${escapeHtml(cmd.shortcut)}</kbd>` : ''}
                 </div>`;
             }).join('');
+            // Scroll active item into view for keyboard navigation
+            list.querySelector(`[data-idx="${_cmdPaletteIdx}"]`)?.scrollIntoView({ block: 'nearest' });
         }
 
         function highlightCmdItem(idx) {
@@ -7195,6 +7317,30 @@
                     jumpToNextUnreadSession();
                 }
             }
+            // P — jump to previous unread session
+            if (e.key === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    jumpToPrevUnreadSession();
+                }
+            }
+            // N — new Claude session
+            if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    newClaudeSession();
+                }
+            }
+            // A — mark all sessions as read
+            if (e.key === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    markAllSessionsRead();
+                }
+            }
         });
         // Show shortcut hint again when search loses focus, and clear keyboard highlight
         document.getElementById('session-search')?.addEventListener('blur', () => {
@@ -7220,13 +7366,31 @@
             const toast = document.createElement('div');
             toast.textContent = message;
             Object.assign(toast.style, {
-                position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+                position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%) translateY(-8px)',
                 background: '#1a1a2e', color: '#e0e0e0', padding: '12px 24px',
                 borderRadius: '8px', border: '1px solid #444', zIndex: '99999',
-                fontSize: '14px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                fontSize: '14px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                opacity: '0', transition: 'opacity 0.2s ease, transform 0.2s ease',
+                cursor: 'pointer', userSelect: 'none'
             });
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), duration);
+            // Slide in
+            requestAnimationFrame(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateX(-50%) translateY(0)';
+            });
+            // Click to dismiss early
+            toast.onclick = () => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-8px)';
+                setTimeout(() => toast.remove(), 200);
+            };
+            const t = setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(-8px)';
+                setTimeout(() => toast.remove(), 200);
+            }, duration);
+            toast.addEventListener('click', () => clearTimeout(t), { once: true });
         }
 
         // ========== SSE Connection ==========
