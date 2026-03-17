@@ -551,6 +551,7 @@
             <a href="/twap" target="_blank" class="nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
             <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" target="_blank" title="Switch environment" style="display:none;"></a>
+            <button id="promote-btn" onclick="runPromote()" class="nav-pill font-semibold" style="display:none;background:var(--teal-9);color:#fff;" title="Promote dev → prod">↑ Promote</button>
             <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
@@ -780,6 +781,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Cycle sort order</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">O</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Hide session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">D</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Export session as Markdown</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">E</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next unread session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">U</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
             </div>
@@ -1594,6 +1596,37 @@
             } else {
                 resumeSession(previousSessionId, previousSessionProjectId);
             }
+        }
+
+        // Jump to next unread session (U key)
+        function jumpToNextUnreadSession() {
+            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
+            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
+            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
+            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
+            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+            if (starredSessions.size > 0) {
+                const starred = sessions.filter(s => starredSessions.has(s.id));
+                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
+                sessions = [...starred, ...unstarred];
+            }
+            if (!sessions.length) { showToast('No sessions'); return; }
+            const isUnread = s => {
+                const lv = sessionViewTimes[s.id];
+                return s.id !== currentSessionId && s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv));
+            };
+            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
+            const start = currentIdx >= 0 ? currentIdx + 1 : 0;
+            for (let i = 0; i < sessions.length; i++) {
+                const idx = (start + i) % sessions.length;
+                if (isUnread(sessions[idx])) {
+                    const s = sessions[idx];
+                    if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+                    else resumeSession(s.id, s.project);
+                    return;
+                }
+            }
+            showToast('No unread sessions');
         }
 
         // Initialize filter UI on load
@@ -4997,8 +5030,67 @@
                 envPill.href = 'http://localhost:4850';
                 envPill.textContent = 'PROD';
                 envPill.style.display = '';
+                const promoteBtn = document.getElementById('promote-btn');
+                if (promoteBtn) promoteBtn.style.display = '';
             }
         })();
+
+        // ========== Promote dev → prod ==========
+        async function runPromote() {
+            const btn = document.getElementById('promote-btn');
+            const prodBase = 'http://localhost:4850';
+            btn.disabled = true;
+            btn.textContent = '↑ Checking...';
+            try {
+                const res = await fetch(prodBase + '/api/promote/pending');
+                const data = await res.json();
+                if (!data.has_pending) {
+                    btn.textContent = '↑ Up to date';
+                    setTimeout(() => { btn.textContent = '↑ Promote'; btn.disabled = false; }, 2000);
+                    return;
+                }
+                const list = data.commits.map(c => `  ${c.hash} ${c.message}`).join('\n');
+                if (!confirm(`Promote ${data.commits.length} commit(s) to prod?\n\n${list}`)) {
+                    btn.textContent = '↑ Promote'; btn.disabled = false; return;
+                }
+                btn.textContent = '↑ Merging...';
+                await fetch(prodBase + '/api/promote', { method: 'POST' });
+                btn.textContent = '↑ Building...';
+                const sse = new EventSource(prodBase + '/api/deploy/stream');
+                sse.addEventListener('deploy-app', e => {
+                    try {
+                        const ev = JSON.parse(e.data);
+                        if (ev.type === 'complete') {
+                            sse.close();
+                            if (ev.success) {
+                                btn.textContent = '↑ Done! →PROD';
+                                setTimeout(() => { window.location.href = prodBase; }, 1500);
+                            } else {
+                                btn.textContent = '↑ Failed';
+                                btn.disabled = false;
+                            }
+                        } else if (ev.type === 'progress') {
+                            btn.textContent = '↑ ' + ev.stage + '...';
+                        }
+                    } catch(e) {}
+                });
+                sse.onerror = () => {
+                    sse.close();
+                    btn.textContent = '↑ Restarting...';
+                    // Prod restarted — poll health then redirect
+                    let attempts = 0;
+                    const poll = setInterval(async () => {
+                        try {
+                            const h = await fetch(prodBase + '/health');
+                            if (h.ok) { clearInterval(poll); window.location.href = prodBase; }
+                        } catch(e) {}
+                        if (++attempts > 30) { clearInterval(poll); btn.textContent = '↑ Promote'; btn.disabled = false; }
+                    }, 1000);
+                };
+            } catch(e) {
+                btn.textContent = '↑ Error'; btn.disabled = false;
+            }
+        }
 
         // ========== New Session ==========
         async function newPiSession() {
@@ -6839,6 +6931,7 @@
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: 'E', action: () => { if (currentSessionId) exportSessionMarkdown(); else showToast('No session selected'); } },
+            { label: 'Next unread session', shortcut: 'U', action: () => jumpToNextUnreadSession() },
             { label: 'Mark all sessions read', shortcut: '', action: () => markAllSessionsRead() },
             { label: 'Hide current session', shortcut: '', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } else { showToast('No session selected'); } } },
             { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
@@ -7092,6 +7185,14 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     cycleSessionSort();
+                }
+            }
+            // U — jump to next unread session
+            if (e.key === 'u' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    jumpToNextUnreadSession();
                 }
             }
         });
