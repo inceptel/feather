@@ -295,6 +295,9 @@
             #search-shortcut-hint { display: none; }
             /* Mobile: session filter pills need larger touch targets */
             .session-filter-pill { min-height: 36px; }
+            /* Mobile: code blocks wrap instead of horizontal scroll — swiping sideways is awkward on phone */
+            .markdown-content pre { white-space: pre-wrap !important; word-wrap: break-word; overflow-wrap: anywhere; overflow-x: hidden; }
+            .markdown-content pre code { white-space: pre-wrap !important; overflow-wrap: anywhere; }
         }
         #voice-btn.recording { background: rgba(239, 68, 68, 0.2) !important; color: #ef4444 !important; animation: voice-pulse 1.5s infinite; }
         #voice-btn.transcribing { background: rgba(59, 130, 246, 0.2) !important; color: #3b82f6 !important; cursor: wait; }
