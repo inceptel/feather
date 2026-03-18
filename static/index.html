@@ -64,9 +64,7 @@
         :focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; border-radius: 3px; }
         ::selection { background: rgba(250, 178, 131, 0.3); }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        @keyframes heatGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-        #pulse-heatmap .flex > div > div:first-child { transform-origin: bottom; animation: heatGrow 0.4s ease-out; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeInScale { from { opacity: 0; transform: scale(0.97) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
@@ -481,15 +479,6 @@
             <div id="mark-all-read-bar" class="hidden mt-1">
                 <button onclick="markAllSessionsRead()" class="w-full text-[10px] text-smoke-7 hover:text-gold-9 transition-colors cursor-pointer py-0.5 text-center" title="Mark all sessions as read"><span id="mark-all-read-count"></span> unread &mdash; mark all read</button>
             </div>
-        </div>
-
-        <!-- Live Pulse - compact -->
-        <div id="pulse-section" class="px-3 py-2 border-y border-smoke-4/50 bg-smoke-2/60">
-            <div class="flex items-center gap-2">
-                <div id="pulse-live" class="flex-1 min-w-0"></div>
-                <div id="pulse-heatmap" class="shrink-0" style="width:84px"></div>
-            </div>
-            <div id="pulse-insight" class="text-[10px] text-smoke-8 mt-0.5 leading-tight"></div>
         </div>
 
         <!-- Sessions -->
@@ -2031,147 +2020,6 @@ const mobileStarBtn = document.getElementById('mobile-star-btn');
                 const d = new Date(iso);
                 return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET';
             } catch { return iso || ''; }
-        }
-
-        // ========== Live Pulse ==========
-        let pulseData = { allSessions: [], activeIds: new Set() };
-
-        async function loadPulseData() {
-            try {
-                const [tmuxRes, projectsRes] = await Promise.all([
-                    fetch('/api/claude-sessions'),
-                    fetch('/api/projects')
-                ]);
-                if (!tmuxRes.ok || !projectsRes.ok) return;
-                const tmuxData = await tmuxRes.json();
-                const projectData = await projectsRes.json();
-
-                // Get active tmux session IDs
-                const activeIds = new Set();
-                if (tmuxData.tmux_sessions) {
-                    for (const ts of tmuxData.tmux_sessions) {
-                        if (ts.session_id) activeIds.add(ts.session_id);
-                    }
-                }
-
-                // Fetch all sessions across all projects
-                const allSessions = [];
-                await Promise.all(projectData.projects.map(async (p) => {
-                    try {
-                        const res = await fetch(`/api/projects/${encodeURIComponent(p.id)}/sessions`);
-                        if (res.ok) {
-                            const data = await res.json();
-                            for (const s of (data.sessions || [])) {
-                                s._projectName = p.name.split('/').pop();
-                                allSessions.push(s);
-                            }
-                        }
-                    } catch {}
-                }));
-
-                // Sort by most recent
-                allSessions.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated));
-                pulseData = { allSessions, activeIds };
-                renderPulse();
-            } catch (e) {
-                console.error('Pulse data error:', e);
-            }
-        }
-
-        function renderPulse() {
-            const { allSessions, activeIds } = pulseData;
-            const liveEl = document.getElementById('pulse-live');
-            const heatEl = document.getElementById('pulse-heatmap');
-            const insightEl = document.getElementById('pulse-insight');
-            if (!liveEl) return;
-
-            // --- Active sessions ---
-            const activeSessions = allSessions.filter(s => {
-                const prefix = s.id.substring(0, 8);
-                return activeIds.has(prefix) || activeIds.has(s.id);
-            });
-
-            if (activeSessions.length > 0) {
-                liveEl.innerHTML = `
-                    <div class="flex items-center gap-1.5 min-w-0">
-                        <span class="w-2 h-2 rounded-full bg-apple-9 live-dot shrink-0"></span>
-                        <span class="text-[10px] text-apple-9 font-semibold truncate">${activeSessions.length} live</span>
-                    </div>
-                `;
-            } else {
-                liveEl.innerHTML = `
-                    <div class="flex items-center gap-1.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-smoke-7 shrink-0"></span>
-                        <span class="text-[10px] text-smoke-8">idle</span>
-                    </div>
-                `;
-            }
-
-            // --- 7-day heatmap ---
-            const now = new Date();
-            const days = [];
-            const dayLabels = ['S','M','T','W','T','F','S'];
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date(now);
-                d.setDate(d.getDate() - i);
-                const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-                const dayEnd = new Date(dayStart.getTime() + 86400000);
-                const count = allSessions.filter(s => {
-                    const t = new Date(s.lastUpdated);
-                    return t >= dayStart && t < dayEnd;
-                }).length;
-                days.push({ count, label: dayLabels[d.getDay()], isToday: i === 0 });
-            }
-            const maxCount = Math.max(...days.map(d => d.count), 1);
-
-            heatEl.innerHTML = `
-                <div class="flex items-end gap-px h-3" title="Last 7 days">
-                    ${days.map(d => {
-                        const intensity = d.count / maxCount;
-                        const h = Math.max(2, Math.round(intensity * 12));
-                        const opacity = d.count === 0 ? 0.12 : (0.25 + intensity * 0.75);
-                        return `<div class="flex-1 rounded-sm" style="height:${h}px;background:rgba(250,178,131,${opacity})"></div>`;
-                    }).join('')}
-                </div>
-            `;
-
-            // --- Smart insight ---
-            const todayCount = days[days.length - 1].count;
-            const weekTotal = days.reduce((sum, d) => sum + d.count, 0);
-            const prevWeekSessions = allSessions.filter(s => {
-                const t = new Date(s.lastUpdated);
-                const daysAgo = (now - t) / 86400000;
-                return daysAgo >= 7 && daysAgo < 14;
-            }).length;
-
-            let insight = '';
-            if (activeSessions.length > 0) {
-                insight = `${activeSessions.length} running now`;
-            } else if (todayCount > 0) {
-                insight = `${todayCount} session${todayCount > 1 ? 's' : ''} today`;
-            } else {
-                const lastSession = allSessions[0];
-                if (lastSession) {
-                    insight = `Last active ${formatTime(lastSession.lastUpdated)}`;
-                }
-            }
-
-            if (weekTotal > 0) {
-                let trendStr = '';
-                if (prevWeekSessions > 0) {
-                    const ratio = weekTotal / prevWeekSessions;
-                    if (ratio >= 3) {
-                        trendStr = ` · ${ratio.toFixed(0)}x last wk`;
-                    } else {
-                        const trend = Math.round((ratio - 1) * 100);
-                        if (trend > 0) trendStr = ` · +${trend}% vs last wk`;
-                        else if (trend < 0) trendStr = ` · ${trend}% vs last wk`;
-                    }
-                }
-                insight += ` · ${weekTotal} this week${trendStr}`;
-            }
-
-            insightEl.textContent = insight;
         }
 
         // ========== Session Selection ==========
@@ -6927,10 +6775,6 @@ const mobileStarBtn = document.getElementById('mobile-star-btn');
                     if (iso) el.textContent = formatTime(iso);
                 });
             }, 30000);
-
-            // Live Pulse - load on init and refresh every 30s
-            loadPulseData();
-            setInterval(loadPulseData, 30000);
 
             // TAO pill - poll TWAP engine for DJINN PnL
             async function updateTaoPill() {
