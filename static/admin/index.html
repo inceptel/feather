@@ -67,16 +67,13 @@
             <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">/</kbd><span class="text-smoke-9">Focus service filter</span></div>
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">R</kbd><span class="text-smoke-9">Refresh status</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">Esc</kbd><span class="text-smoke-9">Clear filter / close panel</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">Esc</kbd><span class="text-smoke-9">Clear filter</span></div>
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">?</kbd><span class="text-smoke-9">Toggle this panel</span></div>
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">S</kbd><span class="text-smoke-9">Toggle stopped filter</span></div>
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">J</kbd><span class="text-smoke-9">Focus next service</span></div>
                 <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">K</kbd><span class="text-smoke-9">Focus prev service</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">g</kbd><span class="text-smoke-9">Jump to first service</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">G</kbd><span class="text-smoke-9">Jump to last service</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">Enter</kbd><span class="text-smoke-9">Copy focused service name</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">c</kbd><span class="text-smoke-9">Copy restart/start cmd</span></div>
-                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">t</kbd><span class="text-smoke-9">Copy tail log cmd</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">G</kbd><span class="text-smoke-9">Jump to first service</span></div>
+                <div class="flex items-center gap-2"><kbd class="bg-smoke-4 px-1.5 py-0.5 rounded font-mono">shift+G</kbd><span class="text-smoke-9">Jump to last service</span></div>
                 <div class="flex items-center gap-2 col-span-2 mt-1 text-smoke-7"><span>Click service name to copy it · ≡ tail log · ↺ restart · ▶ start (stopped only)</span></div>
             </div>
         </div>
@@ -369,9 +366,7 @@
             if (diff < 60) return 'just now';
             if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
             if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-            if (diff < 7 * 86400) return Math.floor(diff / 86400) + 'd ago';
-            if (diff < 30 * 86400) return Math.floor(diff / (7 * 86400)) + 'w ago';
-            return Math.floor(diff / (30 * 86400)) + 'mo ago';
+            return Math.floor(diff / 86400) + 'd ago';
         }
 
         // ========== Copy service name ==========
@@ -447,13 +442,6 @@
                 }
                 return;
             }
-            if (e.key === 'Escape') {
-                const panel = document.getElementById('admin-shortcuts-panel');
-                if (panel && !panel.classList.contains('hidden')) {
-                    toggleShortcuts();
-                    e.preventDefault();
-                }
-            }
             if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
                 const filter = document.getElementById('service-filter');
                 if (filter) { filter.focus(); filter.select(); e.preventDefault(); }
@@ -489,18 +477,6 @@
                 navigateServicesTo(-1);
                 e.preventDefault();
             }
-            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
-                activateFocusedService();
-                e.preventDefault();
-            }
-            if (e.key === 'c' && !e.ctrlKey && !e.metaKey) {
-                copyFocusedServiceCmd();
-                e.preventDefault();
-            }
-            if (e.key === 't' && !e.ctrlKey && !e.metaKey) {
-                tailFocusedService();
-                e.preventDefault();
-            }
         });
 
         function navigateServices(delta) {
@@ -527,40 +503,6 @@
                 target.classList.add('ring-1', 'ring-gold-9');
                 target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             }
-        }
-
-        function activateFocusedService() {
-            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
-            const visible = items.filter(el => el.style.display !== 'none');
-            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
-            const card = visible[focusedServiceIndex];
-            if (!card) return;
-            // Click the service name button (primary action: copy name)
-            const nameBtn = card.querySelector('button.font-medium');
-            if (nameBtn) nameBtn.click();
-        }
-
-        function copyFocusedServiceCmd() {
-            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
-            const visible = items.filter(el => el.style.display !== 'none');
-            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
-            const card = visible[focusedServiceIndex];
-            if (!card) return;
-            // Click restart or start button depending on service state
-            const restartBtn = card.querySelector('button[title^="Copy: supervisorctl restart"]');
-            const startBtn = card.querySelector('button[title^="Copy: supervisorctl start"]');
-            if (restartBtn) restartBtn.click();
-            else if (startBtn) startBtn.click();
-        }
-
-        function tailFocusedService() {
-            const items = Array.from(document.querySelectorAll('#services-list > div[data-svc-name]'));
-            const visible = items.filter(el => el.style.display !== 'none');
-            if (focusedServiceIndex < 0 || focusedServiceIndex >= visible.length) return;
-            const card = visible[focusedServiceIndex];
-            if (!card) return;
-            const tailBtn = card.querySelector('button[title^="Copy: supervisorctl tail"]');
-            if (tailBtn) tailBtn.click();
         }
 
         function clearServiceFilter() {
