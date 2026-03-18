@@ -775,8 +775,6 @@
         // ========== State ==========
         let currentSessionId = null;
         let currentSessionProjectId = null;
-        let previousSessionId = null;
-        let previousSessionProjectId = null;
         const sessionScrollPositions = new Map(); // Save scroll position per session
         const sessionDrafts = new Map(); // Save input drafts per session (in-memory only)
         let currentTmuxSession = null;
@@ -1296,107 +1294,6 @@ const mobileStarBtn = document.getElementById('mobile-star-btn');
             if (nextIdx < 0) nextIdx = items.length - 1;
             if (nextIdx >= items.length) nextIdx = 0;
             items[nextIdx]?.click();
-        }
-
-        // Switch to the previously viewed session (Ctrl+.)
-        function switchToPreviousSession() {
-            if (!previousSessionId || !previousSessionProjectId) return;
-            // Check if the session item is a codex/pi session
-            const prevSession = allSessions.find(s => s.id === previousSessionId);
-            if (!prevSession) return;
-            const isTerminal = prevSession.source === 'codex' || prevSession.source === 'pi';
-            if (isTerminal) {
-                openCodexSession(previousSessionId, previousSessionProjectId, prevSession.source);
-            } else {
-                resumeSession(previousSessionId, previousSessionProjectId);
-            }
-        }
-
-        // Jump to next unread session (U key)
-        function jumpToNextUnreadSession() {
-            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
-            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
-            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
-            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
-            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            { const starred = sessions.filter(s => starredSessions.has(s.id));
-              const rest = sessions.filter(s => !starredSessions.has(s.id));
-              sessions = [...starred, ...rest]; }
-            if (!sessions.length) { showToast('No sessions'); return; }
-            const isUnread = s => {
-                const lv = sessionViewTimes[s.id];
-                return s.id !== currentSessionId && s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv));
-            };
-            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
-            const start = currentIdx >= 0 ? currentIdx + 1 : 0;
-            for (let i = 0; i < sessions.length; i++) {
-                const idx = (start + i) % sessions.length;
-                if (isUnread(sessions[idx])) {
-                    const s = sessions[idx];
-                    if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-                    else resumeSession(s.id, s.project);
-                    return;
-                }
-            }
-            showToast('No unread sessions');
-        }
-
-        function jumpToPrevUnreadSession() {
-            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
-            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
-            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
-            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
-            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            { const starred = sessions.filter(s => starredSessions.has(s.id));
-              const rest = sessions.filter(s => !starredSessions.has(s.id));
-              sessions = [...starred, ...rest]; }
-            if (!sessions.length) { showToast('No sessions'); return; }
-            const isUnread = s => {
-                const lv = sessionViewTimes[s.id];
-                return s.id !== currentSessionId && s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv));
-            };
-            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
-            const start = currentIdx >= 0 ? currentIdx - 1 : sessions.length - 1;
-            for (let i = 0; i < sessions.length; i++) {
-                const idx = (start - i + sessions.length) % sessions.length;
-                if (isUnread(sessions[idx])) {
-                    const s = sessions[idx];
-                    if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-                    else resumeSession(s.id, s.project);
-                    return;
-                }
-            }
-            showToast('No unread sessions');
-        }
-
-        function navigateSessionList(direction) {
-            // direction: 1 = next (down), -1 = prev (up)
-            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
-            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
-            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
-            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
-            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            if (searchApiResults === null) {
-                const starred = sessions.filter(s => starredSessions.has(s.id));
-                const rest = sessions.filter(s => !starredSessions.has(s.id));
-                sessions = [...starred, ...rest];
-            }
-            if (!sessions.length) { showToast('No sessions'); return; }
-            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
-            if (currentIdx === -1) {
-                const s = sessions[0];
-                if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-                else resumeSession(s.id, s.project);
-                return;
-            }
-            const nextIdx = currentIdx + direction;
-            if (nextIdx < 0 || nextIdx >= sessions.length) {
-                showToast(direction > 0 ? 'Last session' : 'First session', 1500);
-                return;
-            }
-            const s = sessions[nextIdx];
-            if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-            else resumeSession(s.id, s.project);
         }
 
         // Initialize filter UI on load
@@ -2344,12 +2241,6 @@ function hideSession(sessionId) {
                 else if (inp) { sessionDrafts.delete(currentSessionId);  }
             }
 
-            // Track previous session for Ctrl+. quick-switch
-            if (currentSessionId && currentSessionId !== sessionId) {
-                previousSessionId = currentSessionId;
-                previousSessionProjectId = currentSessionProjectId;
-            }
-
             currentSessionId = sessionId;
             currentSessionProjectId = projectId;
             currentTmuxSession = null;
@@ -2445,12 +2336,6 @@ function hideSession(sessionId) {
                 const inp = document.getElementById('input');
                 if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value);  }
                 else if (inp) { sessionDrafts.delete(currentSessionId);  }
-            }
-
-            // Track previous session for Ctrl+. quick-switch
-            if (currentSessionId && currentSessionId !== sessionId) {
-                previousSessionId = currentSessionId;
-                previousSessionProjectId = currentSessionProjectId;
             }
 
             // Preserve existing tmux session - Codex sessions share a terminal
@@ -3270,26 +3155,6 @@ function hideSession(sessionId) {
             } catch {
                 label.textContent = 'Failed';
                 setTimeout(() => { label.textContent = 'Copy'; }, 1500);
-            }
-        }
-
-        async function copyLastAssistantMessage() {
-            const msgs = document.querySelectorAll('#message-container [data-raw-content]');
-            // Find last assistant message (has assistant-msg-bubble)
-            let lastAssistant = null;
-            for (let i = msgs.length - 1; i >= 0; i--) {
-                if (msgs[i].querySelector('.assistant-msg-bubble')) {
-                    lastAssistant = msgs[i];
-                    break;
-                }
-            }
-            if (!lastAssistant) { showToast('No assistant message to copy'); return; }
-            const raw = lastAssistant.getAttribute('data-raw-content') || '';
-            try {
-                await navigator.clipboard.writeText(raw);
-                showToast('Last response copied');
-            } catch {
-                showToast('Copy failed');
             }
         }
 
@@ -7089,16 +6954,6 @@ function hideSession(sessionId) {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
                     e.preventDefault();
                     openChatSearch();
-                }
-                // Ctrl+. / Cmd+. to switch to previous session
-                if ((e.metaKey || e.ctrlKey) && e.key === '.') {
-                    e.preventDefault();
-                    switchToPreviousSession();
-                }
-                // Ctrl+Shift+C / Cmd+Shift+C to copy last assistant message
-                if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'C') {
-                    e.preventDefault();
-                    copyLastAssistantMessage();
                 }
             });
 
