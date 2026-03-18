@@ -608,9 +608,7 @@
                     </div>
                     <div class="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[11px] text-smoke-7" id="empty-state-shortcuts">
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">/</kbd> Search</span>
-                        <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">Ctrl+K</kbd> Commands</span>
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">N</kbd> New session</span>
-                        <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">?</kbd> All shortcuts</span>
                     </div>
                     <div id="recent-sessions-cards" class="mt-8 w-full max-w-sm mx-auto"></div>
                 </div>
@@ -722,24 +720,6 @@
         <img id="lightbox-img" src="" alt="Full size image">
     </div>
 
-    <!-- Command palette modal -->
-    <div id="command-palette-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:300; align-items:flex-start; justify-content:center; padding-top:min(20vh,120px); backdrop-filter:blur(4px);" onclick="if(event.target===this)closeCommandPalette()" role="dialog" aria-modal="true" aria-label="Command Palette">
-        <div id="command-palette" style="background:var(--smoke-2); border:1px solid var(--smoke-5); border-radius:12px; width:min(480px,90vw); max-height:400px; box-shadow:0 16px 48px rgba(0,0,0,0.5); overflow:hidden; display:flex; flex-direction:column;">
-            <div style="padding:12px 16px; border-bottom:1px solid var(--smoke-4);">
-                <input id="command-palette-input" type="text" placeholder="Type a command..." autocomplete="off" style="width:100%; background:transparent; border:none; outline:none; color:var(--smoke-12); font-size:15px; font-family:Inter,system-ui,sans-serif;">
-            </div>
-            <div id="command-palette-list" style="overflow-y:auto; padding:6px 0; max-height:280px;"></div>
-            <div id="command-palette-preview" style="display:none; padding:8px 14px; border-top:1px solid var(--smoke-4); background:var(--smoke-3); max-height:80px; overflow:hidden; flex-shrink:0;">
-                <div id="command-palette-preview-role" style="font-size:10px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--smoke-7); margin-bottom:3px;"></div>
-                <div id="command-palette-preview-text" style="font-size:12px; color:var(--smoke-10); line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;"></div>
-            </div>
-            <div id="command-palette-footer" style="padding:6px 14px; border-top:1px solid var(--smoke-4); display:flex; gap:12px; align-items:center; flex-shrink:0;">
-                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↑↓</kbd> Navigate</span>
-                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↵</kbd> Select</span>
-                <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">Esc</kbd> Close</span>
-            </div>
-        </div>
-    </div>
 
 
     <script>
@@ -821,7 +801,6 @@
         let currentSessionProjectId = null;
         let previousSessionId = null;
         let previousSessionProjectId = null;
-        let recentSessionIds = JSON.parse(localStorage.getItem('recentSessionIds') || '[]');
         const sessionScrollPositions = new Map(); // Save scroll position per session
         const sessionDrafts = new Map(); // Save input drafts per session
         // Restore persisted drafts from localStorage
@@ -2079,12 +2058,8 @@
             // Only show when empty state is visible (no session selected)
             const emptyState = document.getElementById('empty-state');
             if (!emptyState || emptyState.classList.contains('hidden')) return;
-            // Get top 3 recently visited sessions (from recentSessionIds), falling back to newest
-            let recent = recentSessionIds
-                .map(id => allSessions.find(s => s.id === id))
-                .filter(s => s && !isAutowebSession(s))
-                .slice(0, 3);
-            if (!recent.length) recent = allSessions.filter(s => !isAutowebSession(s)).slice(0, 3);
+            // Get top 3 newest sessions
+            let recent = allSessions.filter(s => !isAutowebSession(s)).slice(0, 3);
             if (!recent.length) { container.innerHTML = ''; return; }
             let html = '<div class="text-[10px] uppercase tracking-widest text-smoke-7 mb-2">Recent sessions</div>';
             recent.forEach(s => {
@@ -2551,10 +2526,6 @@
                 previousSessionProjectId = currentSessionProjectId;
             }
 
-            // Track recent sessions for command palette
-            recentSessionIds = [sessionId, ...recentSessionIds.filter(id => id !== sessionId)].slice(0, 8);
-            localStorage.setItem('recentSessionIds', JSON.stringify(recentSessionIds));
-
             currentSessionId = sessionId;
             currentSessionProjectId = projectId;
             currentTmuxSession = null;
@@ -2657,10 +2628,6 @@
                 previousSessionId = currentSessionId;
                 previousSessionProjectId = currentSessionProjectId;
             }
-
-            // Track recent sessions for command palette
-            recentSessionIds = [sessionId, ...recentSessionIds.filter(id => id !== sessionId)].slice(0, 8);
-            localStorage.setItem('recentSessionIds', JSON.stringify(recentSessionIds));
 
             // Preserve existing tmux session - Codex sessions share a terminal
             const previousTmux = currentTmuxSession;
@@ -7271,272 +7238,13 @@
             document.body.style.overflow = '';
         }
 
-        // Focus trap: keeps Tab/Shift+Tab cycling within a modal container
-        function trapFocusHandler(container) {
-            return function(e) {
-                if (e.key !== 'Tab') return;
-                const focusable = Array.from(container.querySelectorAll(
-                    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
-                )).filter(el => el.offsetParent !== null);
-                if (!focusable.length) return;
-                const first = focusable[0], last = focusable[focusable.length - 1];
-                if (e.shiftKey) {
-                    if (document.activeElement === first) { e.preventDefault(); last.focus(); }
-                } else {
-                    if (document.activeElement === last) { e.preventDefault(); first.focus(); }
-                }
-            };
-        }
 
-        // ========== Command Palette ==========
-        const COMMAND_PALETTE_ITEMS = [
-            { label: 'New session', shortcut: 'Ctrl+N', action: () => newPiSession() },
-            { label: 'Focus chat input', shortcut: '', action: () => document.getElementById('input')?.focus() },
-            { label: 'Search sessions', shortcut: '/', action: () => { const s = document.getElementById('session-search'); if (s) { s.focus(); } } },
-            { label: 'Search in chat', shortcut: 'Ctrl+F', action: () => openChatSearch() },
-            { label: 'Toggle terminal', shortcut: 'Ctrl+`', action: () => toggleTerminal() },
-            { label: 'Toggle sidebar', shortcut: 'Ctrl+B', action: () => toggleSidebar() },
-            { label: 'Collapse all tools', shortcut: '', action: () => { const btn = document.getElementById('tools-toggle-btn'); if (btn) btn.click(); } },
-            { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
-            { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
-            { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },
-            { label: 'Scroll to bottom', shortcut: 'B', action: () => scrollToBottom(true) },
-            { label: 'Next message', shortcut: 'J', action: () => navigateMessages(1) },
-            { label: 'Previous message', shortcut: 'K', action: () => navigateMessages(-1) },
-            { label: 'First message', shortcut: 'gg / Ctrl+Home', action: () => jumpToMessage('first') },
-            { label: 'Last message', shortcut: 'G / Ctrl+End', action: () => jumpToMessage('last') },
-            { label: 'Filter: My sessions', shortcut: '', action: () => setSessionFilter('mine') },
-            { label: 'Filter: Auto sessions', shortcut: '', action: () => setSessionFilter('auto') },
-            { label: 'Filter: All sessions', shortcut: '', action: () => setSessionFilter('all') },
-            { label: 'Cycle session filter (Mine/Auto/All)', shortcut: 'M', action: () => cycleSessionFilter() },
-            { label: 'Hide current session', shortcut: 'D', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } } },
-            { label: 'Cycle sort mode (Latest/Oldest/Most messages)', shortcut: 'O', action: () => cycleSessionSort() },
-            { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
-            { label: 'Star/unstar current session', shortcut: 'S', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
-            { label: 'Toggle thinking blocks', shortcut: 'T', action: () => toggleAllThinking() },
-            { label: 'Yank (copy) focused message', shortcut: 'Y', action: () => yankFocusedMessage() },
-            { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
-            { label: 'Export session as Markdown', shortcut: 'E', action: () => { if (currentSessionId) exportSessionMarkdown(); else showToast('No session selected'); } },
-            { label: 'Next unread session', shortcut: 'U', action: () => jumpToNextUnreadSession() },
-            { label: 'Previous unread session', shortcut: 'P', action: () => jumpToPrevUnreadSession() },
-            { label: 'Next session in list', shortcut: ']', action: () => navigateSessionList(1) },
-            { label: 'Previous session in list', shortcut: '[', action: () => navigateSessionList(-1) },
-            { label: 'New Claude session', shortcut: 'N', action: () => newClaudeSession() },
-            { label: 'Mark all sessions read', shortcut: 'A', action: () => markAllSessionsRead() },
-            { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
-            { label: 'Rename current session', shortcut: 'R', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
-            { label: 'Copy session link', shortcut: 'C', action: () => { if (currentSessionId) copyCurrentSessionLink(); else showToast('No session selected'); } },
-            { label: 'Open session in new tab', shortcut: 'W', action: () => { if (currentSessionId) openCurrentSessionNewTab(); else showToast('No session selected'); } },
-            { label: 'Pin/unpin current session', shortcut: 'X', action: () => { if (currentSessionId) { togglePinSession(currentSessionId); showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned'); } else showToast('No session selected'); } },
-            { label: 'Reload session list', shortcut: 'L', action: () => { loadSessions(); showToast('Session list refreshed'); } },
-            { label: 'Toggle desktop notifications', shortcut: '', action: () => {
-                if ('Notification' in window && Notification.permission === 'default') {
-                    Notification.requestPermission().then(p => {
-                        if (p === 'granted') { _notificationsEnabled = true; localStorage.setItem('feather-notifications', 'true'); }
-                    });
-                } else {
-                    _notificationsEnabled = !_notificationsEnabled;
-                    localStorage.setItem('feather-notifications', _notificationsEnabled ? 'true' : 'false');
-                }
-            }},
-        ];
-        let _cmdPaletteIdx = 0;
-        const _cmdPreviewCache = {};
-        let _cmdPreviewTimer = null;
-
-        let _cmdPaletteTrigger = null;
-        let _cmdPaletteFocusTrap = null;
-        function openCommandPalette() {
-            _cmdPaletteTrigger = document.activeElement;
-            const overlay = document.getElementById('command-palette-overlay');
-            if (!overlay) return;
-            overlay.style.display = 'flex';
-            const input = document.getElementById('command-palette-input');
-            if (input) { input.value = ''; input.focus(); }
-            _cmdPaletteIdx = 0;
-            renderCommandPaletteList('');
-            const palette = document.getElementById('command-palette');
-            if (palette) {
-                if (_cmdPaletteFocusTrap) palette.removeEventListener('keydown', _cmdPaletteFocusTrap);
-                _cmdPaletteFocusTrap = trapFocusHandler(palette);
-                palette.addEventListener('keydown', _cmdPaletteFocusTrap);
-            }
-        }
-
-        function closeCommandPalette() {
-            const overlay = document.getElementById('command-palette-overlay');
-            if (overlay) overlay.style.display = 'none';
-            clearTimeout(_cmdPreviewTimer);
-            const previewDiv = document.getElementById('command-palette-preview');
-            if (previewDiv) previewDiv.style.display = 'none';
-            const palette = document.getElementById('command-palette');
-            if (palette && _cmdPaletteFocusTrap) { palette.removeEventListener('keydown', _cmdPaletteFocusTrap); _cmdPaletteFocusTrap = null; }
-            if (_cmdPaletteTrigger && typeof _cmdPaletteTrigger.focus === 'function') {
-                _cmdPaletteTrigger.focus();
-                _cmdPaletteTrigger = null;
-            }
-        }
-
-        function loadCmdPreview(item) {
-            const previewDiv = document.getElementById('command-palette-preview');
-            const roleEl = document.getElementById('command-palette-preview-role');
-            const textEl = document.getElementById('command-palette-preview-text');
-            if (!previewDiv || !roleEl || !textEl) return;
-            if (!item || !item.sessionId) {
-                previewDiv.style.display = 'none';
-                return;
-            }
-            clearTimeout(_cmdPreviewTimer);
-            _cmdPreviewTimer = setTimeout(async () => {
-                const key = item.sessionId;
-                if (_cmdPreviewCache[key] !== undefined) {
-                    showCmdPreview(previewDiv, roleEl, textEl, _cmdPreviewCache[key]);
-                    return;
-                }
-                try {
-                    const proj = encodeURIComponent(item.projectId || '');
-                    const res = await fetch(`/api/projects/${proj}/sessions/${key}/history?limit=3`);
-                    if (!res.ok) { _cmdPreviewCache[key] = null; return; }
-                    const data = await res.json();
-                    const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
-                    const last = msgs[msgs.length - 1];
-                    if (!last) { _cmdPreviewCache[key] = null; return; }
-                    const text = (last.content || []).map(b => b.text || '').join(' ').trim().slice(0, 200);
-                    _cmdPreviewCache[key] = { role: last.role, text };
-                    showCmdPreview(previewDiv, roleEl, textEl, _cmdPreviewCache[key]);
-                } catch { _cmdPreviewCache[key] = null; }
-            }, 120);
-        }
-
-        function showCmdPreview(previewDiv, roleEl, textEl, data) {
-            if (!data || !data.text) { previewDiv.style.display = 'none'; return; }
-            roleEl.textContent = data.role === 'assistant' ? 'Claude' : 'You';
-            textEl.textContent = data.text;
-            previewDiv.style.display = 'block';
-        }
-
-        function getFilteredCommands(query) {
-            if (!query) {
-                // Show recent sessions at top for quick navigation (VS Code Ctrl+P style)
-                const recents = recentSessionIds
-                    .map(id => allSessions.find(s => s.id === id))
-                    .filter(Boolean)
-                    .slice(0, 5)
-                    .map(s => {
-                        const projName = (FOLDERS.find(f => f.id === s.project) || {}).name;
-                        const meta = [s.lastUpdated ? formatTime(s.lastUpdated) : '', s.message_count ? s.message_count + ' msg' : ''].filter(Boolean).join(' · ');
-                        return {
-                            label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
-                            shortcut: meta,
-                            group: 'recent',
-                            sessionId: s.id,
-                            projectId: s.project,
-                            action: () => {
-                                if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-                                else resumeSession(s.id, s.project);
-                            }
-                        };
-                    });
-                return [...recents, ...COMMAND_PALETTE_ITEMS.map(c => ({...c, group: 'command'}))];
-            }
-            const q = query.toLowerCase();
-            const cmds = COMMAND_PALETTE_ITEMS.filter(c => c.label.toLowerCase().includes(q)).map(c => ({...c, group: 'command'}));
-            // Also search sessions for quick navigation
-            const sessionItems = allSessions
-                .filter(s => {
-                    const title = getSessionTitle(s).toLowerCase();
-                    return title.includes(q) || s.id.toLowerCase().startsWith(q);
-                })
-                .slice(0, 5)
-                .map(s => {
-                    const projName = (FOLDERS.find(f => f.id === s.project) || {}).name;
-                    const meta = [s.lastUpdated ? formatTime(s.lastUpdated) : '', s.message_count ? s.message_count + ' msg' : ''].filter(Boolean).join(' · ');
-                    return {
-                        label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
-                        shortcut: meta,
-                        group: 'session',
-                        sessionId: s.id,
-                        projectId: s.project,
-                        action: () => {
-                            if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
-                            else resumeSession(s.id, s.project);
-                        }
-                    };
-                });
-            return [...sessionItems, ...cmds];
-        }
-
-        function renderCommandPaletteList(query) {
-            const list = document.getElementById('command-palette-list');
-            if (!list) return;
-            const filtered = getFilteredCommands(query);
-            if (_cmdPaletteIdx >= filtered.length) _cmdPaletteIdx = Math.max(0, filtered.length - 1);
-            if (filtered.length === 0) {
-                list.innerHTML = '<div style="padding:12px 16px; color:var(--smoke-8); font-size:13px;">No matching commands</div>';
-                return;
-            }
-            const GROUP_LABELS = { recent: 'Recent', session: 'Sessions', command: 'Commands' };
-            let lastGroup = null;
-            list.innerHTML = filtered.map((cmd, i) => {
-                const active = i === _cmdPaletteIdx;
-                let header = '';
-                if (cmd.group && cmd.group !== lastGroup) {
-                    lastGroup = cmd.group;
-                    header = `<div style="padding:6px 16px 2px; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7); font-weight:600; pointer-events:none;">${GROUP_LABELS[cmd.group] || cmd.group}</div>`;
-                }
-                return header + `<div class="cmd-palette-item" data-idx="${i}" style="padding:7px 16px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:13px; background:${active ? 'var(--smoke-4)' : 'transparent'}; color:${active ? 'var(--smoke-12)' : 'var(--smoke-10)'};" onmouseenter="highlightCmdItem(${i})" onclick="executeCmdItem(${i})">
-                    <span>${escapeHtml(cmd.label)}</span>
-                    ${cmd.shortcut ? `<kbd style="background:var(--smoke-3); border:1px solid var(--smoke-5); border-radius:4px; padding:1px 6px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-8); flex-shrink:0; margin-left:8px;">${escapeHtml(cmd.shortcut)}</kbd>` : ''}
-                </div>`;
-            }).join('');
-            // Scroll active item into view for keyboard navigation
-            list.querySelector(`[data-idx="${_cmdPaletteIdx}"]`)?.scrollIntoView({ block: 'nearest' });
-        }
-
-        function highlightCmdItem(idx) {
-            const input = document.getElementById('command-palette-input');
-            const query = input?.value || '';
-            _cmdPaletteIdx = idx;
-            renderCommandPaletteList(query);
-            const filtered = getFilteredCommands(query);
-            loadCmdPreview(filtered[idx]);
-        }
-
-        function executeCmdItem(idx) {
-            const input = document.getElementById('command-palette-input');
-            const query = input?.value || '';
-            const filtered = getFilteredCommands(query);
-            if (idx >= 0 && idx < filtered.length) {
-                closeCommandPalette();
-                filtered[idx].action();
-            }
-        }
-
-        // Command palette input handler
-        document.getElementById('command-palette-input')?.addEventListener('input', (e) => {
-            _cmdPaletteIdx = 0;
-            renderCommandPaletteList(e.target.value);
-            const filtered = getFilteredCommands(e.target.value);
-            loadCmdPreview(filtered[0]);
-        });
-        document.getElementById('command-palette-input')?.addEventListener('keydown', (e) => {
-            const query = e.target.value || '';
-            const filtered = getFilteredCommands(query);
-            if (e.key === 'ArrowDown') { e.preventDefault(); _cmdPaletteIdx = Math.min(_cmdPaletteIdx + 1, filtered.length - 1); renderCommandPaletteList(query); loadCmdPreview(filtered[_cmdPaletteIdx]); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); _cmdPaletteIdx = Math.max(_cmdPaletteIdx - 1, 0); renderCommandPaletteList(query); loadCmdPreview(filtered[_cmdPaletteIdx]); }
-            else if (e.key === 'Enter') { e.preventDefault(); executeCmdItem(_cmdPaletteIdx); }
-            else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
-        });
 
         // Close lightbox/shortcuts/context-menu on Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 if (document.getElementById('session-ctx-menu')?.classList.contains('open')) {
                     closeSessionContextMenu();
-                    return;
-                }
-                if (document.getElementById('command-palette-overlay')?.style.display === 'flex') {
-                    closeCommandPalette();
                     return;
                 }
                 if (!document.getElementById('chat-search-bar')?.classList.contains('hidden')) {
@@ -8027,11 +7735,6 @@
 
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
-                // Ctrl+K to open command palette
-                if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                    e.preventDefault();
-                    openCommandPalette();
-                }
                 // Ctrl+` to toggle terminal
                 if ((e.metaKey || e.ctrlKey) && e.key === '`') {
                     e.preventDefault();
