@@ -392,6 +392,8 @@
     </style>
 </head>
 <body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);">
+    <!-- Skip navigation link for keyboard/screen reader users -->
+    <a href="#main-content" class="sr-skip-link" style="position:absolute;left:-9999px;top:8px;z-index:9999;padding:8px 16px;background:#f59e0b;color:#121212;font-weight:600;font-size:14px;border-radius:6px;text-decoration:none;transition:left 0s;" onfocus="this.style.left='8px'" onblur="this.style.left='-9999px'">Skip to main content</a>
     <!-- Screen reader live region for toast announcements -->
     <div id="sr-announce" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
     <!-- Onboarding Modal -->
@@ -483,7 +485,7 @@
     <div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/50 z-30 hidden md:hidden"></div>
 
     <!-- Sidebar -->
-    <aside id="sidebar" class="fixed md:relative w-72 bg-gradient-to-b from-smoke-2 to-smoke-1 border-r border-smoke-4 flex flex-col h-full z-40 -translate-x-full md:translate-x-0 transition-transform">
+    <aside id="sidebar" aria-label="Session navigation" class="fixed md:relative w-72 bg-gradient-to-b from-smoke-2 to-smoke-1 border-r border-smoke-4 flex flex-col h-full z-40 -translate-x-full md:translate-x-0 transition-transform">
         <div id="sidebar-resize-handle" class="hidden md:block"></div>
         <!-- Header + Controls -->
         <div class="pl-14 md:pl-3 pr-3 pt-3 pb-2 safe-top">
@@ -578,7 +580,7 @@
     </aside>
 
     <!-- Main -->
-    <main class="flex-1 flex flex-col min-w-0 bg-smoke-1 relative overflow-x-hidden">
+    <main id="main-content" aria-label="Chat" class="flex-1 flex flex-col min-w-0 bg-smoke-1 relative overflow-x-hidden">
         <input type="file" id="screenshot-input" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.json,.csv" class="hidden" multiple onchange="handleFileUpload(event)">
 
         <!-- Mobile session header -->
