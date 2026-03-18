@@ -553,8 +553,7 @@
         <!-- Desktop session header bar -->
         <div id="desktop-session-header" class="hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10" style="display:none">
             <button id="desktop-star-btn" onclick="if(currentSessionId)toggleStarSession(event,currentSessionId)" class="shrink-0 text-sm leading-none text-smoke-6 hover:text-gold-9 transition-colors" title="Star session (S)" aria-label="Star session">&#9733;</button>
-            <button id="desktop-pin-btn" onclick="if(currentSessionId)togglePinSession(currentSessionId)" class="shrink-0 text-smoke-6 hover:text-blue-9 transition-colors" title="Pin session to top" aria-label="Pin session" style="opacity:0.4;display:flex;align-items:center;padding:1px 2px"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg></button>
-            <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate cursor-pointer" ondblclick="renameCurrentSession()" title="Double-click to rename"></span>
+<span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate cursor-pointer" ondblclick="renameCurrentSession()" title="Double-click to rename"></span>
             <span id="desktop-session-meta" class="text-[10px] text-smoke-8 whitespace-nowrap shrink-0"></span>
             <button id="desktop-search-btn" onclick="openChatSearch()" class="shrink-0 text-smoke-6 hover:text-smoke-11 transition-colors" title="Search in conversation (Ctrl+F)" aria-label="Search in conversation" style="opacity:0.4;padding:2px 4px;font-size:11px;line-height:1">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1255,17 +1254,7 @@
                     starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
                     starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
                 }
-                // Update pin button state
-                const pinBtn = document.getElementById('desktop-pin-btn');
-                if (pinBtn && currentSessionId) {
-                    const isPinned = pinnedSessions.has(currentSessionId);
-                    const pinSvg = pinBtn.querySelector('svg');
-                    if (pinSvg) { pinSvg.setAttribute('fill', isPinned ? 'currentColor' : 'none'); pinSvg.setAttribute('stroke', isPinned ? 'none' : 'currentColor'); }
-                    pinBtn.style.color = isPinned ? 'var(--blue-9)' : '';
-                    pinBtn.style.opacity = isPinned ? '1' : '0.4';
-                    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session to top';
-                }
-                const mobileStarBtn = document.getElementById('mobile-star-btn');
+const mobileStarBtn = document.getElementById('mobile-star-btn');
                 if (mobileStarBtn && currentSessionId) {
                     const isStarred = starredSessions.has(currentSessionId);
                     mobileStarBtn.style.color = isStarred ? 'var(--gold-9)' : '';
@@ -1355,10 +1344,9 @@
             else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
             if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
             else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            { const pinned = sessions.filter(s => pinnedSessions.has(s.id));
-              const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
-              const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
-              sessions = [...pinned, ...starredUnpinned, ...rest]; }
+            { const starred = sessions.filter(s => starredSessions.has(s.id));
+              const rest = sessions.filter(s => !starredSessions.has(s.id));
+              sessions = [...starred, ...rest]; }
             if (!sessions.length) { showToast('No sessions'); return; }
             const isUnread = s => {
                 const lv = sessionViewTimes[s.id];
@@ -1384,10 +1372,9 @@
             else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
             if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
             else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            { const pinned = sessions.filter(s => pinnedSessions.has(s.id));
-              const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
-              const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
-              sessions = [...pinned, ...starredUnpinned, ...rest]; }
+            { const starred = sessions.filter(s => starredSessions.has(s.id));
+              const rest = sessions.filter(s => !starredSessions.has(s.id));
+              sessions = [...starred, ...rest]; }
             if (!sessions.length) { showToast('No sessions'); return; }
             const isUnread = s => {
                 const lv = sessionViewTimes[s.id];
@@ -1415,10 +1402,9 @@
             if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
             else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
             if (searchApiResults === null) {
-                const pinned = sessions.filter(s => pinnedSessions.has(s.id));
-                const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
-                const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
-                sessions = [...pinned, ...starredUnpinned, ...rest];
+                const starred = sessions.filter(s => starredSessions.has(s.id));
+                const rest = sessions.filter(s => !starredSessions.has(s.id));
+                sessions = [...starred, ...rest];
             }
             if (!sessions.length) { showToast('No sessions'); return; }
             const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
@@ -1485,8 +1471,7 @@
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
         let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
         let hiddenSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-hiddenSessions') || '[]')); } catch { return new Set(); } })();
-        let pinnedSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-pinnedSessions') || '[]')); } catch { return new Set(); } })();
-        function hideSession(sessionId) {
+function hideSession(sessionId) {
             hiddenSessions.add(sessionId);
             try { localStorage.setItem('feather-hiddenSessions', JSON.stringify([...hiddenSessions])); } catch {}
             renderSessions();
@@ -1533,29 +1518,6 @@
                 const mobileStarBtn = document.getElementById('mobile-star-btn');
                 if (mobileStarBtn) {
                     mobileStarBtn.style.color = starredSessions.has(sessionId) ? 'var(--gold-9)' : '';
-                }
-            }
-        }
-        function togglePinSession(sessionId) {
-            if (pinnedSessions.has(sessionId)) {
-                pinnedSessions.delete(sessionId);
-                showToast('Session unpinned');
-            } else {
-                pinnedSessions.add(sessionId);
-                showToast('Session pinned to top');
-            }
-            try { localStorage.setItem('feather-pinnedSessions', JSON.stringify([...pinnedSessions])); } catch {}
-            renderSessions();
-            // Update desktop header pin button if this is the current session
-            if (sessionId === currentSessionId) {
-                const pinBtn = document.getElementById('desktop-pin-btn');
-                if (pinBtn) {
-                    const isPinned = pinnedSessions.has(sessionId);
-                    const pinSvg = pinBtn.querySelector('svg');
-                    if (pinSvg) { pinSvg.setAttribute('fill', isPinned ? 'currentColor' : 'none'); pinSvg.setAttribute('stroke', isPinned ? 'none' : 'currentColor'); }
-                    pinBtn.style.color = isPinned ? 'var(--blue-9)' : '';
-                    pinBtn.style.opacity = isPinned ? '1' : '0.4';
-                    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session to top';
                 }
             }
         }
@@ -1794,10 +1756,9 @@
             // Sort starred sessions to the top (preserving relative order within each group)
             // Skip in search mode — API returns results sorted by relevance, don't break that order
             if (searchApiResults === null) {
-                const pinned = sessions.filter(s => pinnedSessions.has(s.id));
-                const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
-                const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
-                sessions = [...pinned, ...starredUnpinned, ...rest];
+                const starred = sessions.filter(s => starredSessions.has(s.id));
+                const rest = sessions.filter(s => !starredSessions.has(s.id));
+                sessions = [...starred, ...rest];
             }
 
             if (!sessions.length) {
@@ -1867,8 +1828,6 @@
                 const unreadDot = isUnread ? '<span class="unread-indicator w-1.5 h-1.5 rounded-full bg-gold-9 shrink-0" title="New activity"></span>' : '';
                 const isStarred = starredSessions.has(s.id);
                 const starBtn = `<button class="star-btn shrink-0 text-[11px] leading-none ${isStarred ? 'text-gold-9' : 'text-smoke-6 opacity-0 group-hover:opacity-100'} hover:text-gold-9 transition-all" onclick="toggleStarSession(event, '${s.id}')" title="${isStarred ? 'Unstar' : 'Star'}" aria-label="${isStarred ? 'Unstar session' : 'Star session'}">&#9733;</button>`;
-                const isPinnedItem = pinnedSessions.has(s.id);
-                const pinIndicator = isPinnedItem ? `<svg class="shrink-0" width="8" height="8" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="color:var(--blue-9);opacity:0.7" title="Pinned"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>` : '';
 
                 // Show project folder name when session is from a different project (useful in search/All filter)
                 const sessionFolderName = s.project !== currentFolder ? (FOLDERS.find(f => f.id === s.project)?.name || s.project?.split('-').filter(Boolean).pop() || '') : '';
@@ -1901,7 +1860,6 @@
                                 ${snippetLine}
                             </div>
                             ${draftIndicator}
-                            ${pinIndicator}
                             ${starBtn}
                         </div>
                     </div>
@@ -1914,16 +1872,12 @@
 
             // Pre-compute group counts for visible sessions
             const groupCounts = {};
-            let pinnedCount = 0, starredCount = 0;
-            let _countPassedPinned = false, _countPassedStarred = false;
+            let starredCount = 0;
+            let _countPassedStarred = false;
             for (const s of visible) {
-                if (pinnedSessions.has(s.id) && !_countPassedPinned) {
-                    pinnedCount++;
-                } else if (starredSessions.has(s.id) && !_countPassedStarred) {
-                    _countPassedPinned = true;
+                if (starredSessions.has(s.id) && !_countPassedStarred) {
                     starredCount++;
                 } else {
-                    _countPassedPinned = true;
                     _countPassedStarred = true;
                     const g = getTimeGroup(s.lastUpdated);
                     groupCounts[g] = (groupCounts[g] || 0) + 1;
@@ -1933,23 +1887,13 @@
             // Build grouped HTML
             let html = '';
             let lastGroup = '';
-            let passedPinned = false, passedStarred = false;
+            let passedStarred = false;
             const isSearchMode = searchApiResults !== null;
             for (const s of visible) {
-                const isPinned = pinnedSessions.has(s.id);
-                const isStarred = !isPinned && starredSessions.has(s.id);
+                const isStarred = starredSessions.has(s.id);
                 if (!isSearchMode) {
-                    // Normal mode: show time/pinned/starred group headers
-                    if (isPinned && !passedPinned) {
-                        if (lastGroup !== 'Pinned') {
-                            const pinSvg = `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:inline;vertical-align:middle;margin-right:2px"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>`;
-                            html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
-                                <span class="text-[9px] font-medium uppercase tracking-widest" style="color:var(--blue-9)">${pinSvg}Pinned</span>${pinnedCount > 0 ? `<span class="text-[9px] ml-1" style="color:color-mix(in srgb,var(--blue-9) 60%,transparent)">${pinnedCount}</span>` : ''}
-                            </div>`;
-                            lastGroup = 'Pinned';
-                        }
-                    } else if (isStarred && !passedStarred) {
-                        passedPinned = true;
+                    // Normal mode: show time/starred group headers
+                    if (isStarred && !passedStarred) {
                         if (lastGroup !== 'Starred') {
                             html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
                                 <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>${starredCount > 0 ? `<span class="text-[9px] text-gold-9/60 ml-1">${starredCount}</span>` : ''}
@@ -1957,7 +1901,6 @@
                             lastGroup = 'Starred';
                         }
                     } else {
-                        passedPinned = true;
                         passedStarred = true;
                         const group = getTimeGroup(s.lastUpdated);
                         if (group !== lastGroup) {
@@ -6986,11 +6929,7 @@
             const readIcon = _isRead
                 ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg>`
                 : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-            const isPinned = pinnedSessions.has(sessionId);
-            const pinLabel = isPinned ? 'Unpin' : 'Pin to top';
-            const pinIcon = `<svg viewBox="0 0 24 24" fill="${isPinned ? 'currentColor' : 'none'}" stroke="${isPinned ? 'none' : 'currentColor'}" stroke-width="2" style="color:var(--blue-9)"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>`;
             menu.innerHTML = `
-                <div class="ctx-item" role="menuitem" onclick="ctxPin()" style="color:var(--blue-9)">${pinIcon} ${pinLabel}</div>
                 <div class="ctx-item" role="menuitem" onclick="ctxStar()">${starIcon} ${starLabel}</div>
                 <div class="ctx-item" role="menuitem" onclick="ctxOpenNewTab()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open in new tab</div>
                 <div class="ctx-item" role="menuitem" onclick="ctxRename()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> Rename</div>
@@ -7022,10 +6961,6 @@
             _ctxSessionId = null;
         }
 
-        function ctxPin() {
-            if (_ctxSessionId) togglePinSession(_ctxSessionId);
-            closeSessionContextMenu();
-        }
         function ctxStar() {
             if (_ctxSessionId) toggleStarSession(new Event('click'), _ctxSessionId);
             closeSessionContextMenu();
