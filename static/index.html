@@ -472,7 +472,7 @@
     </div>
 
     <!-- Mobile menu button -->
-    <button id="menu-btn" onclick="toggleSidebar()" class="md:hidden fixed top-3 left-3 z-50 w-10 h-10 bg-smoke-3/90 hover:bg-gold-9 border border-smoke-5 rounded-xl flex items-center justify-center text-smoke-11 hover:text-smoke-1 shadow-lg backdrop-blur-sm">
+    <button id="menu-btn" onclick="toggleSidebar()" class="md:hidden fixed top-3 left-3 z-50 w-10 h-10 bg-smoke-3/90 hover:bg-gold-9 border border-smoke-5 rounded-xl flex items-center justify-center text-smoke-11 hover:text-smoke-1 shadow-lg backdrop-blur-sm" aria-label="Open navigation" aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
 
@@ -491,8 +491,8 @@
                 </div>
                 <div class="flex items-center gap-1.5 relative">
                     <span id="sse-dot" class="w-1.5 h-1.5 rounded-full bg-apple-9" title="Connected"></span>
-                    <button id="whats-new-btn" onclick="toggleWhatsNew()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="What's New">New</button>
-                    <button id="theme-toggle" onclick="toggleTheme()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="Toggle theme">Dark</button>
+                    <button id="whats-new-btn" onclick="toggleWhatsNew()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="What's New" aria-label="What's New">New</button>
+                    <button id="theme-toggle" onclick="toggleTheme()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="Toggle theme" aria-label="Toggle theme">Dark</button>
                     <div id="whats-new-popover">
                         <div class="wn-header">
                             <h3>What's New</h3>
@@ -504,14 +504,14 @@
             </div>
             <div class="flex gap-1.5 mb-2">
                 <select id="folder-select" onchange="selectFolder(this.value)" class="project-select flex-1 px-2.5 py-2 bg-smoke-3 border border-smoke-5 rounded-lg text-xs text-smoke-11 focus:outline-none focus:border-gold-9/50 cursor-pointer font-medium"></select>
-                <button onclick="showNewProjectModal()" class="px-2.5 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-gold-9/50 text-smoke-11 rounded-lg text-xs font-bold transition-all" title="New Project">
+                <button onclick="showNewProjectModal()" class="px-2.5 py-2 bg-smoke-3 hover:bg-smoke-4 border border-smoke-5 hover:border-gold-9/50 text-smoke-11 rounded-lg text-xs font-bold transition-all" title="New Project" aria-label="New Project">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 </button>
             </div>
             <div class="flex gap-1.5 mb-2">
-                <button onclick="newPiSession()" class="new-session-btn flex-1 bg-gold-9 hover:bg-gold-10 text-smoke-1"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Pi</button>
-                <button onclick="newClaudeSession()" class="new-session-btn flex-1 bg-smoke-3 hover:bg-smoke-4 text-smoke-11 border-smoke-5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Claude</button>
-                <button onclick="newCodexSession()" class="new-session-btn flex-1 bg-smoke-3 hover:bg-smoke-4 text-smoke-11 border-smoke-5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Codex</button>
+                <button onclick="newPiSession()" class="new-session-btn flex-1 bg-gold-9 hover:bg-gold-10 text-smoke-1" aria-label="New Pi session"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Pi</button>
+                <button onclick="newClaudeSession()" class="new-session-btn flex-1 bg-smoke-3 hover:bg-smoke-4 text-smoke-11 border-smoke-5" aria-label="New Claude session"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Claude</button>
+                <button onclick="newCodexSession()" class="new-session-btn flex-1 bg-smoke-3 hover:bg-smoke-4 text-smoke-11 border-smoke-5" aria-label="New Codex session"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Codex</button>
             </div>
             <div class="relative">
                 <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-smoke-7" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -527,10 +527,10 @@
             <div id="search-result-count" class="hidden text-[10px] text-smoke-6 px-1 mt-1"></div>
             <!-- Session filter toggle -->
             <div id="session-filter-bar" class="flex gap-1 mt-1.5">
-                <button onclick="setSessionFilter('mine')" id="sf-mine" class="session-filter-pill active flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">Mine</button>
-                <button onclick="setSessionFilter('auto')" id="sf-auto" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">Auto</button>
-                <button onclick="setSessionFilter('all')" id="sf-all" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border">All</button>
-                <button onclick="cycleSessionSort()" id="session-sort-btn" class="session-filter-pill text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border shrink-0 flex items-center gap-0.5" title="Sort sessions"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span id="sort-label">Latest</span></button>
+                <button onclick="setSessionFilter('mine')" id="sf-mine" class="session-filter-pill active flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border" aria-label="Show my sessions" aria-pressed="true">Mine</button>
+                <button onclick="setSessionFilter('auto')" id="sf-auto" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border" aria-label="Show autoweb sessions" aria-pressed="false">Auto</button>
+                <button onclick="setSessionFilter('all')" id="sf-all" class="session-filter-pill flex-1 text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border" aria-label="Show all sessions" aria-pressed="false">All</button>
+                <button onclick="cycleSessionSort()" id="session-sort-btn" class="session-filter-pill text-center text-[10px] font-medium px-2 py-1 rounded-md cursor-pointer transition-all border shrink-0 flex items-center gap-0.5" title="Sort sessions" aria-label="Sort sessions"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg><span id="sort-label">Latest</span></button>
             </div>
             <div id="mark-all-read-bar" class="hidden mt-1">
                 <button onclick="markAllSessionsRead()" class="w-full text-[10px] text-smoke-7 hover:text-gold-9 transition-colors cursor-pointer py-0.5 text-center" title="Mark all sessions as read"><span id="mark-all-read-count"></span> unread &mdash; mark all read</button>
@@ -563,10 +563,10 @@
             <a href="/dashboards/" target="_blank" class="nav-pill">Dash</a>
             <a href="/dashboards/mm-dashboard.html" target="_blank" class="hidden md:inline-flex nav-pill nav-pill-gold">MM</a>
             <a href="/twap" target="_blank" class="hidden md:inline-flex nav-pill nav-pill-tao" id="tao-pill">TAO<span class="tao-pnl" id="tao-pnl"></span></a>
-            <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold">AV</button>
+            <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold" aria-label="Agents View">AV</button>
             <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" title="Switch environment"></a>
             <button id="promote-btn" onclick="runPromote()" class="nav-pill font-semibold" style="display:none;background:var(--teal-9);color:#fff;" title="Promote dev → prod">↑ Promote</button>
-            <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn">AW</button>
+            <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn" aria-label="Autoweb Dashboard">AW</button>
             <button onclick="newClaudeSession()" class="md:hidden nav-pill font-semibold" id="mobile-new-session-btn" title="New Claude session" style="background:var(--gold-9);color:var(--smoke-1);min-height:32px;min-width:44px;">+ New</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
@@ -605,12 +605,12 @@
         <div id="chat-search-bar" class="hidden border-b border-smoke-5 bg-smoke-2/95 backdrop-blur-sm px-4 py-2 flex items-center gap-2 z-10">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-smoke-8 shrink-0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input id="chat-search-input" type="text" placeholder="Search in conversation..." class="flex-1 bg-transparent text-sm text-smoke-12 outline-none placeholder-smoke-7" autocomplete="off">
-            <button id="chat-search-clear-btn" onclick="clearChatSearchInput()" class="hidden p-1 text-smoke-7 hover:text-smoke-12 transition-colors" title="Clear search"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            <button id="chat-search-case-btn" onclick="toggleChatSearchCase()" class="p-1 text-smoke-7 hover:text-smoke-12 transition-colors rounded" title="Match case (Alt+C)" style="font-size:11px;font-weight:600;line-height:1;padding:2px 4px;font-family:monospace">Aa</button>
-            <span id="chat-search-count" class="text-[10px] text-smoke-8 whitespace-nowrap"></span>
-            <button onclick="chatSearchNav(-1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Previous (Shift+Enter / Shift+F3)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
-            <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter / F3)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
-            <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button id="chat-search-clear-btn" onclick="clearChatSearchInput()" class="hidden p-1 text-smoke-7 hover:text-smoke-12 transition-colors" title="Clear search" aria-label="Clear search"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button id="chat-search-case-btn" onclick="toggleChatSearchCase()" class="p-1 text-smoke-7 hover:text-smoke-12 transition-colors rounded" title="Match case (Alt+C)" aria-label="Match case" style="font-size:11px;font-weight:600;line-height:1;padding:2px 4px;font-family:monospace">Aa</button>
+            <span id="chat-search-count" class="text-[10px] text-smoke-8 whitespace-nowrap" aria-live="polite"></span>
+            <button onclick="chatSearchNav(-1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Previous (Shift+Enter / Shift+F3)" aria-label="Previous match"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+            <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter / F3)" aria-label="Next match"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)" aria-label="Close search"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
 
         <!-- Scroll progress indicator -->
@@ -663,7 +663,7 @@
         </div>
 
         <!-- Scroll to bottom button -->
-        <button id="scroll-to-bottom-btn" onclick="scrollToBottom(true)" class="hidden absolute bottom-24 right-6 w-9 h-9 bg-smoke-3/90 hover:bg-smoke-4 border border-smoke-5 rounded-full shadow-lg flex items-center justify-center text-smoke-10 hover:text-smoke-12 transition-all z-20 backdrop-blur-sm" title="Scroll to bottom">
+        <button id="scroll-to-bottom-btn" onclick="scrollToBottom(true)" class="hidden absolute bottom-24 right-6 w-9 h-9 bg-smoke-3/90 hover:bg-smoke-4 border border-smoke-5 rounded-full shadow-lg flex items-center justify-center text-smoke-10 hover:text-smoke-12 transition-all z-20 backdrop-blur-sm" title="Scroll to bottom" aria-label="Scroll to bottom">
             <span id="unread-badge" class="absolute -top-2 -right-2 hidden min-w-[20px] h-5 px-1.5 bg-gold-9 text-smoke-1 text-[11px] font-semibold rounded-full flex items-center justify-center leading-none"></span>
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 5v14M5 12l7 7 7-7"/>
@@ -693,26 +693,26 @@
                             <span id="char-count" class="hidden text-[10px] text-smoke-6 font-mono ml-2" title="Character count"></span>
                         </div>
                         <div class="flex items-center gap-1">
-                            <button id="tools-toggle-btn" onclick="toggleAllTools()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Collapse/expand all tool calls">
+                            <button id="tools-toggle-btn" onclick="toggleAllTools()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Collapse/expand all tool calls" aria-label="Collapse/expand all tool calls">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             </button>
-                            <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks">
+                            <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks" aria-label="Toggle thinking blocks">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
                             </button>
-                            <button id="focus-mode-btn" onclick="toggleFocusMode()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Focus mode — hide tool calls (F)">
+                            <button id="focus-mode-btn" onclick="toggleFocusMode()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Focus mode — hide tool calls (F)" aria-label="Focus mode — hide tool calls">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                             </button>
-                            <button onclick="triggerScreenshot()" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Upload file">
+                            <button onclick="triggerScreenshot()" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Upload file" aria-label="Upload file">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                             </button>
-                            <button onclick="toggleTerminal()" id="terminal-toggle" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Terminal (Ctrl+`)">
+                            <button onclick="toggleTerminal()" id="terminal-toggle" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Terminal (Ctrl+`)" aria-label="Toggle terminal">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                             </button>
-                            <button id="voice-btn" onclick="toggleVoiceRecording()" class="px-2 py-1.5 bg-smoke-4 hover:bg-smoke-5 rounded-lg text-sm transition-all text-smoke-10 hover:text-smoke-12" title="Voice input">
+                            <button id="voice-btn" onclick="toggleVoiceRecording()" class="px-2 py-1.5 bg-smoke-4 hover:bg-smoke-5 rounded-lg text-sm transition-all text-smoke-10 hover:text-smoke-12" title="Voice input" aria-label="Voice input">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
                             </button>
-                            <button id="ctrlc-btn" onclick="sendCtrlC()" class="hidden px-2 sm:px-3 py-1.5 bg-amber-9 hover:bg-amber-9/80 rounded-xl text-xs font-semibold text-smoke-1 whitespace-nowrap" title="Interrupt Claude (Ctrl-C)"><svg class="sm:hidden" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span class="hidden sm:inline">Interrupt</span></button>
-                            <button id="send-btn" onclick="handleSend()" class="px-3 sm:px-5 py-1.5 bg-gold-9 hover:bg-gold-10 text-smoke-1 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap">
+                            <button id="ctrlc-btn" onclick="sendCtrlC()" class="hidden px-2 sm:px-3 py-1.5 bg-amber-9 hover:bg-amber-9/80 rounded-xl text-xs font-semibold text-smoke-1 whitespace-nowrap" title="Interrupt Claude (Ctrl-C)" aria-label="Interrupt Claude"><svg class="sm:hidden" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span class="hidden sm:inline">Interrupt</span></button>
+                            <button id="send-btn" onclick="handleSend()" class="px-3 sm:px-5 py-1.5 bg-gold-9 hover:bg-gold-10 text-smoke-1 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap" aria-label="Send message">
                                 Send
                             </button>
                         </div>
@@ -1556,6 +1556,8 @@
             const overlay = document.getElementById('sidebar-overlay');
             sidebar.classList.toggle('-translate-x-full');
             overlay.classList.toggle('hidden');
+            const menuBtn = document.getElementById('menu-btn');
+            if (menuBtn) menuBtn.setAttribute('aria-expanded', !sidebar.classList.contains('-translate-x-full'));
         }
 
         // Close sidebar on mobile after selecting something
@@ -1760,8 +1762,9 @@
         function setSessionFilter(mode) {
             sessionFilterMode = mode;
             localStorage.setItem('feather-session-filter', mode);
-            document.querySelectorAll('.session-filter-pill').forEach(b => b.classList.remove('active'));
-            document.getElementById('sf-' + mode).classList.add('active');
+            document.querySelectorAll('.session-filter-pill').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+            const activeBtn = document.getElementById('sf-' + mode);
+            if (activeBtn) { activeBtn.classList.add('active'); activeBtn.setAttribute('aria-pressed', 'true'); }
             renderSessions();
         }
 
