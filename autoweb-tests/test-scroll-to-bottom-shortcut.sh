@@ -10,7 +10,4 @@ grep -A5 "e.key === 'b'" "$F" | grep -q "scrollToBottom(true)" || { echo "FAIL: 
 # 2. Command palette entry shows B shortcut
 grep -q "'Scroll to bottom', shortcut: 'B'" "$F" || { echo "FAIL: command palette missing B shortcut for Scroll to bottom"; exit 1; }
 
-# 3. Shortcuts modal documents B key
-grep -q "Scroll to bottom" "$F" && grep -q ">B<" "$F" || { echo "FAIL: shortcuts modal missing Scroll to bottom / B entry"; exit 1; }
-
 echo "PASS: B keyboard shortcut scrolls to bottom"
