@@ -356,10 +356,6 @@
     </style>
 </head>
 <body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);">
-    <!-- Skip navigation link for keyboard/screen reader users -->
-    <a href="#main-content" class="sr-skip-link" style="position:absolute;left:-9999px;top:8px;z-index:9999;padding:8px 16px;background:#f59e0b;color:#121212;font-weight:600;font-size:14px;border-radius:6px;text-decoration:none;transition:left 0s;" onfocus="this.style.left='8px'" onblur="this.style.left='-9999px'">Skip to main content</a>
-    <!-- Screen reader live region for toast announcements -->
-    <div id="sr-announce" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
     <!-- Onboarding Modal -->
     <div id="onboarding-modal" class="fixed inset-0 bg-black/80 modal-backdrop z-[100] hidden items-center justify-center" role="dialog" aria-modal="true" aria-label="Welcome to Feather">
         <div class="bg-smoke-2 border border-smoke-5 modal-panel max-w-lg w-full mx-4">
@@ -1808,11 +1804,9 @@ function hideSession(sessionId) {
                 const snippetLine = (s._snippet && s._snippet.startsWith('...')) ? `<div class="text-[10px] text-smoke-6 line-clamp-2 leading-tight mt-0.5" title="${escapeHtml(s._snippet)}">${highlightSearch(s._snippet, currentSearchQuery)}</div>` : '';
 
 
-                const _ariaLabel = [getSessionTitle(s), s.message_count ? s.message_count + ' messages' : null, s.lastUpdated ? formatTime(s.lastUpdated) : null, isUnread ? 'unread' : null, isSelected ? 'current session' : null].filter(Boolean).join(', ');
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         role="button" tabindex="-1" aria-label="${escapeHtml(_ariaLabel)}" aria-current="${isSelected ? 'true' : 'false'}"
-                         data-ctx-id="${s.id}" onclick="${onclick}" ondblclick="sidebarInlineRename(event, '${s.id}')" oncontextmenu="showSessionContextMenu(event, '${s.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${onclick}}" title="${escapeHtml(getSessionTitle(s))}">
+                         data-ctx-id="${s.id}" onclick="${onclick}" ondblclick="sidebarInlineRename(event, '${s.id}')" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
@@ -7050,9 +7044,6 @@ function hideSession(sessionId) {
         let knownUptime = null;
 
         function showToast(message, duration = 5000) {
-            // Announce to screen readers via live region
-            const sr = document.getElementById('sr-announce');
-            if (sr) { sr.textContent = ''; requestAnimationFrame(() => { sr.textContent = message; }); }
             const toast = document.createElement('div');
             toast.textContent = message;
             toast.setAttribute('role', 'status');
