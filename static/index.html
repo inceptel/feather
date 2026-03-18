@@ -202,7 +202,6 @@
             background: var(--smoke-1); border-top: 1px solid var(--smoke-6);
         }
         #terminal-panel.open { display: flex; }
-        body.terminal-open #autoweb-version-indicator { display: none; }
         /* Zen/focus mode — hides all chrome for distraction-free reading */
         body.zen-mode #sidebar,
         body.zen-mode #sidebar-overlay,
@@ -210,7 +209,6 @@
         body.zen-mode #mobile-session-header,
         body.zen-mode #desktop-session-header,
         body.zen-mode #terminal-panel,
-        body.zen-mode #autoweb-version-indicator { display: none !important; }
         body.zen-mode main { margin-left: 0 !important; }
         body.zen-mode #zen-exit-btn { display: flex !important; }
         #zen-exit-btn { display: none; position: fixed; top: 12px; right: 12px; z-index: 200; padding: 4px 12px; background: var(--smoke-3); border: 1px solid var(--smoke-5); border-radius: 8px; color: var(--smoke-10); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; gap: 6px; align-items: center; opacity: 0.5; transition: opacity 0.2s; }
@@ -234,7 +232,6 @@
         #terminal-container .xterm { height: 100%; }
         #terminal-container .xterm-viewport { overflow-y: auto !important; }
         @media (max-width: 767px) {
-            #autoweb-version-indicator { display: none !important; }
             #terminal-panel { left: 0; height: 35vh; max-height: 180px; }
             #terminal-container { min-height: 80px; }
             body.terminal-open main { height: calc(100vh - var(--terminal-height, 190px)) !important; flex: 1 1 0% !important; min-width: 0 !important; }
@@ -547,7 +544,6 @@
             <button onclick="toggleAgentsView()" class="nav-pill nav-pill-gold font-semibold" aria-label="Agents View">AV</button>
             <a id="env-pill" href="#" class="nav-pill nav-pill-env font-semibold" title="Switch environment"></a>
             <button id="promote-btn" onclick="runPromote()" class="nav-pill font-semibold" style="display:none;background:var(--teal-9);color:#fff;" title="Promote dev → prod">↑ Promote</button>
-            <button onclick="toggleAutowebPanel()" class="nav-pill nav-pill-gold font-semibold" id="autoweb-dash-btn" aria-label="Autoweb Dashboard">AW</button>
             <button onclick="newClaudeSession()" class="md:hidden nav-pill font-semibold" id="mobile-new-session-btn" title="New Claude session" style="background:var(--gold-9);color:var(--smoke-1);min-height:32px;min-width:44px;">+ New</button>
             <span class="flex-1"></span>
             <span id="sse-status" class="text-[9px] text-smoke-7 hidden md:inline">Connected</span>
@@ -797,7 +793,6 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Yank (copy) focused message</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Y</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">View</div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Autoweb dashboard</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">V</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle thinking blocks</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">T</kbd></div>
@@ -874,190 +869,6 @@
                 <iframe src="/av/" style="flex:1;border:none;width:100%;background:#0f172a;"></iframe>
             `;
             document.body.appendChild(overlay);
-        }
-
-        let _awRefreshTimer = null;
-        function toggleAutowebPanel() {
-            let overlay = document.getElementById('autoweb-overlay');
-            if (overlay) {
-                const visible = overlay.style.display !== 'none';
-                overlay.style.display = visible ? 'none' : 'flex';
-                if (!visible) {
-                    loadAutowebResults();
-                    _awRefreshTimer = setInterval(loadAutowebResults, 15000);
-                } else {
-                    clearInterval(_awRefreshTimer);
-                }
-                return;
-            }
-            overlay = document.createElement('div');
-            overlay.id = 'autoweb-overlay';
-            overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.95);display:flex;flex-direction:column;backdrop-filter:blur(8px);';
-            overlay.innerHTML = `
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--smoke-2);border-bottom:1px solid var(--smoke-5);flex-wrap:wrap;gap:8px;">
-                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                        <span style="color:var(--smoke-12);font-size:14px;font-weight:700;letter-spacing:-0.3px;">Autoweb</span>
-                        <div style="display:flex;gap:4px;" id="aw-tabs">
-                            <button onclick="switchAwTab('feather')" id="aw-tab-feather" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:var(--smoke-4);color:var(--smoke-12);">Feather</button>
-                            <button onclick="switchAwTab('trading')" id="aw-tab-trading" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Trading</button>
-                            <button onclick="switchAwTab('frontend')" id="aw-tab-frontend" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--smoke-9);">Frontend</button>
-                            <button onclick="switchAwTab('reviews')" id="aw-tab-reviews" style="padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--smoke-5);background:transparent;color:var(--gold-9);">Reviews</button>
-                        </div>
-                        <span id="autoweb-stats" style="font-size:11px;color:var(--smoke-9);"></span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span id="aw-current" style="font-size:11px;color:var(--teal-9);font-family:ui-monospace,monospace;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                        <button onclick="document.getElementById('autoweb-overlay').style.display='none';clearInterval(_awRefreshTimer);" style="background:none;border:1px solid var(--smoke-5);color:var(--smoke-10);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;min-height:32px;">Close</button>
-                    </div>
-                </div>
-                <div style="flex:1;overflow-y:auto;overflow-x:auto;padding:16px 20px;-webkit-overflow-scrolling:touch;">
-                    <table id="autoweb-results-table" style="width:100%;min-width:600px;border-collapse:collapse;font-size:13px;font-family:'Inter',sans-serif;">
-                        <thead>
-                            <tr style="border-bottom:2px solid var(--smoke-5);">
-                                <th style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Timestamp</th>
-                                <th style="text-align:center;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Status</th>
-                                <th style="text-align:left;padding:8px 12px;color:var(--smoke-11);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Description</th>
-                            </tr>
-                        </thead>
-                        <tbody id="autoweb-results-body"></tbody>
-                    </table>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            loadAutowebResults();
-        }
-
-        let _awActiveTab = 'feather';
-        const _awUrls = {
-            feather: '/api/autoweb-results/feather',
-            trading: '/api/autoweb-results/trading',
-            frontend: '/api/autoweb-results/frontend',
-        };
-
-        function switchAwTab(tab) {
-            _awActiveTab = tab;
-            document.querySelectorAll('#aw-tabs button').forEach(b => {
-                const isActive = b.id === 'aw-tab-' + tab;
-                b.style.background = isActive ? 'var(--smoke-4)' : 'transparent';
-                b.style.color = isActive ? (tab === 'reviews' && isActive ? 'var(--gold-9)' : 'var(--smoke-12)') : (b.id === 'aw-tab-reviews' ? 'var(--gold-9)' : 'var(--smoke-9)');
-            });
-            if (tab === 'reviews') {
-                loadAutowebReviews();
-            } else {
-                loadAutowebResults();
-            }
-        }
-
-        function loadAutowebResults() {
-            fetch('/aw-current.txt?_=' + Date.now()).then(r => r.text()).then(t => {
-                const el = document.getElementById('aw-current');
-                if (el) el.textContent = t.trim() ? '⚡ ' + t.trim() : '';
-            }).catch(() => {});
-            const url = _awUrls[_awActiveTab] || _awUrls.feather;
-            fetch(url + '?_=' + Date.now())
-                .then(r => r.text())
-                .then(text => {
-                    const lines = text.trim().split('\n');
-                    const body = document.getElementById('autoweb-results-body');
-                    const stats = document.getElementById('autoweb-stats');
-                    if (!body) return;
-                    let keeps = 0, reverts = 0, crashes = 0, skips = 0;
-                    const rows = [];
-                    for (let i = 1; i < lines.length; i++) {
-                        const parts = lines[i].split('\t');
-                        if (parts.length < 3) continue;
-                        // Handle both 3-col (ts,status,desc) and 4-col (ts,type,status,desc) formats
-                        let ts, status, desc;
-                        if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
-                            ts = parts[0]; status = parts[2]; desc = parts[3];
-                        } else {
-                            ts = parts[0]; status = parts[1]; desc = parts[2];
-                        }
-                        if (status === 'keep') keeps++;
-                        else if (status === 'revert') reverts++;
-                        else if (status === 'crash') crashes++;
-                        else if (status === 'skip') skips++;
-                        const colors = {
-                            keep: ['#7fd88f', 'rgba(127,216,143,0.12)'],
-                            revert: ['#e06c75', 'rgba(224,108,117,0.12)'],
-                            crash: ['#e5c07b', 'rgba(229,192,123,0.12)'],
-                            skip: ['#888', 'rgba(136,136,136,0.08)']
-                        };
-                        const [statusColor, statusBg] = colors[status] || colors.skip;
-                        rows.push(`<tr style="border-bottom:1px solid var(--smoke-4);${status === 'skip' ? 'opacity:0.6;' : ''}">
-                            <td style="padding:8px 12px;color:var(--smoke-9);font-family:ui-monospace,monospace;font-size:12px;white-space:nowrap;">${new Date(ts).toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true})} ET</td>
-                            <td style="padding:8px 12px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;color:${statusColor};background:${statusBg};">${status}</span></td>
-                            <td style="padding:8px 12px;color:var(--smoke-11);line-height:1.4;">${desc}</td>
-                        </tr>`);
-                    }
-                    body.innerHTML = rows.reverse().join('');
-                    const total = keeps + reverts + crashes + skips;
-                    const label = {feather: 'Feather', dev: 'Dev', trading: 'Trading', frontend: 'Frontend'}[_awActiveTab] || 'Feather';
-                    if (stats) stats.innerHTML = `${label}: ${total} attempts &mdash; <span style="color:#7fd88f;">${keeps} kept</span> &middot; <span style="color:#888;">${skips} skipped</span> &middot; <span style="color:#e06c75;">${reverts} reverted</span> &middot; <span style="color:#e5c07b;">${crashes} crashed</span>`;
-                })
-                .catch(() => {
-                    const body = document.getElementById('autoweb-results-body');
-                    if (body) body.innerHTML = '<tr><td colspan="3" style="padding:20px;color:var(--smoke-8);text-align:center;">Could not load results.tsv</td></tr>';
-                });
-        }
-
-        function loadAutowebReviews() {
-            const body = document.getElementById('autoweb-results-body');
-            const stats = document.getElementById('autoweb-stats');
-            if (!body) return;
-            if (stats) stats.innerHTML = 'Loading reviews...';
-            // Try all instances and merge
-            const instances = ['feather', 'frontend', 'trading'];
-            Promise.all(instances.map(inst =>
-                fetch('/api/autoweb-reviews/' + inst + '?_=' + Date.now())
-                    .then(r => r.ok ? r.json() : [])
-                    .catch(() => [])
-            )).then(results => {
-                const allReviews = [];
-                instances.forEach((inst, i) => {
-                    (results[i] || []).forEach(r => allReviews.push({ ...r, instance: inst }));
-                });
-                allReviews.sort((a, b) => b.name.localeCompare(a.name)); // newest first
-                if (allReviews.length === 0) {
-                    body.innerHTML = '<tr><td colspan="3" style="padding:40px;color:var(--smoke-8);text-align:center;">No reviews found</td></tr>';
-                    if (stats) stats.innerHTML = '';
-                    return;
-                }
-                if (stats) stats.innerHTML = allReviews.length + ' review' + (allReviews.length !== 1 ? 's' : '');
-                const html = allReviews.map(r => {
-                    const instColors = { feather: '#73b8ff', frontend: '#c678dd', trading: '#e5c07b' };
-                    const badgeColor = instColors[r.instance] || '#888';
-                    // Extract date from filename like review-20260316-0114.md
-                    const dateMatch = r.name.match(/review-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
-                    let dateStr = r.name;
-                    if (dateMatch) {
-                        const d = new Date(Date.UTC(+dateMatch[1], +dateMatch[2]-1, +dateMatch[3], +dateMatch[4], +dateMatch[5]));
-                        dateStr = d.toLocaleString('en-US', {timeZone:'America/New_York', month:'short', day:'numeric', hour:'numeric', minute:'2-digit', hour12:true}) + ' ET';
-                    }
-                    const rendered = typeof marked !== 'undefined' ? marked.parse(r.content) : r.content.replace(/</g, '&lt;');
-                    return `<tr style="border-bottom:1px solid var(--smoke-4);">
-                        <td colspan="3" style="padding:0;">
-                            <details style="padding:0;">
-                                <summary style="padding:12px 16px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--smoke-11);font-size:13px;list-style:none;">
-                                    <span style="color:var(--smoke-8);font-size:10px;">&#9654;</span>
-                                    <span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;color:${badgeColor};background:${badgeColor}20;">${r.instance}</span>
-                                    <span style="font-weight:600;">${dateStr}</span>
-                                    <span style="color:var(--smoke-8);font-size:12px;margin-left:auto;">${r.name}</span>
-                                </summary>
-                                <div class="markdown-content" style="padding:8px 20px 20px;font-size:13px;line-height:1.6;color:var(--smoke-11);">${rendered}</div>
-                            </details>
-                        </td>
-                    </tr>`;
-                }).join('');
-                body.innerHTML = html;
-                // Rotate arrow on open
-                body.querySelectorAll('details').forEach(d => {
-                    d.addEventListener('toggle', () => {
-                        const arrow = d.querySelector('summary span:first-child');
-                        if (arrow) arrow.style.transform = d.open ? 'rotate(90deg)' : '';
-                    });
-                });
-            });
         }
 
         function toggleTheme() {
@@ -7704,7 +7515,6 @@
             { label: 'Open session in new tab', shortcut: 'W', action: () => { if (currentSessionId) openCurrentSessionNewTab(); else showToast('No session selected'); } },
             { label: 'Pin/unpin current session', shortcut: 'X', action: () => { if (currentSessionId) { togglePinSession(currentSessionId); showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned'); } else showToast('No session selected'); } },
             { label: 'Reload session list', shortcut: 'L', action: () => { loadSessions(); showToast('Session list refreshed'); } },
-            { label: 'Autoweb dashboard', shortcut: 'V', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
                 if ('Notification' in window && Notification.permission === 'default') {
                     Notification.requestPermission().then(p => {
@@ -7925,13 +7735,6 @@
                 }
                 if (document.getElementById('lightbox')?.classList.contains('open')) {
                     closeLightbox();
-                    return;
-                }
-                // Close Autoweb panel
-                const awOverlay = document.getElementById('autoweb-overlay');
-                if (awOverlay && awOverlay.style.display !== 'none') {
-                    awOverlay.style.display = 'none';
-                    clearInterval(_awRefreshTimer);
                     return;
                 }
             }
@@ -8169,13 +7972,6 @@
                     yankFocusedMessage();
                 }
             }
-            // V — toggle Autoweb dashboard
-            if (e.key === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    toggleAutowebPanel();
-                }
             }
             // B — scroll to bottom of conversation
             if (e.key === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
@@ -8526,50 +8322,5 @@
         });
     </script>
     <div id="msg-nav-indicator"></div>
-    <!--autoweb-version: 2026-03-18 00:43 UTC iter=58 keeps=181-->
-    <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
-    <script>
-    (function() {
-        var el = document.getElementById('autoweb-version-indicator');
-        if (!el) return;
-        function updateIndicator(keeps) {
-            var etTime = new Date().toLocaleString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true});
-            el.textContent = "AW " + etTime + " ET" + (keeps != null ? " \u2022 " + keeps + " fixes" : "");
-        }
-        // Fetch live keeps count from feather + trading only
-        // ('frontend' maps to same file as 'feather' in backend — skip to avoid double-counting)
-        Promise.all([
-            fetch('/api/autoweb-results/feather').then(function(r) { return r.text(); }).catch(function() { return ''; }),
-            fetch('/api/autoweb-results/trading').then(function(r) { return r.text(); }).catch(function() { return ''; })
-        ]).then(function(texts) {
-            var keeps = 0;
-            texts.forEach(function(text) {
-                text.split('\n').forEach(function(line) {
-                    if (line && line.indexOf('\tkeep\t') !== -1) keeps++;
-                });
-            });
-            updateIndicator(keeps);
-        }).catch(function() {
-            // Fallback: parse from HTML comment
-            function findComment(parent) {
-                for (var i = 0; i < parent.childNodes.length; i++) {
-                    var n = parent.childNodes[i];
-                    if (n.nodeType === 8 && n.data.indexOf('autoweb-version:') !== -1) return n.data;
-                    if (n.childNodes && n.childNodes.length) { var r = findComment(n); if (r) return r; }
-                }
-                return null;
-            }
-            var comment = findComment(document);
-            var keepsMatch = comment && comment.match(/keeps=(\d+)/);
-            updateIndicator(keepsMatch ? keepsMatch[1] : null);
-        });
-        // Refresh time display every 60s
-        setInterval(function() {
-            var text = el.textContent;
-            var fixesMatch = text.match(/(\d+) fixes/);
-            updateIndicator(fixesMatch ? fixesMatch[1] : null);
-        }, 60000);
-    })();
-    </script>
 </body>
 </html>
