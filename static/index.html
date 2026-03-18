@@ -778,7 +778,11 @@
             <div style="padding:12px 16px; border-bottom:1px solid var(--smoke-4);">
                 <input id="command-palette-input" type="text" placeholder="Type a command..." autocomplete="off" style="width:100%; background:transparent; border:none; outline:none; color:var(--smoke-12); font-size:15px; font-family:Inter,system-ui,sans-serif;">
             </div>
-            <div id="command-palette-list" style="overflow-y:auto; padding:6px 0; max-height:340px;"></div>
+            <div id="command-palette-list" style="overflow-y:auto; padding:6px 0; max-height:280px;"></div>
+            <div id="command-palette-preview" style="display:none; padding:8px 14px; border-top:1px solid var(--smoke-4); background:var(--smoke-3); max-height:80px; overflow:hidden; flex-shrink:0;">
+                <div id="command-palette-preview-role" style="font-size:10px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--smoke-7); margin-bottom:3px;"></div>
+                <div id="command-palette-preview-text" style="font-size:12px; color:var(--smoke-10); line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;"></div>
+            </div>
             <div id="command-palette-footer" style="padding:6px 14px; border-top:1px solid var(--smoke-4); display:flex; gap:12px; align-items:center; flex-shrink:0;">
                 <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↑↓</kbd> Navigate</span>
                 <span style="font-size:11px; color:var(--smoke-6); display:flex; align-items:center; gap:4px;"><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:3px; padding:1px 5px; font-family:ui-monospace,monospace; font-size:10px; color:var(--smoke-8);">↵</kbd> Select</span>
@@ -7879,6 +7883,8 @@
             }},
         ];
         let _cmdPaletteIdx = 0;
+        const _cmdPreviewCache = {};
+        let _cmdPreviewTimer = null;
 
         let _cmdPaletteTrigger = null;
         let _cmdPaletteFocusTrap = null;
@@ -7902,12 +7908,53 @@
         function closeCommandPalette() {
             const overlay = document.getElementById('command-palette-overlay');
             if (overlay) overlay.style.display = 'none';
+            clearTimeout(_cmdPreviewTimer);
+            const previewDiv = document.getElementById('command-palette-preview');
+            if (previewDiv) previewDiv.style.display = 'none';
             const palette = document.getElementById('command-palette');
             if (palette && _cmdPaletteFocusTrap) { palette.removeEventListener('keydown', _cmdPaletteFocusTrap); _cmdPaletteFocusTrap = null; }
             if (_cmdPaletteTrigger && typeof _cmdPaletteTrigger.focus === 'function') {
                 _cmdPaletteTrigger.focus();
                 _cmdPaletteTrigger = null;
             }
+        }
+
+        function loadCmdPreview(item) {
+            const previewDiv = document.getElementById('command-palette-preview');
+            const roleEl = document.getElementById('command-palette-preview-role');
+            const textEl = document.getElementById('command-palette-preview-text');
+            if (!previewDiv || !roleEl || !textEl) return;
+            if (!item || !item.sessionId) {
+                previewDiv.style.display = 'none';
+                return;
+            }
+            clearTimeout(_cmdPreviewTimer);
+            _cmdPreviewTimer = setTimeout(async () => {
+                const key = item.sessionId;
+                if (_cmdPreviewCache[key] !== undefined) {
+                    showCmdPreview(previewDiv, roleEl, textEl, _cmdPreviewCache[key]);
+                    return;
+                }
+                try {
+                    const proj = encodeURIComponent(item.projectId || '');
+                    const res = await fetch(`/api/projects/${proj}/sessions/${key}/history?limit=3`);
+                    if (!res.ok) { _cmdPreviewCache[key] = null; return; }
+                    const data = await res.json();
+                    const msgs = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
+                    const last = msgs[msgs.length - 1];
+                    if (!last) { _cmdPreviewCache[key] = null; return; }
+                    const text = (last.content || []).map(b => b.text || '').join(' ').trim().slice(0, 200);
+                    _cmdPreviewCache[key] = { role: last.role, text };
+                    showCmdPreview(previewDiv, roleEl, textEl, _cmdPreviewCache[key]);
+                } catch { _cmdPreviewCache[key] = null; }
+            }, 120);
+        }
+
+        function showCmdPreview(previewDiv, roleEl, textEl, data) {
+            if (!data || !data.text) { previewDiv.style.display = 'none'; return; }
+            roleEl.textContent = data.role === 'assistant' ? 'Claude' : 'You';
+            textEl.textContent = data.text;
+            previewDiv.style.display = 'block';
         }
 
         function getFilteredCommands(query) {
@@ -7924,6 +7971,8 @@
                             label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
                             shortcut: meta,
                             group: 'recent',
+                            sessionId: s.id,
+                            projectId: s.project,
                             action: () => {
                                 if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
                                 else resumeSession(s.id, s.project);
@@ -7948,6 +7997,8 @@
                         label: (projName ? projName + ' / ' : '') + getSessionTitle(s),
                         shortcut: meta,
                         group: 'session',
+                        sessionId: s.id,
+                        projectId: s.project,
                         action: () => {
                             if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
                             else resumeSession(s.id, s.project);
@@ -7989,6 +8040,8 @@
             const query = input?.value || '';
             _cmdPaletteIdx = idx;
             renderCommandPaletteList(query);
+            const filtered = getFilteredCommands(query);
+            loadCmdPreview(filtered[idx]);
         }
 
         function executeCmdItem(idx) {
@@ -8005,12 +8058,14 @@
         document.getElementById('command-palette-input')?.addEventListener('input', (e) => {
             _cmdPaletteIdx = 0;
             renderCommandPaletteList(e.target.value);
+            const filtered = getFilteredCommands(e.target.value);
+            loadCmdPreview(filtered[0]);
         });
         document.getElementById('command-palette-input')?.addEventListener('keydown', (e) => {
             const query = e.target.value || '';
             const filtered = getFilteredCommands(query);
-            if (e.key === 'ArrowDown') { e.preventDefault(); _cmdPaletteIdx = Math.min(_cmdPaletteIdx + 1, filtered.length - 1); renderCommandPaletteList(query); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); _cmdPaletteIdx = Math.max(_cmdPaletteIdx - 1, 0); renderCommandPaletteList(query); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); _cmdPaletteIdx = Math.min(_cmdPaletteIdx + 1, filtered.length - 1); renderCommandPaletteList(query); loadCmdPreview(filtered[_cmdPaletteIdx]); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); _cmdPaletteIdx = Math.max(_cmdPaletteIdx - 1, 0); renderCommandPaletteList(query); loadCmdPreview(filtered[_cmdPaletteIdx]); }
             else if (e.key === 'Enter') { e.preventDefault(); executeCmdItem(_cmdPaletteIdx); }
             else if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
         });
