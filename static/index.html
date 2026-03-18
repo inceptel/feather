@@ -608,7 +608,6 @@
                     </div>
                     <div class="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[11px] text-smoke-7" id="empty-state-shortcuts">
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">/</kbd> Search</span>
-                        <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">N</kbd> New session</span>
                     </div>
                     <div id="recent-sessions-cards" class="mt-8 w-full max-w-sm mx-auto"></div>
                 </div>
@@ -7256,14 +7255,6 @@
                     return;
                 }
             }
-            // Press "i" to focus chat input (vim-style, when not already in an input)
-            if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    document.getElementById('input')?.focus();
-                }
-            }
             // Press "/" to focus session search (when not already in an input)
             if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const tag = document.activeElement?.tagName?.toLowerCase();
@@ -7272,7 +7263,6 @@
                     const searchInput = document.getElementById('session-search');
                     if (searchInput) {
                         searchInput.focus();
-                        // Hide the shortcut hint while focused
                         const hint = document.getElementById('search-shortcut-hint');
                         if (hint) hint.style.display = 'none';
                     }
@@ -7290,190 +7280,6 @@
             if ((e.ctrlKey || e.metaKey) && (e.key === 'Home' || e.key === 'End')) {
                 e.preventDefault();
                 jumpToMessage(e.key === 'Home' ? 'first' : 'last');
-            }
-            // Alt+ArrowUp / Alt+ArrowDown to switch between sessions
-            if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-                e.preventDefault();
-                switchSessionByDirection(e.key === 'ArrowUp' ? -1 : 1);
-            }
-            // J/K vim-style message navigation (when not in input)
-            if ((e.key === 'j' || e.key === 'k') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    navigateMessages(e.key === 'j' ? 1 : -1);
-                }
-            }
-            // G / gg vim-style jump navigation (when not in input)
-            if (e.key === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    const now = Date.now();
-                    if (now - _lastGPress < 500) {
-                        e.preventDefault();
-                        _lastGPress = 0;
-                        jumpToMessage('first');
-                    } else {
-                        _lastGPress = now;
-                    }
-                }
-            }
-            if (e.key === 'G' && !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    jumpToMessage('last');
-                }
-            }
-            // T — toggle thinking blocks collapsed/expanded
-            if (e.key === 't' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    toggleAllThinking();
-                }
-            }
-            // S — star/unstar current session
-            if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); }
-                    else { showToast('No session selected'); }
-                }
-            }
-            // R — rename current session
-            if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    renameCurrentSession();
-                }
-            }
-            // M — cycle session filter (Mine → Auto → All → Mine)
-            if (e.key === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    cycleSessionFilter();
-                }
-            }
-            // D — hide current session
-            if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); }
-                    else { showToast('No session selected'); }
-                }
-            }
-            if (e.key === 'e' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) exportSessionMarkdown();
-                    else showToast('No session selected');
-                }
-            }
-            // O — cycle session sort order (order)
-            if (e.key === 'o' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    cycleSessionSort();
-                }
-            }
-            // U — jump to next unread session
-            if (e.key === 'u' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    jumpToNextUnreadSession();
-                }
-            }
-            // P — jump to previous unread session
-            if (e.key === 'p' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    jumpToPrevUnreadSession();
-                }
-            }
-            // N — new Claude session
-            if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    newClaudeSession();
-                }
-            }
-            // A — mark all sessions as read
-            if (e.key === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    markAllSessionsRead();
-                }
-            }
-            // [ / ] — navigate previous/next session in list
-            if ((e.key === '[' || e.key === ']') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    navigateSessionList(e.key === ']' ? 1 : -1);
-                }
-            }
-            // C — copy current session URL to clipboard
-            if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) copyCurrentSessionLink();
-                    else showToast('No session selected');
-                }
-            }
-            // X — pin/unpin current session
-            if (e.key === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) {
-                        togglePinSession(currentSessionId);
-                        showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned');
-                    } else { showToast('No session selected'); }
-                }
-            }
-            if (e.key === 'w' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    if (currentSessionId) { openCurrentSessionNewTab(); } else { showToast('No session selected'); }
-                }
-            }
-            // L — reload session list
-            if (e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    loadSessions();
-                    showToast('Session list refreshed');
-                }
-            }
-            if (e.key === 'y' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    yankFocusedMessage();
-                }
-            }
-            }
-            // B — scroll to bottom of conversation
-            if (e.key === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    scrollToBottom(true);
-                }
             }
         });
         // Show shortcut hint again when search loses focus, and clear keyboard highlight
