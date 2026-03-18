@@ -7028,11 +7028,6 @@ function hideSession(sessionId) {
                     chatSearchNav(e.shiftKey ? -1 : 1);
                 }
             }
-            // Ctrl+Home / Ctrl+End to jump to first/last message (standard shortcut)
-            if ((e.ctrlKey || e.metaKey) && (e.key === 'Home' || e.key === 'End')) {
-                e.preventDefault();
-                jumpToMessage(e.key === 'Home' ? 'first' : 'last');
-            }
         });
         // Show shortcut hint again when search loses focus, and clear keyboard highlight
         document.getElementById('session-search')?.addEventListener('blur', () => {
