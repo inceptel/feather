@@ -4704,8 +4704,8 @@
                     const tag = parent.tagName;
                     if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'INPUT') return NodeFilter.FILTER_REJECT;
                     if (parent.closest('#chat-search-bar')) return NodeFilter.FILTER_REJECT;
-                    // Only search in visible text content
-                    if (parent.closest('.tool-body.hidden') || parent.closest('.thinking-content') && parent.closest('.thinking-block.collapsed')) return NodeFilter.FILTER_REJECT;
+                    // Only search in visible text content (tool-body.hidden is included — we expand on navigate)
+                    if (parent.closest('.thinking-content') && parent.closest('.thinking-block.collapsed')) return NodeFilter.FILTER_REJECT;
                     return NodeFilter.FILTER_ACCEPT;
                 }
             });
@@ -4744,6 +4744,7 @@
             if (total > 0) {
                 _chatSearchIdx = 0;
                 _chatSearchMarks[0].classList.add('current');
+                expandToolBodyIfNeeded(_chatSearchMarks[0]);
                 _chatSearchMarks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
                 countEl.textContent = `1 / ${total}`;
             } else {
@@ -4771,12 +4772,26 @@
             doChatSearch(query);
         }
 
+        function expandToolBodyIfNeeded(mark) {
+            const toolBody = mark.closest('.tool-body');
+            if (toolBody && toolBody.classList.contains('hidden')) {
+                toolBody.classList.remove('hidden');
+                const header = toolBody.previousElementSibling;
+                if (header) {
+                    const chevron = header.querySelector('.tool-chevron');
+                    if (chevron) chevron.textContent = '▼';
+                }
+            }
+        }
+
         function chatSearchNav(dir) {
             if (_chatSearchMarks.length === 0) return;
             _chatSearchMarks[_chatSearchIdx].classList.remove('current');
             _chatSearchIdx = (_chatSearchIdx + dir + _chatSearchMarks.length) % _chatSearchMarks.length;
-            _chatSearchMarks[_chatSearchIdx].classList.add('current');
-            _chatSearchMarks[_chatSearchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const mark = _chatSearchMarks[_chatSearchIdx];
+            mark.classList.add('current');
+            expandToolBodyIfNeeded(mark);
+            mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
             document.getElementById('chat-search-count').textContent = `${_chatSearchIdx + 1} / ${_chatSearchMarks.length}`;
         }
 
