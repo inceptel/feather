@@ -796,10 +796,7 @@
         let previousSessionId = null;
         let previousSessionProjectId = null;
         const sessionScrollPositions = new Map(); // Save scroll position per session
-        const sessionDrafts = new Map(); // Save input drafts per session
-        // Restore persisted drafts from localStorage
-        try { const _sd = JSON.parse(localStorage.getItem('feather-session-drafts') || '{}'); for (const [k,v] of Object.entries(_sd)) if (v) sessionDrafts.set(k, v); } catch {}
-        function persistDrafts() { try { localStorage.setItem('feather-session-drafts', JSON.stringify(Object.fromEntries(sessionDrafts))); } catch {} }
+        const sessionDrafts = new Map(); // Save input drafts per session (in-memory only)
         let currentTmuxSession = null;
         let isStreaming = false;
         let sseConnection = null;
@@ -1627,28 +1624,6 @@ function hideSession(sessionId) {
             }
         }
 
-        function updateDraftIndicator(sessionId) {
-            if (!sessionId) return;
-            const item = document.querySelector(`.session-item[data-ctx-id="${sessionId}"]`);
-            if (!item) return;
-            const hasDraft = sessionDrafts.has(sessionId);
-            const draft = sessionDrafts.get(sessionId) || '';
-            let ind = item.querySelector('.draft-indicator');
-            if (hasDraft && !ind) {
-                ind = document.createElement('span');
-                ind.className = 'draft-indicator text-[9px] text-amber-9 shrink-0';
-                ind.title = 'Draft: ' + draft.substring(0, 60) + (draft.length > 60 ? '…' : '');
-                ind.textContent = '✎';
-                // Insert before the star button
-                const starBtn = item.querySelector('.star-btn');
-                if (starBtn) item.querySelector('.flex').insertBefore(ind, starBtn);
-                else item.querySelector('.flex').appendChild(ind);
-            } else if (hasDraft && ind) {
-                ind.title = 'Draft: ' + draft.substring(0, 60) + (draft.length > 60 ? '…' : '');
-            } else if (!hasDraft && ind) {
-                ind.remove();
-            }
-        }
 
         function renderSessions() {
             const container = document.getElementById('sessions');
@@ -1832,10 +1807,6 @@ function hideSession(sessionId) {
                 // Only show snippet for content matches (start with '...') — title-only snippets are redundant with the title above
                 const snippetLine = (s._snippet && s._snippet.startsWith('...')) ? `<div class="text-[10px] text-smoke-6 line-clamp-2 leading-tight mt-0.5" title="${escapeHtml(s._snippet)}">${highlightSearch(s._snippet, currentSearchQuery)}</div>` : '';
 
-                // Draft indicator — shows when session has unsent text saved from a prior visit
-                const hasDraft = sessionDrafts.has(s.id);
-                const draftText = sessionDrafts.get(s.id) || '';
-                const draftIndicator = hasDraft ? `<span class="draft-indicator text-[9px] text-amber-9 shrink-0" title="Draft: ${escapeHtml(draftText.substring(0, 60))}${draftText.length > 60 ? '…' : ''}">✎</span>` : '';
 
                 const _ariaLabel = [getSessionTitle(s), s.message_count ? s.message_count + ' messages' : null, s.lastUpdated ? formatTime(s.lastUpdated) : null, isUnread ? 'unread' : null, isSelected ? 'current session' : null].filter(Boolean).join(', ');
                 return `
@@ -1855,7 +1826,6 @@ function hideSession(sessionId) {
                                 </div>
                                 ${snippetLine}
                             </div>
-                            ${draftIndicator}
                             ${starBtn}
                         </div>
                     </div>
@@ -2390,8 +2360,8 @@ function hideSession(sessionId) {
                 const msgs = document.getElementById('messages');
                 if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
                 const inp = document.getElementById('input');
-                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value); updateDraftIndicator(currentSessionId); persistDrafts(); }
-                else if (inp) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value);  }
+                else if (inp) { sessionDrafts.delete(currentSessionId);  }
             }
 
             // Track previous session for Ctrl+. quick-switch
@@ -2493,8 +2463,8 @@ function hideSession(sessionId) {
                 const msgs = document.getElementById('messages');
                 if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
                 const inp = document.getElementById('input');
-                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value); updateDraftIndicator(currentSessionId); persistDrafts(); }
-                else if (inp) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value);  }
+                else if (inp) { sessionDrafts.delete(currentSessionId);  }
             }
 
             // Track previous session for Ctrl+. quick-switch
@@ -5388,7 +5358,7 @@ function hideSession(sessionId) {
             } else if (e.key === 'Escape') {
                 // Clear input on Escape and blur so keyboard shortcuts work
                 input.value = '';
-                if (currentSessionId) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                if (currentSessionId) { sessionDrafts.delete(currentSessionId);  }
                 historyIndex = -1;
                 currentDraft = '';
                 autoResize(input);
@@ -5706,7 +5676,7 @@ function hideSession(sessionId) {
 
                 setStatus('Starting session...', 'amber');
                 input.value = '';
-                if (currentSessionId) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                if (currentSessionId) { sessionDrafts.delete(currentSessionId);  }
                 autoResize(input);
                 stopHistoryPolling();
 
@@ -5885,7 +5855,7 @@ function hideSession(sessionId) {
             }
 
             input.value = '';
-            if (currentSessionId) { sessionDrafts.delete(currentSessionId); persistDrafts(); }
+            if (currentSessionId) { sessionDrafts.delete(currentSessionId) }
             autoResize(input);
 
             // Upload pending files (images or documents)
