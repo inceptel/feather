@@ -369,6 +369,7 @@
         /* J/K message navigation highlight */
         @keyframes msg-nav-flash { 0% { box-shadow: inset 0 0 0 2px rgba(250, 178, 131, 0.5); } 100% { box-shadow: none; } }
         .msg-nav-highlight { animation: msg-nav-flash 0.8s ease-out; border-radius: 8px; }
+        #msg-nav-indicator { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(20,20,30,0.85); color: var(--smoke-10); padding: 4px 14px; border-radius: 14px; font-size: 12px; font-family: 'Inter', sans-serif; z-index: 9998; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; border: 1px solid var(--smoke-5); }
         .user-msg-bubble .msg-edit-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
         .user-msg-bubble:hover .msg-edit-btn { opacity: 0.8; }
         .user-msg-bubble .msg-edit-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
@@ -522,6 +523,7 @@
                 <button id="search-clear-btn" onclick="clearSessionSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 text-smoke-7 hover:text-smoke-11 transition-colors hidden" title="Clear search" aria-label="Clear search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 <svg id="search-spinner" class="absolute right-2 top-1/2 -translate-y-1/2 text-gold-9 hidden animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
             </div>
+            <div id="search-recent-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-smoke-2 border border-smoke-5 rounded-lg shadow-lg z-50 overflow-hidden" style="max-height:200px;overflow-y:auto"></div>
             <div id="search-result-count" class="hidden text-[10px] text-smoke-6 px-1 mt-1"></div>
             <!-- Session filter toggle -->
             <div id="session-filter-bar" class="flex gap-1 mt-1.5">
@@ -588,6 +590,7 @@
         <!-- Desktop session header bar -->
         <div id="desktop-session-header" class="hidden border-b border-smoke-4 bg-smoke-1/95 backdrop-blur-sm px-4 py-1.5 flex items-center gap-3 z-10" style="display:none">
             <button id="desktop-star-btn" onclick="if(currentSessionId)toggleStarSession(event,currentSessionId)" class="shrink-0 text-sm leading-none text-smoke-6 hover:text-gold-9 transition-colors" title="Star session (S)" aria-label="Star session">&#9733;</button>
+            <button id="desktop-pin-btn" onclick="if(currentSessionId)togglePinSession(currentSessionId)" class="shrink-0 text-smoke-6 hover:text-blue-9 transition-colors" title="Pin session to top" aria-label="Pin session" style="opacity:0.4;display:flex;align-items:center;padding:1px 2px"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg></button>
             <span id="desktop-session-title" class="text-xs font-medium text-smoke-11 truncate cursor-pointer" ondblclick="renameCurrentSession()" title="Double-click to rename"></span>
             <span id="desktop-session-meta" class="text-[10px] text-smoke-8 whitespace-nowrap shrink-0"></span>
             <button id="desktop-search-btn" onclick="openChatSearch()" class="shrink-0 text-smoke-6 hover:text-smoke-11 transition-colors" title="Search in conversation (Ctrl+F)" aria-label="Search in conversation" style="opacity:0.4;padding:2px 4px;font-size:11px;line-height:1">
@@ -602,9 +605,11 @@
         <div id="chat-search-bar" class="hidden border-b border-smoke-5 bg-smoke-2/95 backdrop-blur-sm px-4 py-2 flex items-center gap-2 z-10">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" class="text-smoke-8 shrink-0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input id="chat-search-input" type="text" placeholder="Search in conversation..." class="flex-1 bg-transparent text-sm text-smoke-12 outline-none placeholder-smoke-7" autocomplete="off">
+            <button id="chat-search-clear-btn" onclick="clearChatSearchInput()" class="hidden p-1 text-smoke-7 hover:text-smoke-12 transition-colors" title="Clear search"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button id="chat-search-case-btn" onclick="toggleChatSearchCase()" class="p-1 text-smoke-7 hover:text-smoke-12 transition-colors rounded" title="Match case (Alt+C)" style="font-size:11px;font-weight:600;line-height:1;padding:2px 4px;font-family:monospace">Aa</button>
             <span id="chat-search-count" class="text-[10px] text-smoke-8 whitespace-nowrap"></span>
-            <button onclick="chatSearchNav(-1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Previous (Shift+Enter)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
-            <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+            <button onclick="chatSearchNav(-1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Previous (Shift+Enter / Shift+F3)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+            <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter / F3)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
             <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
 
@@ -641,7 +646,7 @@
                     <div class="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[11px] text-smoke-7" id="empty-state-shortcuts">
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">/</kbd> Search</span>
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">Ctrl+K</kbd> Commands</span>
-                        <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">Ctrl+N</kbd> New session</span>
+                        <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">N</kbd> New session</span>
                         <span><kbd class="px-1.5 py-0.5 rounded bg-smoke-3 border border-smoke-5 text-smoke-9 font-mono text-[10px]">?</kbd> All shortcuts</span>
                     </div>
                     <div id="recent-sessions-cards" class="mt-8 w-full max-w-sm mx-auto"></div>
@@ -780,15 +785,19 @@
     <!-- Keyboard shortcuts help modal -->
     <div id="shortcuts-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:250; align-items:center; justify-content:center; backdrop-filter:blur(4px);" onclick="if(event.target===this)closeShortcutsModal()">
         <div style="background:var(--smoke-2); border:1px solid var(--smoke-5); border-radius:12px; padding:24px 28px; max-width:380px; width:90%; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-shrink:0;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-shrink:0;">
                 <span style="font-size:14px; font-weight:600; color:var(--smoke-12);">Keyboard Shortcuts</span>
                 <span onclick="closeShortcutsModal()" style="cursor:pointer; color:var(--smoke-8); font-size:18px; line-height:1;">&times;</span>
             </div>
-            <div style="display:flex; flex-direction:column; gap:10px; font-size:13px; overflow-y:auto; padding-right:4px;">
+            <div style="flex-shrink:0; margin-bottom:12px;">
+                <input id="shortcuts-search" type="text" placeholder="Filter shortcuts…" oninput="filterShortcuts(this.value)" style="width:100%; box-sizing:border-box; background:var(--smoke-3); border:1px solid var(--smoke-5); border-radius:6px; padding:6px 10px; font-size:12px; color:var(--smoke-11); outline:none;" onfocus="this.style.borderColor='#f59e0b'" onblur="this.style.borderColor='var(--smoke-5)'">
+            </div>
+            <div id="shortcuts-list" style="display:flex; flex-direction:column; gap:10px; font-size:13px; overflow-y:auto; padding-right:4px;">
                 <div style="padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">Input &amp; Search</div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus input</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">I</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus search</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">/</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Search in chat</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+F</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Search in chat</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+F</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next / prev match</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F3</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">⇧F3</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Command palette</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+K</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Blur input / close</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Esc</kbd></div>
                 <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">Navigation</div>
@@ -796,10 +805,14 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Switch session</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2191;</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Alt+&#x2193;</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Last viewed session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+.</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next / prev unread</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">U</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">P</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Next / prev session in list</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">]</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">[</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Navigate messages</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">J</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">K</kbd></span></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">First / last message</span><span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">gg</kbd> <kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">G</kbd></span></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Scroll to bottom</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">B</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Yank (copy) focused message</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Y</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy last response</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+Shift+C</kbd></div>
                 <div style="margin-top:6px; padding-bottom:5px; border-bottom:1px solid var(--smoke-4); font-size:10px; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:var(--smoke-7);">View</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Autoweb dashboard</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">V</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Zen mode</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Z</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Focus mode (hide tools)</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">F</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Toggle thinking blocks</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">T</kbd></div>
@@ -815,7 +828,12 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Claude session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">New Pi session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">Ctrl+N</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Mark all sessions read</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">A</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Copy session link</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">C</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Open session in new tab</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">W</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Pin/unpin session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">X</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Reload session list</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">L</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">What's New</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">H</kbd></div>
             </div>
         </div>
     </div>
@@ -1085,6 +1103,11 @@
             if (active && document.body.classList.contains('terminal-open')) {
                 toggleTerminal();
             }
+            localStorage.setItem('feather-zen-mode', active ? '1' : '0');
+        }
+        // Restore zen mode on load
+        if (localStorage.getItem('feather-zen-mode') === '1') {
+            document.body.classList.add('zen-mode');
         }
 
         // ========== What's New Popover ==========
@@ -1092,6 +1115,36 @@
         let _whatsNewLoaded = false;
         let _whatsNewLastSeen = localStorage.getItem('feather-whatsNewLastSeen') || '';
         let _whatsNewNewestTs = '';
+        let _whatsNewItems = [];
+        let _whatsNewShowAll = false;
+        const WHATS_NEW_LIMIT = 15;
+
+        function renderWhatsNewList() {
+            const list = document.getElementById('whats-new-list');
+            if (!list) return;
+            if (_whatsNewItems.length === 0) {
+                list.innerHTML = '<div class="wn-empty">No improvements yet</div>';
+                return;
+            }
+            const visible = _whatsNewShowAll ? _whatsNewItems : _whatsNewItems.slice(0, WHATS_NEW_LIMIT);
+            list.innerHTML = visible.map(item => {
+                const d = new Date(item.ts);
+                const timeStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+                const cleanDesc = item.desc.replace(/;\s*\d+ tests? pass\.?$/i, '');
+                return `<div class="wn-item">
+                    <div class="wn-item-time">${timeStr} ET</div>
+                    <div class="wn-item-desc">${escapeHtml(cleanDesc)}</div>
+                </div>`;
+            }).join('');
+            if (!_whatsNewShowAll && _whatsNewItems.length > WHATS_NEW_LIMIT) {
+                list.innerHTML += `<div onclick="showAllWhatsNew()" style="text-align:center;padding:8px 4px 2px;font-size:11px;color:var(--smoke-7);cursor:pointer;border-top:1px solid var(--smoke-4);margin-top:4px;" onmouseover="this.style.color='var(--smoke-11)'" onmouseout="this.style.color='var(--smoke-7)'">Show all ${_whatsNewItems.length} improvements ↓</div>`;
+            }
+        }
+
+        function showAllWhatsNew() {
+            _whatsNewShowAll = true;
+            renderWhatsNewList();
+        }
 
         function toggleWhatsNew() {
             const popover = document.getElementById('whats-new-popover');
@@ -1102,11 +1155,9 @@
                 loadWhatsNew();
             }
             if (_whatsNewOpen) {
-                // Mark as seen — store the latest timestamp
-                const list = document.getElementById('whats-new-list');
-                const firstTime = list?.querySelector('.wn-item-time');
-                if (firstTime) {
-                    _whatsNewLastSeen = firstTime.textContent;
+                // Mark as seen — store the latest ISO timestamp
+                if (_whatsNewNewestTs) {
+                    _whatsNewLastSeen = _whatsNewNewestTs;
                     localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
                 }
                 updateWhatsNewBadge();
@@ -1134,24 +1185,12 @@
                     items.reverse(); // newest first
                     // Track newest timestamp for badge comparison
                     if (items.length > 0) _whatsNewNewestTs = items[0].ts;
-                    const recent = items.slice(0, 15);
-                    const list = document.getElementById('whats-new-list');
-                    if (!list) return;
-                    if (recent.length === 0) {
-                        list.innerHTML = '<div class="wn-empty">No improvements yet</div>';
-                        return;
-                    }
-                    list.innerHTML = recent.map(item => {
-                        const d = new Date(item.ts);
-                        const timeStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-                        return `<div class="wn-item">
-                            <div class="wn-item-time">${timeStr} ET</div>
-                            <div class="wn-item-desc">${escapeHtml(item.desc)}</div>
-                        </div>`;
-                    }).join('');
+                    _whatsNewItems = items;
+                    _whatsNewShowAll = false;
+                    renderWhatsNewList();
                     // Update last seen
-                    if (_whatsNewOpen && recent.length > 0) {
-                        _whatsNewLastSeen = recent[0].ts;
+                    if (_whatsNewOpen && items.length > 0) {
+                        _whatsNewLastSeen = items[0].ts;
                         localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
                         updateWhatsNewBadge();
                     }
@@ -1199,13 +1238,18 @@
                         }
                     }
                     if (newestKeepTs) {
+                        const wasNewer = !_whatsNewNewestTs || newestKeepTs > _whatsNewNewestTs;
                         _whatsNewNewestTs = newestKeepTs;
+                        if (wasNewer && _whatsNewLoaded) {
+                            _whatsNewLoaded = false; // Force list reload next open
+                        }
                         updateWhatsNewBadge();
                     }
                 })
                 .catch(() => {});
         }
         checkWhatsNewBadge();
+        setInterval(checkWhatsNewBadge, 300000); // Re-check badge every 5 min
 
         // ========== State ==========
         let currentSessionId = null;
@@ -1215,6 +1259,9 @@
         let recentSessionIds = JSON.parse(localStorage.getItem('recentSessionIds') || '[]');
         const sessionScrollPositions = new Map(); // Save scroll position per session
         const sessionDrafts = new Map(); // Save input drafts per session
+        // Restore persisted drafts from localStorage
+        try { const _sd = JSON.parse(localStorage.getItem('feather-session-drafts') || '{}'); for (const [k,v] of Object.entries(_sd)) if (v) sessionDrafts.set(k, v); } catch {}
+        function persistDrafts() { try { localStorage.setItem('feather-session-drafts', JSON.stringify(Object.fromEntries(sessionDrafts))); } catch {} }
         let currentTmuxSession = null;
         let isStreaming = false;
         let sseConnection = null;
@@ -1265,7 +1312,7 @@
 
         function updatePageTitle(statusText) {
             const prefix = _currentPageStatus === 'working' ? '\u25CF ' : _currentPageStatus === 'error' ? '\u25CB ' : '';
-            const unreadPrefix = (typeof unreadCount !== 'undefined' && unreadCount > 0) ? '(' + (unreadCount > 99 ? '99+' : unreadCount) + ') ' : '';
+            const unreadPrefix = (typeof sessionListUnreadCount !== 'undefined' && sessionListUnreadCount > 0) ? '(' + (sessionListUnreadCount > 99 ? '99+' : sessionListUnreadCount) + ') ' : '';
             const session = _currentSessionTitle || '';
             if (session && statusText && _currentPageStatus === 'working') {
                 document.title = unreadPrefix + prefix + statusText + ' \u2014 ' + session + ' \u2014 Feather';
@@ -1593,17 +1640,18 @@
                 const metaEl = document.getElementById('desktop-session-meta');
                 if (!metaEl) return;
                 const dur = formatDuration(data.duration_secs);
-                if (dur && metaEl.textContent && !metaEl.textContent.includes('·' + dur) && !metaEl.dataset.durAdded) {
-                    metaEl.textContent = metaEl.textContent + ' · ' + dur;
+                if (dur && metaEl.textContent && !metaEl.textContent.includes('~' + dur) && !metaEl.dataset.durAdded) {
+                    metaEl.textContent = metaEl.textContent + ' · ~' + dur;
                     metaEl.dataset.durAdded = '1';
                 }
-                // Set tooltip with role breakdown
+                // Set tooltip with role breakdown + duration
                 if (data.by_role) {
                     const parts = [];
+                    if (dur) parts.push('Duration: ' + dur);
                     if (data.by_role.assistant) parts.push(data.by_role.assistant + ' assistant');
                     if (data.by_role.user) parts.push(data.by_role.user + ' user');
                     if (data.tool_calls) parts.push(data.tool_calls + ' tool calls');
-                    if (data.char_count) parts.push(Math.round(data.char_count / 1000) + 'k chars');
+                    if (data.char_count) { const kC = Math.round(data.char_count / 1000); const kT = Math.round(data.char_count / 4000); parts.push(kC + 'k chars (~' + kT + 'k tokens)'); }
                     if (parts.length) metaEl.title = parts.join(' · ');
                 }
             } catch(e) {}
@@ -1659,6 +1707,16 @@
                     const isStarred = starredSessions.has(currentSessionId);
                     starBtn.style.color = isStarred ? 'var(--gold-9)' : '';
                     starBtn.title = isStarred ? 'Unstar session (S)' : 'Star session (S)';
+                }
+                // Update pin button state
+                const pinBtn = document.getElementById('desktop-pin-btn');
+                if (pinBtn && currentSessionId) {
+                    const isPinned = pinnedSessions.has(currentSessionId);
+                    const pinSvg = pinBtn.querySelector('svg');
+                    if (pinSvg) { pinSvg.setAttribute('fill', isPinned ? 'currentColor' : 'none'); pinSvg.setAttribute('stroke', isPinned ? 'none' : 'currentColor'); }
+                    pinBtn.style.color = isPinned ? 'var(--blue-9)' : '';
+                    pinBtn.style.opacity = isPinned ? '1' : '0.4';
+                    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session to top';
                 }
                 const mobileStarBtn = document.getElementById('mobile-star-btn');
                 if (mobileStarBtn && currentSessionId) {
@@ -1749,11 +1807,10 @@
             else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
             if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
             else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            if (starredSessions.size > 0) {
-                const starred = sessions.filter(s => starredSessions.has(s.id));
-                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
-                sessions = [...starred, ...unstarred];
-            }
+            { const pinned = sessions.filter(s => pinnedSessions.has(s.id));
+              const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
+              const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
+              sessions = [...pinned, ...starredUnpinned, ...rest]; }
             if (!sessions.length) { showToast('No sessions'); return; }
             const isUnread = s => {
                 const lv = sessionViewTimes[s.id];
@@ -1779,11 +1836,10 @@
             else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
             if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
             else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
-            if (starredSessions.size > 0) {
-                const starred = sessions.filter(s => starredSessions.has(s.id));
-                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
-                sessions = [...starred, ...unstarred];
-            }
+            { const pinned = sessions.filter(s => pinnedSessions.has(s.id));
+              const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
+              const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
+              sessions = [...pinned, ...starredUnpinned, ...rest]; }
             if (!sessions.length) { showToast('No sessions'); return; }
             const isUnread = s => {
                 const lv = sessionViewTimes[s.id];
@@ -1801,6 +1857,37 @@
                 }
             }
             showToast('No unread sessions');
+        }
+
+        function navigateSessionList(direction) {
+            // direction: 1 = next (down), -1 = prev (up)
+            let sessions = allSessions.filter(s => !hiddenSessions.has(s.id));
+            if (sessionFilterMode === 'mine') sessions = sessions.filter(s => !isAutowebSession(s));
+            else if (sessionFilterMode === 'auto') sessions = sessions.filter(s => isAutowebSession(s));
+            if (sessionSortMode === 'oldest') sessions = [...sessions].sort((a, b) => new Date(a.lastUpdated) - new Date(b.lastUpdated));
+            else if (sessionSortMode === 'messages') sessions = [...sessions].sort((a, b) => (b.message_count || 0) - (a.message_count || 0));
+            if (searchApiResults === null) {
+                const pinned = sessions.filter(s => pinnedSessions.has(s.id));
+                const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
+                const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
+                sessions = [...pinned, ...starredUnpinned, ...rest];
+            }
+            if (!sessions.length) { showToast('No sessions'); return; }
+            const currentIdx = sessions.findIndex(s => s.id === currentSessionId);
+            if (currentIdx === -1) {
+                const s = sessions[0];
+                if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+                else resumeSession(s.id, s.project);
+                return;
+            }
+            const nextIdx = currentIdx + direction;
+            if (nextIdx < 0 || nextIdx >= sessions.length) {
+                showToast(direction > 0 ? 'Last session' : 'First session', 1500);
+                return;
+            }
+            const s = sessions[nextIdx];
+            if (s.source === 'codex' || s.source === 'pi') openCodexSession(s.id, s.project, s.source);
+            else resumeSession(s.id, s.project);
         }
 
         // Initialize filter UI on load
@@ -1850,6 +1937,7 @@
         let starredSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-starredSessions') || '[]')); } catch { return new Set(); } })();
         let sessionRenames = (() => { try { return JSON.parse(localStorage.getItem('feather-sessionRenames') || '{}'); } catch { return {}; } })();
         let hiddenSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-hiddenSessions') || '[]')); } catch { return new Set(); } })();
+        let pinnedSessions = (() => { try { return new Set(JSON.parse(localStorage.getItem('feather-pinnedSessions') || '[]')); } catch { return new Set(); } })();
         function hideSession(sessionId) {
             hiddenSessions.add(sessionId);
             try { localStorage.setItem('feather-hiddenSessions', JSON.stringify([...hiddenSessions])); } catch {}
@@ -1879,8 +1967,10 @@
             e.stopPropagation();
             if (starredSessions.has(sessionId)) {
                 starredSessions.delete(sessionId);
+                showToast('Session unstarred');
             } else {
                 starredSessions.add(sessionId);
+                showToast('Session starred ★');
             }
             try { localStorage.setItem('feather-starredSessions', JSON.stringify([...starredSessions])); } catch {}
             renderSessions();
@@ -1898,6 +1988,30 @@
                 }
             }
         }
+        function togglePinSession(sessionId) {
+            if (pinnedSessions.has(sessionId)) {
+                pinnedSessions.delete(sessionId);
+                showToast('Session unpinned');
+            } else {
+                pinnedSessions.add(sessionId);
+                showToast('Session pinned to top');
+            }
+            try { localStorage.setItem('feather-pinnedSessions', JSON.stringify([...pinnedSessions])); } catch {}
+            renderSessions();
+            // Update desktop header pin button if this is the current session
+            if (sessionId === currentSessionId) {
+                const pinBtn = document.getElementById('desktop-pin-btn');
+                if (pinBtn) {
+                    const isPinned = pinnedSessions.has(sessionId);
+                    const pinSvg = pinBtn.querySelector('svg');
+                    if (pinSvg) { pinSvg.setAttribute('fill', isPinned ? 'currentColor' : 'none'); pinSvg.setAttribute('stroke', isPinned ? 'none' : 'currentColor'); }
+                    pinBtn.style.color = isPinned ? 'var(--blue-9)' : '';
+                    pinBtn.style.opacity = isPinned ? '1' : '0.4';
+                    pinBtn.title = isPinned ? 'Unpin session' : 'Pin session to top';
+                }
+            }
+        }
+
         let activeTmuxPrefixes = new Set(); // Session ID prefixes with tmux
         let tmuxNameLookup = {};    // session prefix → tmux name
         let codexTmuxMapping = {};  // Codex JSONL UUID → tmux session name (for sessions spawned by Feather)
@@ -2007,6 +2121,29 @@
             }
         }
 
+        function updateDraftIndicator(sessionId) {
+            if (!sessionId) return;
+            const item = document.querySelector(`.session-item[data-ctx-id="${sessionId}"]`);
+            if (!item) return;
+            const hasDraft = sessionDrafts.has(sessionId);
+            const draft = sessionDrafts.get(sessionId) || '';
+            let ind = item.querySelector('.draft-indicator');
+            if (hasDraft && !ind) {
+                ind = document.createElement('span');
+                ind.className = 'draft-indicator text-[9px] text-amber-9 shrink-0';
+                ind.title = 'Draft: ' + draft.substring(0, 60) + (draft.length > 60 ? '…' : '');
+                ind.textContent = '✎';
+                // Insert before the star button
+                const starBtn = item.querySelector('.star-btn');
+                if (starBtn) item.querySelector('.flex').insertBefore(ind, starBtn);
+                else item.querySelector('.flex').appendChild(ind);
+            } else if (hasDraft && ind) {
+                ind.title = 'Draft: ' + draft.substring(0, 60) + (draft.length > 60 ? '…' : '');
+            } else if (!hasDraft && ind) {
+                ind.remove();
+            }
+        }
+
         function renderSessions() {
             const container = document.getElementById('sessions');
             const q = currentSearchQuery.toLowerCase();
@@ -2024,6 +2161,19 @@
             if (sfAuto) sfAuto.textContent = 'Auto' + (autoCount ? ' ' + autoCount : '');
             if (sfAll) sfAll.textContent = 'All' + (allCount ? ' ' + allCount : '');
 
+            // Update sort button: show "Relevance" in search mode, regular label otherwise
+            const sortLabelEl = document.getElementById('sort-label');
+            const sortBtn = document.getElementById('session-sort-btn');
+            if (sortLabelEl) {
+                if (searchApiResults !== null) {
+                    sortLabelEl.textContent = 'Relevance';
+                    if (sortBtn) { sortBtn.title = 'Sort: Relevance (by search score)'; sortBtn.style.opacity = '0.6'; sortBtn.style.pointerEvents = 'none'; }
+                } else {
+                    sortLabelEl.textContent = SESSION_SORT_LABELS[sessionSortMode] || 'Latest';
+                    if (sortBtn) { sortBtn.title = 'Sort sessions'; sortBtn.style.opacity = ''; sortBtn.style.pointerEvents = ''; }
+                }
+            }
+
             // Update mark-all-read bar
             const unreadBase = sessionFilterMode === 'mine' ? allSessions.filter(s => !isAutowebSession(s))
                              : sessionFilterMode === 'auto' ? allSessions.filter(s => isAutowebSession(s))
@@ -2032,6 +2182,8 @@
                 const lv = sessionViewTimes[s.id];
                 return s.lastUpdated && (!lv || new Date(s.lastUpdated) > new Date(lv)) && s.id !== currentSessionId;
             }).length;
+            sessionListUnreadCount = unreadCount;
+            updatePageTitle('');
             const markAllBar = document.getElementById('mark-all-read-bar');
             const markAllCount = document.getElementById('mark-all-read-count');
             if (markAllBar) {
@@ -2093,10 +2245,11 @@
 
             // Sort starred sessions to the top (preserving relative order within each group)
             // Skip in search mode — API returns results sorted by relevance, don't break that order
-            if (starredSessions.size > 0 && searchApiResults === null) {
-                const starred = sessions.filter(s => starredSessions.has(s.id));
-                const unstarred = sessions.filter(s => !starredSessions.has(s.id));
-                sessions = [...starred, ...unstarred];
+            if (searchApiResults === null) {
+                const pinned = sessions.filter(s => pinnedSessions.has(s.id));
+                const starredUnpinned = sessions.filter(s => !pinnedSessions.has(s.id) && starredSessions.has(s.id));
+                const rest = sessions.filter(s => !pinnedSessions.has(s.id) && !starredSessions.has(s.id));
+                sessions = [...pinned, ...starredUnpinned, ...rest];
             }
 
             if (!sessions.length) {
@@ -2166,21 +2319,28 @@
                 const unreadDot = isUnread ? '<span class="unread-indicator w-1.5 h-1.5 rounded-full bg-gold-9 shrink-0" title="New activity"></span>' : '';
                 const isStarred = starredSessions.has(s.id);
                 const starBtn = `<button class="star-btn shrink-0 text-[11px] leading-none ${isStarred ? 'text-gold-9' : 'text-smoke-6 opacity-0 group-hover:opacity-100'} hover:text-gold-9 transition-all" onclick="toggleStarSession(event, '${s.id}')" title="${isStarred ? 'Unstar' : 'Star'}" aria-label="${isStarred ? 'Unstar session' : 'Star session'}">&#9733;</button>`;
+                const isPinnedItem = pinnedSessions.has(s.id);
+                const pinIndicator = isPinnedItem ? `<svg class="shrink-0" width="8" height="8" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="color:var(--blue-9);opacity:0.7" title="Pinned"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>` : '';
 
                 // Show project folder name when session is from a different project (useful in search/All filter)
                 const sessionFolderName = s.project !== currentFolder ? (FOLDERS.find(f => f.id === s.project)?.name || s.project?.split('-').filter(Boolean).pop() || '') : '';
-                const folderBadge = sessionFolderName ? `<span class="text-smoke-8">&middot;</span><span class="text-smoke-5 truncate max-w-[60px]" title="${escapeHtml(sessionFolderName)}">${escapeHtml(sessionFolderName)}</span>` : '';
+                const folderBadge = sessionFolderName ? `<span class="text-smoke-8">&middot;</span><button class="text-smoke-5 hover:text-gold-9 truncate max-w-[60px] transition-colors cursor-pointer" title="Filter to ${escapeHtml(sessionFolderName)}" onclick="event.stopPropagation();selectFolder('${s.project}')">${escapeHtml(sessionFolderName)}</button>` : '';
 
                 // Only show snippet for content matches (start with '...') — title-only snippets are redundant with the title above
-                const snippetLine = (s._snippet && s._snippet.startsWith('...')) ? `<div class="text-[10px] text-smoke-6 line-clamp-2 leading-tight mt-0.5">${highlightSearch(s._snippet, currentSearchQuery)}</div>` : '';
+                const snippetLine = (s._snippet && s._snippet.startsWith('...')) ? `<div class="text-[10px] text-smoke-6 line-clamp-2 leading-tight mt-0.5" title="${escapeHtml(s._snippet)}">${highlightSearch(s._snippet, currentSearchQuery)}</div>` : '';
+
+                // Draft indicator — shows when session has unsent text saved from a prior visit
+                const hasDraft = sessionDrafts.has(s.id);
+                const draftText = sessionDrafts.get(s.id) || '';
+                const draftIndicator = hasDraft ? `<span class="draft-indicator text-[9px] text-amber-9 shrink-0" title="Draft: ${escapeHtml(draftText.substring(0, 60))}${draftText.length > 60 ? '…' : ''}">✎</span>` : '';
 
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         data-ctx-id="${s.id}" onclick="${onclick}" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
+                         data-ctx-id="${s.id}" onclick="${onclick}" ondblclick="sidebarInlineRename(event, '${s.id}')" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
-                                <div class="text-xs text-smoke-12 truncate leading-tight">${currentSearchQuery ? highlightSearch(getSessionTitle(s), currentSearchQuery) : escapeHtml(getSessionTitle(s))}</div>
+                                <div class="text-xs text-smoke-12 truncate leading-tight session-item-title">${currentSearchQuery ? highlightSearch(getSessionTitle(s), currentSearchQuery) : escapeHtml(getSessionTitle(s))}</div>
                                 <div class="flex items-center gap-1 text-[10px] text-smoke-7 leading-tight">
                                     ${sourceBadge}
                                     <span class="session-time" data-last-updated="${s.lastUpdated}" title="${formatFullTime(s.lastUpdated)}">${formatTime(s.lastUpdated)}</span>
@@ -2190,6 +2350,8 @@
                                 </div>
                                 ${snippetLine}
                             </div>
+                            ${draftIndicator}
+                            ${pinIndicator}
                             ${starBtn}
                         </div>
                     </div>
@@ -2202,12 +2364,16 @@
 
             // Pre-compute group counts for visible sessions
             const groupCounts = {};
-            let starredCount = 0;
-            let _countPassedStarred = false;
+            let pinnedCount = 0, starredCount = 0;
+            let _countPassedPinned = false, _countPassedStarred = false;
             for (const s of visible) {
-                if (starredSessions.has(s.id) && !_countPassedStarred) {
+                if (pinnedSessions.has(s.id) && !_countPassedPinned) {
+                    pinnedCount++;
+                } else if (starredSessions.has(s.id) && !_countPassedStarred) {
+                    _countPassedPinned = true;
                     starredCount++;
                 } else {
+                    _countPassedPinned = true;
                     _countPassedStarred = true;
                     const g = getTimeGroup(s.lastUpdated);
                     groupCounts[g] = (groupCounts[g] || 0) + 1;
@@ -2217,13 +2383,23 @@
             // Build grouped HTML
             let html = '';
             let lastGroup = '';
-            let passedStarred = false;
+            let passedPinned = false, passedStarred = false;
             const isSearchMode = searchApiResults !== null;
             for (const s of visible) {
-                const isStarred = starredSessions.has(s.id);
+                const isPinned = pinnedSessions.has(s.id);
+                const isStarred = !isPinned && starredSessions.has(s.id);
                 if (!isSearchMode) {
-                    // Normal mode: show time/starred group headers
-                    if (isStarred && !passedStarred) {
+                    // Normal mode: show time/pinned/starred group headers
+                    if (isPinned && !passedPinned) {
+                        if (lastGroup !== 'Pinned') {
+                            const pinSvg = `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:inline;vertical-align:middle;margin-right:2px"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>`;
+                            html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
+                                <span class="text-[9px] font-medium uppercase tracking-widest" style="color:var(--blue-9)">${pinSvg}Pinned</span>${pinnedCount > 0 ? `<span class="text-[9px] ml-1" style="color:color-mix(in srgb,var(--blue-9) 60%,transparent)">${pinnedCount}</span>` : ''}
+                            </div>`;
+                            lastGroup = 'Pinned';
+                        }
+                    } else if (isStarred && !passedStarred) {
+                        passedPinned = true;
                         if (lastGroup !== 'Starred') {
                             html += `<div class="px-1 pt-2 pb-0.5 sticky top-0 z-10" style="background:var(--smoke-2)">
                                 <span class="text-[9px] font-medium uppercase tracking-widest text-gold-9">&#9733; Starred</span>${starredCount > 0 ? `<span class="text-[9px] text-gold-9/60 ml-1">${starredCount}</span>` : ''}
@@ -2231,6 +2407,7 @@
                             lastGroup = 'Starred';
                         }
                     } else {
+                        passedPinned = true;
                         passedStarred = true;
                         const group = getTimeGroup(s.lastUpdated);
                         if (group !== lastGroup) {
@@ -2254,13 +2431,29 @@
                 `;
             }
 
+            // Load more search results button
+            if (isSearchMode && _searchTotal > (searchApiResults ? searchApiResults.length : 0)) {
+                const remaining = _searchTotal - (searchApiResults ? searchApiResults.length : 0);
+                html += `
+                    <button id="load-more-search-btn" onclick="loadMoreSearchResults()" class="w-full px-3 py-2.5 mt-1 text-xs text-smoke-8 hover:text-gold-9 hover:bg-smoke-3/50 rounded-lg transition-all text-center">
+                        Load more results (${remaining} remaining)
+                    </button>
+                `;
+            }
+
             container.innerHTML = html;
             if (hasMore) setupLoadMoreSessionsObserver();
+            if (isSearchMode && _searchTotal > (searchApiResults ? searchApiResults.length : 0)) setupLoadMoreSearchObserver();
         }
 
         function loadMoreSessions() {
             sessionsDisplayCount += 50;
             renderSessions();
+        }
+
+        function loadMoreSearchResults() {
+            _searchLimit += 30;
+            performApiSearch(currentSearchQuery, _searchLimit);
         }
 
         let loadEarlierObserver = null;
@@ -2291,6 +2484,21 @@
                 }
             }, { threshold: 0.1 });
             loadMoreSessionsObserver.observe(btn);
+        }
+
+        let loadMoreSearchObserver = null;
+        function setupLoadMoreSearchObserver() {
+            if (loadMoreSearchObserver) { loadMoreSearchObserver.disconnect(); loadMoreSearchObserver = null; }
+            const btn = document.getElementById('load-more-search-btn');
+            if (!btn) return;
+            loadMoreSearchObserver = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting) {
+                    loadMoreSearchObserver.disconnect();
+                    loadMoreSearchObserver = null;
+                    loadMoreSearchResults();
+                }
+            }, { threshold: 0.1 });
+            loadMoreSearchObserver.observe(btn);
         }
 
         function renderRecentSessionCards() {
@@ -2362,18 +2570,23 @@
         }
 
         let currentSearchQuery = '';
+        let recentSearches = JSON.parse(localStorage.getItem('recentSearches') || '[]');
         let _kbHighlightIdx = -1;
+        let _recentSearchHighlightIdx = -1;
         let searchApiResults = null;
         let searchDebounceTimer = null;
+        let _searchLimit = 30;
+        let _searchTotal = 0;
 
-        async function performApiSearch(query) {
+        async function performApiSearch(query, limit) {
+            limit = limit || _searchLimit;
             const spinner = document.getElementById('search-spinner');
             const clearBtn = document.getElementById('search-clear-btn');
             const countEl = document.getElementById('search-result-count');
             if (spinner) { spinner.classList.remove('hidden'); if (clearBtn) clearBtn.classList.add('hidden'); }
             if (countEl) countEl.classList.add('hidden');
             try {
-                const resp = await fetch('/api/search?q=' + encodeURIComponent(query) + '&limit=30');
+                const resp = await fetch('/api/search?q=' + encodeURIComponent(query) + '&limit=' + limit);
                 const data = await resp.json();
                 // Match results to allSessions, attach snippet
                 searchApiResults = data.results.map(r => {
@@ -2383,9 +2596,11 @@
                     };
                     return {...session, _snippet: r.snippet, _score: r.score};
                 });
+                _searchTotal = data.total || searchApiResults.length;
+                if (searchApiResults.length > 0) saveRecentSearch(query);
                 if (countEl) {
                     const n = searchApiResults.length;
-                    const total = data.total || n;
+                    const total = _searchTotal;
                     if (n === 0) {
                         countEl.textContent = 'No results';
                     } else if (total > n) {
@@ -2421,6 +2636,7 @@
             }
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             if (query.length >= 3) {
+                _searchLimit = 30; // reset limit when query changes
                 searchDebounceTimer = setTimeout(() => performApiSearch(query), 300);
             } else {
                 searchApiResults = null;
@@ -2453,6 +2669,46 @@
             if (countEl) countEl.classList.add('hidden');
         }
 
+        function saveRecentSearch(query) {
+            if (!query || query.length < 3) return;
+            recentSearches = [query, ...recentSearches.filter(q => q !== query)].slice(0, 8);
+            localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
+        }
+
+        function showRecentSearchDropdown() {
+            const dropdown = document.getElementById('search-recent-dropdown');
+            if (!dropdown || recentSearches.length === 0) return;
+            _recentSearchHighlightIdx = -1;
+            renderRecentSearchDropdown(dropdown);
+            dropdown.classList.remove('hidden');
+        }
+
+        function renderRecentSearchDropdown(dropdown) {
+            if (!dropdown) dropdown = document.getElementById('search-recent-dropdown');
+            if (!dropdown) return;
+            dropdown.innerHTML = recentSearches.map((q, i) =>
+                `<button class="w-full text-left px-3 py-1.5 text-xs text-smoke-10 hover:bg-smoke-4 flex items-center gap-2 truncate${i === _recentSearchHighlightIdx ? ' bg-smoke-4' : ''}"
+                  onmousedown="event.preventDefault();applyRecentSearch(${JSON.stringify(q)})">
+                    <svg class="shrink-0 text-smoke-6" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span class="truncate">${escapeHtml(q)}</span>
+                </button>`
+            ).join('');
+        }
+
+        function hideRecentSearchDropdown() {
+            document.getElementById('search-recent-dropdown')?.classList.add('hidden');
+        }
+
+        function applyRecentSearch(query) {
+            const searchInput = document.getElementById('session-search');
+            if (searchInput) {
+                searchInput.value = query;
+                filterSessions(query);
+                searchInput.focus();
+            }
+            hideRecentSearchDropdown();
+        }
+
         function getVisibleSessionItems() {
             return Array.from(document.querySelectorAll('#sessions .session-item'));
         }
@@ -2472,8 +2728,30 @@
         function handleSessionSearchKeydown(e) {
             if (e.key === 'Escape') {
                 e.preventDefault();
+                const dropdown = document.getElementById('search-recent-dropdown');
+                if (dropdown && !dropdown.classList.contains('hidden')) {
+                    hideRecentSearchDropdown();
+                    return;
+                }
                 clearSessionSearch();
                 document.getElementById('session-search')?.blur();
+                return;
+            }
+            // If recent search dropdown is visible, navigate it with arrow keys
+            const dropdown = document.getElementById('search-recent-dropdown');
+            const dropdownVisible = dropdown && !dropdown.classList.contains('hidden');
+            if (dropdownVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+                e.preventDefault();
+                if (e.key === 'ArrowDown') {
+                    _recentSearchHighlightIdx = Math.min(_recentSearchHighlightIdx + 1, recentSearches.length - 1);
+                    renderRecentSearchDropdown(dropdown);
+                } else if (e.key === 'ArrowUp') {
+                    _recentSearchHighlightIdx = Math.max(_recentSearchHighlightIdx - 1, -1);
+                    renderRecentSearchDropdown(dropdown);
+                } else if (e.key === 'Enter' && _recentSearchHighlightIdx >= 0) {
+                    applyRecentSearch(recentSearches[_recentSearchHighlightIdx]);
+                    _recentSearchHighlightIdx = -1;
+                }
                 return;
             }
             const items = getVisibleSessionItems();
@@ -2511,7 +2789,7 @@
                 if (d >= today) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
                 // Yesterday: show time only — group header says "Yesterday"
                 if (d >= yesterday) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                if (days < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+                if (days < 7) return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
                 if (days >= 365) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             } catch { return iso; }
@@ -2643,7 +2921,7 @@
             } else {
                 const lastSession = allSessions[0];
                 if (lastSession) {
-                    insight = `Last active ${formatTime(lastSession.lastUpdated)} ago`;
+                    insight = `Last active ${formatTime(lastSession.lastUpdated)}`;
                 }
             }
 
@@ -2691,8 +2969,8 @@
                 const msgs = document.getElementById('messages');
                 if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
                 const inp = document.getElementById('input');
-                if (inp && inp.value.trim()) sessionDrafts.set(currentSessionId, inp.value);
-                else if (inp) sessionDrafts.delete(currentSessionId);
+                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                else if (inp) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
             }
 
             // Track previous session for Ctrl+. quick-switch
@@ -2717,7 +2995,15 @@
 
             // Update sidebar highlight
             document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
-            if (event && event.currentTarget) event.currentTarget.classList.add('active');
+            if (event && event.currentTarget) {
+                event.currentTarget.classList.add('active');
+            } else {
+                const sidebarItem = document.querySelector(`.session-item[data-ctx-id="${sessionId}"]`);
+                if (sidebarItem) {
+                    sidebarItem.classList.add('active');
+                    sidebarItem.scrollIntoView({ block: 'nearest' });
+                }
+            }
 
             // Load history immediately so user sees the conversation
             const historyResult = await loadSessionHistory(projectId, sessionId);
@@ -2790,8 +3076,8 @@
                 const msgs = document.getElementById('messages');
                 if (msgs) sessionScrollPositions.set(currentSessionId, msgs.scrollTop);
                 const inp = document.getElementById('input');
-                if (inp && inp.value.trim()) sessionDrafts.set(currentSessionId, inp.value);
-                else if (inp) sessionDrafts.delete(currentSessionId);
+                if (inp && inp.value.trim()) { sessionDrafts.set(currentSessionId, inp.value); updateDraftIndicator(currentSessionId); persistDrafts(); }
+                else if (inp) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
             }
 
             // Track previous session for Ctrl+. quick-switch
@@ -3431,7 +3717,7 @@
                         ${textContent ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(textContent))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
-                    ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
+                    ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1 cursor-default" title="${escapeHtml(formatMessageTimeFull(timestamp))}">${escapeHtml(timeStr)}</div>` : ''}
                 </div>
             `;
             const bubble = div.querySelector('.user-msg-bubble');
@@ -3571,7 +3857,7 @@
                     <button class="msg-copy-btn" onclick="copyMessageContent(this)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy</span></button>
                     <div class="markdown-content text-sm text-smoke-12${useLazy ? ' lazy-md' : ''}">${mdHtml}</div>
                 </div>
-                ${timeStr ? `<div class="text-[10px] text-smoke-7 mt-1 pl-1">${escapeHtml(timeStr)}</div>` : ''}
+                ${timeStr ? `<div class="text-[10px] text-smoke-7 mt-1 pl-1 cursor-default" title="${escapeHtml(formatMessageTimeFull(timestamp))}">${escapeHtml(timeStr)}</div>` : ''}
             `;
             container.appendChild(div);
 
@@ -3899,7 +4185,7 @@
                         ${displayText ? `<div class="text-sm text-smoke-12 whitespace-pre-wrap">${linkifyUrls(escapeHtml(displayText))}</div>` : ''}
                         ${attachmentHtml}
                     </div>
-                    ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1">${escapeHtml(timeStr)}</div>` : ''}
+                    ${timeStr ? `<div class="text-[10px] text-smoke-7 text-right mt-1 pr-1 cursor-default" title="${escapeHtml(formatMessageTimeFull(timestamp))}">${escapeHtml(timeStr)}</div>` : ''}
                 </div>
             `;
             const bubble = div.querySelector('.user-msg-bubble');
@@ -4195,7 +4481,9 @@
             updateFocusModeButton();
         }
 
-        let thinkingBlocksCollapsed = window.innerWidth < 768;
+        let thinkingBlocksCollapsed = localStorage.getItem('feather-thinking-collapsed') !== null
+            ? localStorage.getItem('feather-thinking-collapsed') === '1'
+            : window.innerWidth < 768;
 
         function addThinkingBlock(text) {
             const container = document.getElementById('message-container');
@@ -4245,12 +4533,16 @@
                 }
             });
             updateThinkingToggleButton();
+            localStorage.setItem('feather-thinking-collapsed', thinkingBlocksCollapsed ? '1' : '0');
         }
 
-        let toolBlocksCollapsed = true;
+        let toolBlocksCollapsed = localStorage.getItem('feather-tool-blocks-collapsed') !== null
+            ? localStorage.getItem('feather-tool-blocks-collapsed') === '1'
+            : true;
 
         function toggleAllTools() {
             toolBlocksCollapsed = !toolBlocksCollapsed;
+            localStorage.setItem('feather-tool-blocks-collapsed', toolBlocksCollapsed ? '1' : '0');
             // Collapse/expand tool call bodies
             document.querySelectorAll('.tool-card .tool-body').forEach(body => {
                 if (toolBlocksCollapsed) {
@@ -4311,6 +4603,13 @@
                     btn.title = 'Focus mode — hide tool calls (F)';
                 }
             }
+            localStorage.setItem('feather-focus-mode', focusModeActive ? '1' : '0');
+        }
+        // Restore focus mode on load
+        if (localStorage.getItem('feather-focus-mode') === '1') {
+            focusModeActive = true;
+            const _fmc = document.getElementById('message-container');
+            if (_fmc) _fmc.classList.add('focus-mode');
         }
 
         function updateFocusModeButton() {
@@ -4328,6 +4627,23 @@
         // ========== In-Chat Search ==========
         let _chatSearchMarks = [];
         let _chatSearchIdx = -1;
+        let _chatSearchCaseSensitive = localStorage.getItem('feather-chat-search-case') === 'true';
+
+        function _applyChatSearchCaseBtn() {
+            const btn = document.getElementById('chat-search-case-btn');
+            if (btn) {
+                btn.style.color = _chatSearchCaseSensitive ? 'var(--gold-9)' : '';
+                btn.style.background = _chatSearchCaseSensitive ? 'var(--smoke-4)' : '';
+            }
+        }
+
+        function toggleChatSearchCase() {
+            _chatSearchCaseSensitive = !_chatSearchCaseSensitive;
+            localStorage.setItem('feather-chat-search-case', _chatSearchCaseSensitive);
+            _applyChatSearchCaseBtn();
+            const input = document.getElementById('chat-search-input');
+            if (input && input.value) doChatSearch(input.value);
+        }
 
         function openChatSearch(initialQuery = '') {
             const bar = document.getElementById('chat-search-bar');
@@ -4335,8 +4651,11 @@
             bar.classList.remove('hidden');
             const input = document.getElementById('chat-search-input');
             input.value = initialQuery || '';
+            const clearBtn = document.getElementById('chat-search-clear-btn');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !initialQuery);
             if (!initialQuery) input.focus();
             document.getElementById('chat-search-count').textContent = '';
+            _applyChatSearchCaseBtn();
             clearChatSearchMarks();
             if (initialQuery) {
                 doChatSearch(initialQuery);
@@ -4388,7 +4707,8 @@
                 }
             });
 
-            const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            const regexFlags = _chatSearchCaseSensitive ? 'g' : 'gi';
+            const regex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), regexFlags);
             const textNodes = [];
             while (walker.nextNode()) textNodes.push(walker.currentNode);
 
@@ -4424,8 +4744,28 @@
                 _chatSearchMarks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
                 countEl.textContent = `1 / ${total}`;
             } else {
-                countEl.textContent = 'No results';
+                const hasEarlier = !!document.getElementById('load-earlier-btn');
+                if (hasEarlier) {
+                    countEl.innerHTML = `No results in loaded messages &middot; <a href="#" id="chat-search-all-link" style="color:var(--gold-9);text-decoration:underline" onclick="loadAllAndSearchChat(event,${JSON.stringify(query)});return false">search all</a>`;
+                } else {
+                    countEl.textContent = 'No results';
+                }
             }
+        }
+
+        async function loadAllAndSearchChat(e, query) {
+            if (e) e.preventDefault();
+            const countEl = document.getElementById('chat-search-count');
+            if (!query) return;
+            let iters = 0;
+            while (document.getElementById('load-earlier-btn') && iters < 100) {
+                const remaining = window._earlierMessagesBefore || 0;
+                countEl.textContent = `Loading${remaining ? ' ' + remaining + ' earlier' : ''}...`;
+                await renderEarlierMessages();
+                await new Promise(r => setTimeout(r, 30));
+                iters++;
+            }
+            doChatSearch(query);
         }
 
         function chatSearchNav(dir) {
@@ -4437,12 +4777,26 @@
             document.getElementById('chat-search-count').textContent = `${_chatSearchIdx + 1} / ${_chatSearchMarks.length}`;
         }
 
+        function clearChatSearchInput() {
+            const input = document.getElementById('chat-search-input');
+            if (!input) return;
+            input.value = '';
+            document.getElementById('chat-search-clear-btn')?.classList.add('hidden');
+            clearChatSearchMarks();
+            _chatSearchMarks = [];
+            _chatSearchIdx = -1;
+            document.getElementById('chat-search-count').textContent = '';
+            input.focus();
+        }
+
         // Debounced search input
         let _chatSearchTimer = null;
         document.addEventListener('DOMContentLoaded', () => {
             const input = document.getElementById('chat-search-input');
             if (input) {
                 input.addEventListener('input', () => {
+                    const clearBtn = document.getElementById('chat-search-clear-btn');
+                    if (clearBtn) clearBtn.classList.toggle('hidden', !input.value);
                     clearTimeout(_chatSearchTimer);
                     _chatSearchTimer = setTimeout(() => doChatSearch(input.value), 200);
                 });
@@ -4450,6 +4804,7 @@
                     if (e.key === 'Escape') { closeChatSearch(); e.preventDefault(); }
                     else if (e.key === 'Enter' && e.shiftKey) { chatSearchNav(-1); e.preventDefault(); }
                     else if (e.key === 'Enter') { chatSearchNav(1); e.preventDefault(); }
+                    else if (e.key === 'c' && e.altKey) { toggleChatSearchCase(); e.preventDefault(); }
                 });
             }
         });
@@ -4654,6 +5009,15 @@
             } catch { return ''; }
         }
 
+        function formatMessageTimeFull(isoString) {
+            if (!isoString) return '';
+            try {
+                const d = new Date(isoString);
+                if (isNaN(d.getTime())) return '';
+                return d.toLocaleString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+            } catch { return ''; }
+        }
+
         function escapeHtml(text) {
             if (!text) return '';
             const div = document.createElement('div');
@@ -4663,19 +5027,35 @@
 
         function highlightSearch(text, query) {
             if (!query || !text) return escapeHtml(text);
-            const q = query.toLowerCase();
             const lower = text.toLowerCase();
-            const qLen = query.length;
-            let result = '';
-            let pos = 0;
-            let idx;
-            while ((idx = lower.indexOf(q, pos)) !== -1) {
-                result += escapeHtml(text.substring(pos, idx));
-                result += '<span class="search-highlight">' + escapeHtml(text.substring(idx, idx + qLen)) + '</span>';
-                pos = idx + qLen;
+            // Collect all match ranges for each word in the query (multi-word support)
+            const words = query.trim().split(/\s+/).filter(Boolean);
+            const ranges = [];
+            for (const word of words) {
+                const w = word.toLowerCase();
+                let pos = 0, idx;
+                while ((idx = lower.indexOf(w, pos)) !== -1) {
+                    ranges.push([idx, idx + w.length]);
+                    pos = idx + 1;
+                }
+            }
+            if (ranges.length === 0) return escapeHtml(text);
+            // Merge overlapping/adjacent ranges
+            ranges.sort((a, b) => a[0] - b[0]);
+            const merged = [[...ranges[0]]];
+            for (let i = 1; i < ranges.length; i++) {
+                const last = merged[merged.length - 1];
+                if (ranges[i][0] <= last[1]) { last[1] = Math.max(last[1], ranges[i][1]); }
+                else merged.push([...ranges[i]]);
+            }
+            let result = '', pos = 0;
+            for (const [start, end] of merged) {
+                result += escapeHtml(text.substring(pos, start));
+                result += '<span class="search-highlight">' + escapeHtml(text.substring(start, end)) + '</span>';
+                pos = end;
             }
             result += escapeHtml(text.substring(pos));
-            return result || escapeHtml(text);
+            return result;
         }
 
         function stripAnsi(text) {
@@ -4866,6 +5246,25 @@
             target.classList.remove('msg-nav-highlight');
             void target.offsetWidth; // force reflow
             target.classList.add('msg-nav-highlight');
+            const role = target.querySelector('.user-msg-bubble') ? 'you' : 'claude';
+            showMsgNavIndicator(_msgNavIdx, msgs.length, role);
+        }
+
+        // Yank (copy) currently focused/navigated message text (vim Y)
+        function yankFocusedMessage() {
+            const container = document.getElementById('message-container');
+            if (!container) return;
+            const msgs = Array.from(container.children).filter(el =>
+                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
+            );
+            if (msgs.length === 0) return;
+            const idx = (_msgNavIdx >= 0 && _msgNavIdx < msgs.length) ? _msgNavIdx : msgs.length - 1;
+            const target = msgs[idx];
+            const textEl = target.querySelector('.user-msg-bubble, .assistant-msg-bubble');
+            const text = textEl ? textEl.innerText : target.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Message copied');
+            }).catch(() => showToast('Copy failed'));
         }
 
         // Jump to first or last message (vim G / gg)
@@ -4882,7 +5281,20 @@
             target.classList.remove('msg-nav-highlight');
             void target.offsetWidth;
             target.classList.add('msg-nav-highlight');
+            const role = target.querySelector('.user-msg-bubble') ? 'you' : 'claude';
+            showMsgNavIndicator(_msgNavIdx, msgs.length, role);
         }
+        // Show brief "X / Y · role" position indicator when navigating messages
+        let _msgNavIndicatorTimeout = null;
+        function showMsgNavIndicator(idx, total, role) {
+            const el = document.getElementById('msg-nav-indicator');
+            if (!el) return;
+            el.textContent = (idx + 1) + ' / ' + total + (role ? ' · ' + role : '');
+            el.style.opacity = '1';
+            if (_msgNavIndicatorTimeout) clearTimeout(_msgNavIndicatorTimeout);
+            _msgNavIndicatorTimeout = setTimeout(() => { el.style.opacity = '0'; }, 1500);
+        }
+
         let _lastGPress = 0; // for gg detection
         // Reset nav index on session switch
         const _origSelectSession = typeof selectSession === 'function' ? selectSession : null;
@@ -5077,6 +5489,7 @@
         }
 
         // ========== Unread message count ==========
+        let sessionListUnreadCount = 0;  // unread sessions (for tab title badge)
         let unreadCount = 0;
         function incrementUnread() {
             if (!userAtBottom) {
@@ -5656,7 +6069,7 @@
             } else if (e.key === 'Escape') {
                 // Clear input on Escape and blur so keyboard shortcuts work
                 input.value = '';
-                if (currentSessionId) sessionDrafts.delete(currentSessionId);
+                if (currentSessionId) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
                 historyIndex = -1;
                 currentDraft = '';
                 autoResize(input);
@@ -5974,7 +6387,7 @@
 
                 setStatus('Starting session...', 'amber');
                 input.value = '';
-                if (currentSessionId) sessionDrafts.delete(currentSessionId);
+                if (currentSessionId) { sessionDrafts.delete(currentSessionId); updateDraftIndicator(currentSessionId); persistDrafts(); }
                 autoResize(input);
                 stopHistoryPolling();
 
@@ -6153,7 +6566,7 @@
             }
 
             input.value = '';
-            if (currentSessionId) sessionDrafts.delete(currentSessionId);
+            if (currentSessionId) { sessionDrafts.delete(currentSessionId); persistDrafts(); }
             autoResize(input);
 
             // Upload pending files (images or documents)
@@ -7043,7 +7456,19 @@
             const isStarred = starredSessions.has(sessionId);
             const starLabel = isStarred ? 'Unstar' : 'Star';
             const starIcon = `<svg viewBox="0 0 24 24" fill="${isStarred ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+            const _s = allSessions.find(s => s.id === sessionId);
+            const _lastViewed = sessionViewTimes[sessionId];
+            const _isRead = !_s || !_s.lastUpdated || (_lastViewed && new Date(_s.lastUpdated) <= new Date(_lastViewed));
+            const readLabel = _isRead ? 'Mark as unread' : 'Mark as read';
+            const readAction = _isRead ? 'ctxMarkUnread()' : 'ctxMarkRead()';
+            const readIcon = _isRead
+                ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></svg>`
+                : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+            const isPinned = pinnedSessions.has(sessionId);
+            const pinLabel = isPinned ? 'Unpin' : 'Pin to top';
+            const pinIcon = `<svg viewBox="0 0 24 24" fill="${isPinned ? 'currentColor' : 'none'}" stroke="${isPinned ? 'none' : 'currentColor'}" stroke-width="2" style="color:var(--blue-9)"><path d="M16 1a1 1 0 0 0-1 1v1H9V2a1 1 0 0 0-2 0v1H6a2 2 0 0 0-2 2v1c0 2.97 2.16 5.43 5 5.91V20l-2 2h10l-2-2v-8.09c2.84-.48 5-2.94 5-5.91V5a2 2 0 0 0-2-2h-1V2a1 1 0 0 0-1-1z"/></svg>`;
             menu.innerHTML = `
+                <div class="ctx-item" onclick="ctxPin()" style="color:var(--blue-9)">${pinIcon} ${pinLabel}</div>
                 <div class="ctx-item" onclick="ctxStar()">${starIcon} ${starLabel}</div>
                 <div class="ctx-item" onclick="ctxOpenNewTab()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open in new tab</div>
                 <div class="ctx-item" onclick="ctxRename()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg> Rename</div>
@@ -7051,7 +7476,7 @@
                 <div class="ctx-item" onclick="ctxCopyId()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy session ID</div>
                 <div class="ctx-item" onclick="ctxExport()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Export Markdown</div>
                 <div class="ctx-sep"></div>
-                <div class="ctx-item" onclick="ctxMarkRead()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> Mark as read</div>
+                <div class="ctx-item" onclick="${readAction}">${readIcon} ${readLabel}</div>
                 <div class="ctx-item ctx-danger" onclick="ctxHide()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Hide session</div>
             `;
             // Measure actual menu dimensions before positioning
@@ -7075,6 +7500,10 @@
             _ctxSessionId = null;
         }
 
+        function ctxPin() {
+            if (_ctxSessionId) togglePinSession(_ctxSessionId);
+            closeSessionContextMenu();
+        }
         function ctxStar() {
             if (_ctxSessionId) toggleStarSession(new Event('click'), _ctxSessionId);
             closeSessionContextMenu();
@@ -7113,6 +7542,14 @@
             }).catch(() => {});
         }
 
+        function openCurrentSessionNewTab() {
+            if (!currentSessionId) return;
+            const s = allSessions.find(s => s.id === currentSessionId);
+            const folder = s && s.project ? s.project : (currentFolder || '');
+            const hash = folder ? `session=${encodeURIComponent(currentSessionId)}&folder=${encodeURIComponent(folder)}` : `session=${encodeURIComponent(currentSessionId)}`;
+            window.open(`${location.pathname}#${hash}`, '_blank');
+        }
+
         function ctxOpenNewTab() {
             if (_ctxSessionId) {
                 const s = allSessions.find(s => s.id === _ctxSessionId);
@@ -7132,14 +7569,8 @@
             closeSessionContextMenu();
         }
 
-        function ctxRename() {
-            if (!_ctxSessionId) { closeSessionContextMenu(); return; }
-            const sid = _ctxSessionId;
-            closeSessionContextMenu();
+        function saveRename(sid, newName) {
             const s = allSessions.find(s => s.id === sid);
-            const current = sessionRenames[sid] || (s && s.title) || '';
-            const newName = prompt('Rename session:', current);
-            if (newName === null) return; // cancelled
             if (newName.trim() === '') {
                 delete sessionRenames[sid];
             } else {
@@ -7147,29 +7578,110 @@
             }
             try { localStorage.setItem('feather-sessionRenames', JSON.stringify(sessionRenames)); } catch {}
             renderSessions();
-            // Update mobile and desktop headers if this is the current session
             const sessionTitle = getSessionTitle(s || { id: sid });
             const mobileHeader = document.getElementById('mobile-session-header-text');
-            if (mobileHeader && currentSessionId === sid) {
-                mobileHeader.textContent = sessionTitle;
-            }
+            if (mobileHeader && currentSessionId === sid) mobileHeader.textContent = sessionTitle;
             const desktopTitle = document.getElementById('desktop-session-title');
-            if (desktopTitle && currentSessionId === sid) {
-                desktopTitle.textContent = sessionTitle;
-            }
+            if (desktopTitle && currentSessionId === sid) desktopTitle.textContent = sessionTitle;
             showToast(newName.trim() ? 'Session renamed' : 'Session name reset');
+        }
+
+        function startInlineRename(sid, titleEl) {
+            if (!sid || !titleEl) return;
+            const s = allSessions.find(s => s.id === sid);
+            const current = sessionRenames[sid] || (s && s.title) || '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = current;
+            input.className = 'bg-smoke-3 border border-gold-9/60 rounded px-1.5 py-0.5 text-xs text-smoke-12 outline-none w-48 max-w-[50vw]';
+            input.style.cssText = 'min-width:120px;font-family:inherit;';
+            let committed = false;
+            function commit() {
+                if (committed) return; committed = true;
+                titleEl.style.display = '';
+                input.replaceWith(titleEl);
+                saveRename(sid, input.value);
+            }
+            function cancel() {
+                if (committed) return; committed = true;
+                titleEl.style.display = '';
+                input.replaceWith(titleEl);
+            }
+            titleEl.style.display = 'none';
+            titleEl.parentNode.insertBefore(input, titleEl.nextSibling);
+            input.focus();
+            input.select();
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); commit(); }
+                else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+            });
+            input.addEventListener('blur', commit);
+        }
+
+        function sidebarInlineRename(e, sid) {
+            e.stopPropagation();
+            const item = document.querySelector(`.session-item[data-ctx-id="${sid}"]`);
+            if (!item) return;
+            const titleEl = item.querySelector('.session-item-title');
+            if (!titleEl) return;
+            startInlineRename(sid, titleEl);
+        }
+
+        function ctxRename() {
+            if (!_ctxSessionId) { closeSessionContextMenu(); return; }
+            const sid = _ctxSessionId;
+            closeSessionContextMenu();
+            // Try inline rename on desktop header first (if this is the active session)
+            const desktopTitle = document.getElementById('desktop-session-title');
+            if (sid === currentSessionId && desktopTitle && desktopTitle.offsetParent !== null) {
+                startInlineRename(sid, desktopTitle);
+                return;
+            }
+            // Try inline rename on sidebar item
+            const item = document.querySelector(`.session-item[data-ctx-id="${sid}"]`);
+            const titleEl = item && item.querySelector('.session-item-title');
+            if (titleEl) {
+                startInlineRename(sid, titleEl);
+                return;
+            }
+            // Fallback to prompt
+            const s = allSessions.find(s => s.id === sid);
+            const current = sessionRenames[sid] || (s && s.title) || '';
+            const newName = prompt('Rename session:', current);
+            if (newName === null) return;
+            saveRename(sid, newName);
         }
 
         function renameCurrentSession() {
             if (!currentSessionId) { showToast('No session selected'); return; }
-            _ctxSessionId = currentSessionId;
-            ctxRename();
+            const desktopTitle = document.getElementById('desktop-session-title');
+            if (desktopTitle && desktopTitle.offsetParent !== null) {
+                startInlineRename(currentSessionId, desktopTitle);
+            } else {
+                _ctxSessionId = currentSessionId;
+                ctxRename();
+            }
         }
 
         function ctxMarkRead() {
             if (_ctxSessionId) {
                 markSessionRead(_ctxSessionId);
                 renderSessions();
+            }
+            closeSessionContextMenu();
+        }
+
+        function markSessionUnread(sessionId) {
+            if (!sessionId) return;
+            delete sessionViewTimes[sessionId];
+            try { localStorage.setItem('feather-sessionViewTimes', JSON.stringify(sessionViewTimes)); } catch {}
+        }
+
+        function ctxMarkUnread() {
+            if (_ctxSessionId) {
+                markSessionUnread(_ctxSessionId);
+                renderSessions();
+                showToast('Marked as unread');
             }
             closeSessionContextMenu();
         }
@@ -7206,10 +7718,35 @@
         function openShortcutsModal() {
             const m = document.getElementById('shortcuts-modal');
             if (m) m.style.display = 'flex';
+            const inp = document.getElementById('shortcuts-search');
+            if (inp) { inp.value = ''; filterShortcuts(''); setTimeout(() => inp.focus(), 50); }
         }
         function closeShortcutsModal() {
             const m = document.getElementById('shortcuts-modal');
             if (m) m.style.display = 'none';
+        }
+        function filterShortcuts(q) {
+            const list = document.getElementById('shortcuts-list');
+            if (!list) return;
+            const query = q.toLowerCase().trim();
+            const items = list.children;
+            let lastHeader = null;
+            let sectionHasMatch = false;
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const isHeader = !item.querySelector('kbd');
+                if (isHeader) {
+                    if (lastHeader) lastHeader.style.display = sectionHasMatch ? '' : 'none';
+                    lastHeader = item;
+                    sectionHasMatch = false;
+                } else {
+                    const text = item.textContent.toLowerCase();
+                    const match = !query || text.includes(query);
+                    item.style.display = match ? '' : 'none';
+                    if (match) sectionHasMatch = true;
+                }
+            }
+            if (lastHeader) lastHeader.style.display = sectionHasMatch ? '' : 'none';
         }
 
         // ========== Command Palette ==========
@@ -7224,7 +7761,7 @@
             { label: 'Previous session', shortcut: 'Alt+Up', action: () => switchSessionByDirection(-1) },
             { label: 'Next session', shortcut: 'Alt+Down', action: () => switchSessionByDirection(1) },
             { label: 'Last viewed session', shortcut: 'Ctrl+.', action: () => switchToPreviousSession() },
-            { label: 'Scroll to bottom', shortcut: '', action: () => scrollToBottom(true) },
+            { label: 'Scroll to bottom', shortcut: 'B', action: () => scrollToBottom(true) },
             { label: 'Next message', shortcut: 'J', action: () => navigateMessages(1) },
             { label: 'Previous message', shortcut: 'K', action: () => navigateMessages(-1) },
             { label: 'First message', shortcut: 'gg / Ctrl+Home', action: () => jumpToMessage('first') },
@@ -7241,16 +7778,23 @@
             { label: 'Focus mode — hide tool calls', shortcut: 'F', action: () => toggleFocusMode() },
             { label: 'Toggle thinking blocks', shortcut: 'T', action: () => toggleAllThinking() },
             { label: 'Keyboard shortcuts', shortcut: '?', action: () => openShortcutsModal() },
+            { label: 'Yank (copy) focused message', shortcut: 'Y', action: () => yankFocusedMessage() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
             { label: 'Export session as Markdown', shortcut: 'E', action: () => { if (currentSessionId) exportSessionMarkdown(); else showToast('No session selected'); } },
             { label: 'Next unread session', shortcut: 'U', action: () => jumpToNextUnreadSession() },
             { label: 'Previous unread session', shortcut: 'P', action: () => jumpToPrevUnreadSession() },
+            { label: 'Next session in list', shortcut: ']', action: () => navigateSessionList(1) },
+            { label: 'Previous session in list', shortcut: '[', action: () => navigateSessionList(-1) },
             { label: 'New Claude session', shortcut: 'N', action: () => newClaudeSession() },
             { label: 'Mark all sessions read', shortcut: 'A', action: () => markAllSessionsRead() },
-            { label: 'Hide current session', shortcut: '', action: () => { if (currentSessionId) { hideSession(currentSessionId); showToast('Session hidden'); } else { showToast('No session selected'); } } },
             { label: 'Show all hidden sessions', shortcut: '', action: () => unhideAllSessions() },
             { label: 'Rename current session', shortcut: 'R', action: () => { if (currentSessionId) { _ctxSessionId = currentSessionId; ctxRename(); } else { showToast('No session selected'); } } },
-            { label: 'Autoweb dashboard', shortcut: '', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
+            { label: 'Copy session link', shortcut: 'C', action: () => { if (currentSessionId) copyCurrentSessionLink(); else showToast('No session selected'); } },
+            { label: 'Open session in new tab', shortcut: 'W', action: () => { if (currentSessionId) openCurrentSessionNewTab(); else showToast('No session selected'); } },
+            { label: 'Pin/unpin current session', shortcut: 'X', action: () => { if (currentSessionId) { togglePinSession(currentSessionId); showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned'); } else showToast('No session selected'); } },
+            { label: 'Reload session list', shortcut: 'L', action: () => { loadSessions(); showToast('Session list refreshed'); } },
+            { label: 'Autoweb dashboard', shortcut: 'V', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
+            { label: "What's New", shortcut: 'H', action: () => toggleWhatsNew() },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
                 if ('Notification' in window && Notification.permission === 'default') {
                     Notification.requestPermission().then(p => {
@@ -7407,6 +7951,18 @@
                     closeLightbox();
                     return;
                 }
+                // Close What's New popover
+                if (_whatsNewOpen) {
+                    toggleWhatsNew();
+                    return;
+                }
+                // Close Autoweb panel
+                const awOverlay = document.getElementById('autoweb-overlay');
+                if (awOverlay && awOverlay.style.display !== 'none') {
+                    awOverlay.style.display = 'none';
+                    clearInterval(_awRefreshTimer);
+                    return;
+                }
             }
             // Press "i" to focus chat input (vim-style, when not already in an input)
             if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -7436,6 +7992,14 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     openShortcutsModal();
+                }
+            }
+            // F3 / Shift+F3 — navigate chat search results (standard browser shortcut)
+            if (e.key === 'F3') {
+                const bar = document.getElementById('chat-search-bar');
+                if (bar && !bar.classList.contains('hidden')) {
+                    e.preventDefault();
+                    chatSearchNav(e.shiftKey ? -1 : 1);
                 }
             }
             // Ctrl+Home / Ctrl+End to jump to first/last message (standard shortcut)
@@ -7583,6 +8147,81 @@
                     markAllSessionsRead();
                 }
             }
+            // [ / ] — navigate previous/next session in list
+            if ((e.key === '[' || e.key === ']') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    navigateSessionList(e.key === ']' ? 1 : -1);
+                }
+            }
+            // C — copy current session URL to clipboard
+            if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) copyCurrentSessionLink();
+                    else showToast('No session selected');
+                }
+            }
+            // X — pin/unpin current session
+            if (e.key === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) {
+                        togglePinSession(currentSessionId);
+                        showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned');
+                    } else { showToast('No session selected'); }
+                }
+            }
+            if (e.key === 'w' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    if (currentSessionId) { openCurrentSessionNewTab(); } else { showToast('No session selected'); }
+                }
+            }
+            // L — reload session list
+            if (e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    loadSessions();
+                    showToast('Session list refreshed');
+                }
+            }
+            if (e.key === 'y' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    yankFocusedMessage();
+                }
+            }
+            // H — toggle What's New
+            if (e.key === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    toggleWhatsNew();
+                }
+            }
+            // V — toggle Autoweb dashboard
+            if (e.key === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    toggleAutowebPanel();
+                }
+            }
+            // B — scroll to bottom of conversation
+            if (e.key === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+                const tag = document.activeElement?.tagName?.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
+                    e.preventDefault();
+                    scrollToBottom(true);
+                }
+            }
         });
         // Show shortcut hint again when search loses focus, and clear keyboard highlight
         document.getElementById('session-search')?.addEventListener('blur', () => {
@@ -7593,12 +8232,19 @@
             }
             _kbHighlightIdx = -1;
             updateKeyboardHighlight();
+            hideRecentSearchDropdown();
         });
-        // Hide hint when search has content
+        document.getElementById('session-search')?.addEventListener('focus', () => {
+            const searchInput = document.getElementById('session-search');
+            if (!searchInput?.value) showRecentSearchDropdown();
+        });
+        // Hide hint when search has content; hide recent dropdown when typing
         document.getElementById('session-search')?.addEventListener('input', () => {
             const hint = document.getElementById('search-shortcut-hint');
             const searchInput = document.getElementById('session-search');
             if (hint) hint.style.display = searchInput.value ? 'none' : '';
+            if (searchInput.value) hideRecentSearchDropdown();
+            else showRecentSearchDropdown();
         });
 
         // ========== Auto-Refresh After Deploy ==========
@@ -7827,6 +8473,9 @@
             initFolders();
             connectSSE();
 
+            // Refresh session list timestamps every 60s so relative times stay current
+            setInterval(() => { if (allSessions.length > 0) renderSessions(); }, 60000);
+
             // Keyboard shortcuts
             document.addEventListener('keydown', (e) => {
                 // Ctrl+K to open command palette
@@ -7909,7 +8558,8 @@
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <!--autoweb-version: 2026-03-17 18:13 UTC iter=27 keeps=150-->
+    <div id="msg-nav-indicator"></div>
+    <!--autoweb-version: 2026-03-18 00:43 UTC iter=58 keeps=181-->
     <div id="autoweb-version-indicator" style="position:fixed;bottom:6px;right:8px;font-size:10px;opacity:0.3;color:var(--smoke-10);font-family:'Inter',sans-serif;z-index:9999;pointer-events:none;white-space:nowrap;max-width:calc(100vw - 16px);overflow:hidden;text-overflow:ellipsis;"></div>
     <script>
     (function() {
