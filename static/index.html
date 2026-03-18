@@ -487,7 +487,6 @@
                 <button id="search-clear-btn" onclick="clearSessionSearch()" class="absolute right-2 top-1/2 -translate-y-1/2 text-smoke-7 hover:text-smoke-11 transition-colors hidden" title="Clear search" aria-label="Clear search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 <svg id="search-spinner" class="absolute right-2 top-1/2 -translate-y-1/2 text-gold-9 hidden animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
             </div>
-            <div id="search-recent-dropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-smoke-2 border border-smoke-5 rounded-lg shadow-lg z-50 overflow-hidden" style="max-height:200px;overflow-y:auto"></div>
             <div id="search-result-count" class="hidden text-[10px] text-smoke-6 px-1 mt-1"></div>
             <!-- Session filter toggle -->
             <div id="session-filter-bar" class="flex gap-1 mt-1.5">
@@ -2059,9 +2058,7 @@ function hideSession(sessionId) {
         }
 
         let currentSearchQuery = '';
-        let recentSearches = JSON.parse(localStorage.getItem('recentSearches') || '[]');
         let _kbHighlightIdx = -1;
-        let _recentSearchHighlightIdx = -1;
         let searchApiResults = null;
         let searchDebounceTimer = null;
         let _searchLimit = 30;
@@ -2086,7 +2083,6 @@ function hideSession(sessionId) {
                     return {...session, _snippet: r.snippet, _score: r.score};
                 });
                 _searchTotal = data.total || searchApiResults.length;
-                if (searchApiResults.length > 0) saveRecentSearch(query);
                 if (countEl) {
                     const n = searchApiResults.length;
                     const total = _searchTotal;
@@ -2158,45 +2154,6 @@ function hideSession(sessionId) {
             if (countEl) countEl.classList.add('hidden');
         }
 
-        function saveRecentSearch(query) {
-            if (!query || query.length < 3) return;
-            recentSearches = [query, ...recentSearches.filter(q => q !== query)].slice(0, 8);
-            localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
-        }
-
-        function showRecentSearchDropdown() {
-            const dropdown = document.getElementById('search-recent-dropdown');
-            if (!dropdown || recentSearches.length === 0) return;
-            _recentSearchHighlightIdx = -1;
-            renderRecentSearchDropdown(dropdown);
-            dropdown.classList.remove('hidden');
-        }
-
-        function renderRecentSearchDropdown(dropdown) {
-            if (!dropdown) dropdown = document.getElementById('search-recent-dropdown');
-            if (!dropdown) return;
-            dropdown.innerHTML = recentSearches.map((q, i) =>
-                `<button class="w-full text-left px-3 py-1.5 text-xs text-smoke-10 hover:bg-smoke-4 flex items-center gap-2 truncate${i === _recentSearchHighlightIdx ? ' bg-smoke-4' : ''}"
-                  onmousedown="event.preventDefault();applyRecentSearch(${JSON.stringify(q)})">
-                    <svg class="shrink-0 text-smoke-6" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                    <span class="truncate">${escapeHtml(q)}</span>
-                </button>`
-            ).join('');
-        }
-
-        function hideRecentSearchDropdown() {
-            document.getElementById('search-recent-dropdown')?.classList.add('hidden');
-        }
-
-        function applyRecentSearch(query) {
-            const searchInput = document.getElementById('session-search');
-            if (searchInput) {
-                searchInput.value = query;
-                filterSessions(query);
-                searchInput.focus();
-            }
-            hideRecentSearchDropdown();
-        }
 
         function getVisibleSessionItems() {
             return Array.from(document.querySelectorAll('#sessions .session-item'));
@@ -2217,30 +2174,8 @@ function hideSession(sessionId) {
         function handleSessionSearchKeydown(e) {
             if (e.key === 'Escape') {
                 e.preventDefault();
-                const dropdown = document.getElementById('search-recent-dropdown');
-                if (dropdown && !dropdown.classList.contains('hidden')) {
-                    hideRecentSearchDropdown();
-                    return;
-                }
                 clearSessionSearch();
                 document.getElementById('session-search')?.blur();
-                return;
-            }
-            // If recent search dropdown is visible, navigate it with arrow keys
-            const dropdown = document.getElementById('search-recent-dropdown');
-            const dropdownVisible = dropdown && !dropdown.classList.contains('hidden');
-            if (dropdownVisible && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
-                e.preventDefault();
-                if (e.key === 'ArrowDown') {
-                    _recentSearchHighlightIdx = Math.min(_recentSearchHighlightIdx + 1, recentSearches.length - 1);
-                    renderRecentSearchDropdown(dropdown);
-                } else if (e.key === 'ArrowUp') {
-                    _recentSearchHighlightIdx = Math.max(_recentSearchHighlightIdx - 1, -1);
-                    renderRecentSearchDropdown(dropdown);
-                } else if (e.key === 'Enter' && _recentSearchHighlightIdx >= 0) {
-                    applyRecentSearch(recentSearches[_recentSearchHighlightIdx]);
-                    _recentSearchHighlightIdx = -1;
-                }
                 return;
             }
             const items = getVisibleSessionItems();
@@ -7226,19 +7161,12 @@ function hideSession(sessionId) {
             }
             _kbHighlightIdx = -1;
             updateKeyboardHighlight();
-            hideRecentSearchDropdown();
         });
-        document.getElementById('session-search')?.addEventListener('focus', () => {
-            const searchInput = document.getElementById('session-search');
-            if (!searchInput?.value) showRecentSearchDropdown();
-        });
-        // Hide hint when search has content; hide recent dropdown when typing
+        // Hide hint when search has content
         document.getElementById('session-search')?.addEventListener('input', () => {
             const hint = document.getElementById('search-shortcut-hint');
             const searchInput = document.getElementById('session-search');
             if (hint) hint.style.display = searchInput.value ? 'none' : '';
-            if (searchInput.value) hideRecentSearchDropdown();
-            else showRecentSearchDropdown();
         });
 
         // ========== Auto-Refresh After Deploy ==========
