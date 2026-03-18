@@ -2342,9 +2342,11 @@
                 const draftText = sessionDrafts.get(s.id) || '';
                 const draftIndicator = hasDraft ? `<span class="draft-indicator text-[9px] text-amber-9 shrink-0" title="Draft: ${escapeHtml(draftText.substring(0, 60))}${draftText.length > 60 ? '…' : ''}">✎</span>` : '';
 
+                const _ariaLabel = [getSessionTitle(s), s.message_count ? s.message_count + ' messages' : null, s.lastUpdated ? formatTime(s.lastUpdated) : null, isUnread ? 'unread' : null, isSelected ? 'current session' : null].filter(Boolean).join(', ');
                 return `
                     <div class="session-item group px-2 py-1.5 rounded cursor-pointer border-l-2 border-transparent ${isSelected ? 'active' : ''}"
-                         data-ctx-id="${s.id}" onclick="${onclick}" ondblclick="sidebarInlineRename(event, '${s.id}')" oncontextmenu="showSessionContextMenu(event, '${s.id}')" title="${escapeHtml(getSessionTitle(s))}">
+                         role="button" tabindex="-1" aria-label="${escapeHtml(_ariaLabel)}" aria-current="${isSelected ? 'true' : 'false'}"
+                         data-ctx-id="${s.id}" onclick="${onclick}" ondblclick="sidebarInlineRename(event, '${s.id}')" oncontextmenu="showSessionContextMenu(event, '${s.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${onclick}}" title="${escapeHtml(getSessionTitle(s))}">
                         <div class="flex items-center gap-1.5">
                             ${dot}
                             <div class="flex-1 min-w-0">
