@@ -623,7 +623,7 @@
         <div id="msg-position-indicator"></div>
 
         <!-- Messages -->
-        <div id="messages" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <div id="messages" role="log" aria-label="Conversation messages" aria-live="polite" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
             <!-- Drop overlay -->
             <div id="drop-overlay"><span class="text-gold-9 text-lg font-medium flex items-center gap-2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Drop files to upload</span></div>
             <div id="empty-state" class="h-full flex items-center justify-center">
@@ -1572,6 +1572,8 @@
                 const overlay = document.getElementById('sidebar-overlay');
                 sidebar.classList.add('-translate-x-full');
                 overlay.classList.add('hidden');
+                const menuBtn = document.getElementById('menu-btn');
+                if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
             }
         }
 
