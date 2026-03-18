@@ -572,7 +572,7 @@
         <div id="msg-position-indicator"></div>
 
         <!-- Messages -->
-        <div id="messages" role="log" aria-label="Conversation messages" aria-live="polite" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <div id="messages" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
             <!-- Drop overlay -->
             <div id="drop-overlay"><span class="text-gold-9 text-lg font-medium flex items-center gap-2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Drop files to upload</span></div>
             <div id="empty-state" class="h-full flex items-center justify-center">
@@ -3839,9 +3839,7 @@ function hideSession(sessionId) {
                 <div class="max-w-3xl mx-auto">
                     <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}" data-start-time="${Date.now()}">
                         <div class="tool-header min-w-0 flex items-center gap-2.5 px-3 py-2 cursor-pointer"
-                             role="button" tabindex="0" aria-expanded="false" aria-label="Tool call: ${escapeHtml(tool.name)}"
-                             onclick="toggleToolHeader(this)"
-                             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleToolHeader(this)}">
+                             onclick="toggleToolHeader(this)">
                             <span class="text-sm">${icon}</span>
                             <span class="text-xs font-medium text-smoke-12">${escapeHtml(tool.name)}</span>
                             ${langBadge}
@@ -3922,11 +3920,8 @@ function hideSession(sessionId) {
                 } else {
                     body.classList.remove('hidden');
                 }
-                // Update chevron and aria-expanded
-                const header = body.parentElement.querySelector('.tool-header');
                 const chevron = body.parentElement.querySelector('.tool-chevron');
                 if (chevron) chevron.textContent = toolBlocksCollapsed ? '▶' : '▼';
-                if (header) header.setAttribute('aria-expanded', String(!toolBlocksCollapsed));
             });
             // Collapse/expand tool result bodies
             document.querySelectorAll('.tool-card .result-body').forEach(body => {
@@ -3935,10 +3930,8 @@ function hideSession(sessionId) {
                 } else {
                     body.classList.remove('hidden');
                 }
-                const header = body.parentElement.querySelector('.tool-header');
                 const chevron = body.parentElement.querySelector('.tool-chevron');
                 if (chevron) chevron.textContent = toolBlocksCollapsed ? '▶' : '▼';
-                if (header) header.setAttribute('aria-expanded', String(!toolBlocksCollapsed));
             });
             updateToolsToggleButton();
         }
@@ -3949,7 +3942,6 @@ function hideSession(sessionId) {
             const hidden = body.classList.toggle('hidden');
             const chevron = el.querySelector('.tool-chevron');
             if (chevron) chevron.textContent = hidden ? '▶' : '▼';
-            el.setAttribute('aria-expanded', String(!hidden));
         }
 
         function updateToolsToggleButton() {
@@ -4278,7 +4270,7 @@ function hideSession(sessionId) {
                 <div class="max-w-3xl mx-auto">
                     <div class="tool-card border-l-[3px] ${borderColor} bg-smoke-3/30 rounded-r-lg overflow-hidden">
                         <div class="tool-header min-w-0 flex items-center gap-2.5 px-3 py-2 ${isShort ? '' : 'cursor-pointer'}"
-                             ${isShort ? '' : `role="button" tabindex="0" aria-expanded="${shouldExpand}" aria-label="Tool result: ${escapeHtml(summary)}" onclick="toggleToolHeader(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleToolHeader(this)}"`}>
+                             ${isShort ? '' : `onclick="toggleToolHeader(this)"`}>
                             <span class="text-xs ${isError ? 'text-ember-9' : 'text-apple-9'}">${icon}</span>
                             <span class="text-xs text-smoke-10 truncate flex-1 ${isShort ? 'font-mono' : ''}">${escapeHtml(summary)}</span>
                             ${durationHtml}
