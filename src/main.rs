@@ -302,25 +302,42 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
 // ============================================================================
 
 async fn autoweb_results(Path(instance): Path<String>) -> impl IntoResponse {
-    let path = match instance.as_str() {
-        "feather" | "frontend" => "/home/user/autoweb/results.tsv",
-        "trading" => "/home/user/autoweb-trading/results.tsv",
-        _ => return (axum::http::StatusCode::NOT_FOUND, "not found".to_string()),
-    };
-    match std::fs::read_to_string(path) {
-        Ok(content) => (axum::http::StatusCode::OK, content),
-        Err(_) => (axum::http::StatusCode::NOT_FOUND, "file not found".to_string()),
+    // Dynamically resolve any autoweb instance: "feather" -> /home/user/autoweb/
+    // all others -> /home/user/autoweb-{instance}/
+    let sanitized: String = instance.chars().filter(|c| c.is_alphanumeric() || *c == '-').collect();
+    if sanitized.is_empty() || sanitized.len() > 32 {
+        return (axum::http::StatusCode::NOT_FOUND, "not found".to_string());
     }
+    let base = if sanitized == "feather" || sanitized == "frontend" {
+        "/home/user/autoweb".to_string()
+    } else {
+        format!("/home/user/autoweb-{}", sanitized)
+    };
+    // results.tsv can live in the instance dir or a linked repo dir
+    let candidates = [
+        format!("{}/results.tsv", base),
+        format!("/home/user/public/{}/results.tsv", sanitized),
+    ];
+    for path in &candidates {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            return (axum::http::StatusCode::OK, content);
+        }
+    }
+    (axum::http::StatusCode::NOT_FOUND, "not found".to_string())
 }
 
 async fn autoweb_reviews(Path(instance): Path<String>) -> impl IntoResponse {
-    let dir = match instance.as_str() {
-        "feather" | "frontend" => "/home/user/autoweb/reviews",
-        "trading" => "/home/user/autoweb-trading/reviews",
-        _ => return axum::response::Response::builder()
+    let sanitized: String = instance.chars().filter(|c| c.is_alphanumeric() || *c == '-').collect();
+    if sanitized.is_empty() || sanitized.len() > 32 {
+        return axum::response::Response::builder()
             .status(404)
             .body(axum::body::Body::from("not found"))
-            .expect("valid 404 response"),
+            .expect("valid 404 response");
+    }
+    let dir = if sanitized == "feather" || sanitized == "frontend" {
+        "/home/user/autoweb/reviews".to_string()
+    } else {
+        format!("/home/user/autoweb-{}/reviews", sanitized)
     };
     let mut reviews = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -919,6 +936,252 @@ async fn get_session_history(
 struct ClaudeAuthStatusResponse {
     authenticated: bool,
     message: String,
+}
+
+// ============================================================================
+// Search API
+// ============================================================================
+
+/// Round down to the nearest valid UTF-8 character boundary at or before `idx`.
+fn floor_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() { return s.len(); }
+    let mut i = idx;
+    while i > 0 && !s.is_char_boundary(i) { i -= 1; }
+    i
+}
+
+/// Round up to the nearest valid UTF-8 character boundary at or after `idx`.
+fn ceil_char_boundary(s: &str, idx: usize) -> usize {
+    if idx >= s.len() { return s.len(); }
+    let mut i = idx;
+    while i < s.len() && !s.is_char_boundary(i) { i += 1; }
+    i
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize { 20 }
+
+#[derive(Serialize)]
+struct SearchResult {
+    session_id: String,
+    project: String,
+    title: String,
+    score: u32,
+    snippet: String,
+    updated_at: String,
+    message_count: usize,
+}
+
+#[derive(Serialize)]
+struct SearchResponse {
+    query: String,
+    results: Vec<SearchResult>,
+    total: usize,
+}
+
+async fn search_sessions(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<SearchQuery>,
+) -> Json<SearchResponse> {
+    let q = params.q.trim().to_lowercase();
+    if q.is_empty() {
+        return Json(SearchResponse { query: params.q, results: vec![], total: 0 });
+    }
+
+    // Split query into words for multi-word AND search; also keep full phrase for exact match boost
+    let words: Vec<&str> = q.split_whitespace().collect();
+    let n_words = words.len() as u32;
+
+    let mut results: Vec<SearchResult> = Vec::new();
+
+    for meta in state.session_cache.list_sessions() {
+        let title_str = meta.title.clone().unwrap_or_default();
+        let title_lower = title_str.to_lowercase();
+        let mut score: u32 = 0;
+        let mut snippet = String::new();
+
+        // Title match: score per word matched + bonus for exact phrase + bonus for all words
+        let title_words_matched = words.iter().filter(|w| title_lower.contains(*w)).count() as u32;
+        if title_words_matched > 0 {
+            score += title_words_matched * 40;
+            // Bonus if all words found in title
+            if title_words_matched == n_words {
+                score += 60;
+            }
+            // Extra bonus for exact phrase
+            if n_words > 1 && title_lower.contains(&q) {
+                score += 40;
+            }
+        }
+
+        // Message content match - check in-memory session if available
+        if let Some(session) = state.session_cache.get(&meta.id) {
+            let mut content_words_matched: u32 = 0;
+            let mut best_snippet = String::new();
+            let mut best_snippet_score: u32 = 0;
+
+            'outer: for msg in session.messages.iter().rev().take(500) {
+                for block in &msg.content {
+                    let text = match block {
+                        sessions::ContentBlock::Text { text } => text.as_str(),
+                        sessions::ContentBlock::Thinking { thinking } => thinking.as_str(),
+                        _ => continue,
+                    };
+                    let text_lower = text.to_lowercase();
+                    // Count how many query words appear in this block
+                    let matched: Vec<&str> = words.iter().filter(|w| text_lower.contains(*w)).map(|w| *w).collect();
+                    if matched.is_empty() { continue; }
+
+                    let block_score = matched.len() as u32;
+                    if block_score > best_snippet_score {
+                        best_snippet_score = block_score;
+                        // Build snippet around first matching word
+                        let first_word = matched[0];
+                        let idx = text_lower.find(first_word).unwrap_or(0);
+                        let start = floor_char_boundary(text, idx.saturating_sub(60));
+                        let end = ceil_char_boundary(text, (idx + first_word.len() + 100).min(text.len()));
+                        best_snippet = format!("...{}...", &text[start..end]);
+                    }
+                    content_words_matched = content_words_matched.max(matched.len() as u32);
+                    // Stop once we've found all words
+                    if content_words_matched >= n_words { break 'outer; }
+                }
+            }
+
+            if content_words_matched > 0 {
+                score += content_words_matched * 5;
+                if content_words_matched == n_words { score += 10; }
+                if !best_snippet.is_empty() { snippet = best_snippet; }
+            }
+        }
+
+        if score > 0 {
+            results.push(SearchResult {
+                session_id: meta.id,
+                project: meta.project,
+                title: title_str,
+                score,
+                snippet,
+                updated_at: meta.updated_at,
+                message_count: meta.message_count,
+            });
+        }
+    }
+
+    results.sort_by(|a, b| b.score.cmp(&a.score).then(b.updated_at.cmp(&a.updated_at)));
+    let total = results.len();
+    results.truncate(params.limit);
+
+    Json(SearchResponse { query: params.q, results, total })
+}
+
+// ============================================================================
+// Session Stats API
+// ============================================================================
+
+#[derive(Serialize)]
+struct SessionStats {
+    session_id: String,
+    project: String,
+    title: Option<String>,
+    message_count: usize,
+    by_role: std::collections::HashMap<String, usize>,
+    tool_calls: usize,
+    first_timestamp: Option<String>,
+    last_timestamp: Option<String>,
+    duration_secs: Option<i64>,
+    char_count: usize,
+}
+
+async fn get_session_stats(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> impl axum::response::IntoResponse {
+    if !is_valid_session_id(&session_id) {
+        return (axum::http::StatusCode::BAD_REQUEST, axum::Json(serde_json::json!({"error": "invalid session_id"}))).into_response();
+    }
+
+    let normalized_path = state.session_cache.normalized_dir.join(format!("{}.jsonl", session_id));
+    if !normalized_path.exists() {
+        return (axum::http::StatusCode::NOT_FOUND, axum::Json(serde_json::json!({"error": "session not found"}))).into_response();
+    }
+
+    let mut by_role: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut tool_calls: usize = 0;
+    let mut first_ts: Option<String> = None;
+    let mut last_ts: Option<String> = None;
+    let mut char_count: usize = 0;
+    let mut message_count: usize = 0;
+
+    if let Ok(file) = File::open(&normalized_path) {
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let Ok(line) = line else { continue };
+            let Ok(msg) = serde_json::from_str::<sessions::NormalizedMessage>(line.trim()) else { continue };
+
+            message_count += 1;
+            *by_role.entry(msg.role.clone()).or_insert(0) += 1;
+
+            if !msg.timestamp.is_empty() {
+                if first_ts.is_none() {
+                    first_ts = Some(msg.timestamp.clone());
+                }
+                last_ts = Some(msg.timestamp.clone());
+            }
+
+            for block in &msg.content {
+                match block {
+                    sessions::ContentBlock::Text { text } => char_count += text.len(),
+                    sessions::ContentBlock::Thinking { thinking } => char_count += thinking.len(),
+                    sessions::ContentBlock::ToolUse { .. } => tool_calls += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Compute duration in seconds from ISO 8601 timestamps
+    let duration_secs = if let (Some(first), Some(last)) = (&first_ts, &last_ts) {
+        fn parse_ts(s: &str) -> Option<i64> {
+            // Accept "2025-01-15T12:34:56.789Z" or "2025-01-15T12:34:56Z"
+            let s = s.trim_end_matches('Z');
+            let dt = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
+                .or_else(|_| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+                .ok()?;
+            Some(dt.and_utc().timestamp())
+        }
+        if let (Some(f), Some(l)) = (parse_ts(first), parse_ts(last)) {
+            Some(l - f)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let meta = state.session_cache.list_sessions().into_iter().find(|m| m.id == session_id);
+    let (project, title) = meta.map(|m| (m.project, m.title)).unwrap_or_default();
+
+    let stats = SessionStats {
+        session_id,
+        project,
+        title,
+        message_count,
+        by_role,
+        tool_calls,
+        first_timestamp: first_ts,
+        last_timestamp: last_ts,
+        duration_secs,
+        char_count,
+    };
+
+    axum::Json(stats).into_response()
 }
 
 /// Check if Claude CLI has valid authentication.
@@ -2667,6 +2930,9 @@ async fn main() {
         .route("/health", get(health))
         // SSE
         .route("/api/stream", get(stream_events))
+        // Search
+        .route("/api/search", get(search_sessions))
+        .route("/api/sessions/{session_id}/stats", get(get_session_stats))
         // Projects & Sessions
         .route("/api/projects", get(list_projects))
         .route("/api/dashboards", get(list_dashboards))
