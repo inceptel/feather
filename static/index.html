@@ -215,22 +215,6 @@
         body.zen-mode #zen-exit-btn { display: flex !important; }
         #zen-exit-btn { display: none; position: fixed; top: 12px; right: 12px; z-index: 200; padding: 4px 12px; background: var(--smoke-3); border: 1px solid var(--smoke-5); border-radius: 8px; color: var(--smoke-10); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; gap: 6px; align-items: center; opacity: 0.5; transition: opacity 0.2s; }
         #zen-exit-btn:hover { opacity: 1; background: var(--smoke-4); color: var(--smoke-12); }
-        /* What's New popover */
-        #whats-new-popover {
-            display: none; position: absolute; top: 100%; left: -80px; margin-top: 6px;
-            width: 320px; max-height: 400px; overflow-y: auto; z-index: 100;
-            background: var(--smoke-2); border: 1px solid var(--smoke-5); border-radius: 10px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.3); padding: 0;
-        }
-        #whats-new-popover.open { display: block; animation: fadeInScale 0.15s ease-out; }
-        .wn-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--smoke-4); display: flex; align-items: center; justify-content: space-between; }
-        .wn-header h3 { font-size: 13px; font-weight: 600; color: var(--smoke-12); margin: 0; }
-        .wn-item { padding: 8px 14px; border-bottom: 1px solid var(--smoke-3); }
-        .wn-item:last-child { border-bottom: none; }
-        .wn-item-time { font-size: 10px; color: var(--smoke-7); font-family: ui-monospace, monospace; }
-        .wn-item-desc { font-size: 12px; color: var(--smoke-11); line-height: 1.4; margin-top: 2px; }
-        .wn-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
-        .wn-empty { padding: 30px 14px; text-align: center; color: var(--smoke-7); font-size: 12px; }
         body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: 1 1 0% !important; min-width: 0 !important; }
         @keyframes tool-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         .tool-running-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-9); animation: tool-pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
@@ -496,15 +480,7 @@
                 </div>
                 <div class="flex items-center gap-1.5 relative">
                     <span id="sse-dot" class="w-1.5 h-1.5 rounded-full bg-apple-9" title="Connected"></span>
-                    <button id="whats-new-btn" onclick="toggleWhatsNew()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="What's New" aria-label="What's New">New</button>
                     <button id="theme-toggle" onclick="toggleTheme()" class="text-smoke-8 hover:text-smoke-11 text-[10px] font-medium transition-all px-1.5 py-0.5 rounded-md hover:bg-smoke-3" title="Toggle theme" aria-label="Toggle theme">Dark</button>
-                    <div id="whats-new-popover">
-                        <div class="wn-header">
-                            <h3>What's New</h3>
-                            <button onclick="toggleWhatsNew()" class="text-smoke-7 hover:text-smoke-11 text-sm leading-none">&times;</button>
-                        </div>
-                        <div id="whats-new-list"><div class="wn-empty">Loading...</div></div>
-                    </div>
                 </div>
             </div>
             <div class="flex gap-1.5 mb-2">
@@ -842,7 +818,6 @@
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Pin/unpin session</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">X</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">Reload session list</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">L</kbd></div>
                 <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">This help</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">?</kbd></div>
-                <div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--smoke-10);">What's New</span><kbd style="background:var(--smoke-4); border:1px solid var(--smoke-5); border-radius:4px; padding:2px 8px; font-family:ui-monospace,monospace; font-size:11px; color:var(--smoke-11);">H</kbd></div>
             </div>
         </div>
     </div>
@@ -1119,146 +1094,6 @@
             document.body.classList.add('zen-mode');
         }
 
-        // ========== What's New Popover ==========
-        let _whatsNewOpen = false;
-        let _whatsNewLoaded = false;
-        let _whatsNewLastSeen = localStorage.getItem('feather-whatsNewLastSeen') || '';
-        let _whatsNewNewestTs = '';
-        let _whatsNewItems = [];
-        let _whatsNewShowAll = false;
-        const WHATS_NEW_LIMIT = 15;
-
-        function renderWhatsNewList() {
-            const list = document.getElementById('whats-new-list');
-            if (!list) return;
-            if (_whatsNewItems.length === 0) {
-                list.innerHTML = '<div class="wn-empty">No improvements yet</div>';
-                return;
-            }
-            const visible = _whatsNewShowAll ? _whatsNewItems : _whatsNewItems.slice(0, WHATS_NEW_LIMIT);
-            list.innerHTML = visible.map(item => {
-                const d = new Date(item.ts);
-                const timeStr = d.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-                const cleanDesc = item.desc.replace(/;\s*\d+ tests? pass\.?$/i, '');
-                return `<div class="wn-item">
-                    <div class="wn-item-time">${timeStr} ET</div>
-                    <div class="wn-item-desc">${escapeHtml(cleanDesc)}</div>
-                </div>`;
-            }).join('');
-            if (!_whatsNewShowAll && _whatsNewItems.length > WHATS_NEW_LIMIT) {
-                list.innerHTML += `<div onclick="showAllWhatsNew()" style="text-align:center;padding:8px 4px 2px;font-size:11px;color:var(--smoke-7);cursor:pointer;border-top:1px solid var(--smoke-4);margin-top:4px;" onmouseover="this.style.color='var(--smoke-11)'" onmouseout="this.style.color='var(--smoke-7)'">Show all ${_whatsNewItems.length} improvements ↓</div>`;
-            }
-        }
-
-        function showAllWhatsNew() {
-            _whatsNewShowAll = true;
-            renderWhatsNewList();
-        }
-
-        function toggleWhatsNew() {
-            const popover = document.getElementById('whats-new-popover');
-            if (!popover) return;
-            _whatsNewOpen = !_whatsNewOpen;
-            popover.classList.toggle('open', _whatsNewOpen);
-            if (_whatsNewOpen && !_whatsNewLoaded) {
-                loadWhatsNew();
-            }
-            if (_whatsNewOpen) {
-                // Mark as seen — store the latest ISO timestamp
-                if (_whatsNewNewestTs) {
-                    _whatsNewLastSeen = _whatsNewNewestTs;
-                    localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
-                }
-                updateWhatsNewBadge();
-            }
-        }
-
-        function loadWhatsNew() {
-            fetch('/api/autoweb-results/feather?_=' + Date.now())
-                .then(r => r.text())
-                .then(text => {
-                    _whatsNewLoaded = true;
-                    const lines = text.trim().split('\n');
-                    const items = [];
-                    for (let i = 1; i < lines.length; i++) {
-                        const parts = lines[i].split('\t');
-                        if (parts.length < 3) continue;
-                        let ts, status, desc;
-                        if (parts.length >= 4 && ['rust','frontend','both'].includes(parts[1])) {
-                            ts = parts[0]; status = parts[2]; desc = parts[3];
-                        } else {
-                            ts = parts[0]; status = parts[1]; desc = parts[2];
-                        }
-                        if (status === 'keep') items.push({ ts, desc });
-                    }
-                    items.reverse(); // newest first
-                    // Track newest timestamp for badge comparison
-                    if (items.length > 0) _whatsNewNewestTs = items[0].ts;
-                    _whatsNewItems = items;
-                    _whatsNewShowAll = false;
-                    renderWhatsNewList();
-                    // Update last seen
-                    if (_whatsNewOpen && items.length > 0) {
-                        _whatsNewLastSeen = items[0].ts;
-                        localStorage.setItem('feather-whatsNewLastSeen', _whatsNewLastSeen);
-                        updateWhatsNewBadge();
-                    }
-                })
-                .catch(() => {
-                    const list = document.getElementById('whats-new-list');
-                    if (list) list.innerHTML = '<div class="wn-empty">Could not load changes</div>';
-                });
-        }
-
-        function updateWhatsNewBadge() {
-            const btn = document.getElementById('whats-new-btn');
-            if (!btn) return;
-            // Remove existing badge
-            const old = btn.querySelector('.wn-unseen-dot');
-            if (old) old.remove();
-            // Show dot if never viewed OR if newest change is newer than last-seen
-            const hasUnseen = !_whatsNewLastSeen || (_whatsNewNewestTs > _whatsNewLastSeen);
-            if (hasUnseen && _whatsNewNewestTs) {
-                btn.insertAdjacentHTML('beforeend', '<span class="wn-unseen-dot" style="position:absolute;top:-1px;right:-1px;width:5px;height:5px;border-radius:50%;background:var(--gold-9);"></span>');
-            }
-        }
-
-        // Close popover when clicking outside
-        document.addEventListener('click', function(e) {
-            if (_whatsNewOpen && !e.target.closest('#whats-new-popover') && !e.target.closest('#whats-new-btn')) {
-                toggleWhatsNew();
-            }
-        });
-
-        // Check for new changes on page load (lightweight fetch for badge)
-        function checkWhatsNewBadge() {
-            fetch('/api/autoweb-results/feather?_=' + Date.now())
-                .then(r => r.text())
-                .then(text => {
-                    const lines = text.trim().split('\n');
-                    let newestKeepTs = '';
-                    for (let i = lines.length - 1; i >= 1; i--) {
-                        const parts = lines[i].split('\t');
-                        if (parts.length < 3) continue;
-                        const status = parts.length >= 4 && ['rust','frontend','both'].includes(parts[1]) ? parts[2] : parts[1];
-                        if (status === 'keep') {
-                            newestKeepTs = parts[0];
-                            break;
-                        }
-                    }
-                    if (newestKeepTs) {
-                        const wasNewer = !_whatsNewNewestTs || newestKeepTs > _whatsNewNewestTs;
-                        _whatsNewNewestTs = newestKeepTs;
-                        if (wasNewer && _whatsNewLoaded) {
-                            _whatsNewLoaded = false; // Force list reload next open
-                        }
-                        updateWhatsNewBadge();
-                    }
-                })
-                .catch(() => {});
-        }
-        checkWhatsNewBadge();
-        setInterval(checkWhatsNewBadge, 300000); // Re-check badge every 5 min
 
         // ========== State ==========
         let currentSessionId = null;
@@ -7870,7 +7705,6 @@
             { label: 'Pin/unpin current session', shortcut: 'X', action: () => { if (currentSessionId) { togglePinSession(currentSessionId); showToast(pinnedSessions.has(currentSessionId) ? 'Session pinned \uD83D\uDCCC' : 'Session unpinned'); } else showToast('No session selected'); } },
             { label: 'Reload session list', shortcut: 'L', action: () => { loadSessions(); showToast('Session list refreshed'); } },
             { label: 'Autoweb dashboard', shortcut: 'V', action: () => { const btn = document.getElementById('autoweb-dash-btn'); if (btn) btn.click(); } },
-            { label: "What's New", shortcut: 'H', action: () => toggleWhatsNew() },
             { label: 'Toggle desktop notifications', shortcut: '', action: () => {
                 if ('Notification' in window && Notification.permission === 'default') {
                     Notification.requestPermission().then(p => {
@@ -8091,11 +7925,6 @@
                 }
                 if (document.getElementById('lightbox')?.classList.contains('open')) {
                     closeLightbox();
-                    return;
-                }
-                // Close What's New popover
-                if (_whatsNewOpen) {
-                    toggleWhatsNew();
                     return;
                 }
                 // Close Autoweb panel
@@ -8338,14 +8167,6 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     yankFocusedMessage();
-                }
-            }
-            // H — toggle What's New
-            if (e.key === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    toggleWhatsNew();
                 }
             }
             // V — toggle Autoweb dashboard
