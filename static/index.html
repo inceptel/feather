@@ -3865,9 +3865,7 @@ function hideSession(sessionId) {
             updateToolsToggleButton();
         }
 
-        let thinkingBlocksCollapsed = localStorage.getItem('feather-thinking-collapsed') !== null
-            ? localStorage.getItem('feather-thinking-collapsed') === '1'
-            : window.innerWidth < 768;
+        let thinkingBlocksCollapsed = window.innerWidth < 768;
 
         function addThinkingBlock(text) {
             const container = document.getElementById('message-container');
@@ -3917,16 +3915,12 @@ function hideSession(sessionId) {
                 }
             });
             updateThinkingToggleButton();
-            localStorage.setItem('feather-thinking-collapsed', thinkingBlocksCollapsed ? '1' : '0');
         }
 
-        let toolBlocksCollapsed = localStorage.getItem('feather-tool-blocks-collapsed') !== null
-            ? localStorage.getItem('feather-tool-blocks-collapsed') === '1'
-            : true;
+        let toolBlocksCollapsed = true;
 
         function toggleAllTools() {
             toolBlocksCollapsed = !toolBlocksCollapsed;
-            localStorage.setItem('feather-tool-blocks-collapsed', toolBlocksCollapsed ? '1' : '0');
             // Collapse/expand tool call bodies
             document.querySelectorAll('.tool-card .tool-body').forEach(body => {
                 if (toolBlocksCollapsed) {
@@ -3980,7 +3974,7 @@ function hideSession(sessionId) {
         // ========== In-Chat Search ==========
         let _chatSearchMarks = [];
         let _chatSearchIdx = -1;
-        let _chatSearchCaseSensitive = localStorage.getItem('feather-chat-search-case') === 'true';
+        let _chatSearchCaseSensitive = false;
 
         function _applyChatSearchCaseBtn() {
             const btn = document.getElementById('chat-search-case-btn');
@@ -3992,7 +3986,6 @@ function hideSession(sessionId) {
 
         function toggleChatSearchCase() {
             _chatSearchCaseSensitive = !_chatSearchCaseSensitive;
-            localStorage.setItem('feather-chat-search-case', _chatSearchCaseSensitive);
             _applyChatSearchCaseBtn();
             const input = document.getElementById('chat-search-input');
             if (input && input.value) doChatSearch(input.value);
