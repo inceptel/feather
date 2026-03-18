@@ -76,12 +76,6 @@
         /* Skeleton loading for session history */
         .skeleton-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
         .skeleton-block { border-radius: 12px; background: linear-gradient(90deg, var(--smoke-3) 25%, var(--smoke-4) 50%, var(--smoke-3) 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
-        /* Scroll progress indicator */
-        #scroll-progress { position: absolute; top: 0; left: 0; height: 2px; background: var(--gold-9); z-index: 30; transition: width 80ms linear, opacity 200ms ease; opacity: 0; pointer-events: none; border-radius: 0 1px 1px 0; }
-        #scroll-progress.visible { opacity: 0.6; }
-        /* Message position indicator — shows "42 / 155" when scrolling long sessions */
-        #msg-position-indicator { position: absolute; top: 6px; right: 12px; z-index: 31; font-size: 11px; font-family: ui-monospace, monospace; color: var(--smoke-9); background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; white-space: nowrap; }
-        #msg-position-indicator.visible { opacity: 0.8; }
         /* Sticky date separators in message list */
         .date-separator { position: sticky; top: 0; z-index: 10; background: var(--smoke-1); padding-left: 1rem; padding-right: 1rem; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -566,10 +560,6 @@
             <button onclick="chatSearchNav(1)" class="p-1 text-smoke-8 hover:text-smoke-12" title="Next (Enter / F3)" aria-label="Next match"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
             <button onclick="closeChatSearch()" class="p-1 text-smoke-8 hover:text-smoke-12" title="Close (Escape)" aria-label="Close search"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
-
-        <!-- Scroll progress indicator -->
-        <div id="scroll-progress"></div>
-        <div id="msg-position-indicator"></div>
 
         <!-- Messages -->
         <div id="messages" class="flex-1 overflow-y-auto overflow-x-hidden thin-scrollbar relative pt-2 flex flex-col" onscroll="handleMessagesScroll()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
@@ -4477,67 +4467,6 @@ function hideSession(sessionId) {
                     btn.classList.remove('hidden');
                 }
             }
-            updateScrollProgress();
-        }
-
-        let _msgPosHideTimer = null;
-        function updateScrollProgress() {
-            const container = document.getElementById('messages');
-            const bar = document.getElementById('scroll-progress');
-            if (!container || !bar) return;
-            const scrollable = container.scrollHeight - container.clientHeight;
-            if (scrollable <= 50) {
-                bar.classList.remove('visible');
-                bar.style.width = '0%';
-                hideMsgPosition();
-                return;
-            }
-            const pct = Math.min(100, (container.scrollTop / scrollable) * 100);
-            bar.style.width = pct + '%';
-            const showBar = pct > 0 && pct < 99;
-            bar.classList.toggle('visible', showBar);
-            // Message position indicator
-            updateMsgPosition(container, showBar);
-        }
-
-        function updateMsgPosition(scrollContainer, isScrolling) {
-            const indicator = document.getElementById('msg-position-indicator');
-            if (!indicator) return;
-            const mc = document.getElementById('message-container');
-            if (!mc) { indicator.classList.remove('visible'); return; }
-            const msgs = mc.children;
-            // Count user+assistant message bubbles (skip date separators, tool-only blocks)
-            let total = 0;
-            const msgEls = [];
-            for (let i = 0; i < msgs.length; i++) {
-                if (msgs[i].querySelector('.user-msg-bubble, .assistant-msg-bubble')) {
-                    total++;
-                    msgEls.push(msgs[i]);
-                }
-            }
-            if (total < 10 || !isScrolling) {
-                indicator.classList.remove('visible');
-                return;
-            }
-            // Find first visible message (top of viewport)
-            const viewTop = scrollContainer.getBoundingClientRect().top;
-            const viewBottom = viewTop + scrollContainer.clientHeight;
-            let firstVisible = 0;
-            for (let i = 0; i < msgEls.length; i++) {
-                const rect = msgEls[i].getBoundingClientRect();
-                if (rect.bottom > viewTop + 20) { firstVisible = i + 1; break; }
-            }
-            if (firstVisible === 0) firstVisible = 1;
-            indicator.textContent = firstVisible + ' / ' + total;
-            indicator.classList.add('visible');
-            // Auto-hide after 1.5s of no scrolling
-            clearTimeout(_msgPosHideTimer);
-            _msgPosHideTimer = setTimeout(() => hideMsgPosition(), 1500);
-        }
-
-        function hideMsgPosition() {
-            const indicator = document.getElementById('msg-position-indicator');
-            if (indicator) indicator.classList.remove('visible');
         }
 
         let scrollPending = false;
