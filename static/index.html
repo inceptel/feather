@@ -334,10 +334,7 @@
         .assistant-msg-bubble .msg-quote-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
         .assistant-msg-bubble:hover .msg-quote-btn { opacity: 0.8; }
         .assistant-msg-bubble .msg-quote-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
-        /* J/K message navigation highlight */
-        @keyframes msg-nav-flash { 0% { box-shadow: inset 0 0 0 2px rgba(250, 178, 131, 0.5); } 100% { box-shadow: none; } }
-        .msg-nav-highlight { animation: msg-nav-flash 0.8s ease-out; border-radius: 8px; }
-        #msg-nav-indicator { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(20,20,30,0.85); color: var(--smoke-10); padding: 4px 14px; border-radius: 14px; font-size: 12px; font-family: 'Inter', sans-serif; z-index: 9998; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; border: 1px solid var(--smoke-5); }
+
         .user-msg-bubble .msg-edit-btn { position: absolute; top: 6px; right: 60px; opacity: 0; transition: opacity 0.15s; background: var(--smoke-4); border: 1px solid var(--smoke-6); border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--smoke-10); cursor: pointer; z-index: 2; display: flex; align-items: center; gap: 4px; }
         .user-msg-bubble:hover .msg-edit-btn { opacity: 0.8; }
         .user-msg-bubble .msg-edit-btn:hover { opacity: 1 !important; background: var(--smoke-5); color: var(--smoke-12); }
@@ -4620,84 +4617,6 @@ function hideSession(sessionId) {
             });
         }
 
-        // ========== J/K Vim-style message navigation ==========
-        let _msgNavIdx = -1;
-        function navigateMessages(direction) {
-            const container = document.getElementById('message-container');
-            if (!container) return;
-            // Get all top-level message divs (user and assistant), skip date separators and non-message elements
-            const msgs = Array.from(container.children).filter(el =>
-                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
-            );
-            if (msgs.length === 0) return;
-            // Find current visible center message if _msgNavIdx is stale
-            if (_msgNavIdx < 0 || _msgNavIdx >= msgs.length) {
-                const messagesEl = document.getElementById('messages');
-                const centerY = messagesEl.getBoundingClientRect().top + messagesEl.clientHeight / 2;
-                _msgNavIdx = 0;
-                for (let i = 0; i < msgs.length; i++) {
-                    if (msgs[i].getBoundingClientRect().top <= centerY) _msgNavIdx = i;
-                }
-            }
-            _msgNavIdx = Math.max(0, Math.min(msgs.length - 1, _msgNavIdx + direction));
-            const target = msgs[_msgNavIdx];
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Flash highlight
-            target.classList.remove('msg-nav-highlight');
-            void target.offsetWidth; // force reflow
-            target.classList.add('msg-nav-highlight');
-            const role = target.querySelector('.user-msg-bubble') ? 'you' : 'claude';
-            showMsgNavIndicator(_msgNavIdx, msgs.length, role);
-        }
-
-        // Yank (copy) currently focused/navigated message text (vim Y)
-        function yankFocusedMessage() {
-            const container = document.getElementById('message-container');
-            if (!container) return;
-            const msgs = Array.from(container.children).filter(el =>
-                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
-            );
-            if (msgs.length === 0) return;
-            const idx = (_msgNavIdx >= 0 && _msgNavIdx < msgs.length) ? _msgNavIdx : msgs.length - 1;
-            const target = msgs[idx];
-            const textEl = target.querySelector('.user-msg-bubble, .assistant-msg-bubble');
-            const text = textEl ? textEl.innerText : target.innerText;
-            navigator.clipboard.writeText(text).then(() => {
-                showToast('Message copied');
-            }).catch(() => showToast('Copy failed'));
-        }
-
-        // Jump to first or last message (vim G / gg)
-        function jumpToMessage(position) {
-            const container = document.getElementById('message-container');
-            if (!container) return;
-            const msgs = Array.from(container.children).filter(el =>
-                el.querySelector('.user-msg-bubble, .assistant-msg-bubble')
-            );
-            if (msgs.length === 0) return;
-            _msgNavIdx = position === 'first' ? 0 : msgs.length - 1;
-            const target = msgs[_msgNavIdx];
-            target.scrollIntoView({ behavior: 'smooth', block: position === 'first' ? 'start' : 'center' });
-            target.classList.remove('msg-nav-highlight');
-            void target.offsetWidth;
-            target.classList.add('msg-nav-highlight');
-            const role = target.querySelector('.user-msg-bubble') ? 'you' : 'claude';
-            showMsgNavIndicator(_msgNavIdx, msgs.length, role);
-        }
-        // Show brief "X / Y · role" position indicator when navigating messages
-        let _msgNavIndicatorTimeout = null;
-        function showMsgNavIndicator(idx, total, role) {
-            const el = document.getElementById('msg-nav-indicator');
-            if (!el) return;
-            el.textContent = (idx + 1) + ' / ' + total + (role ? ' · ' + role : '');
-            el.style.opacity = '1';
-            if (_msgNavIndicatorTimeout) clearTimeout(_msgNavIndicatorTimeout);
-            _msgNavIndicatorTimeout = setTimeout(() => { el.style.opacity = '0'; }, 1500);
-        }
-
-        let _lastGPress = 0; // for gg detection
-        // Reset nav index on session switch
-        const _origSelectSession = typeof selectSession === 'function' ? selectSession : null;
 
         // ========== Auto-scroll reliability ==========
         // When images/media load inside messages, they change scrollHeight.
@@ -7479,6 +7398,6 @@ function hideSession(sessionId) {
             setInterval(updateTaoPill, 5000);
         });
     </script>
-    <div id="msg-nav-indicator"></div>
+
 </body>
 </html>
