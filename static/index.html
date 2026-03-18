@@ -4472,7 +4472,9 @@
                 <div class="max-w-3xl mx-auto">
                     <div class="tool-card border-l-[3px] border-apple-9/50 bg-smoke-3/30 rounded-r-lg overflow-hidden" data-tool-id="${toolId}" data-start-time="${Date.now()}">
                         <div class="tool-header min-w-0 flex items-center gap-2.5 px-3 py-2 cursor-pointer"
-                             onclick="this.parentElement.querySelector('.tool-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.tool-body').classList.contains('hidden') ? '▶' : '▼'">
+                             role="button" tabindex="0" aria-expanded="false" aria-label="Tool call: ${escapeHtml(tool.name)}"
+                             onclick="toggleToolHeader(this)"
+                             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleToolHeader(this)}">
                             <span class="text-sm">${icon}</span>
                             <span class="text-xs font-medium text-smoke-12">${escapeHtml(tool.name)}</span>
                             ${langBadge}
@@ -4560,9 +4562,11 @@
                 } else {
                     body.classList.remove('hidden');
                 }
-                // Update chevron
+                // Update chevron and aria-expanded
+                const header = body.parentElement.querySelector('.tool-header');
                 const chevron = body.parentElement.querySelector('.tool-chevron');
                 if (chevron) chevron.textContent = toolBlocksCollapsed ? '▶' : '▼';
+                if (header) header.setAttribute('aria-expanded', String(!toolBlocksCollapsed));
             });
             // Collapse/expand tool result bodies
             document.querySelectorAll('.tool-card .result-body').forEach(body => {
@@ -4571,10 +4575,21 @@
                 } else {
                     body.classList.remove('hidden');
                 }
+                const header = body.parentElement.querySelector('.tool-header');
                 const chevron = body.parentElement.querySelector('.tool-chevron');
                 if (chevron) chevron.textContent = toolBlocksCollapsed ? '▶' : '▼';
+                if (header) header.setAttribute('aria-expanded', String(!toolBlocksCollapsed));
             });
             updateToolsToggleButton();
+        }
+
+        function toggleToolHeader(el) {
+            const body = el.parentElement.querySelector('.tool-body,.result-body');
+            if (!body) return;
+            const hidden = body.classList.toggle('hidden');
+            const chevron = el.querySelector('.tool-chevron');
+            if (chevron) chevron.textContent = hidden ? '▶' : '▼';
+            el.setAttribute('aria-expanded', String(!hidden));
         }
 
         function updateToolsToggleButton() {
@@ -4948,7 +4963,7 @@
                 <div class="max-w-3xl mx-auto">
                     <div class="tool-card border-l-[3px] ${borderColor} bg-smoke-3/30 rounded-r-lg overflow-hidden">
                         <div class="tool-header min-w-0 flex items-center gap-2.5 px-3 py-2 ${isShort ? '' : 'cursor-pointer'}"
-                             ${isShort ? '' : `onclick="this.parentElement.querySelector('.result-body').classList.toggle('hidden'); this.querySelector('.tool-chevron').textContent = this.parentElement.querySelector('.result-body').classList.contains('hidden') ? '▶' : '▼'"`}>
+                             ${isShort ? '' : `role="button" tabindex="0" aria-expanded="${shouldExpand}" aria-label="Tool result: ${escapeHtml(summary)}" onclick="toggleToolHeader(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleToolHeader(this)}"`}>
                             <span class="text-xs ${isError ? 'text-ember-9' : 'text-apple-9'}">${icon}</span>
                             <span class="text-xs text-smoke-10 truncate flex-1 ${isShort ? 'font-mono' : ''}">${escapeHtml(summary)}</span>
                             ${durationHtml}
