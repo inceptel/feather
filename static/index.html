@@ -391,6 +391,8 @@
     </style>
 </head>
 <body class="bg-smoke-1 text-smoke-12 flex overflow-hidden font-sans" style="height: 100vh; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);">
+    <!-- Screen reader live region for toast announcements -->
+    <div id="sr-announce" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
     <!-- Onboarding Modal -->
     <div id="onboarding-modal" class="fixed inset-0 bg-black/80 modal-backdrop z-[100] hidden items-center justify-center" role="dialog" aria-modal="true" aria-label="Welcome to Feather">
         <div class="bg-smoke-2 border border-smoke-5 modal-panel max-w-lg w-full mx-4">
@@ -7733,7 +7735,9 @@
             document.body.style.overflow = '';
         }
 
+        let _shortcutsModalTrigger = null;
         function openShortcutsModal() {
+            _shortcutsModalTrigger = document.activeElement;
             const m = document.getElementById('shortcuts-modal');
             if (m) m.style.display = 'flex';
             const inp = document.getElementById('shortcuts-search');
@@ -7742,6 +7746,10 @@
         function closeShortcutsModal() {
             const m = document.getElementById('shortcuts-modal');
             if (m) m.style.display = 'none';
+            if (_shortcutsModalTrigger && typeof _shortcutsModalTrigger.focus === 'function') {
+                _shortcutsModalTrigger.focus();
+                _shortcutsModalTrigger = null;
+            }
         }
         function filterShortcuts(q) {
             const list = document.getElementById('shortcuts-list');
@@ -7826,7 +7834,9 @@
         ];
         let _cmdPaletteIdx = 0;
 
+        let _cmdPaletteTrigger = null;
         function openCommandPalette() {
+            _cmdPaletteTrigger = document.activeElement;
             const overlay = document.getElementById('command-palette-overlay');
             if (!overlay) return;
             overlay.style.display = 'flex';
@@ -7839,6 +7849,10 @@
         function closeCommandPalette() {
             const overlay = document.getElementById('command-palette-overlay');
             if (overlay) overlay.style.display = 'none';
+            if (_cmdPaletteTrigger && typeof _cmdPaletteTrigger.focus === 'function') {
+                _cmdPaletteTrigger.focus();
+                _cmdPaletteTrigger = null;
+            }
         }
 
         function getFilteredCommands(query) {
@@ -8269,8 +8283,12 @@
         let knownUptime = null;
 
         function showToast(message, duration = 5000) {
+            // Announce to screen readers via live region
+            const sr = document.getElementById('sr-announce');
+            if (sr) { sr.textContent = ''; requestAnimationFrame(() => { sr.textContent = message; }); }
             const toast = document.createElement('div');
             toast.textContent = message;
+            toast.setAttribute('role', 'status');
             Object.assign(toast.style, {
                 position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%) translateY(-8px)',
                 background: '#1a1a2e', color: '#e0e0e0', padding: '12px 24px',
