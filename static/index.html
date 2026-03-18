@@ -82,9 +82,6 @@
         /* Message position indicator — shows "42 / 155" when scrolling long sessions */
         #msg-position-indicator { position: absolute; top: 6px; right: 12px; z-index: 31; font-size: 11px; font-family: ui-monospace, monospace; color: var(--smoke-9); background: var(--smoke-2); border: 1px solid var(--smoke-4); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; white-space: nowrap; }
         #msg-position-indicator.visible { opacity: 0.8; }
-        /* Focus mode — hides tool calls/results for clean conversation reading */
-        #message-container.focus-mode [data-msg-type="tool"] { display: none !important; }
-        #focus-mode-btn.active { color: var(--gold-9) !important; background: rgba(250, 178, 131, 0.12); }
         /* Sticky date separators in message list */
         .date-separator { position: sticky; top: 0; z-index: 10; background: var(--smoke-1); padding-left: 1rem; padding-right: 1rem; }
         .status-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
@@ -202,17 +199,6 @@
             background: var(--smoke-1); border-top: 1px solid var(--smoke-6);
         }
         #terminal-panel.open { display: flex; }
-        /* Zen/focus mode — hides all chrome for distraction-free reading */
-        body.zen-mode #sidebar,
-        body.zen-mode #sidebar-overlay,
-        body.zen-mode #menu-btn,
-        body.zen-mode #mobile-session-header,
-        body.zen-mode #desktop-session-header,
-        body.zen-mode #terminal-panel,
-        body.zen-mode main { margin-left: 0 !important; }
-        body.zen-mode #zen-exit-btn { display: flex !important; }
-        #zen-exit-btn { display: none; position: fixed; top: 12px; right: 12px; z-index: 200; padding: 4px 12px; background: var(--smoke-3); border: 1px solid var(--smoke-5); border-radius: 8px; color: var(--smoke-10); font-size: 11px; cursor: pointer; font-family: 'Inter', sans-serif; gap: 6px; align-items: center; opacity: 0.5; transition: opacity 0.2s; }
-        #zen-exit-btn:hover { opacity: 1; background: var(--smoke-4); color: var(--smoke-12); }
         body.terminal-open main { height: calc(100vh - var(--terminal-height, 290px)) !important; flex: 1 1 0% !important; min-width: 0 !important; }
         @keyframes tool-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         .tool-running-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold-9); animation: tool-pulse 1.2s ease-in-out infinite; flex-shrink: 0; }
@@ -239,7 +225,7 @@
             #input { font-size: 16px !important; min-height: 48px; }
             #send-btn { min-height: 44px; min-width: 60px; }
             /* Mobile: hide secondary toolbar buttons to prevent overflow — accessible via keyboard shortcuts (T, F) and command palette */
-            #tools-toggle-btn, #thinking-toggle-btn, #focus-mode-btn, #voice-btn, #terminal-toggle { display: none !important; }
+            #tools-toggle-btn, #thinking-toggle-btn, #voice-btn, #terminal-toggle { display: none !important; }
             #input + div > div:first-child { display: none; }
             /* Mobile: messages top padding is set dynamically by updateMobileSessionHeader */
             #messages { padding-top: 8px !important; }
@@ -676,9 +662,6 @@
                             <button id="thinking-toggle-btn" onclick="toggleAllThinking()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Toggle thinking blocks" aria-label="Toggle thinking blocks">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
                             </button>
-                            <button id="focus-mode-btn" onclick="toggleFocusMode()" class="hidden px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-sm rounded-lg hover:bg-smoke-4" title="Focus mode — hide tool calls (F)" aria-label="Focus mode — hide tool calls">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                            </button>
                             <button onclick="triggerScreenshot()" class="px-2 py-1.5 text-smoke-8 hover:text-smoke-12 transition-colors text-xs rounded-lg hover:bg-smoke-4" title="Upload file" aria-label="Upload file">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                             </button>
@@ -697,11 +680,6 @@
                 </div>
             </div>
         </div>
-        <!-- Zen mode exit button -->
-        <button id="zen-exit-btn" onclick="toggleZenMode()" title="Exit zen mode (Z)">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            Exit Zen
-        </button>
     </main>
 
     <!-- Terminal Panel -->
@@ -837,21 +815,6 @@
 
         // Apply theme immediately to avoid flash
         initTheme();
-
-        // ========== Zen Mode ==========
-        function toggleZenMode() {
-            const active = document.body.classList.toggle('zen-mode');
-            // Close terminal if entering zen mode
-            if (active && document.body.classList.contains('terminal-open')) {
-                toggleTerminal();
-            }
-            localStorage.setItem('feather-zen-mode', active ? '1' : '0');
-        }
-        // Restore zen mode on load
-        if (localStorage.getItem('feather-zen-mode') === '1') {
-            document.body.classList.add('zen-mode');
-        }
-
 
         // ========== State ==========
         let currentSessionId = null;
@@ -4089,7 +4052,6 @@
             `;
             container.appendChild(div);
             updateToolsToggleButton();
-            updateFocusModeButton();
         }
 
         let thinkingBlocksCollapsed = localStorage.getItem('feather-thinking-collapsed') !== null
@@ -4198,50 +4160,6 @@
                 if (hasTools) {
                     btn.classList.remove('hidden');
                     btn.style.opacity = toolBlocksCollapsed ? '0.5' : '1';
-                } else {
-                    btn.classList.add('hidden');
-                }
-            }
-        }
-
-        // ========== Focus Mode (hide tool calls) ==========
-        let focusModeActive = false;
-
-        function toggleFocusMode() {
-            focusModeActive = !focusModeActive;
-            const container = document.getElementById('message-container');
-            const btn = document.getElementById('focus-mode-btn');
-            if (container) {
-                if (focusModeActive) {
-                    container.classList.add('focus-mode');
-                } else {
-                    container.classList.remove('focus-mode');
-                }
-            }
-            if (btn) {
-                if (focusModeActive) {
-                    btn.classList.add('active');
-                    btn.title = 'Focus mode ON — showing conversation only (F)';
-                } else {
-                    btn.classList.remove('active');
-                    btn.title = 'Focus mode — hide tool calls (F)';
-                }
-            }
-            localStorage.setItem('feather-focus-mode', focusModeActive ? '1' : '0');
-        }
-        // Restore focus mode on load
-        if (localStorage.getItem('feather-focus-mode') === '1') {
-            focusModeActive = true;
-            const _fmc = document.getElementById('message-container');
-            if (_fmc) _fmc.classList.add('focus-mode');
-        }
-
-        function updateFocusModeButton() {
-            const btn = document.getElementById('focus-mode-btn');
-            const hasTools = document.querySelectorAll('[data-msg-type="tool"]').length > 0;
-            if (btn) {
-                if (hasTools) {
-                    btn.classList.remove('hidden');
                 } else {
                     btn.classList.add('hidden');
                 }
@@ -4578,7 +4496,6 @@
             `;
             container.appendChild(div);
             updateToolsToggleButton();
-            updateFocusModeButton();
         }
 
         function renderMarkdown(text) {
@@ -7396,8 +7313,6 @@
             { label: 'Cycle sort mode (Latest/Oldest/Most messages)', shortcut: 'O', action: () => cycleSessionSort() },
             { label: 'Toggle theme', shortcut: '', action: () => toggleTheme() },
             { label: 'Star/unstar current session', shortcut: 'S', action: () => { if (currentSessionId) { toggleStarSession(new Event('click'), currentSessionId); } } },
-            { label: 'Toggle zen mode', shortcut: 'Z', action: () => toggleZenMode() },
-            { label: 'Focus mode — hide tool calls', shortcut: 'F', action: () => toggleFocusMode() },
             { label: 'Toggle thinking blocks', shortcut: 'T', action: () => toggleAllThinking() },
             { label: 'Yank (copy) focused message', shortcut: 'Y', action: () => yankFocusedMessage() },
             { label: 'Copy last response', shortcut: 'Ctrl+Shift+C', action: () => copyLastAssistantMessage() },
@@ -7700,22 +7615,6 @@
                 if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
                     e.preventDefault();
                     jumpToMessage('last');
-                }
-            }
-            // Z — toggle zen mode (when not in input)
-            if (e.key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    toggleZenMode();
-                }
-            }
-            // F — toggle focus mode (hide tool calls, when not in input)
-            if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-                const tag = document.activeElement?.tagName?.toLowerCase();
-                if (tag !== 'input' && tag !== 'textarea' && !document.activeElement?.isContentEditable) {
-                    e.preventDefault();
-                    toggleFocusMode();
                 }
             }
             // T — toggle thinking blocks collapsed/expanded
