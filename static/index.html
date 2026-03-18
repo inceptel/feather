@@ -7757,17 +7757,41 @@
             document.body.style.overflow = '';
         }
 
+        // Focus trap: keeps Tab/Shift+Tab cycling within a modal container
+        function trapFocusHandler(container) {
+            return function(e) {
+                if (e.key !== 'Tab') return;
+                const focusable = Array.from(container.querySelectorAll(
+                    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+                )).filter(el => el.offsetParent !== null);
+                if (!focusable.length) return;
+                const first = focusable[0], last = focusable[focusable.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                } else {
+                    if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                }
+            };
+        }
         let _shortcutsModalTrigger = null;
+        let _shortcutsFocusTrap = null;
         function openShortcutsModal() {
             _shortcutsModalTrigger = document.activeElement;
             const m = document.getElementById('shortcuts-modal');
-            if (m) m.style.display = 'flex';
+            if (!m) return;
+            m.style.display = 'flex';
             const inp = document.getElementById('shortcuts-search');
             if (inp) { inp.value = ''; filterShortcuts(''); setTimeout(() => inp.focus(), 50); }
+            if (_shortcutsFocusTrap) m.removeEventListener('keydown', _shortcutsFocusTrap);
+            _shortcutsFocusTrap = trapFocusHandler(m);
+            m.addEventListener('keydown', _shortcutsFocusTrap);
         }
         function closeShortcutsModal() {
             const m = document.getElementById('shortcuts-modal');
-            if (m) m.style.display = 'none';
+            if (m) {
+                m.style.display = 'none';
+                if (_shortcutsFocusTrap) { m.removeEventListener('keydown', _shortcutsFocusTrap); _shortcutsFocusTrap = null; }
+            }
             if (_shortcutsModalTrigger && typeof _shortcutsModalTrigger.focus === 'function') {
                 _shortcutsModalTrigger.focus();
                 _shortcutsModalTrigger = null;
@@ -7857,6 +7881,7 @@
         let _cmdPaletteIdx = 0;
 
         let _cmdPaletteTrigger = null;
+        let _cmdPaletteFocusTrap = null;
         function openCommandPalette() {
             _cmdPaletteTrigger = document.activeElement;
             const overlay = document.getElementById('command-palette-overlay');
@@ -7866,11 +7891,19 @@
             if (input) { input.value = ''; input.focus(); }
             _cmdPaletteIdx = 0;
             renderCommandPaletteList('');
+            const palette = document.getElementById('command-palette');
+            if (palette) {
+                if (_cmdPaletteFocusTrap) palette.removeEventListener('keydown', _cmdPaletteFocusTrap);
+                _cmdPaletteFocusTrap = trapFocusHandler(palette);
+                palette.addEventListener('keydown', _cmdPaletteFocusTrap);
+            }
         }
 
         function closeCommandPalette() {
             const overlay = document.getElementById('command-palette-overlay');
             if (overlay) overlay.style.display = 'none';
+            const palette = document.getElementById('command-palette');
+            if (palette && _cmdPaletteFocusTrap) { palette.removeEventListener('keydown', _cmdPaletteFocusTrap); _cmdPaletteFocusTrap = null; }
             if (_cmdPaletteTrigger && typeof _cmdPaletteTrigger.focus === 'function') {
                 _cmdPaletteTrigger.focus();
                 _cmdPaletteTrigger = null;
