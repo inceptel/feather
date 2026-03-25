@@ -33,7 +33,10 @@ function renderMarkdown(text: string): string {
 }
 
 function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+  return text.replace(
+    /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[P^_][\s\S]*?\u001b\\|\u001b[@-_])/g,
+    '',
+  )
 }
 
 // ── Tool rendering ──────────────────────────────────────────────────────────
@@ -205,6 +208,8 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
 
   createEffect(() => {
     if (!lightbox()) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     requestAnimationFrame(() => lightboxCloseRef?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -212,7 +217,10 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       }
     }
     window.addEventListener('keydown', onKeyDown)
-    onCleanup(() => window.removeEventListener('keydown', onKeyDown))
+    onCleanup(() => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKeyDown)
+    })
   })
 
   return (
@@ -227,7 +235,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
     >
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
-        <div style={{ color: '#7c8595', 'text-align': 'center', padding: '40px' }}>Loading...</div>
+        <div role="status" aria-live="polite" aria-atomic="true" style={{ color: '#7c8595', 'text-align': 'center', padding: '40px' }}>Loading...</div>
       </Show>
       {/* Lightbox */}
       <Show when={lightbox()}>
