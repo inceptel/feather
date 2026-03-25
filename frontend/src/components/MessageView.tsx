@@ -213,7 +213,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
             </div>
           </div>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <span style={{ 'font-size': '10px', color: '#444' }}>{formatTime(msg.timestamp)}</span>
+            <span style={{ 'font-size': '10px', color: '#7c8595' }}>{formatTime(msg.timestamp)}</span>
             {msg.role === 'user' && msg.delivery && (
               <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
