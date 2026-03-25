@@ -201,7 +201,7 @@ export default function App() {
                   'justify-content': 'center',
                   background: 'none',
                   border: 'none',
-                  color: '#666',
+                  color: '#7c8595',
                   'font-size': '20px',
                   cursor: 'pointer',
                   'border-radius': '8px',
@@ -214,7 +214,7 @@ export default function App() {
               </button>
             </div>
             <div style={{ padding: '12px 16px' }}>
-              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
+              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>
@@ -294,7 +294,7 @@ export default function App() {
                     'max-width': '240px',
                     height: '44px',
                     background: creating() ? '#1a1a2e' : '#4aba6a',
-                    color: creating() ? '#666' : '#000',
+                    color: creating() ? '#7c8595' : '#000',
                     border: 'none',
                     'border-radius': '10px',
                     'font-size': '14px',
@@ -335,7 +335,13 @@ export default function App() {
                     ? <img src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
                     : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#999', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
                   }
-                  <button onClick={() => removeFile(i())} style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '11px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1' }}>&times;</button>
+                  <button
+                    onClick={() => removeFile(i())}
+                    aria-label={`Remove attached file ${f.name}`}
+                    style={{ position: 'absolute', top: '-8px', right: '-8px', width: '28px', height: '28px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '14px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1', padding: '0' }}
+                  >
+                    &times;
+                  </button>
                 </div>
               )}</For>
             </div>
@@ -369,7 +375,7 @@ export default function App() {
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
               placeholder="Send a message..." rows={1}
               style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '15px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '180px' }} />
-            <button onClick={handleSend} disabled={uploading() || (!text().trim() && files().length === 0)} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '0 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '44px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }}>{uploading() ? '...' : 'Send'}</button>
+            <button onClick={handleSend} disabled={uploading() || (!text().trim() && files().length === 0)} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#aeb6c2', border: 'none', 'border-radius': '12px', padding: '0 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '44px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }}>{uploading() ? '...' : 'Send'}</button>
           </div>
         </Show>
       </div>
