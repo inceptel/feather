@@ -1,20 +1,25 @@
 import { onMount, onCleanup, createEffect } from 'solid-js'
-import { Terminal as XTerm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
+import { init, Terminal as GhosttyTerm, FitAddon } from 'ghostty-web'
 
 const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/new-dev/api/terminal`
 
+let wasmReady: Promise<void> | null = null
+function ensureInit() {
+  if (!wasmReady) wasmReady = init()
+  return wasmReady
+}
+
 export function Terminal(props: { sessionId: string | null }) {
   let containerRef: HTMLDivElement | undefined
-  let term: XTerm | null = null
+  let term: GhosttyTerm | null = null
   let fitAddon: FitAddon | null = null
   let ws: WebSocket | null = null
 
-  function connect(sessionId: string) {
+  async function connect(sessionId: string) {
     disconnect()
+    await ensureInit()
 
-    term = new XTerm({
+    term = new GhosttyTerm({
       theme: { background: '#0a0e14', foreground: '#e5e5e5', cursor: '#4aba6a' },
       fontSize: 13,
       fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
