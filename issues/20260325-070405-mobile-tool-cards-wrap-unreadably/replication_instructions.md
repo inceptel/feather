@@ -1,0 +1,4 @@
+1. Open Feather on a mobile viewport (`390x844`) and load the worker-2 session titled `WORKER_NUM=2 WORKTREE=/home/user/feather-dev/w2 PORT=3302 WORKER_DIR=/home/user/`.
+2. Stay on the `Chat` tab and inspect the tool transcript around the long Bash command (`printf "%s\tskip\tNo new issues to replicate...`) and the tool output mentioning `/home/user/feather-aw/w2/breadcrumbs.md`.
+3. The bug is present if those tool blocks preserve `white-space: pre-wrap` while also using `word-break: break-all`, because that forces long commands and file paths to split across arbitrary character boundaries on mobile instead of remaining horizontally scrollable.
+4. The automated repro confirms the target transcript still contains those exact long strings, opens the session by hash, and reports failure when both the command block and output block render with `pre-wrap` plus `break-all`.
