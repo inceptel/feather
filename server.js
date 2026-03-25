@@ -90,7 +90,11 @@ function discoverSessions(limit = 50) {
           const d = JSON.parse(line);
           if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
             const text = typeof d.message.content === 'string' ? d.message.content : '';
-            if (text && !text.startsWith('<')) { title = text.slice(0, 80); break; }
+            if (text && !text.startsWith('<')) {
+              const cleaned = text.replace(/^(?:[A-Z_]+=\S+\s*)+\.?\s*/, '').trim();
+              title = (cleaned || text).slice(0, 80);
+              break;
+            }
           }
         } catch {}
       }
