@@ -1,0 +1,1 @@
+{"href":"http://localhost:3304/#4baa1292-7fdf-4e87-af47-6731e459b3cd","textareaValue":"","sendCalls":1,"optimisticPresent":true,"notes":"Selenium injected window.fetch rejection for /send. After tapping Send, the composer cleared and the optimistic bubble remained with a single-check sent state; no visible error banner appeared."}
