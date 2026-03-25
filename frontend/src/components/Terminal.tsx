@@ -108,10 +108,16 @@ export function Terminal(props: { sessionId: string | null }) {
     const observer = typeof ResizeObserver === 'undefined' || !containerRef
       ? null
       : new ResizeObserver(onResize)
+    const a11yObserver = typeof MutationObserver === 'undefined' || !containerRef
+      ? null
+      : new MutationObserver(() => syncTerminalA11y())
     window.addEventListener('resize', onResize)
     observer?.observe(containerRef)
+    a11yObserver?.observe(containerRef, { childList: true, subtree: true })
+    syncTerminalA11y()
     onCleanup(() => { window.removeEventListener('resize', onResize); disconnect() })
     onCleanup(() => observer?.disconnect())
+    onCleanup(() => a11yObserver?.disconnect())
   })
 
   return (
