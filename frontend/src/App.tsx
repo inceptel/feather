@@ -351,7 +351,7 @@ export default function App() {
               id="terminal-panel"
               role="tabpanel"
               aria-labelledby="terminal-tab"
-              style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%', 'box-sizing': 'border-box', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom, 0px))' }}
+              style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%', 'box-sizing': 'border-box', 'padding-top': 'max(12px, env(safe-area-inset-top, 0px))', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom, 0px))' }}
             >
               <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
             </div>
