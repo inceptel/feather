@@ -223,7 +223,27 @@ export default function App() {
               <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
               <div style={{ flex: '1' }} />
               <Show when={!s().isActive}>
-                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Resume</button>
+                <button
+                  onClick={() => handleResume(s().id)}
+                  style={{
+                    background: '#4aba6a',
+                    color: '#000',
+                    border: 'none',
+                    'border-radius': '8px',
+                    padding: '0 14px',
+                    'min-width': '44px',
+                    height: '44px',
+                    display: 'inline-flex',
+                    'align-items': 'center',
+                    'justify-content': 'center',
+                    'font-size': '12px',
+                    'font-weight': '600',
+                    cursor: 'pointer',
+                    'flex-shrink': '0',
+                  }}
+                >
+                  Resume
+                </button>
               </Show>
             </>}
           </Show>
