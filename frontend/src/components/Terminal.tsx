@@ -126,6 +126,7 @@ export function Terminal(props: { sessionId: string | null }) {
           top: '12px',
           right: '12px',
           left: '12px',
+          'z-index': '10',
           display: 'flex',
           'align-items': 'center',
           'flex-wrap': 'wrap',
