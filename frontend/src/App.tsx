@@ -214,7 +214,7 @@ export default function App() {
               </button>
             </div>
             <div style={{ padding: '12px 16px' }}>
-              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
+              <button aria-label="Start a new session" onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>
@@ -274,19 +274,38 @@ export default function App() {
 
         {/* Tabs */}
         <Show when={currentId()}>
-          <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
-            <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
-            <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+          <div role="tablist" aria-label="Session panels" style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
+            <button
+              id="chat-tab"
+              role="tab"
+              aria-selected={tab() === 'chat'}
+              aria-controls="chat-panel"
+              onClick={() => setTab('chat')}
+              style={tabStyle('chat')}
+            >
+              Chat
+            </button>
+            <button
+              id="terminal-tab"
+              role="tab"
+              aria-selected={tab() === 'terminal'}
+              aria-controls="terminal-panel"
+              onClick={() => setTab('terminal')}
+              style={tabStyle('terminal')}
+            >
+              Terminal
+            </button>
           </div>
         </Show>
 
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden' }}>
           <Show when={currentId()} fallback={
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444', padding: '24px' }}>
+            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#7c8595', padding: '24px' }}>
               <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
                 <p style={{ color: '#7c8595', 'font-size': '14px', 'line-height': '1.5' }}>Open a session or create a new one</p>
                 <button
+                  aria-label="Start a new session"
                   onClick={handleNew}
                   disabled={creating()}
                   style={{
@@ -307,10 +326,20 @@ export default function App() {
               </div>
             </div>
           }>
-            <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
+            <div
+              id="chat-panel"
+              role="tabpanel"
+              aria-labelledby="chat-tab"
+              style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}
+            >
               <MessageView messages={messages()} loading={loading()} />
             </div>
-            <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
+            <div
+              id="terminal-panel"
+              role="tabpanel"
+              aria-labelledby="terminal-tab"
+              style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}
+            >
               <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
             </div>
           </Show>
@@ -333,7 +362,7 @@ export default function App() {
                 <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333' }}>
                   {f.isImage
                     ? <img src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
-                    : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#999', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
+                    : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#c9d1d9', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
                   }
                   <button
                     onClick={() => removeFile(i())}
@@ -370,12 +399,13 @@ export default function App() {
               +
             </button>
             <textarea ref={textareaRef} value={text()}
+              aria-label="Message input"
               onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px' }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
               placeholder="Send a message..." rows={1}
               style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '15px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '180px' }} />
-            <button onClick={handleSend} disabled={uploading() || (!text().trim() && files().length === 0)} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#aeb6c2', border: 'none', 'border-radius': '12px', padding: '0 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '44px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }}>{uploading() ? '...' : 'Send'}</button>
+            <button aria-label="Send message" onClick={handleSend} disabled={uploading() || (!text().trim() && files().length === 0)} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#aeb6c2', border: 'none', 'border-radius': '12px', padding: '0 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '44px', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }}>{uploading() ? '...' : 'Send'}</button>
           </div>
         </Show>
       </div>
