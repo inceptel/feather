@@ -3,16 +3,34 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/new-dev/api/terminal`
+const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal`
 
 export function Terminal(props: { sessionId: string | null }) {
   let containerRef: HTMLDivElement | undefined
   let term: XTerm | null = null
   let fitAddon: FitAddon | null = null
   let ws: WebSocket | null = null
+  let reconnectTimer = 0
+  let connectionKey = 0
+
+  function clearReconnectTimer() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = 0
+    }
+  }
+
+  function scheduleReconnect(sessionId: string, key: number) {
+    clearReconnectTimer()
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = 0
+      if (props.sessionId === sessionId && key === connectionKey) connect(sessionId)
+    }, 1000)
+  }
 
   function connect(sessionId: string) {
     disconnect()
+    const key = connectionKey
 
     term = new XTerm({
       theme: { background: '#0a0e14', foreground: '#e5e5e5', cursor: '#4aba6a' },
@@ -30,9 +48,15 @@ export function Terminal(props: { sessionId: string | null }) {
 
     ws = new WebSocket(`${BASE_WS}?session=${sessionId}`)
     ws.onmessage = (e) => term?.write(e.data)
-    ws.onclose = () => term?.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n')
+    ws.onclose = (event) => {
+      term?.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n')
+      if (!event.wasClean && props.sessionId === sessionId && key === connectionKey) {
+        scheduleReconnect(sessionId, key)
+      }
+    }
 
     ws.onopen = () => {
+      clearReconnectTimer()
       if (fitAddon && ws) {
         const dims = fitAddon.proposeDimensions()
         if (dims) ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }))
@@ -46,6 +70,8 @@ export function Terminal(props: { sessionId: string | null }) {
   }
 
   function disconnect() {
+    clearReconnectTimer()
+    connectionKey += 1
     ws?.close()
     ws = null
     term?.dispose()
@@ -61,8 +87,13 @@ export function Terminal(props: { sessionId: string | null }) {
 
   onMount(() => {
     const onResize = () => { try { fitAddon?.fit() } catch {} }
+    const observer = typeof ResizeObserver === 'undefined' || !containerRef
+      ? null
+      : new ResizeObserver(onResize)
     window.addEventListener('resize', onResize)
+    observer?.observe(containerRef)
     onCleanup(() => { window.removeEventListener('resize', onResize); disconnect() })
+    onCleanup(() => observer?.disconnect())
   })
 
   return (
