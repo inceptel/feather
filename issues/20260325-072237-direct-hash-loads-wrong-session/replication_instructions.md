@@ -1,0 +1,5 @@
+1. Fetch `http://localhost:$PORT/api/sessions?limit=500` and confirm session `4baa1292-7fdf-4e87-af47-6731e459b3cd` exists with title `worker 4 probe` and `isActive: true`.
+2. Fetch the default `http://localhost:$PORT/api/sessions` list and confirm that same id is absent from the top 50 sessions the UI initially loads.
+3. Fetch `http://localhost:$PORT/api/sessions/4baa1292-7fdf-4e87-af47-6731e459b3cd/messages` and confirm the transcript still starts with the worker 4 probe discussion about the `port flip` repro instead of another worker bootstrap transcript.
+4. Inspect [App.tsx](/home/user/feather-dev/w5/frontend/src/App.tsx): on mount it restores `currentId` from `location.hash`, and `select(id)` fetches messages via `fetchMessages(id)` using that exact hashed id.
+5. The bug is present only if a direct hash load can show some other session's transcript while the requested session still exists. In this worker environment on port `3305`, the detector shows the opposite: the off-list hash still resolves to the target transcript, so this issue currently reproduces as absent.
