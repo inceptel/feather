@@ -159,7 +159,7 @@ export default function App() {
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
+        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
       </Show>
 
       {/* Sidebar */}
@@ -168,7 +168,28 @@ export default function App() {
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
             <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
-              <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer' }}>&times;</button>
+              <button
+                onClick={() => setSidebar(false)}
+                aria-label="Close session drawer"
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  display: 'flex',
+                  'align-items': 'center',
+                  'justify-content': 'center',
+                  background: 'none',
+                  border: 'none',
+                  color: '#666',
+                  'font-size': '20px',
+                  cursor: 'pointer',
+                  'border-radius': '8px',
+                  'flex-shrink': '0',
+                  padding: '0',
+                  'line-height': '1',
+                }}
+              >
+                &times;
+              </button>
             </div>
             <div style={{ padding: '12px 16px' }}>
               <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
@@ -177,13 +198,17 @@ export default function App() {
             </div>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
               <For each={sessions()}>{(s) => (
-                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
+                <button
+                  onClick={() => select(s.id)}
+                  aria-current={s.id === currentId() ? 'page' : undefined}
+                  style={{ width: '100%', padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
+                >
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
                     <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
                     <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
                   </div>
-                </div>
+                </button>
               )}</For>
             </div>
           </div>
