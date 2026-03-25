@@ -240,7 +240,7 @@ export default function App() {
       <div aria-hidden={sidebar() ? 'true' : undefined} style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%', 'pointer-events': sidebar() ? 'none' : 'auto', overflow: 'hidden' }}>
         {/* Header */}
         <div style={{ padding: '8px 16px 8px 68px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'flex-start', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
-          <Show when={cur()} fallback={<h1 style={{ color: '#666', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
+          <Show when={cur()} fallback={<h1 style={{ color: '#7c8595', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <span style={{ flex: '1', 'min-width': '0', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '2', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.2', 'font-size': '14px', 'font-weight': '600', 'padding-top': '2px' }}>{formatSessionTitle(s().title)}</span>
