@@ -159,7 +159,7 @@ export default function App() {
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
+        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
       </Show>
 
       {/* Sidebar */}
