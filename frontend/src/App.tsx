@@ -62,9 +62,11 @@ export default function App() {
   function removeFile(idx: number) { setFiles(prev => prev.filter((_, i) => i !== idx)) }
 
   onMount(async () => {
-    setSessions(await fetchSessions())
+    const nextSessions = await fetchSessions()
+    setSessions(nextSessions)
     const hash = location.hash.slice(1)
-    if (hash) select(hash)
+    const initialSessionId = hash || nextSessions.find(session => session.isActive)?.id
+    if (initialSessionId) select(initialSessionId)
   })
   onCleanup(() => cleanupSSE?.())
 
