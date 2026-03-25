@@ -135,11 +135,12 @@ export function Terminal(props: { sessionId: string | null }) {
             color: '#000',
             border: 'none',
             'border-radius': '8px',
-            padding: '6px 10px',
+            padding: '6px 12px',
             'font-size': '12px',
             'font-weight': '600',
             cursor: 'pointer',
-            'min-height': '32px',
+            'min-width': '44px',
+            'min-height': '44px',
           }}>Retry now</button>
         </div>
       </Show>
