@@ -164,8 +164,7 @@ export default function App() {
 
       {/* Sidebar */}
       <div style={{ width: sidebar() ? '300px' : '0', 'min-width': sidebar() ? '300px' : '0', height: '100%', background: '#0d1117', 'border-right': sidebar() ? '1px solid #1e1e1e' : 'none', overflow: 'hidden', transition: 'width 0.2s, min-width 0.2s', 'z-index': '40' }}>
-        <Show when={sidebar()}>
-          <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
+          <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', visibility: sidebar() ? 'visible' : 'hidden', 'pointer-events': sidebar() ? 'auto' : 'none' }}>
             <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
               <button
@@ -201,7 +200,7 @@ export default function App() {
                 <button
                   onClick={() => select(s.id)}
                   aria-current={s.id === currentId() ? 'page' : undefined}
-                  style={{ width: '100%', padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
+                  style={{ width: '100%', padding: '12px 16px', 'min-height': '44px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
                 >
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
@@ -212,7 +211,6 @@ export default function App() {
               )}</For>
             </div>
           </div>
-        </Show>
       </div>
 
       {/* Main */}
