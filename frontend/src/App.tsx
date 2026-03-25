@@ -213,7 +213,7 @@ export default function App() {
                   'justify-content': 'center',
                   background: 'none',
                   border: 'none',
-                  color: '#7c8595',
+                  color: '#aeb6c2',
                   'font-size': '20px',
                   cursor: 'pointer',
                   'border-radius': '8px',
