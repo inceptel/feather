@@ -29,17 +29,16 @@ Feather reads Claude's raw JSONL session files, streams updates via SSE, and con
 ## Quick start
 
 ```bash
-git clone https://github.com/inceptel/feather.git && cd feather
-./run.sh
-# → Feather on http://localhost:4870
+npm install inceptel/feather
+cd node_modules/feather && npm start
 ```
 
-Or step by step:
+Or from source:
 
 ```bash
-npm install
-cd frontend && npm install && npm run build && cd ..
-node server.js
+git clone https://github.com/inceptel/feather.git && cd feather
+npm install    # installs deps + builds frontend automatically
+npm start      # → Feather on http://localhost:4870
 ```
 
 ## Architecture

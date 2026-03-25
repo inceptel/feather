@@ -1,11 +1,11 @@
 {
   "name": "feather",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build:frontend": "cd frontend && npm run build",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "prepare": "npm run build:frontend",
     "test": "node --test test/unit/*.test.js",
     "test:api": "node --test test/unit/api.test.js",
     "test:e2e": "playwright test"
