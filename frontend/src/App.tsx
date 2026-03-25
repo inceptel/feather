@@ -258,7 +258,7 @@ export default function App() {
             </div>
           </Show>
           <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
-            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1' }} title="Attach file">+</button>
+            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '0', 'line-height': '1', width: '44px', height: '44px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }} title="Attach file">+</button>
             <textarea ref={textareaRef} value={text()}
               onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
