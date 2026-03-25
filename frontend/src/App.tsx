@@ -4,6 +4,8 @@ import { Terminal } from './components/Terminal'
 import type { SessionMeta, Message } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, uploadFile } from './api'
 
+interface QuickLink { label: string; url: string }
+
 interface PendingFile { name: string; blob: Blob; dataUrl: string; isImage: boolean }
 
 function resizeImage(blob: Blob, maxDim = 1600): Promise<Blob> {
@@ -43,6 +45,8 @@ export default function App() {
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [uploading, setUploading] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
+  const [links, setLinks] = createSignal<QuickLink[]>([])
   let cleanupSSE: (() => void) | null = null
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
@@ -63,6 +67,7 @@ export default function App() {
 
   onMount(async () => {
     setSessions(await fetchSessions())
+    fetch('/api/quick-links').then(r => r.json()).then(setLinks).catch(() => {})
     const hash = location.hash.slice(1)
     if (hash) select(hash)
   })
@@ -170,22 +175,46 @@ export default function App() {
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
               <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer' }}>&times;</button>
             </div>
-            <div style={{ padding: '12px 16px' }}>
-              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
-                {creating() ? 'Starting...' : '+ New Claude'}
-              </button>
+            {/* Sidebar tabs */}
+            <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
+              <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Sessions</button>
+              <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Links</button>
             </div>
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
-              <For each={sessions()}>{(s) => (
-                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
-                    <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
+            {/* Sessions tab */}
+            <Show when={sidebarTab() === 'sessions'}>
+              <div style={{ padding: '12px 16px' }}>
+                <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
+                  {creating() ? 'Starting...' : '+ New Claude'}
+                </button>
+              </div>
+              <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+                <For each={sessions()}>{(s) => (
+                  <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
+                    <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                      <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
+                      <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
+                      <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
+                    </div>
                   </div>
-                </div>
-              )}</For>
-            </div>
+                )}</For>
+              </div>
+            </Show>
+            {/* Links tab */}
+            <Show when={sidebarTab() === 'links'}>
+              <div style={{ flex: '1', 'overflow-y': 'auto', padding: '8px 0' }}>
+                <For each={links()}>{(link) => (
+                  <a href={link.url} target="_blank" rel="noopener" style={{ display: 'block', padding: '10px 16px', color: '#73b8ff', 'text-decoration': 'none', 'font-size': '13px', 'font-weight': '500', 'border-bottom': '1px solid #111' }}
+                    onMouseOver={(e) => (e.currentTarget.style.background = '#1a1a2e')}
+                    onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}>
+                    {link.label}
+                    <span style={{ color: '#444', 'font-size': '11px', 'margin-left': '8px' }}>{link.url}</span>
+                  </a>
+                )}</For>
+                <Show when={links().length === 0}>
+                  <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No quick links yet. Use /feather add link to add some.</div>
+                </Show>
+              </div>
+            </Show>
           </div>
         </Show>
       </div>

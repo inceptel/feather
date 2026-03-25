@@ -299,6 +299,24 @@ app.post('/api/upload', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Quick Links ─────────────────────────────────────────────────────────────
+
+const LINKS_FILE = path.resolve(import.meta.dirname, 'quick-links.json');
+
+function readLinks() {
+  try { return JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8')); }
+  catch { return []; }
+}
+
+app.get('/api/quick-links', (_req, res) => res.json(readLinks()));
+
+app.post('/api/quick-links', (req, res) => {
+  const links = req.body;
+  if (!Array.isArray(links)) return res.status(400).json({ error: 'expected array' });
+  fs.writeFileSync(LINKS_FILE, JSON.stringify(links, null, 2));
+  res.json({ ok: true });
+});
+
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
 app.use(express.static(STATIC_DIR));
@@ -351,9 +369,8 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    // Detach cleanly so we don't kill the tmux session
-    try { term.write('\x01d'); } catch {} // Ctrl-A d (our prefix + d = detach)
-    setTimeout(() => { try { term.kill(); } catch {} }, 200);
+    // Just kill the pty — tmux session survives when an attached client dies
+    try { term.kill(); } catch {}
   });
 });
 
