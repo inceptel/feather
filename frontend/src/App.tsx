@@ -172,8 +172,21 @@ export default function App() {
         <button aria-label="Open session list" onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
       </Show>
 
+      <Show when={sidebar()}>
+        <button
+          aria-label="Close session drawer backdrop"
+          onClick={() => setSidebar(false)}
+          style={{ position: 'fixed', inset: '0', background: 'rgba(0, 0, 0, 0.55)', border: 'none', padding: '0', margin: '0', cursor: 'pointer', 'z-index': '35' }}
+        />
+      </Show>
+
       {/* Sidebar */}
-      <div style={{ width: sidebar() ? '300px' : '0', 'min-width': sidebar() ? '300px' : '0', height: '100%', background: '#0d1117', 'border-right': sidebar() ? '1px solid #1e1e1e' : 'none', overflow: 'hidden', transition: 'width 0.2s, min-width 0.2s', 'z-index': '40' }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Session list"
+        style={{ position: 'fixed', top: '0', left: '0', width: '300px', 'max-width': 'calc(100vw - 32px)', height: '100%', background: '#0d1117', 'border-right': '1px solid #1e1e1e', overflow: 'hidden', transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.2s', 'z-index': '40', 'box-shadow': sidebar() ? '0 0 0 1px rgba(0,0,0,0.15), 0 20px 40px rgba(0,0,0,0.45)' : 'none' }}
+      >
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', visibility: sidebar() ? 'visible' : 'hidden', 'pointer-events': sidebar() ? 'auto' : 'none' }}>
             <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
@@ -224,7 +237,7 @@ export default function App() {
       </div>
 
       {/* Main */}
-      <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
+      <div aria-hidden={sidebar() ? 'true' : undefined} style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%', 'pointer-events': sidebar() ? 'none' : 'auto', overflow: 'hidden' }}>
         {/* Header */}
         <div style={{ padding: '8px 16px 0 68px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<h1 style={{ color: '#666', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
