@@ -109,7 +109,7 @@ function renderBlock(block: ContentBlock) {
   }
   if (block.type === 'tool_result') {
     const rawContent = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
-    const raw = stripAnsi(rawContent)
+    const raw = stripInternalTags(rawContent)
     const preview = raw.slice(0, 200)
     const isErr = block.is_error
     return (
@@ -119,7 +119,7 @@ function renderBlock(block: ContentBlock) {
         style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}
       >
         <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#ff9b9b' : '#7c8595' }}>{isErr ? 'error' : 'output'}</div>
-        {preview && <div tabindex="0" style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#ff9b9b' : '#aeb6c2', 'white-space': 'pre', 'overflow-x': 'auto', 'overflow-y': 'visible', 'word-break': 'normal' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
+        {preview && <div tabindex="0" style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#ff9b9b' : '#aeb6c2', 'white-space': 'pre-wrap', 'overflow-x': 'hidden', 'overflow-y': 'visible', 'word-break': 'break-word', 'overflow-wrap': 'anywhere' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
       </div>
     )
   }
@@ -237,7 +237,15 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       aria-live="polite"
       aria-relevant="additions text"
       aria-label="Chat transcript"
-      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
+      style={{
+        height: '100%',
+        'overflow-y': 'auto',
+        '-webkit-overflow-scrolling': 'touch',
+        'overscroll-behavior': 'contain',
+        'touch-action': 'pan-y',
+        padding: '16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px))',
+        'padding-bottom': 'calc(80px + env(safe-area-inset-bottom, 0px))',
+      }}
     >
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
