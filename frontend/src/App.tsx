@@ -239,9 +239,11 @@ export default function App() {
                   style={{ width: '100%', padding: '12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))', 'min-height': '44px', cursor: 'pointer', border: 'none', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', color: 'inherit', 'text-align': 'left' }}
                 >
                   <div style={{ display: 'flex', 'align-items': 'flex-start', gap: '8px' }}>
-                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '2', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.25', flex: '1' }}>{formatSessionTitle(s.title)}</span>
-                    <span style={{ 'font-size': '11px', color: '#aeb6c2', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
+                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0', 'margin-top': '5px' }} /></Show>
+                    <div style={{ flex: '1', 'min-width': '0', display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
+                      <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '2', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.25' }}>{formatSessionTitle(s.title)}</span>
+                      <span style={{ 'font-size': '11px', color: '#aeb6c2', 'line-height': '1.2' }}>{timeAgo(s.updatedAt)}</span>
+                    </div>
                   </div>
                 </button>
               )}</For>
