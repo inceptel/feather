@@ -8,17 +8,27 @@ import DOMPurify from 'dompurify'
 const marked = new Marked({ gfm: true, breaks: true })
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
+const STRIP_TAGS = ['local-command-caveat', 'command-name', 'command-message', 'command-args', 'persisted-output']
+
+function stripInternalTags(text: string): string {
+  let cleaned = text
+  for (const tag of STRIP_TAGS) {
+    cleaned = cleaned.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g'), '')
+  }
+  return cleaned.trim()
+}
 
 function renderMarkdown(text: string): string {
-  const cached = mdCache.get(text)
+  const cleaned = stripInternalTags(text)
+  const cached = mdCache.get(cleaned)
   if (cached !== undefined) return cached
-  const html = marked.parse(text.trimEnd()) as string
+  const html = marked.parse(cleaned) as string
   const safe = DOMPurify.sanitize(html)
   if (mdCache.size >= MD_CACHE_MAX) {
     const first = mdCache.keys().next().value!
     mdCache.delete(first)
   }
-  mdCache.set(text, safe)
+  mdCache.set(cleaned, safe)
   return safe
 }
 
@@ -161,7 +171,7 @@ const imgPattern = /\[Attached image: (\/uploads\/[^\]]+)\]/g
 
 function extractImages(text: string): { cleanText: string; images: string[] } {
   const images: string[] = []
-  const cleanText = text.replace(imgPattern, (_, p) => { images.push(p); return '' }).trim()
+  const cleanText = stripInternalTags(text).replace(imgPattern, (_, p) => { images.push(p); return '' }).trim()
   return { cleanText, images }
 }
 
