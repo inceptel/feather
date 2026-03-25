@@ -38,6 +38,14 @@ function formatSessionTitle(title: string) {
   return portMatch ? `Worker ${workerMatch[1]} • Port ${portMatch[1]}` : `Worker ${workerMatch[1]}`
 }
 
+function formatSessionA11yLabel(session: SessionMeta) {
+  const updated = new Date(session.updatedAt)
+  const updatedLabel = Number.isNaN(updated.getTime())
+    ? 'last updated recently'
+    : `last updated ${updated.toLocaleString()}`
+  return `${formatSessionTitle(session.title)}${session.isActive ? ', active session' : ''}, ${updatedLabel}`
+}
+
 export default function App() {
   const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
@@ -169,7 +177,7 @@ export default function App() {
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button aria-label="Open session list" onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
+        <button aria-label="Open session list" onClick={() => setSidebar(true)} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top, 0px))', left: 'max(12px, env(safe-area-inset-left, 0px))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
       </Show>
 
       <Show when={sidebar()}>
@@ -188,7 +196,7 @@ export default function App() {
         style={{ position: 'fixed', top: '0', left: '0', width: '300px', 'max-width': 'calc(100vw - 32px)', height: '100%', background: '#0d1117', 'border-right': '1px solid #1e1e1e', overflow: 'hidden', transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.2s', 'z-index': '40', 'box-shadow': sidebar() ? '0 0 0 1px rgba(0,0,0,0.15), 0 20px 40px rgba(0,0,0,0.45)' : 'none' }}
       >
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', visibility: sidebar() ? 'visible' : 'hidden', 'pointer-events': sidebar() ? 'auto' : 'none' }}>
-            <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
+            <div style={{ padding: 'max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
               <button
                 onClick={() => setSidebar(false)}
@@ -213,15 +221,16 @@ export default function App() {
                 &times;
               </button>
             </div>
-            <div style={{ padding: '12px 16px' }}>
-              <button aria-label="Start a new session" onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
+            <div style={{ padding: '12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))' }}>
+              <button aria-label="Start a new session" onClick={handleNew} disabled={creating()} style={{ width: '100%', 'min-height': '44px', padding: '10px 14px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'touch-action': 'pan-y', 'padding-bottom': 'max(12px, env(safe-area-inset-bottom, 0px))' }}>
               <For each={sessions()}>{(s) => (
                 <button
                   onClick={() => select(s.id)}
+                  aria-label={formatSessionA11yLabel(s)}
                   aria-current={s.id === currentId() ? 'page' : undefined}
                   style={{ width: '100%', padding: '12px 16px', 'min-height': '44px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
                 >
@@ -239,7 +248,7 @@ export default function App() {
       {/* Main */}
       <div aria-hidden={sidebar() ? 'true' : undefined} style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%', 'pointer-events': sidebar() ? 'none' : 'auto', overflow: 'hidden' }}>
         {/* Header */}
-        <div style={{ padding: '8px 16px 8px 68px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'flex-start', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
+        <div style={{ padding: 'max(8px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 8px calc(68px + env(safe-area-inset-left, 0px))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'flex-start', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<h1 style={{ color: '#7c8595', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
@@ -248,6 +257,7 @@ export default function App() {
               <Show when={!s().isActive}>
                 <button
                   onClick={() => handleResume(s().id)}
+                  aria-label={`Resume session ${formatSessionTitle(s().title)}`}
                   style={{
                     background: '#4aba6a',
                     color: '#000',
@@ -274,7 +284,7 @@ export default function App() {
 
         {/* Tabs */}
         <Show when={currentId()}>
-          <div role="tablist" aria-label="Session panels" style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
+          <div role="tablist" aria-label="Session panels" style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e', padding: '0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px))', 'flex-shrink': '0' }}>
             <button
               id="chat-tab"
               role="tab"
@@ -303,7 +313,7 @@ export default function App() {
           <Show when={currentId()} fallback={
             <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#7c8595', padding: '24px' }}>
               <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
-                <p style={{ color: '#7c8595', 'font-size': '14px', 'line-height': '1.5' }}>Open a session or create a new one</p>
+                <p style={{ color: '#aeb6c2', 'font-size': '14px', 'line-height': '1.5' }}>Open a session or create a new one</p>
                 <button
                   aria-label="Start a new session"
                   onClick={handleNew}
@@ -361,13 +371,13 @@ export default function App() {
               <For each={files()}>{(f, i) => (
                 <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333' }}>
                   {f.isImage
-                    ? <img src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
+                    ? <img alt={`Attachment preview ${f.name}`} src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
                     : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#c9d1d9', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
                   }
                   <button
                     onClick={() => removeFile(i())}
                     aria-label={`Remove attached file ${f.name}`}
-                    style={{ position: 'absolute', top: '-8px', right: '-8px', width: '28px', height: '28px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '14px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1', padding: '0' }}
+                    style={{ position: 'absolute', top: '-8px', right: '-8px', width: '44px', height: '44px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1', padding: '0' }}
                   >
                     &times;
                   </button>
@@ -375,7 +385,7 @@ export default function App() {
               )}</For>
             </div>
           </Show>
-          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
+          <div style={{ padding: '8px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
             <button
               onClick={() => fileInputRef?.click()}
               aria-label="Attach file"
