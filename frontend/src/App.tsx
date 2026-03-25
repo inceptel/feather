@@ -177,8 +177,8 @@ export default function App() {
             </div>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
               <For each={sessions()}>{(s) => (
-                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                <div role="button" tabIndex={0} onClick={() => select(s.id)} onKeyDown={(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(s.id); } }} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
+                  <div role="presentation" style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
                     <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
                     <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
