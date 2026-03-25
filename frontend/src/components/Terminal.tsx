@@ -31,12 +31,17 @@ export function Terminal(props: { sessionId: string | null }) {
     }, 1000)
   }
 
-  function syncTerminalA11y() {
+  function syncTerminalDom() {
     const helperTextarea = containerRef?.querySelector('textarea[aria-label="Terminal input"]')
     if (helperTextarea instanceof HTMLTextAreaElement) {
       helperTextarea.setAttribute('aria-hidden', 'true')
       helperTextarea.setAttribute('tabindex', '-1')
       helperTextarea.removeAttribute('aria-label')
+    }
+    const terminalViewport = containerRef?.querySelector('.xterm-viewport')
+    if (terminalViewport instanceof HTMLDivElement) {
+      terminalViewport.style.overscrollBehavior = 'contain'
+      terminalViewport.style.webkitOverflowScrolling = 'touch'
     }
   }
 
@@ -68,7 +73,7 @@ export function Terminal(props: { sessionId: string | null }) {
     term.loadAddon(fitAddon)
     if (containerRef) {
       term.open(containerRef)
-      syncTerminalA11y()
+      syncTerminalDom()
       refitTerminal()
       queueRefitTerminal()
     }
@@ -133,13 +138,13 @@ export function Terminal(props: { sessionId: string | null }) {
       : new ResizeObserver(onResize)
     const a11yObserver = typeof MutationObserver === 'undefined' || !containerRef
       ? null
-      : new MutationObserver(() => syncTerminalA11y())
+      : new MutationObserver(() => syncTerminalDom())
     window.addEventListener('resize', onResize)
     viewport?.addEventListener('resize', onResize)
     viewport?.addEventListener('scroll', onResize)
     observer?.observe(containerRef)
     a11yObserver?.observe(containerRef, { childList: true, subtree: true })
-    syncTerminalA11y()
+    syncTerminalDom()
     onCleanup(() => {
       window.removeEventListener('resize', onResize)
       viewport?.removeEventListener('resize', onResize)
@@ -156,7 +161,6 @@ export function Terminal(props: { sessionId: string | null }) {
         height: '100%', width: '100%', background: '#0a0e14',
         padding: '4px max(4px, env(safe-area-inset-right, 0px)) calc(4px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px))',
         'box-sizing': 'border-box',
-        'overscroll-behavior': 'contain',
       }} />
       <Show when={connectionState() === 'reconnecting' || connectionState() === 'disconnected'}>
         <div role="status" aria-live="polite" aria-atomic="true" style={{
