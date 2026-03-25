@@ -75,7 +75,7 @@ function renderBlock(block: ContentBlock) {
     return (
       <details style={{ margin: '4px 0' }}>
         <summary style={{ color: '#c4993a', 'font-size': '12px', cursor: 'pointer' }}>Thinking...</summary>
-        <div style={{ color: '#999', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '200px', overflow: 'auto', padding: '8px', background: '#0d1117', 'border-radius': '4px', 'margin-top': '4px' }}>
+        <div style={{ color: '#c9d1d9', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '200px', overflow: 'auto', padding: '8px', background: '#0d1117', 'border-radius': '4px', 'margin-top': '4px' }}>
           {block.thinking}
         </div>
       </details>
@@ -150,7 +150,7 @@ const markdownCSS = `
 .markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: #c9d1d9; }
 .markdown blockquote {
-  margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
+  margin: 6px 0; padding: 4px 12px; border-left: 3px solid #7c8595; color: #999;
 }
 .markdown table {
   display: block; overflow-x: auto; max-width: 100%; width: max-content; min-width: 100%;
