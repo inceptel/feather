@@ -1,0 +1,5 @@
+1. Confirm `GET /api/sessions/370e2f60-1399-4ebf-a182-7a8ba6c59ccf/messages?limit=200` still contains the seeded assistant text `Codex finder is a bug-finding machine`, which proves the session transcript from the bug report still exists.
+2. Open `http://localhost:$PORT/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf` at `390x844`, wait for the session shell to load, and tap `Terminal`.
+3. Measure `.xterm-screen` after the tab switch. The reported bug is present only if the terminal transcript itself renders in a very narrow strip, which this probe treats as `< 100px` wide while the seeded transcript text is visible in terminal rows.
+4. In the current build, the terminal does not reproduce that collapse: the `.xterm-screen` stays near full mobile width and the tab only shows `[disconnected]`.
+5. The current frontend bundle still points the terminal websocket at `/new-dev/api/terminal`, while the server only upgrades `/api/terminal`, so the app now fails with a disconnected terminal instead of the narrow-column transcript shown in the report.
