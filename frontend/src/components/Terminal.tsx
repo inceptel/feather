@@ -1,4 +1,4 @@
-import { onMount, onCleanup, createEffect } from 'solid-js'
+import { onMount, onCleanup, createEffect, createSignal, Show } from 'solid-js'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -12,6 +12,7 @@ export function Terminal(props: { sessionId: string | null }) {
   let ws: WebSocket | null = null
   let reconnectTimer = 0
   let connectionKey = 0
+  const [connectionState, setConnectionState] = createSignal<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('idle')
 
   function clearReconnectTimer() {
     if (reconnectTimer) {
@@ -22,6 +23,7 @@ export function Terminal(props: { sessionId: string | null }) {
 
   function scheduleReconnect(sessionId: string, key: number) {
     clearReconnectTimer()
+    setConnectionState('reconnecting')
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = 0
       if (props.sessionId === sessionId && key === connectionKey) connect(sessionId)
@@ -31,6 +33,7 @@ export function Terminal(props: { sessionId: string | null }) {
   function connect(sessionId: string) {
     disconnect()
     const key = connectionKey
+    setConnectionState('connecting')
 
     term = new XTerm({
       theme: { background: '#0a0e14', foreground: '#e5e5e5', cursor: '#4aba6a' },
@@ -53,10 +56,12 @@ export function Terminal(props: { sessionId: string | null }) {
       if (!event.wasClean && props.sessionId === sessionId && key === connectionKey) {
         scheduleReconnect(sessionId, key)
       }
+      else setConnectionState('disconnected')
     }
 
     ws.onopen = () => {
       clearReconnectTimer()
+      setConnectionState('connected')
       if (fitAddon && ws) {
         const dims = fitAddon.proposeDimensions()
         if (dims) ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }))
@@ -72,11 +77,18 @@ export function Terminal(props: { sessionId: string | null }) {
   function disconnect() {
     clearReconnectTimer()
     connectionKey += 1
+    if (ws) ws.onclose = null
     ws?.close()
     ws = null
     term?.dispose()
     term = null
     fitAddon = null
+    setConnectionState('idle')
+  }
+
+  function reconnectNow() {
+    const sid = props.sessionId
+    if (sid) connect(sid)
   }
 
   createEffect(() => {
@@ -97,9 +109,40 @@ export function Terminal(props: { sessionId: string | null }) {
   })
 
   return (
-    <div ref={containerRef} style={{
-      height: '100%', width: '100%', background: '#0a0e14',
-      padding: '4px',
-    }} />
+    <div style={{ position: 'relative', height: '100%', width: '100%', background: '#0a0e14' }}>
+      <div ref={containerRef} aria-label="Terminal output" style={{
+        height: '100%', width: '100%', background: '#0a0e14',
+        padding: '4px',
+      }} />
+      <Show when={connectionState() === 'reconnecting' || connectionState() === 'disconnected'}>
+        <div aria-live="polite" style={{
+          position: 'absolute',
+          top: '12px',
+          right: '12px',
+          display: 'flex',
+          'align-items': 'center',
+          gap: '8px',
+          padding: '8px 10px',
+          background: 'rgba(13, 17, 23, 0.92)',
+          border: '1px solid #333',
+          'border-radius': '10px',
+          color: '#e5e5e5',
+          'font-size': '12px',
+        }}>
+          <span>{connectionState() === 'reconnecting' ? 'Terminal reconnecting...' : 'Terminal disconnected'}</span>
+          <button onClick={reconnectNow} style={{
+            background: '#4aba6a',
+            color: '#000',
+            border: 'none',
+            'border-radius': '8px',
+            padding: '6px 10px',
+            'font-size': '12px',
+            'font-weight': '600',
+            cursor: 'pointer',
+            'min-height': '32px',
+          }}>Retry now</button>
+        </div>
+      </Show>
+    </div>
   )
 }
