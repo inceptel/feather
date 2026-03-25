@@ -5,11 +5,17 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build:frontend": "cd frontend && npm run build"
+    "build:frontend": "cd frontend && npm run build",
+    "test": "node --test test/unit/*.test.js",
+    "test:api": "node --test test/unit/api.test.js",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "express": "^5.1.0",
     "node-pty": "^1.1.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }
