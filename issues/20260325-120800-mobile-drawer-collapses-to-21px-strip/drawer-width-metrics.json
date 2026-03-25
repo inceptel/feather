@@ -1,0 +1,15 @@
+{
+  "drawer": {
+    "bg": "rgb(13, 17, 23)",
+    "height": 844,
+    "text": "Feather\n\u00d7\nSessions\nLinks\n+ New Claude\nWORKER_NUM=2 WORKTREE=/home/user/feather-d",
+    "width": 21.296875,
+    "x": 0,
+    "y": 0,
+    "z": "40"
+  },
+  "viewport": {
+    "height": 844,
+    "width": 390
+  }
+}
