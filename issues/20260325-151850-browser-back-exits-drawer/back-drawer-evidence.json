@@ -1,0 +1,17 @@
+{
+  "before": {
+    "bodyText": "\u2630\nSelect a session\n~\nOpen a session or create a new one",
+    "historyLength": 2,
+    "href": "http://localhost:3304/"
+  },
+  "opened": {
+    "bodyText": "Feather\n\u00d7\nSessions\nLinks\n+ New Claude\nWORKER_NUM=1 WORKTREE=/home/user/feather-dev/w1 PORT=3301 WORKER_DIR=/home/user/\nnow\nWORKER_NUM=2 WORKTREE=/home/user/feather-dev/w2 PORT=3302 WORKER_DIR=/home/user/\nnow\nWORKER_NUM=3 WORKTREE=/home/user/feather-dev/w3 PORT=3303 WORKER_DIR=/home/user/\n1m\nWORKER_N",
+    "historyLength": 2,
+    "href": "http://localhost:3304/"
+  },
+  "afterBack": {
+    "bodyText": "",
+    "historyLength": 2,
+    "href": "data:,"
+  }
+}
