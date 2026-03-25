@@ -374,7 +374,7 @@ export default function App() {
           <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
           {/* File previews */}
           <Show when={files().length > 0}>
-            <div style={{ padding: '6px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'nowrap', 'overflow-x': 'auto', 'overflow-y': 'hidden', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior-x': 'contain', 'touch-action': 'pan-x' }}>
+            <div style={{ padding: '12px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'nowrap', 'overflow-x': 'auto', 'overflow-y': 'hidden', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior-x': 'contain', 'touch-action': 'pan-x' }}>
               <For each={files()}>{(f, i) => (
                 <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333', 'flex-shrink': '0' }}>
                   {f.isImage
