@@ -165,7 +165,12 @@ const markdownCSS = `
 }
 .markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; white-space: nowrap; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
-.markdown a { color: #73b8ff; text-decoration: none; }
+.markdown a {
+  color: #73b8ff;
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
+  text-decoration-thickness: 0.08em;
+}
 .markdown a:hover { text-decoration: underline; }
 .markdown img { max-width: 100%; border-radius: 6px; }
 .markdown hr { border: none; border-top: 1px solid #333; margin: 12px 0; }
