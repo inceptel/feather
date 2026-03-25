@@ -1,0 +1,9 @@
+URL: http://localhost:3304/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf
+Browser snapshot exposed the control as:
+- button "×"
+
+DOM button metrics:
+- text: ×
+- aria-label: null
+- title: null
+- rect: x=109 y=749 width=18 height=18
