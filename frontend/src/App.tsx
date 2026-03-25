@@ -268,7 +268,7 @@ export default function App() {
           <Show when={cur()} fallback={<h1 style={{ margin: '0', color: '#aeb6c2', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-              <span style={{ flex: '1', 'min-width': '0', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '3', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.2', 'font-size': '14px', 'font-weight': '600', 'padding-top': '2px' }}>{formatSessionTitle(s().title)}</span>
+              <span style={{ flex: '1', 'min-width': '0', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '4', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.2', 'font-size': '13px', 'font-weight': '600', 'padding-top': '2px' }}>{formatSessionTitle(s().title)}</span>
               <Show when={!s().isActive}>
                 <button
                   onClick={() => handleResume(s().id)}
