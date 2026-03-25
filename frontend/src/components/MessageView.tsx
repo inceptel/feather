@@ -137,8 +137,11 @@ const markdownCSS = `
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
 }
-.markdown table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 0.9em; }
-.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+.markdown table {
+  display: block; overflow-x: auto; max-width: 100%; width: max-content; min-width: 100%;
+  border-collapse: collapse; margin: 8px 0; font-size: 0.9em; -webkit-overflow-scrolling: touch;
+}
+.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; white-space: nowrap; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
 .markdown a { color: #73b8ff; text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
