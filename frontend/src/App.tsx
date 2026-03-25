@@ -168,7 +168,7 @@ export default function App() {
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
             <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
               <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
-              <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer' }}>&times;</button>
+              <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', width: '44px', height: '44px', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&times;</button>
             </div>
             <div style={{ padding: '12px 16px' }}>
               <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
