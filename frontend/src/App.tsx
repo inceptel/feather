@@ -196,6 +196,7 @@ export default function App() {
         role="dialog"
         aria-modal="true"
         aria-label="Session list"
+        aria-hidden={sidebar() ? undefined : 'true'}
         style={{ position: 'fixed', top: '0', left: '0', width: '300px', 'max-width': 'calc(100vw - 32px)', height: '100%', background: '#0d1117', 'border-right': '1px solid #1e1e1e', overflow: 'hidden', transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.2s', 'z-index': '40', 'box-shadow': sidebar() ? '0 0 0 1px rgba(0,0,0,0.15), 0 20px 40px rgba(0,0,0,0.45)' : 'none' }}
       >
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', visibility: sidebar() ? 'visible' : 'hidden', 'pointer-events': sidebar() ? 'auto' : 'none' }}>
