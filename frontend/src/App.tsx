@@ -340,7 +340,7 @@ export default function App() {
               id="chat-panel"
               role="tabpanel"
               aria-labelledby="chat-tab"
-              style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%', 'box-sizing': 'border-box', 'padding-top': 'max(8px, env(safe-area-inset-top, 0px))' }}
+              style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%', 'box-sizing': 'border-box', 'padding-top': 'max(12px, env(safe-area-inset-top, 0px))' }}
             >
               <MessageView messages={messages()} loading={loading()} />
             </div>
