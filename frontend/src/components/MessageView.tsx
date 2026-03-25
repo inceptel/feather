@@ -130,6 +130,7 @@ const markdownCSS = `
 .markdown code {
   background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px;
   font-family: 'SF Mono', Menlo, 'Courier New', monospace; font-size: 0.88em;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
 }
 .markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: #c9d1d9; }
