@@ -127,7 +127,7 @@ export function Terminal(props: { sessionId: string | null }) {
         padding: '4px',
       }} />
       <Show when={connectionState() === 'reconnecting' || connectionState() === 'disconnected'}>
-        <div aria-live="polite" style={{
+        <div role="status" aria-live="polite" aria-atomic="true" style={{
           position: 'absolute',
           top: '12px',
           right: '12px',
@@ -146,7 +146,11 @@ export function Terminal(props: { sessionId: string | null }) {
           'box-sizing': 'border-box',
           'max-width': 'calc(100% - 24px)',
         }}>
-          <span>{connectionState() === 'reconnecting' ? 'Terminal reconnecting...' : 'Terminal disconnected'}</span>
+          <span>
+            {connectionState() === 'reconnecting'
+              ? 'Terminal reconnecting automatically in 1 second...'
+              : 'Terminal disconnected. Retry to reconnect.'}
+          </span>
           <button onClick={reconnectNow} style={{
             background: '#4aba6a',
             color: '#000',
