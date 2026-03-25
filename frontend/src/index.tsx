@@ -3,6 +3,17 @@ import App from './App'
 
 let viewportSyncFrame = 0
 
+function syncDocumentShell() {
+  document.documentElement.style.height = '100%'
+  document.documentElement.style.overflow = 'hidden'
+  document.documentElement.style.overscrollBehavior = 'none'
+  document.body.style.height = '100%'
+  document.body.style.margin = '0'
+  document.body.style.overflow = 'hidden'
+  document.body.style.overscrollBehavior = 'none'
+  document.body.style.background = '#0d1117'
+}
+
 function syncViewportHeight() {
   const viewportHeight = window.visualViewport?.height ?? window.innerHeight
   document.documentElement.style.setProperty('--vh', `${viewportHeight * 0.01}px`)
@@ -16,6 +27,7 @@ function queueViewportSync() {
   })
 }
 
+syncDocumentShell()
 syncViewportHeight()
 queueViewportSync()
 window.addEventListener('resize', queueViewportSync)
