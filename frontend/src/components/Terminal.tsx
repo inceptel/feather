@@ -11,6 +11,7 @@ export function Terminal(props: { sessionId: string | null }) {
   let fitAddon: FitAddon | null = null
   let ws: WebSocket | null = null
   let reconnectTimer = 0
+  let refitFrame = 0
   let connectionKey = 0
   const [connectionState, setConnectionState] = createSignal<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('idle')
 
@@ -35,6 +36,18 @@ export function Terminal(props: { sessionId: string | null }) {
     if (helperTextarea) helperTextarea.setAttribute('aria-hidden', 'true')
   }
 
+  function refitTerminal() {
+    try { fitAddon?.fit() } catch {}
+  }
+
+  function queueRefitTerminal() {
+    if (refitFrame) cancelAnimationFrame(refitFrame)
+    refitFrame = requestAnimationFrame(() => {
+      refitFrame = 0
+      refitTerminal()
+    })
+  }
+
   function connect(sessionId: string) {
     disconnect()
     const key = connectionKey
@@ -52,7 +65,8 @@ export function Terminal(props: { sessionId: string | null }) {
     if (containerRef) {
       term.open(containerRef)
       syncTerminalA11y()
-      fitAddon.fit()
+      refitTerminal()
+      queueRefitTerminal()
     }
 
     ws = new WebSocket(`${BASE_WS}?session=${sessionId}`)
@@ -82,6 +96,10 @@ export function Terminal(props: { sessionId: string | null }) {
 
   function disconnect() {
     clearReconnectTimer()
+    if (refitFrame) {
+      cancelAnimationFrame(refitFrame)
+      refitFrame = 0
+    }
     connectionKey += 1
     if (ws) ws.onclose = null
     ws?.close()
@@ -104,7 +122,7 @@ export function Terminal(props: { sessionId: string | null }) {
   })
 
   onMount(() => {
-    const onResize = () => { try { fitAddon?.fit() } catch {} }
+    const onResize = () => refitTerminal()
     const viewport = window.visualViewport
     const observer = typeof ResizeObserver === 'undefined' || !containerRef
       ? null
