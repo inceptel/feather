@@ -30,6 +30,11 @@ export function Terminal(props: { sessionId: string | null }) {
     }, 1000)
   }
 
+  function syncTerminalA11y() {
+    const helperTextarea = containerRef?.querySelector('textarea[aria-label="Terminal input"]')
+    if (helperTextarea) helperTextarea.setAttribute('aria-hidden', 'true')
+  }
+
   function connect(sessionId: string) {
     disconnect()
     const key = connectionKey
@@ -46,6 +51,7 @@ export function Terminal(props: { sessionId: string | null }) {
     term.loadAddon(fitAddon)
     if (containerRef) {
       term.open(containerRef)
+      syncTerminalA11y()
       fitAddon.fit()
     }
 
