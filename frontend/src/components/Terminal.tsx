@@ -129,9 +129,9 @@ export function Terminal(props: { sessionId: string | null }) {
       <Show when={connectionState() === 'reconnecting' || connectionState() === 'disconnected'}>
         <div role="status" aria-live="polite" aria-atomic="true" style={{
           position: 'absolute',
-          top: '12px',
-          right: '12px',
-          left: '12px',
+          top: 'max(12px, env(safe-area-inset-top, 0px))',
+          right: 'max(12px, env(safe-area-inset-right, 0px))',
+          left: 'max(12px, env(safe-area-inset-left, 0px))',
           'z-index': '10',
           display: 'flex',
           'align-items': 'center',
@@ -144,7 +144,6 @@ export function Terminal(props: { sessionId: string | null }) {
           color: '#e5e5e5',
           'font-size': '12px',
           'box-sizing': 'border-box',
-          'max-width': 'calc(100% - 24px)',
         }}>
           <span>
             {connectionState() === 'reconnecting'
