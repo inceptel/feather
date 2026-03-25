@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from 'solid-js'
+import { For, Show, createEffect, createSignal, on } from 'solid-js'
 import type { Message, ContentBlock } from '../api'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -20,6 +20,10 @@ function renderMarkdown(text: string): string {
   }
   mdCache.set(text, safe)
   return safe
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
 }
 
 // ── Tool rendering ──────────────────────────────────────────────────────────
@@ -91,13 +95,14 @@ function renderBlock(block: ContentBlock) {
     )
   }
   if (block.type === 'tool_result') {
-    const raw = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
+    const rawContent = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
+    const raw = stripAnsi(rawContent)
     const preview = raw.slice(0, 200)
     const isErr = block.is_error
     return (
       <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}>
-        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666' }}>{isErr ? 'error' : 'output'}</div>
-        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '120px', overflow: 'auto', 'word-break': 'break-all' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
+        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#7c8595' }}>{isErr ? 'error' : 'output'}</div>
+        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#aeb6c2', 'white-space': 'pre-wrap', 'max-height': '120px', overflow: 'auto', 'word-break': 'break-all' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
       </div>
     )
   }
@@ -173,12 +178,15 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
     setPinned(scrollHeight - scrollTop - clientHeight < 80)
   }
 
-  createEffect(() => {
-    props.messages.length // track
-    if (pinned()) {
+  createEffect(on(
+    () => props.messages.map(msg => `${msg.uuid}:${msg.delivery ?? ''}`).join('|'),
+    () => {
+      const lastMessage = props.messages.at(-1)
+      if (!lastMessage) return
+      if (!pinned() && !lastMessage.uuid.startsWith('optimistic-')) return
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
-    }
-  })
+    },
+  ))
 
   return (
     <div
@@ -192,12 +200,12 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
     >
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
-        <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
+        <div style={{ color: '#7c8595', 'text-align': 'center', padding: '40px' }}>Loading...</div>
       </Show>
       {/* Lightbox */}
       <Show when={lightbox()}>
         <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}>
-          <img src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }} />
+          <img alt="Expanded attachment preview" src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }} />
         </div>
       </Show>
 
@@ -220,7 +228,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           }}>
             {/* Inline images */}
             <For each={images}>{(src) => (
-              <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+              <img alt="Attached image" src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
             )}</For>
             {/* Text + other blocks */}
             <div style={hasImages ? { padding: '4px 8px 4px' } : {}}>
@@ -236,7 +244,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <span style={{ 'font-size': '10px', color: '#7c8595' }}>{formatTime(msg.timestamp)}</span>
             {msg.role === 'user' && msg.delivery && (
-              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
+              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#7c8595' }}>
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
               </span>
             )}
