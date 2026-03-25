@@ -112,7 +112,7 @@ function renderBlock(block: ContentBlock) {
     return (
       <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}>
         <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#7c8595' }}>{isErr ? 'error' : 'output'}</div>
-        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#aeb6c2', 'white-space': 'pre-wrap', 'max-height': '120px', overflow: 'auto', 'word-break': 'break-all' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
+        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#aeb6c2', 'white-space': 'pre', 'overflow-x': 'auto', 'overflow-y': 'visible', 'word-break': 'normal' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
       </div>
     )
   }
