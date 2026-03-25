@@ -252,7 +252,7 @@ export default function App() {
           <Show when={cur()} fallback={<h1 style={{ color: '#7c8595', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-              <span style={{ flex: '1', 'min-width': '0', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '2', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.2', 'font-size': '14px', 'font-weight': '600', 'padding-top': '2px' }}>{formatSessionTitle(s().title)}</span>
+              <span style={{ flex: '1', 'min-width': '0', overflow: 'hidden', display: '-webkit-box', '-webkit-box-orient': 'vertical', '-webkit-line-clamp': '3', 'white-space': 'normal', 'overflow-wrap': 'anywhere', 'line-height': '1.2', 'font-size': '14px', 'font-weight': '600', 'padding-top': '2px' }}>{formatSessionTitle(s().title)}</span>
               <div style={{ flex: '1' }} />
               <Show when={!s().isActive}>
                 <button
@@ -348,7 +348,7 @@ export default function App() {
               id="terminal-panel"
               role="tabpanel"
               aria-labelledby="terminal-tab"
-              style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}
+              style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%', 'box-sizing': 'border-box', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom, 0px))' }}
             >
               <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
             </div>
@@ -367,7 +367,7 @@ export default function App() {
           <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
           {/* File previews */}
           <Show when={files().length > 0}>
-            <div style={{ padding: '6px max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'wrap' }}>
+            <div style={{ padding: '6px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'wrap' }}>
               <For each={files()}>{(f, i) => (
                 <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333' }}>
                   {f.isImage
