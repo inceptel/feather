@@ -265,7 +265,6 @@ export default function App() {
           <Show when={currentId()} fallback={
             <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444', padding: '24px' }}>
               <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
-                <div style={{ 'font-size': '32px', 'margin-bottom': '12px', opacity: '0.3' }}>~</div>
                 <p style={{ color: '#7c8595', 'font-size': '14px', 'line-height': '1.5' }}>Open a session or create a new one</p>
                 <button
                   onClick={handleNew}
