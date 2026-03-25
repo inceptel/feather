@@ -61,11 +61,16 @@ export default function App() {
 
   function removeFile(idx: number) { setFiles(prev => prev.filter((_, i) => i !== idx)) }
 
-  onMount(async () => setSessions(await fetchSessions()))
+  onMount(async () => {
+    setSessions(await fetchSessions())
+    const hash = location.hash.slice(1)
+    if (hash) select(hash)
+  })
   onCleanup(() => cleanupSSE?.())
 
   async function select(id: string) {
     setCurrentId(id)
+    location.hash = id
     setSidebar(false)
     setLoading(true)
     setMessages([])
