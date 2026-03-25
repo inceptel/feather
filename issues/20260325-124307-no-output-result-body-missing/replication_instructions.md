@@ -1,0 +1,5 @@
+1. Fetch `http://localhost:$PORT/api/sessions/370e2f60-1399-4ebf-a182-7a8ba6c59ccf/messages?limit=500` and confirm the `hello old friend` session still stores a `tool_result` whose exact content is `(Bash completed with no output)`.
+2. Open `http://localhost:$PORT/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf` in a `390x844` mobile viewport and locate that same no-output result card.
+3. The reproducer scrolls the exact body text into view and measures its rendered box. It only reports the bug if the API still contains the no-output message but the mobile UI fails to render a visible body for it.
+4. On the current worker-5 build, the body text renders normally: the live card contains `(Bash completed with no output)` with a visible body box, so the detector reports the issue absent.
+5. Run `PORT=$PORT bash /home/user/feather-dev/w5/issues/20260325-124307-no-output-result-body-missing/replicate.sh`. Exit `0` means the bug is present; exit `1` means the no-output body is visible and the bug is absent.
