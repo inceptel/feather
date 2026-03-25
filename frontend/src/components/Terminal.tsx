@@ -33,7 +33,11 @@ export function Terminal(props: { sessionId: string | null }) {
 
   function syncTerminalA11y() {
     const helperTextarea = containerRef?.querySelector('textarea[aria-label="Terminal input"]')
-    if (helperTextarea) helperTextarea.setAttribute('aria-hidden', 'true')
+    if (helperTextarea instanceof HTMLTextAreaElement) {
+      helperTextarea.setAttribute('aria-hidden', 'true')
+      helperTextarea.setAttribute('tabindex', '-1')
+      helperTextarea.removeAttribute('aria-label')
+    }
   }
 
   function refitTerminal() {
