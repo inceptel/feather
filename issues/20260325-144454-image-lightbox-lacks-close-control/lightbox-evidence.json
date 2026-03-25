@@ -1,0 +1,20 @@
+{
+  "activeElement": "BODY",
+  "bodyOverflow": "hidden",
+  "closeButtons": [],
+  "overlayAriaLabel": null,
+  "overlayAriaModal": null,
+  "overlayExists": true,
+  "overlayImageRect": {
+    "bottom": 353,
+    "height": 1,
+    "left": 249.5,
+    "right": 250.5,
+    "top": 352,
+    "width": 1,
+    "x": 249.5,
+    "y": 352
+  },
+  "overlayRole": null,
+  "visibleText": ""
+}
