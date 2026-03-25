@@ -1,0 +1,5 @@
+1. Fetch `http://localhost:$PORT/api/sessions?limit=50` and inspect the newest sessions.
+2. For each candidate session id, fetch `http://localhost:$PORT/api/sessions/<id>/messages?limit=200` and look for a `tool_result` block whose text still contains ANSI control sequences such as `\u001b[31m`, `\u001b[32m`, or `\u001b[0m`.
+3. The current reliable example on port `3305` is session `01e6c75c-82c5-4047-8aa5-7bb64afa0779`, titled `WORKER_NUM=1 WORKTREE=/home/user/feather-dev/w1 PORT=3301 WORKER_DIR=/home/user/`, whose transcript includes lines like `\u001b[31m✗\u001b[0m Evaluation error...`.
+4. Inspect [MessageView.tsx](/home/user/feather-dev/w5/frontend/src/components/MessageView.tsx): the `tool_result` renderer builds `raw` directly from `block.content`, slices it into `preview`, and renders that preview text inside the `OUTPUT` card without stripping ANSI sequences.
+5. Run `PORT=$PORT bash /home/user/feather-dev/w5/issues/20260325-080856-ansi-escape-codes-visible-in-output/replicate.sh`. It reports the bug when both conditions hold: a currently listed transcript still stores raw ANSI escapes, and the frontend still renders raw `tool_result` preview text.
