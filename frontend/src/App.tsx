@@ -31,6 +31,13 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d`
 }
 
+function formatSessionTitle(title: string) {
+  const workerMatch = title.match(/\bWORKER_NUM=(\d+)\b/)
+  const portMatch = title.match(/\bPORT=(\d+)\b/)
+  if (!workerMatch) return title
+  return portMatch ? `Worker ${workerMatch[1]} • Port ${portMatch[1]}` : `Worker ${workerMatch[1]}`
+}
+
 export default function App() {
   const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
@@ -207,7 +214,7 @@ export default function App() {
                 >
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
+                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{formatSessionTitle(s.title)}</span>
                     <span style={{ 'font-size': '11px', color: '#7c8595' }}>{timeAgo(s.updatedAt)}</span>
                   </div>
                 </button>
@@ -223,7 +230,7 @@ export default function App() {
           <Show when={cur()} fallback={<h1 style={{ color: '#666', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
+              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{formatSessionTitle(s().title)}</span>
               <div style={{ flex: '1' }} />
               <Show when={!s().isActive}>
                 <button
