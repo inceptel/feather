@@ -154,7 +154,8 @@ export function Terminal(props: { sessionId: string | null }) {
     <div style={{ position: 'relative', height: '100%', width: '100%', background: '#0a0e14' }}>
       <div ref={containerRef} aria-label="Terminal output" style={{
         height: '100%', width: '100%', background: '#0a0e14',
-        padding: '4px',
+        padding: '4px 4px calc(4px + env(safe-area-inset-bottom, 0px))',
+        'box-sizing': 'border-box',
       }} />
       <Show when={connectionState() === 'reconnecting' || connectionState() === 'disconnected'}>
         <div role="status" aria-live="polite" aria-atomic="true" style={{
