@@ -83,7 +83,7 @@ function renderBlock(block: ContentBlock) {
       <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
         <summary style={{ padding: '6px 10px', cursor: hasDetail ? 'pointer' : 'default', 'list-style': hasDetail ? undefined : 'none' }}>
           <span style={{ color }}>{icon} {name}</span>
-          {summary && <span style={{ color: '#888', 'margin-left': '8px' }}>{summary}</span>}
+          {summary && <span style={{ color: '#aeb6c2', 'margin-left': '8px' }}>{summary}</span>}
         </summary>
         {name === 'Edit' && <>
           {inp.old_string && <pre style={`${pre}color:#d45555;background:#1a0000;border-top:1px solid #1e1e1e`}>{inp.old_string}</pre>}
