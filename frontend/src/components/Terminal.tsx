@@ -3,7 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 
-const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/new-dev/api/terminal`
+const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal`
 
 export function Terminal(props: { sessionId: string | null }) {
   let containerRef: HTMLDivElement | undefined

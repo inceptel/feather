@@ -1,0 +1,10 @@
+Frontend Terminal.tsx uses:
+ws://localhost:3304/new-dev/api/terminal?session=370e2f60-1399-4ebf-a182-7a8ba6c59ccf
+
+Live verification:
+- /new-dev/api/terminal -> socket hang up / close 1006
+- /api/terminal -> open
+
+Relevant code:
+- frontend/src/components/Terminal.tsx:6
+- server.js:318

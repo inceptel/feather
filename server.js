@@ -315,6 +315,8 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  // Strip stale /new-dev prefix if present (frontend compat)
+  if (req.url?.startsWith('/new-dev/')) req.url = req.url.slice('/new-dev'.length);
   if (req.url?.startsWith('/api/terminal')) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else {
