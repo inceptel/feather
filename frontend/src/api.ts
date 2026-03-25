@@ -1,4 +1,4 @@
-const BASE = '/new-dev'
+const BASE = ''
 
 export interface SessionMeta {
   id: string
@@ -22,6 +22,7 @@ export interface Message {
   role: 'user' | 'assistant'
   timestamp: string
   content: ContentBlock[]
+  delivery?: 'sent' | 'delivered'
 }
 
 export async function fetchSessions(): Promise<SessionMeta[]> {
@@ -36,8 +37,9 @@ export async function fetchMessages(id: string): Promise<Message[]> {
   return (await r.json()).messages
 }
 
-export const sendInput = (id: string, text: string) =>
+export const sendInput = (id: string, text: string): Promise<{ ok: boolean, sentAt: string }> =>
   fetch(`${BASE}/api/sessions/${id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    .then(r => r.json())
 
 export async function createSession(cwd?: string): Promise<string> {
   const id = crypto.randomUUID()

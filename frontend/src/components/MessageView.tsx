@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo } from 'solid-js'
+import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { Message, ContentBlock } from '../api'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -92,14 +92,23 @@ const markdownCSS = `
 
 export function MessageView(props: { messages: Message[], loading: boolean }) {
   let scrollRef: HTMLDivElement | undefined
+  const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
+
+  function onScroll() {
+    if (!scrollRef) return
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef
+    setPinned(scrollHeight - scrollTop - clientHeight < 80)
+  }
 
   createEffect(() => {
     props.messages.length // track
-    setTimeout(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight, behavior: 'smooth' }), 50)
+    if (pinned()) {
+      requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
+    }
   })
 
   return (
-    <div ref={scrollRef} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}>
+    <div ref={scrollRef} onScroll={onScroll} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
@@ -115,7 +124,14 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           }}>
             <For each={msg.content}>{(block) => renderBlock(block)}</For>
           </div>
-          <span style={{ 'font-size': '10px', color: '#444', 'margin-top': '4px', padding: '0 4px' }}>{formatTime(msg.timestamp)}</span>
+          <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <span style={{ 'font-size': '10px', color: '#444' }}>{formatTime(msg.timestamp)}</span>
+            {msg.role === 'user' && msg.delivery && (
+              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
+                {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
+              </span>
+            )}
+          </div>
         </div>
       )}</For>
     </div>

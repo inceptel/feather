@@ -37,7 +37,24 @@ export default function App() {
     try { setMessages(await fetchMessages(id)) } catch {}
     setLoading(false)
     cleanupSSE = subscribeMessages(id, (msg) => {
-      setMessages(prev => prev.some(m => m.uuid === msg.uuid) ? prev : [...prev, msg])
+      setMessages(prev => {
+        if (prev.some(m => m.uuid === msg.uuid)) return prev
+        // Try to match an optimistic message (same text content, sent within 30s)
+        if (msg.role === 'user') {
+          const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
+          const idx = prev.findIndex(m =>
+            m.uuid.startsWith('optimistic-') &&
+            m.content?.[0]?.text === msgText &&
+            Math.abs(new Date(m.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 30000
+          )
+          if (idx >= 0) {
+            const updated = [...prev]
+            updated[idx] = { ...msg, delivery: 'delivered' }
+            return updated
+          }
+        }
+        return [...prev, msg]
+      })
     })
   }
 
@@ -60,6 +77,15 @@ export default function App() {
   function handleSend() {
     const val = text().trim()
     if (!val || !currentId()) return
+    const tempId = `optimistic-${Date.now()}`
+    // Optimistic insert with single check
+    setMessages(prev => [...prev, {
+      uuid: tempId,
+      role: 'user',
+      timestamp: new Date().toISOString(),
+      content: [{ type: 'text', text: val }],
+      delivery: 'sent',
+    }])
     sendInput(currentId()!, val)
     setText('')
     if (textareaRef) textareaRef.style.height = 'auto'

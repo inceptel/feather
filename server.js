@@ -268,7 +268,7 @@ app.post('/api/sessions', (req, res) => {
 });
 
 app.post('/api/sessions/:id/send', (req, res) => {
-  try { sendInput(req.params.id, req.body.text); res.json({ ok: true }); }
+  try { sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
