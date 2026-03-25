@@ -5,6 +5,7 @@ let viewportSyncFrame = 0
 
 function syncDocumentShell() {
   document.documentElement.style.height = '100%'
+  document.documentElement.style.background = '#0d1117'
   document.documentElement.style.overflow = 'hidden'
   document.documentElement.style.overscrollBehavior = 'none'
   document.body.style.height = '100%'
