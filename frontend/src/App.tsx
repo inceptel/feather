@@ -395,7 +395,7 @@ export default function App() {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#7c8595',
+                color: '#aeb6c2',
                 'font-size': '20px',
                 cursor: 'pointer',
                 width: '44px',
