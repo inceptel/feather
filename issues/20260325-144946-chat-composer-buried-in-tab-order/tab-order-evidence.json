@@ -1,0 +1,385 @@
+{
+  "count": 38,
+  "first70": [
+    {
+      "h": 36,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "BUTTON",
+      "text": "\u2630",
+      "w": 36,
+      "x": 12,
+      "y": 12
+    },
+    {
+      "h": 29,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "BUTTON",
+      "text": "Chat",
+      "w": 60.890625,
+      "x": 16,
+      "y": 48
+    },
+    {
+      "h": 29,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "BUTTON",
+      "text": "Terminal",
+      "w": 85.21875,
+      "x": 76.890625,
+      "y": 48
+    },
+    {
+      "h": 48,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls ~/feather-aw/w5/logs/ | grep \"17744389\"",
+      "w": 272.296875,
+      "x": 33,
+      "y": -27711.3125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls -t ~/feather-aw/w5/logs/iteration-*.log | head -3",
+      "w": 272.296875,
+      "x": 33,
+      "y": -27494.3125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -40 ~/feather-aw/w5/logs/iteration-0034-1774438824.log",
+      "w": 272.296875,
+      "x": 33,
+      "y": -27176.8125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep -r \"w5-ui-probe-1774438971\" ~/feather-aw/w5/logs/ | head -5",
+      "w": 272.296875,
+      "x": 33,
+      "y": -26402.3125
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep \"w5-bubble-1774439005540\" ~/feather-aw/w5/logs/iteration-0034-1774438824.lo\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -25293.9375
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep -r \"w5-bubble-1774439005\" ~/feather-aw/w5/logs/ 2>/dev/null | head -3",
+      "w": 272.296875,
+      "x": 33,
+      "y": -25040.9375
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep \"w5-bubble-1774439011267\" ~/feather-aw/w5/logs/iteration-0034-1774438824.lo\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -24268.25
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep \"worker5-duplicate-probe-1774439049989\" ~/feather-aw/w5/logs/iteration-0034\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -23706.75
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep -r \"worker5-duplicate-probe\" ~/feather-aw/w5/logs/ 2>/dev/null | head -3",
+      "w": 272.296875,
+      "x": 33,
+      "y": -23471.75
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgrep \"1774439049989\\|1774439057796\" ~/feather-aw/w5/logs/iteration-0034-17744388\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -23145.25
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls -t ~/feather-aw/w5/logs/iteration-*.log | head -1 | xargs grep \"duplicate-pro\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -22892.25
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -20 ~/feather-aw/w5/logs/iteration-0034-1774438824.log 2>/dev/null",
+      "w": 272.296875,
+      "x": 33,
+      "y": -22130.4375
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -5 /home/user/feather-aw/w5/results.tsv",
+      "w": 272.296875,
+      "x": 33,
+      "y": -9986.75
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -5 /home/user/feather-aw/w6/results.tsv",
+      "w": 272.296875,
+      "x": 33,
+      "y": -9660.25
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcat /home/user/feather-aw/w5/current.txt 2>/dev/null; echo \"---\"; cat /home/user\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -9342.75
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -5 /home/user/feather-aw/w4/results.tsv",
+      "w": 272.296875,
+      "x": 33,
+      "y": -9016.25
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashtail -5 /home/user/feather-aw/w1/results.tsv; echo \"===\"; tail -5 /home/user/fea\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -8043.65625
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcat /home/user/feather-aw/w1/current.txt 2>/dev/null; echo \"---\"; cat /home/user\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -7699.15625
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashecho \"=== w1 (Claude Finder) ===\"; tail -3 /home/user/feather-aw/w1/results.tsv;\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -6542.71875
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashfor w in 1 2 3 4 5 6; do echo \"w$w: $(cat /home/user/feather-aw/w$w/current.txt \u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -6198.21875
+    },
+    {
+      "h": 84,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashfor w in 1 2 3 4 5 6; do keeps=$(tail -n +2 /home/user/feather-aw/w$w/results.ts\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -5853.71875
+    },
+    {
+      "h": 48,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcat /home/user/feather-aw/w2/breadcrumbs.md 2>/dev/null",
+      "w": 272.296875,
+      "x": 33,
+      "y": -4516.078125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls /home/user/feather-dev/w2/issues/ 2>/dev/null | head -20; echo \"---\"; ls /hom\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -4216.578125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcat /home/user/autoweb/jobs/feather-program-replicator.md 2>/dev/null",
+      "w": 272.296875,
+      "x": 33,
+      "y": -3890.078125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls /home/user/feather-dev/w2/issues/ 2>/dev/null | wc -l; echo \"---\"; git -C /ho\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -3512.578125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgit -C /home/user/feather-dev/w1 log --oneline -5; echo \"---\"; git -C /home/user\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -3186.078125
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcd /home/user/feather-dev/w2 && git fetch origin dev-w1 2>&1 && git merge origin\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -2649.140625
+    },
+    {
+      "h": 48,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashcd /home/user/feather-dev/w2 && git status --short",
+      "w": 272.296875,
+      "x": 33,
+      "y": -2141.515625
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgit checkout -- frontend/package-lock.json && git merge origin/dev-w1 --no-edit \u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -1830.140625
+    },
+    {
+      "h": 48,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashgit -C /home/user/feather-dev/w3 status --short",
+      "w": 272.296875,
+      "x": 33,
+      "y": -1271.140625
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls /home/user/feather-dev/w2/issues/ | while read d; do s=$(cat \"/home/user/feat\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -873.015625
+    },
+    {
+      "h": 66,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "SUMMARY",
+      "text": "\u26a1 Bashls /home/user/feather-dev/w2/issues/ | while read d; do s=$(cat \"/home/user/feat\u2026",
+      "w": 272.296875,
+      "x": 33,
+      "y": -555.515625
+    },
+    {
+      "h": 36,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "BUTTON",
+      "text": "+",
+      "w": 19.6875,
+      "x": 12,
+      "y": 800
+    },
+    {
+      "h": 43,
+      "placeholder": "Send a message...",
+      "tabindex": null,
+      "tag": "TEXTAREA",
+      "text": "",
+      "w": 261.625,
+      "x": 39.6875,
+      "y": 793
+    },
+    {
+      "h": 42,
+      "placeholder": null,
+      "tabindex": null,
+      "tag": "BUTTON",
+      "text": "Send",
+      "w": 68.6875,
+      "x": 309.3125,
+      "y": 794
+    }
+  ]
+}
