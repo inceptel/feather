@@ -112,7 +112,7 @@ function formatTime(iso: string) {
 // ── Markdown styles ─────────────────────────────────────────────────────────
 
 const markdownCSS = `
-.markdown { line-height: 1.55; word-break: break-word; }
+.markdown { line-height: 1.55; word-break: break-word; overflow-x: auto; }
 .markdown p { margin: 0 0 8px 0; }
 .markdown p:last-child { margin-bottom: 0; }
 .markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 12px 0 6px 0; font-weight: 600; }
@@ -130,8 +130,8 @@ const markdownCSS = `
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
 }
-.markdown table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 0.9em; }
-.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+.markdown table { border-collapse: collapse; margin: 8px 0; min-width: 100%; font-size: 0.9em; }
+.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; white-space: nowrap; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
 .markdown a { color: #73b8ff; text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
