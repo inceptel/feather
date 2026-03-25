@@ -119,8 +119,10 @@ export function Terminal(props: { sessionId: string | null }) {
           position: 'absolute',
           top: '12px',
           right: '12px',
+          left: '12px',
           display: 'flex',
           'align-items': 'center',
+          'flex-wrap': 'wrap',
           gap: '8px',
           padding: '8px 10px',
           background: 'rgba(13, 17, 23, 0.92)',
@@ -128,6 +130,8 @@ export function Terminal(props: { sessionId: string | null }) {
           'border-radius': '10px',
           color: '#e5e5e5',
           'font-size': '12px',
+          'box-sizing': 'border-box',
+          'max-width': 'calc(100% - 24px)',
         }}>
           <span>{connectionState() === 'reconnecting' ? 'Terminal reconnecting...' : 'Terminal disconnected'}</span>
           <button onClick={reconnectNow} style={{
