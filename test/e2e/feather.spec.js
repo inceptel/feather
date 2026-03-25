@@ -269,6 +269,18 @@ test.describe('Message rendering', () => {
     const timestamps = allText.filter(t => timePattern.test(t))
     expect(timestamps.length).toBeGreaterThanOrEqual(4)
   })
+
+  test('chat transcript is exposed to the accessibility tree', async ({ page }) => {
+    const snapshot = await page.getByRole('log', { name: 'Chat transcript' }).ariaSnapshot()
+
+    expect(snapshot).toContain('log "Chat transcript"')
+    expect(snapshot).toContain('- text: Explain how')
+    expect(snapshot).toContain('- strong: markdown')
+    expect(snapshot).toContain('- code: Feather')
+    expect(snapshot).toContain('- text: Feather uses')
+    expect(snapshot).toContain('- strong: marked')
+    expect(snapshot).toContain('- text: with GFM support.')
+  })
 })
 
 // ── Chat input ──────────────────────────────────────────────────────────────

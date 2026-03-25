@@ -109,6 +109,12 @@ function formatTime(iso: string) {
   catch { return '' }
 }
 
+function messageA11yLabel(msg: Message) {
+  const sender = msg.role === 'user' ? 'You' : 'Assistant'
+  const timestamp = formatTime(msg.timestamp)
+  return timestamp ? `${sender} at ${timestamp}` : sender
+}
+
 // ── Markdown styles ─────────────────────────────────────────────────────────
 
 const markdownCSS = `
@@ -171,7 +177,15 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
   })
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}>
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions text"
+      aria-label="Chat transcript"
+      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}
+    >
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
@@ -189,7 +203,10 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
         const { cleanText, images } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [] }
         const hasImages = images.length > 0
 
-        return <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '16px' }}>
+        return <article
+          aria-label={messageA11yLabel(msg)}
+          style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '16px' }}
+        >
           <div style={{
             'max-width': '85%', padding: hasImages ? '6px' : '10px 14px',
             'border-radius': msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
@@ -220,7 +237,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
               </span>
             )}
           </div>
-        </div>
+        </article>
       }}</For>
     </div>
   )
