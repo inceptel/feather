@@ -1,0 +1,15 @@
+{
+  "name": "feather",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "build:frontend": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.20.0"
+  }
+}
