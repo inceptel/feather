@@ -16,12 +16,15 @@ function queueViewportSync() {
   })
 }
 
+syncViewportHeight()
 queueViewportSync()
 window.addEventListener('resize', queueViewportSync)
+window.addEventListener('load', queueViewportSync)
 window.addEventListener('orientationchange', queueViewportSync)
 window.addEventListener('pageshow', queueViewportSync)
 window.addEventListener('focus', queueViewportSync)
 window.addEventListener('scroll', queueViewportSync)
+document.addEventListener('scroll', queueViewportSync)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) queueViewportSync()
 })
