@@ -263,10 +263,28 @@ export default function App() {
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden' }}>
           <Show when={currentId()} fallback={
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444' }}>
-              <div style={{ 'text-align': 'center' }}>
+            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444', padding: '24px' }}>
+              <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
                 <div style={{ 'font-size': '32px', 'margin-bottom': '12px', opacity: '0.3' }}>~</div>
                 <div>Open a session or create a new one</div>
+                <button
+                  onClick={handleNew}
+                  disabled={creating()}
+                  style={{
+                    width: '100%',
+                    'max-width': '240px',
+                    height: '44px',
+                    background: creating() ? '#1a1a2e' : '#4aba6a',
+                    color: creating() ? '#666' : '#000',
+                    border: 'none',
+                    'border-radius': '10px',
+                    'font-size': '14px',
+                    'font-weight': '600',
+                    cursor: creating() ? 'wait' : 'pointer',
+                  }}
+                >
+                  {creating() ? 'Starting...' : 'Start a new session'}
+                </button>
               </div>
             </div>
           }>
