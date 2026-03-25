@@ -110,9 +110,13 @@ function renderBlock(block: ContentBlock) {
     const preview = raw.slice(0, 200)
     const isErr = block.is_error
     return (
-      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}>
-        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#7c8595' }}>{isErr ? 'error' : 'output'}</div>
-        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#aeb6c2', 'white-space': 'pre', 'overflow-x': 'auto', 'overflow-y': 'visible', 'word-break': 'normal' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
+      <div
+        role="group"
+        aria-label={isErr ? 'Tool error output' : 'Tool output'}
+        style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}
+      >
+        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#ff9b9b' : '#7c8595' }}>{isErr ? 'error' : 'output'}</div>
+        {preview && <div tabindex="0" style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#ff9b9b' : '#aeb6c2', 'white-space': 'pre', 'overflow-x': 'auto', 'overflow-y': 'visible', 'word-break': 'normal' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
       </div>
     )
   }
@@ -150,7 +154,7 @@ const markdownCSS = `
 .markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: #c9d1d9; }
 .markdown blockquote {
-  margin: 6px 0; padding: 4px 12px; border-left: 3px solid #7c8595; color: #999;
+  margin: 6px 0; padding: 4px 12px; border-left: 3px solid #7c8595; color: #c9d1d9;
 }
 .markdown table {
   display: block; overflow-x: auto; max-width: 100%; width: max-content; min-width: 100%;
@@ -180,6 +184,7 @@ function extractImages(text: string): { cleanText: string; images: string[] } {
 export function MessageView(props: { messages: Message[], loading: boolean }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
+  let lightboxCloseRef: HTMLButtonElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
 
   function onScroll() {
@@ -200,6 +205,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
 
   createEffect(() => {
     if (!lightbox()) return
+    requestAnimationFrame(() => lightboxCloseRef?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setLightbox(null)
@@ -225,8 +231,64 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       </Show>
       {/* Lightbox */}
       <Show when={lightbox()}>
-        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}>
-          <img alt="Expanded attachment preview" src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }} />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Expanded attachment preview"
+          aria-describedby="lightbox-help"
+          onClick={() => setLightbox(null)}
+          style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}
+        >
+          <p
+            id="lightbox-help"
+            style={{
+              position: 'absolute',
+              width: '1px',
+              height: '1px',
+              padding: '0',
+              margin: '-1px',
+              overflow: 'hidden',
+              clip: 'rect(0, 0, 0, 0)',
+              'white-space': 'nowrap',
+              border: '0',
+            }}
+          >
+            Press Escape or activate the close button to dismiss the image preview.
+          </p>
+          <button
+            type="button"
+            ref={lightboxCloseRef}
+            aria-label="Close image preview"
+            onClick={(event) => {
+              event.stopPropagation()
+              setLightbox(null)
+            }}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              width: '44px',
+              height: '44px',
+              border: '1px solid #333',
+              'border-radius': '999px',
+              background: 'rgba(13,17,23,0.92)',
+              color: '#c9d1d9',
+              'font-size': '24px',
+              'line-height': '1',
+              cursor: 'pointer',
+              display: 'flex',
+              'align-items': 'center',
+              'justify-content': 'center',
+            }}
+          >
+            ×
+          </button>
+          <img
+            alt="Expanded attachment preview"
+            src={lightbox()!}
+            onClick={(event) => event.stopPropagation()}
+            style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }}
+          />
         </div>
       </Show>
 
@@ -249,7 +311,14 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           }}>
             {/* Inline images */}
             <For each={images}>{(src) => (
-              <img alt="Attached image" src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+              <button
+                type="button"
+                onClick={() => setLightbox(src)}
+                aria-label="Expand attached image"
+                style={{ padding: '0', border: 'none', background: 'none', cursor: 'zoom-in', display: 'block', width: '100%', 'text-align': 'left' }}
+              >
+                <img alt="Attached image" src={src} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', display: 'block' }} />
+              </button>
             )}</For>
             {/* Text + other blocks */}
             <div style={hasImages ? { padding: '4px 8px 4px' } : {}}>
@@ -265,7 +334,12 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <span style={{ 'font-size': '10px', color: '#7c8595' }}>{formatTime(msg.timestamp)}</span>
             {msg.role === 'user' && msg.delivery && (
-              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#7c8595' }}>
+              <span
+                role="img"
+                aria-label={msg.delivery === 'delivered' ? 'Delivered' : 'Pending delivery'}
+                title={msg.delivery === 'delivered' ? 'Delivered' : 'Pending delivery'}
+                style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#7c8595' }}
+              >
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
               </span>
             )}
