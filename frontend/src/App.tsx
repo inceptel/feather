@@ -226,7 +226,7 @@ export default function App() {
               </button>
             </div>
             <div style={{ padding: '12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))' }}>
-              <button aria-label="Start a new session" onClick={handleNew} disabled={creating()} style={{ width: '100%', 'min-height': '44px', padding: '10px 14px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#7c8595' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center' }}>
+              <button aria-label="Start a new session" onClick={handleNew} disabled={creating()} style={{ width: '100%', 'min-height': '44px', padding: '10px 14px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#aeb6c2' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>
@@ -326,7 +326,7 @@ export default function App() {
                     'max-width': '240px',
                     height: '44px',
                     background: creating() ? '#1a1a2e' : '#4aba6a',
-                    color: creating() ? '#7c8595' : '#000',
+                    color: creating() ? '#aeb6c2' : '#000',
                     border: 'none',
                     'border-radius': '10px',
                     'font-size': '14px',
