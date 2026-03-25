@@ -197,7 +197,7 @@ export default function App() {
         aria-modal="true"
         aria-label="Session list"
         aria-hidden={sidebar() ? undefined : 'true'}
-        style={{ position: 'fixed', top: '0', left: '0', width: '300px', 'max-width': 'calc(100vw - 32px)', height: '100%', background: '#0d1117', 'border-right': '1px solid #1e1e1e', overflow: 'hidden', transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.2s', 'z-index': '40', 'box-shadow': sidebar() ? '0 0 0 1px rgba(0,0,0,0.15), 0 20px 40px rgba(0,0,0,0.45)' : 'none' }}
+        style={{ position: 'fixed', top: '0', left: '0', width: 'min(300px, calc(100vw - max(16px, env(safe-area-inset-left, 0px)) - max(16px, env(safe-area-inset-right, 0px))))', height: '100%', background: '#0d1117', 'border-right': '1px solid #1e1e1e', overflow: 'hidden', transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform 0.2s', 'z-index': '40', 'box-shadow': sidebar() ? '0 0 0 1px rgba(0,0,0,0.15), 0 20px 40px rgba(0,0,0,0.45)' : 'none' }}
       >
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', visibility: sidebar() ? 'visible' : 'hidden', 'pointer-events': sidebar() ? 'auto' : 'none' }}>
             <div style={{ padding: 'max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
