@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, on } from 'solid-js'
+import { For, Show, createEffect, createSignal, on, onCleanup } from 'solid-js'
 import type { Message, ContentBlock } from '../api'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -197,6 +197,17 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
     },
   ))
+
+  createEffect(() => {
+    if (!lightbox()) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setLightbox(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    onCleanup(() => window.removeEventListener('keydown', onKeyDown))
+  })
 
   return (
     <div
