@@ -91,6 +91,9 @@ export default function App() {
     setSidebar(false)
     setLoading(true)
     setMessages([])
+    setText('')
+    setFiles([])
+    if (textareaRef) textareaRef.style.height = 'auto'
     cleanupSSE?.()
     try { setMessages(await fetchMessages(id)) } catch {}
     setLoading(false)
