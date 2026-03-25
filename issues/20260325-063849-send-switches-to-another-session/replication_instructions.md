@@ -1,0 +1,5 @@
+1. Fetch `http://localhost:$PORT/api/sessions?limit=500` and confirm session id `4baa1292-7fdf-4e87-af47-6731e459b3cd` is still present with title `worker 4 probe`.
+2. Fetch the default `http://localhost:$PORT/api/sessions` list and confirm that same id is missing from the top 50 sessions the UI keeps in memory.
+3. Inspect [App.tsx](/home/user/feather-dev/w5/frontend/src/App.tsx): on mount it restores `currentId` from `location.hash`, derives header/session identity only from `sessions()`, and `handleSend()` still posts with `sendInput(currentId()!, ...)`.
+4. Inspect [server.js](/home/user/feather-dev/w5/server.js): `findJsonlPath()` scans every directory under `~/.claude/projects`, and `sendInput(id, text)` accepts any reachable session id from that shared store.
+5. The bug is present if a hidden foreign session can still be targeted by hash and sent to even after it has fallen out of the visible session list, because that leaves Feather free to post into another worker's conversation from the wrong in-app context.
