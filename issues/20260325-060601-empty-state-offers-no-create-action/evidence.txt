@@ -1,0 +1,3 @@
+Accessibility snapshot after loading `http://localhost:3304/` on the mobile viewport:
+
+`- button "☰" [ref=e1]`
