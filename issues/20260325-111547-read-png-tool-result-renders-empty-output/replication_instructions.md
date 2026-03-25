@@ -1,0 +1,5 @@
+1. Fetch `http://localhost:$PORT/api/sessions/4baa1292-7fdf-4e87-af47-6731e459b3cd/messages?limit=500` and locate the `07:09 AM` `Read` tool call for `/home/user/feather-aw/w4/after-send-iter27.png`.
+2. Confirm the immediately following `tool_result` block is not text output: it is an array containing an `image/png` payload and no `.text` content.
+3. Inspect [MessageView.tsx](/home/user/feather-dev/w5/frontend/src/components/MessageView.tsx): the `tool_result` renderer builds `raw` by joining only `c.text` values from array content, then renders the body only when `preview` is truthy.
+4. Because the PNG tool result has image data but no text, `raw` becomes an empty string, `preview` is empty, and Feather renders only the green `OUTPUT` header with no visible body.
+5. Run `PORT=$PORT bash /home/user/feather-dev/w5/issues/20260325-111547-read-png-tool-result-renders-empty-output/replicate.sh`. It reports the bug when both conditions still hold: the stored transcript contains that image-only PNG result, and the current frontend still drops non-text tool-result parts.
