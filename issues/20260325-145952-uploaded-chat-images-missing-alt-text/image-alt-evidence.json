@@ -1,0 +1,46 @@
+{
+  "allImgs": [
+    {
+      "alt": null,
+      "ariaLabel": null,
+      "height": 299.984375,
+      "index": 0,
+      "role": null,
+      "src": "/uploads/1774450760676-landing-iter.png",
+      "width": 138.609375
+    },
+    {
+      "alt": null,
+      "ariaLabel": null,
+      "height": 299.984375,
+      "index": 1,
+      "role": null,
+      "src": "/uploads/1774450760676-landing-iter.png",
+      "width": 138.609375
+    }
+  ],
+  "imgCount": 2,
+  "textareaValue": null,
+  "title": "Feather",
+  "uploadImgs": [
+    {
+      "alt": null,
+      "ariaLabel": null,
+      "height": 299.984375,
+      "index": 0,
+      "role": null,
+      "src": "/uploads/1774450760676-landing-iter.png",
+      "width": 138.609375
+    },
+    {
+      "alt": null,
+      "ariaLabel": null,
+      "height": 299.984375,
+      "index": 1,
+      "role": null,
+      "src": "/uploads/1774450760676-landing-iter.png",
+      "width": 138.609375
+    }
+  ],
+  "url": "http://localhost:3304/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf"
+}
