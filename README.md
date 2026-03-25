@@ -13,7 +13,7 @@ Feather reads Claude's raw JSONL session files, streams updates via SSE, and con
 ## Quick start
 
 ```bash
-git clone <repo-url> feather && cd feather
+git clone https://github.com/inceptel/feather.git && cd feather
 ./run.sh
 # → Feather on http://localhost:4870
 ```
@@ -104,6 +104,22 @@ handle /feather/* {
     reverse_proxy localhost:4870
 }
 ```
+
+## Make it yours
+
+The entire app is 6 files. Point Claude (or any AI agent) at this repo and tell it what you want:
+
+- *"Add a cost tracker that shows tokens and dollars per session"*
+- *"Add push notifications when an agent needs my attention"*
+- *"Show me a diff view when Claude edits a file"*
+- *"Add a dark/light theme toggle"*
+- *"Group consecutive tool calls into a collapsible block"*
+- *"Add Codex support — here's how their session files work"*
+- *"Add a search bar that filters across all sessions"*
+- *"Show a green typing indicator when Claude is responding"*
+- *"Add keyboard shortcuts — j/k to navigate sessions, Enter to open"*
+
+No abstractions to learn. No plugin API to read. One server file, one app shell, one message renderer. You describe it, the agent builds it.
 
 ## Dependencies
 
