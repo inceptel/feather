@@ -1,133 +1,413 @@
-import { describe, it, before } from 'node:test'
+import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-// API tests run against a live server.
-// Start it first: PORT=14870 node server.js
-// Or test against the default running instance on 4870.
 const PORT = process.env.TEST_PORT || 4870
 const BASE = `http://localhost:${PORT}`
+const HOME = process.env.HOME || '/home/user'
+const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects')
+
+// ── Synthetic session for deterministic testing ─────────────────────────────
+
+const TEST_SESSION_ID = `test-feather-${Date.now()}`
+let testSessionDir
+let testSessionPath
+
+function writeLine(obj) {
+  fs.appendFileSync(testSessionPath, JSON.stringify(obj) + '\n')
+}
 
 before(async () => {
   // Verify server is reachable
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     try {
       const r = await fetch(`${BASE}/api/health`)
-      if (r.ok) return
+      if (r.ok) break
     } catch {}
     await new Promise(r => setTimeout(r, 500))
   }
-  throw new Error(`Server not reachable at ${BASE}. Start it first: node server.js`)
+  const r = await fetch(`${BASE}/api/health`)
+  if (!r.ok) throw new Error(`Server not reachable at ${BASE}`)
+
+  // Create a synthetic session JSONL in the first project directory
+  const dirs = fs.readdirSync(CLAUDE_PROJECTS).filter(d =>
+    fs.statSync(path.join(CLAUDE_PROJECTS, d)).isDirectory()
+  )
+  if (dirs.length === 0) throw new Error('No project dirs found in ~/.claude/projects/')
+
+  testSessionDir = path.join(CLAUDE_PROJECTS, dirs[0])
+  testSessionPath = path.join(testSessionDir, `${TEST_SESSION_ID}.jsonl`)
+
+  // Seed with known messages
+  writeLine({
+    type: 'user', uuid: 'api-test-0001', timestamp: '2025-06-15T12:00:00Z',
+    isSidechain: false, isMeta: false,
+    message: { role: 'user', content: 'What is the meaning of life?' },
+  })
+  writeLine({
+    type: 'assistant', uuid: 'api-test-0002', timestamp: '2025-06-15T12:00:05Z',
+    isSidechain: false, isMeta: false,
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'The answer is **42**, according to Douglas Adams.' },
+        { type: 'thinking', thinking: 'Classic reference to Hitchhiker\'s Guide.' },
+      ],
+    },
+  })
+  writeLine({
+    type: 'assistant', uuid: 'api-test-0003', timestamp: '2025-06-15T12:00:10Z',
+    isSidechain: false, isMeta: false,
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'tool_x', name: 'Read', input: { file_path: '/meaning.txt' } }],
+    },
+  })
+  writeLine({
+    type: 'assistant', uuid: 'api-test-0004', timestamp: '2025-06-15T12:00:12Z',
+    isSidechain: false, isMeta: false,
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_result', tool_use_id: 'tool_x', content: 'forty-two', is_error: false }],
+    },
+  })
+
+  // Give fs.watch a moment to pick up the new file
+  await new Promise(r => setTimeout(r, 500))
 })
 
+after(() => {
+  // Clean up synthetic session
+  try { fs.unlinkSync(testSessionPath) } catch {}
+})
+
+// ── Health ───────────────────────────────────────────────────────────────────
+
 describe('GET /api/health', () => {
-  it('returns ok status', async () => {
+  it('returns ok with numeric uptime', async () => {
     const r = await fetch(`${BASE}/api/health`)
     assert.equal(r.status, 200)
     const body = await r.json()
     assert.equal(body.status, 'ok')
-    assert.ok(typeof body.uptime === 'number')
+    assert.ok(body.uptime > 0)
   })
 })
+
+// ── Sessions ────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions', () => {
-  it('returns sessions array', async () => {
+  it('returns array of sessions', async () => {
     const r = await fetch(`${BASE}/api/sessions`)
     assert.equal(r.status, 200)
-    const body = await r.json()
-    assert.ok(Array.isArray(body.sessions))
+    const { sessions } = await r.json()
+    assert.ok(Array.isArray(sessions))
+    assert.ok(sessions.length > 0, 'expected at least one session')
   })
 
-  it('respects limit parameter', async () => {
-    const r = await fetch(`${BASE}/api/sessions?limit=5`)
-    assert.equal(r.status, 200)
-    const body = await r.json()
-    assert.ok(body.sessions.length <= 5)
-  })
-
-  it('sessions have expected shape', async () => {
-    const r = await fetch(`${BASE}/api/sessions`)
-    const body = await r.json()
-    for (const s of body.sessions.slice(0, 3)) {
-      assert.ok(s.id, 'session missing id')
-      assert.ok(s.title, 'session missing title')
-      assert.ok(s.updatedAt, 'session missing updatedAt')
-      assert.equal(typeof s.isActive, 'boolean', 'isActive should be boolean')
+  it('every session has id, title, updatedAt, isActive', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions`)).json()
+    for (const s of sessions) {
+      assert.ok(typeof s.id === 'string' && s.id.length > 0, 'bad id')
+      assert.ok(typeof s.title === 'string' && s.title.length > 0, 'bad title')
+      assert.ok(typeof s.updatedAt === 'string', 'bad updatedAt')
+      assert.ok(!isNaN(new Date(s.updatedAt).getTime()), 'updatedAt not valid ISO date')
+      assert.ok(typeof s.isActive === 'boolean', 'isActive not boolean')
     }
   })
+
+  it('limit=3 returns at most 3 sessions', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=3`)).json()
+    assert.ok(sessions.length <= 3)
+  })
+
+  it('sessions are sorted by updatedAt descending', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=20`)).json()
+    for (let i = 1; i < sessions.length; i++) {
+      const prev = new Date(sessions[i - 1].updatedAt).getTime()
+      const curr = new Date(sessions[i].updatedAt).getTime()
+      assert.ok(prev >= curr, `sessions not sorted: ${sessions[i-1].updatedAt} < ${sessions[i].updatedAt}`)
+    }
+  })
+
+  it('our test session appears in the list', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=50`)).json()
+    const found = sessions.find(s => s.id === TEST_SESSION_ID)
+    assert.ok(found, `test session ${TEST_SESSION_ID} not found`)
+    assert.equal(found.title, 'What is the meaning of life?')
+  })
 })
+
+// ── Messages ────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions/:id/messages', () => {
   it('returns empty array for nonexistent session', async () => {
-    const r = await fetch(`${BASE}/api/sessions/nonexistent-fake-id/messages`)
-    assert.equal(r.status, 200)
-    const body = await r.json()
-    assert.deepEqual(body.messages, [])
+    const { messages } = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/messages`)).json()
+    assert.deepEqual(messages, [])
   })
 
-  it('returns messages with expected shape for real session', async () => {
-    const sr = await fetch(`${BASE}/api/sessions?limit=1`)
-    const { sessions } = await sr.json()
-    if (sessions.length === 0) return
+  it('returns correct messages for test session', async () => {
+    const { messages } = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages`)).json()
+    assert.equal(messages.length, 4)
 
-    const r = await fetch(`${BASE}/api/sessions/${sessions[0].id}/messages`)
-    assert.equal(r.status, 200)
-    const body = await r.json()
-    assert.ok(Array.isArray(body.messages))
-    for (const msg of body.messages.slice(0, 3)) {
-      assert.ok(msg.uuid, 'message missing uuid')
-      assert.ok(msg.role, 'message missing role')
-      assert.ok(msg.timestamp, 'message missing timestamp')
-      assert.ok(Array.isArray(msg.content), 'content should be array')
-    }
+    // First message: user
+    assert.equal(messages[0].uuid, 'api-test-0001')
+    assert.equal(messages[0].role, 'user')
+    assert.equal(messages[0].content[0].text, 'What is the meaning of life?')
+
+    // Second message: assistant with text + thinking
+    assert.equal(messages[1].uuid, 'api-test-0002')
+    assert.equal(messages[1].role, 'assistant')
+    assert.equal(messages[1].content[0].type, 'text')
+    assert.ok(messages[1].content[0].text.includes('**42**'))
+    assert.equal(messages[1].content[1].type, 'thinking')
+
+    // Third: tool_use
+    assert.equal(messages[2].content[0].type, 'tool_use')
+    assert.equal(messages[2].content[0].name, 'Read')
+
+    // Fourth: tool_result
+    assert.equal(messages[3].content[0].type, 'tool_result')
+    assert.equal(messages[3].content[0].content, 'forty-two')
+  })
+
+  it('limit parameter truncates from the front', async () => {
+    const { messages } = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages?limit=2`)).json()
+    assert.equal(messages.length, 2)
+    // Should be the last 2 messages (tool_use, tool_result)
+    assert.equal(messages[0].uuid, 'api-test-0003')
+    assert.equal(messages[1].uuid, 'api-test-0004')
+  })
+
+  it('messages preserve timestamps', async () => {
+    const { messages } = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages`)).json()
+    assert.equal(messages[0].timestamp, '2025-06-15T12:00:00Z')
+    assert.equal(messages[1].timestamp, '2025-06-15T12:00:05Z')
   })
 })
 
+// ── SSE ─────────────────────────────────────────────────────────────────────
+
 describe('GET /api/sessions/:id/stream (SSE)', () => {
-  it('connects and receives connected event', async () => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+  it('sends connected event on open', async () => {
+    const ctrl = new AbortController()
     try {
-      const r = await fetch(`${BASE}/api/sessions/test-sse-fake/stream`, {
-        signal: controller.signal,
+      const r = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, {
+        signal: ctrl.signal,
         headers: { Accept: 'text/event-stream' },
       })
       assert.equal(r.status, 200)
       assert.ok(r.headers.get('content-type').includes('text/event-stream'))
+      assert.equal(r.headers.get('cache-control'), 'no-cache')
 
       const reader = r.body.getReader()
-      const decoder = new TextDecoder()
       const { value } = await reader.read()
-      const text = decoder.decode(value)
-      assert.ok(text.includes('event: connected'), `expected connected event, got: ${text}`)
-      controller.abort()
+      const text = new TextDecoder().decode(value)
+      assert.ok(text.includes('event: connected'))
     } finally {
-      clearTimeout(timeout)
+      ctrl.abort()
+    }
+  })
+
+  it('delivers new messages written to JSONL', async () => {
+    // Subscribe to SSE
+    const ctrl = new AbortController()
+    const receivedMessages = []
+
+    try {
+      const r = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, {
+        signal: ctrl.signal,
+      })
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+
+      // Read and discard the "connected" event
+      await reader.read()
+
+      // Now append a new message to the JSONL file
+      const newUuid = `sse-live-${Date.now()}`
+      writeLine({
+        type: 'user', uuid: newUuid, timestamp: '2025-06-15T12:01:00Z',
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'This message was written during the SSE test' },
+      })
+
+      // Read from SSE — should receive the new message
+      const deadline = Date.now() + 5000
+      let accumulated = ''
+      while (Date.now() < deadline) {
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise(r => setTimeout(() => r({ done: true }), 2000))
+        const { value, done } = await Promise.race([readPromise, timeoutPromise])
+        if (done || !value) break
+        accumulated += decoder.decode(value)
+        if (accumulated.includes(newUuid)) break
+      }
+
+      assert.ok(accumulated.includes(newUuid), `SSE did not deliver message. Got: ${accumulated.slice(0, 200)}`)
+      assert.ok(accumulated.includes('event: message'))
+
+      // Parse the SSE data
+      const dataLine = accumulated.split('\n').find(l => l.startsWith('data: ') && l.includes(newUuid))
+      assert.ok(dataLine, 'no data line found')
+      const parsed = JSON.parse(dataLine.replace('data: ', ''))
+      assert.equal(parsed.uuid, newUuid)
+      assert.equal(parsed.role, 'user')
+      assert.equal(parsed.content[0].text, 'This message was written during the SSE test')
+    } finally {
+      ctrl.abort()
+    }
+  })
+
+  it('SSE does not deliver sidechain messages', async () => {
+    const ctrl = new AbortController()
+    try {
+      const r = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, { signal: ctrl.signal })
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      await reader.read() // connected
+
+      // Write a sidechain message
+      writeLine({
+        type: 'assistant', uuid: 'sse-sidechain-test', timestamp: '2025-06-15T12:02:00Z',
+        isSidechain: true, isMeta: false,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'sidechain noise' }] },
+      })
+
+      // Then write a normal message so we know SSE is working
+      const markerUuid = `sse-marker-${Date.now()}`
+      writeLine({
+        type: 'user', uuid: markerUuid, timestamp: '2025-06-15T12:02:01Z',
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'marker message' },
+      })
+
+      // Read until we see the marker
+      let accumulated = ''
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise(r => setTimeout(() => r({ done: true }), 2000))
+        const { value, done } = await Promise.race([readPromise, timeoutPromise])
+        if (done || !value) break
+        accumulated += decoder.decode(value)
+        if (accumulated.includes(markerUuid)) break
+      }
+
+      assert.ok(accumulated.includes(markerUuid), 'marker not received')
+      assert.ok(!accumulated.includes('sse-sidechain-test'), 'sidechain message leaked through SSE')
+    } finally {
+      ctrl.abort()
+    }
+  })
+
+  it('SSE does not deliver progress/system messages', async () => {
+    const ctrl = new AbortController()
+    try {
+      const r = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, { signal: ctrl.signal })
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      await reader.read()
+
+      // Write progress and system messages
+      writeLine({ type: 'progress', uuid: 'sse-progress-test', timestamp: '2025-06-15T12:03:00Z', message: null })
+      writeLine({ type: 'system', uuid: 'sse-system-test', timestamp: '2025-06-15T12:03:01Z', message: { role: 'system', content: 'init' } })
+
+      // Write marker
+      const markerUuid = `sse-marker2-${Date.now()}`
+      writeLine({
+        type: 'user', uuid: markerUuid, timestamp: '2025-06-15T12:03:02Z',
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'marker2' },
+      })
+
+      let accumulated = ''
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise(r => setTimeout(() => r({ done: true }), 2000))
+        const { value, done } = await Promise.race([readPromise, timeoutPromise])
+        if (done || !value) break
+        accumulated += decoder.decode(value)
+        if (accumulated.includes(markerUuid)) break
+      }
+
+      assert.ok(accumulated.includes(markerUuid), 'marker not received')
+      assert.ok(!accumulated.includes('sse-progress-test'), 'progress message leaked')
+      assert.ok(!accumulated.includes('sse-system-test'), 'system message leaked')
+    } finally {
+      ctrl.abort()
+    }
+  })
+
+  it('SSE event IDs are byte offsets (monotonically increasing)', async () => {
+    const ctrl = new AbortController()
+    try {
+      const r = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, { signal: ctrl.signal })
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      await reader.read()
+
+      // Write two messages rapidly
+      writeLine({
+        type: 'user', uuid: `sse-offset-a-${Date.now()}`, timestamp: '2025-06-15T12:04:00Z',
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'offset test A' },
+      })
+      writeLine({
+        type: 'user', uuid: `sse-offset-b-${Date.now()}`, timestamp: '2025-06-15T12:04:01Z',
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'offset test B' },
+      })
+
+      let accumulated = ''
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        const readPromise = reader.read()
+        const timeoutPromise = new Promise(r => setTimeout(() => r({ done: true }), 2000))
+        const { value, done } = await Promise.race([readPromise, timeoutPromise])
+        if (done || !value) break
+        accumulated += decoder.decode(value)
+        if (accumulated.includes('offset test B')) break
+      }
+
+      // Extract IDs
+      const ids = accumulated.split('\n')
+        .filter(l => l.startsWith('id: '))
+        .map(l => parseInt(l.replace('id: ', '')))
+      assert.ok(ids.length >= 2, `expected >=2 IDs, got ${ids.length}`)
+      for (let i = 1; i < ids.length; i++) {
+        assert.ok(ids[i] > ids[i - 1], `IDs not monotonically increasing: ${ids[i-1]} >= ${ids[i]}`)
+      }
+    } finally {
+      ctrl.abort()
     }
   })
 })
 
+// ── Error handling ──────────────────────────────────────────────────────────
+
 describe('POST /api/sessions/:id/interrupt', () => {
-  it('returns error for nonexistent session', async () => {
-    const r = await fetch(`${BASE}/api/sessions/nonexistent-id/interrupt`, {
-      method: 'POST',
-    })
+  it('returns 500 for nonexistent tmux session', async () => {
+    const r = await fetch(`${BASE}/api/sessions/no-such-session/interrupt`, { method: 'POST' })
     assert.equal(r.status, 500)
+    const body = await r.json()
+    assert.ok(body.error)
   })
 })
 
-describe('static file serving', () => {
-  it('serves index.html at root', async () => {
+describe('static files', () => {
+  it('serves index.html with correct content-type', async () => {
     const staticDir = path.join(__dirname, '..', '..', 'static')
     if (!fs.existsSync(path.join(staticDir, 'index.html'))) return
 
     const r = await fetch(`${BASE}/`)
     assert.equal(r.status, 200)
+    assert.ok(r.headers.get('content-type').includes('text/html'))
     const html = await r.text()
+    assert.ok(html.includes('<!DOCTYPE html>') || html.includes('<html'))
     assert.ok(html.includes('</html>'))
   })
 })

@@ -5,6 +5,7 @@ import path from 'path';
 import { execFileSync, execSync } from 'child_process';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
+import { parseMessage } from './lib/parse.js';
 
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
@@ -20,34 +21,6 @@ function findJsonlPath(sessionId) {
     if (fs.existsSync(p)) return p;
   }
   return null;
-}
-
-function parseMessage(line) {
-  try {
-    const d = JSON.parse(line);
-    if (d.type !== 'user' && d.type !== 'assistant') return null;
-    if (d.isSidechain || d.isMeta || !d.message) return null;
-
-    const content = d.message.content;
-    if (!content) return null;
-    if (Array.isArray(content) && content.length === 0) return null;
-    if (typeof content === 'string' && content.trim() === '') return null;
-
-    let blocks;
-    if (typeof content === 'string') {
-      let text = content;
-      for (const tag of ['local-command-caveat', 'command-name', 'command-message', 'command-args', 'persisted-output']) {
-        text = text.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g'), '');
-      }
-      text = text.trim();
-      if (!text) return null;
-      blocks = [{ type: 'text', text }];
-    } else {
-      blocks = content;
-    }
-
-    return { uuid: d.uuid, role: d.message.role, timestamp: d.timestamp, content: blocks };
-  } catch { return null; }
 }
 
 function getMessages(sessionId, limit = 100) {
