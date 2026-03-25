@@ -232,7 +232,7 @@ export default function App() {
                   onClick={() => select(s.id)}
                   aria-label={formatSessionA11yLabel(s)}
                   aria-current={s.id === currentId() ? 'page' : undefined}
-                  style={{ width: '100%', padding: '12px 16px', 'min-height': '44px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
+                  style={{ width: '100%', padding: '12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px))', 'min-height': '44px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', border: 'none', color: 'inherit', 'text-align': 'left' }}
                 >
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
