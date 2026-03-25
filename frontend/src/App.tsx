@@ -220,7 +220,7 @@ export default function App() {
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
         {/* Header */}
         <div style={{ padding: '8px 16px 0 68px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
-          <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
+          <Show when={cur()} fallback={<h1 style={{ color: '#666', 'font-size': '14px', 'font-weight': '600' }}>Select a session</h1>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
@@ -266,7 +266,7 @@ export default function App() {
             <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444', padding: '24px' }}>
               <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
                 <div style={{ 'font-size': '32px', 'margin-bottom': '12px', opacity: '0.3' }}>~</div>
-                <div>Open a session or create a new one</div>
+                <p style={{ color: '#7c8595', 'font-size': '14px', 'line-height': '1.5' }}>Open a session or create a new one</p>
                 <button
                   onClick={handleNew}
                   disabled={creating()}
