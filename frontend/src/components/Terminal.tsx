@@ -105,6 +105,7 @@ export function Terminal(props: { sessionId: string | null }) {
 
   onMount(() => {
     const onResize = () => { try { fitAddon?.fit() } catch {} }
+    const viewport = window.visualViewport
     const observer = typeof ResizeObserver === 'undefined' || !containerRef
       ? null
       : new ResizeObserver(onResize)
@@ -112,10 +113,17 @@ export function Terminal(props: { sessionId: string | null }) {
       ? null
       : new MutationObserver(() => syncTerminalA11y())
     window.addEventListener('resize', onResize)
+    viewport?.addEventListener('resize', onResize)
+    viewport?.addEventListener('scroll', onResize)
     observer?.observe(containerRef)
     a11yObserver?.observe(containerRef, { childList: true, subtree: true })
     syncTerminalA11y()
-    onCleanup(() => { window.removeEventListener('resize', onResize); disconnect() })
+    onCleanup(() => {
+      window.removeEventListener('resize', onResize)
+      viewport?.removeEventListener('resize', onResize)
+      viewport?.removeEventListener('scroll', onResize)
+      disconnect()
+    })
     onCleanup(() => observer?.disconnect())
     onCleanup(() => a11yObserver?.disconnect())
   })
