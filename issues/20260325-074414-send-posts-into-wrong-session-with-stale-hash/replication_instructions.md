@@ -1,0 +1,5 @@
+1. Confirm the target transcript still exists on disk at `/home/user/.claude/projects/-home-user/4baa1292-7fdf-4e87-af47-6731e459b3cd.jsonl`, then fetch `http://localhost:$PORT/api/sessions/4baa1292-7fdf-4e87-af47-6731e459b3cd/messages` and confirm it is the `worker 4 probe` conversation.
+2. Fetch the default `http://localhost:$PORT/api/sessions` list and confirm that same id is absent from the UI's default visible session set.
+3. Inspect [App.tsx](/home/user/feather-dev/w5/frontend/src/App.tsx): on mount it restores `currentId` directly from `location.hash`, derives header metadata only from `sessions()`, and `handleSend()` still posts with `sendInput(currentId()!, fullText)`.
+4. Post a unique probe message to `http://localhost:$PORT/api/sessions/4baa1292-7fdf-4e87-af47-6731e459b3cd/send` and poll `.../messages` for that same probe text.
+5. The bug is present if the hidden worker 4 session can still receive a new message through the stale hash/currentId send path even though it is no longer in the visible session list Feather uses for the active in-app context.
