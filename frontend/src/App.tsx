@@ -324,7 +324,8 @@ export default function App() {
                   style={{
                     width: '100%',
                     'max-width': '240px',
-                    height: '44px',
+                    'min-height': '44px',
+                    padding: '10px 14px',
                     background: creating() ? '#1a1a2e' : '#4aba6a',
                     color: creating() ? '#aeb6c2' : '#000',
                     border: 'none',
@@ -332,6 +333,9 @@ export default function App() {
                     'font-size': '14px',
                     'font-weight': '600',
                     cursor: creating() ? 'wait' : 'pointer',
+                    display: 'inline-flex',
+                    'align-items': 'center',
+                    'justify-content': 'center',
                   }}
                 >
                   {creating() ? 'Starting...' : 'Start a new session'}
