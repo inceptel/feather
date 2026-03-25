@@ -162,8 +162,13 @@ export default function App() {
         <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '8px', left: '8px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '44px', height: '44px', 'border-radius': '8px', 'font-size': '20px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
       </Show>
 
+      {/* Sidebar backdrop */}
+      <Show when={sidebar()}>
+        <div onClick={() => setSidebar(false)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.5)', 'z-index': '39' }} />
+      </Show>
+
       {/* Sidebar */}
-      <div style={{ width: sidebar() ? '300px' : '0', 'min-width': sidebar() ? '300px' : '0', height: '100%', background: '#0d1117', 'border-right': sidebar() ? '1px solid #1e1e1e' : 'none', overflow: 'hidden', transition: 'width 0.2s, min-width 0.2s', 'z-index': '40' }}>
+      <div style={{ position: 'fixed', top: '0', left: '0', width: sidebar() ? '300px' : '0', height: '100%', background: '#0d1117', 'border-right': sidebar() ? '1px solid #1e1e1e' : 'none', overflow: 'hidden', transition: 'width 0.2s', 'z-index': '40' }}>
         <Show when={sidebar()}>
           <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
             <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
