@@ -91,7 +91,7 @@ function renderBlock(block: ContentBlock) {
     const summary = toolSummary(name, block.input)
     const inp = block.input || {}
     const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write'
-    const pre = 'white-space:pre;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow:auto;margin:0;word-break:normal;overflow-wrap:normal;-webkit-overflow-scrolling:touch;'
+    const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow-x:hidden;overflow-y:auto;margin:0;word-break:break-word;overflow-wrap:anywhere;-webkit-overflow-scrolling:touch;'
     return (
       <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
         <summary style={{ padding: '6px 10px', cursor: hasDetail ? 'pointer' : 'default', 'list-style': hasDetail ? undefined : 'none' }}>
