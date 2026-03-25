@@ -9,13 +9,20 @@ const marked = new Marked({ gfm: true, breaks: true })
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
 const STRIP_TAGS = ['local-command-caveat', 'command-name', 'command-message', 'command-args', 'persisted-output']
+const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g
+const ANSI_ESCAPE_CODES =
+  /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[P^_][\s\S]*?\u001b\\|\u001b[@-_])/g
+
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE_CODES, '')
+}
 
 function stripInternalTags(text: string): string {
   let cleaned = text
   for (const tag of STRIP_TAGS) {
     cleaned = cleaned.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g'), '')
   }
-  return cleaned.trim()
+  return stripAnsi(cleaned).replace(CONTROL_CHARS, '').trim()
 }
 
 function renderMarkdown(text: string): string {
@@ -30,13 +37,6 @@ function renderMarkdown(text: string): string {
   }
   mdCache.set(cleaned, safe)
   return safe
-}
-
-function stripAnsi(text: string): string {
-  return text.replace(
-    /(?:\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[P^_][\s\S]*?\u001b\\|\u001b[@-_])/g,
-    '',
-  )
 }
 
 // ── Tool rendering ──────────────────────────────────────────────────────────
@@ -99,11 +99,11 @@ function renderBlock(block: ContentBlock) {
           {summary && <span style={{ color: '#aeb6c2', 'margin-left': '8px' }}>{summary}</span>}
         </summary>
         {name === 'Edit' && <>
-          {inp.old_string && <pre style={`${pre}color:#d45555;background:#1a0000;border-top:1px solid #1e1e1e`}>{inp.old_string}</pre>}
-          {inp.new_string && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{inp.new_string}</pre>}
+          {inp.old_string && <pre tabindex="0" aria-label="Original text removed by edit" style={`${pre}color:#d45555;background:#1a0000;border-top:1px solid #1e1e1e`}>{inp.old_string}</pre>}
+          {inp.new_string && <pre tabindex="0" aria-label="Replacement text inserted by edit" style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{inp.new_string}</pre>}
         </>}
-        {name === 'Bash' && inp.command && <pre style={`${pre}color:#e5946b;border-top:1px solid #1e1e1e`}>{inp.command}</pre>}
-        {name === 'Write' && inp.content && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        {name === 'Bash' && inp.command && <pre tabindex="0" aria-label="Shell command details" style={`${pre}color:#e5946b;border-top:1px solid #1e1e1e`}>{inp.command}</pre>}
+        {name === 'Write' && inp.content && <pre tabindex="0" aria-label="Written file content preview" style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
       </details>
     )
   }
@@ -188,6 +188,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   let lightboxCloseRef: HTMLButtonElement | undefined
+  let lightboxReturnFocusRef: HTMLElement | null = null
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
 
   function onScroll() {
@@ -209,6 +210,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
   createEffect(() => {
     if (!lightbox()) return
     const prevOverflow = document.body.style.overflow
+    const previousFocus = lightboxReturnFocusRef ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
     document.body.style.overflow = 'hidden'
     requestAnimationFrame(() => lightboxCloseRef?.focus())
     const onKeyDown = (event: KeyboardEvent) => {
@@ -220,6 +222,10 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
     onCleanup(() => {
       document.body.style.overflow = prevOverflow
       window.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) {
+        previousFocus.focus()
+      }
+      lightboxReturnFocusRef = null
     })
   })
 
@@ -231,7 +237,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       aria-live="polite"
       aria-relevant="additions text"
       aria-label="Chat transcript"
-      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}
+      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': 'calc(80px + env(safe-area-inset-bottom, 0px))' }}
     >
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
@@ -245,7 +251,18 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
           aria-label="Expanded attachment preview"
           aria-describedby="lightbox-help"
           onClick={() => setLightbox(null)}
-          style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}
+          style={{
+            position: 'fixed',
+            inset: '0',
+            background: 'rgba(0,0,0,0.85)',
+            'z-index': '200',
+            display: 'flex',
+            'align-items': 'center',
+            'justify-content': 'center',
+            cursor: 'zoom-out',
+            padding: 'max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px))',
+            'box-sizing': 'border-box',
+          }}
         >
           <p
             id="lightbox-help"
@@ -273,8 +290,8 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
             }}
             style={{
               position: 'absolute',
-              top: '16px',
-              right: '16px',
+              top: 'max(16px, env(safe-area-inset-top, 0px))',
+              right: 'max(16px, env(safe-area-inset-right, 0px))',
               width: '44px',
               height: '44px',
               border: '1px solid #333',
@@ -295,7 +312,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
             alt="Expanded attachment preview"
             src={lightbox()!}
             onClick={(event) => event.stopPropagation()}
-            style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }}
+            style={{ 'max-width': '100%', 'max-height': '100%', 'object-fit': 'contain', 'border-radius': '8px' }}
           />
         </div>
       </Show>
@@ -321,7 +338,10 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
             <For each={images}>{(src) => (
               <button
                 type="button"
-                onClick={() => setLightbox(src)}
+                onClick={(event) => {
+                  lightboxReturnFocusRef = event.currentTarget
+                  setLightbox(src)
+                }}
                 aria-label="Expand attached image"
                 style={{ padding: '0', border: 'none', background: 'none', cursor: 'zoom-in', display: 'block', width: '100%', 'text-align': 'left' }}
               >
