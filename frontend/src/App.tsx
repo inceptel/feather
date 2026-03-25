@@ -72,6 +72,7 @@ export default function App() {
     setCurrentId(id)
     location.hash = id
     setSidebar(false)
+    setTab('chat')
     setLoading(true)
     setMessages([])
     cleanupSSE?.()
