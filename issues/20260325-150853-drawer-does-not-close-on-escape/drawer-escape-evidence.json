@@ -1,0 +1,30 @@
+{
+  "before": {
+    "buttons": [
+      "\u00d7",
+      "Sessions",
+      "Links",
+      "+ New Claude"
+    ],
+    "hasClose": true,
+    "hasSessionsText": true
+  },
+  "afterEscape": {
+    "buttons": [
+      "\u00d7",
+      "Sessions",
+      "Links",
+      "+ New Claude"
+    ],
+    "hasClose": true,
+    "hasSessionsText": true
+  },
+  "afterCloseClick": {
+    "buttons": [
+      "\u2630"
+    ],
+    "hasClose": false,
+    "hasSessionsText": false
+  },
+  "url": "http://localhost:3304/"
+}

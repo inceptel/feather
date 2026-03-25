@@ -1,0 +1,7 @@
+{
+  "before_url": "http://localhost:3304/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf",
+  "after_url": "http://localhost:3304/#4baa1292-7fdf-4e87-af47-6731e459b3cd",
+  "before_contains_hello_old_friend": true,
+  "after_contains_hello_old_friend": true,
+  "after_contains_worker_4_probe": false
+}
