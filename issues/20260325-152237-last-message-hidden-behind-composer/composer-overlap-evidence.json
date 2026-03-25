@@ -1,0 +1,46 @@
+{
+  "composerRect": {
+    "bottom": 844,
+    "height": 60,
+    "left": 0,
+    "right": 390,
+    "toJSON": {},
+    "top": 784,
+    "width": 390,
+    "x": 0,
+    "y": 784
+  },
+  "imageNatural": {
+    "height": 844,
+    "src": "/uploads/1774450760676-landing-iter.png",
+    "width": 390
+  },
+  "imageRect": {
+    "bottom": 860.53125,
+    "height": 299.984375,
+    "left": 229.375,
+    "right": 367.984375,
+    "toJSON": {},
+    "top": 560.546875,
+    "width": 138.609375,
+    "x": 229.375,
+    "y": 560.546875
+  },
+  "overlap": 60,
+  "scrollerRect": {
+    "bottom": 784,
+    "height": 706,
+    "left": 0,
+    "right": 390,
+    "toJSON": {},
+    "top": 78,
+    "width": 390,
+    "x": 0,
+    "y": 78
+  },
+  "url": "http://localhost:3304/#370e2f60-1399-4ebf-a182-7a8ba6c59ccf",
+  "viewport": {
+    "height": 844,
+    "width": 390
+  }
+}
