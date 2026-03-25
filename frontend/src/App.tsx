@@ -372,7 +372,7 @@ export default function App() {
           <Show when={files().length > 0}>
             <div style={{ padding: '6px max(12px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'nowrap', 'overflow-x': 'auto', 'overflow-y': 'hidden', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior-x': 'contain', 'touch-action': 'pan-x' }}>
               <For each={files()}>{(f, i) => (
-                <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333' }}>
+                <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333', 'flex-shrink': '0' }}>
                   {f.isImage
                     ? <img alt={`Attachment preview ${f.name}`} src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
                     : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#c9d1d9', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
