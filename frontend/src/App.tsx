@@ -147,8 +147,9 @@ export default function App() {
 
   const cur = () => sessions().find(s => s.id === currentId())
   const tabStyle = (t: string) => ({
-    padding: '6px 16px', border: 'none', 'border-bottom': tab() === t ? '2px solid #4aba6a' : '2px solid transparent',
+    padding: '0 16px', height: '44px', border: 'none', 'border-bottom': tab() === t ? '2px solid #4aba6a' : '2px solid transparent',
     background: 'none', color: tab() === t ? '#e5e5e5' : '#666', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
+    display: 'inline-flex', 'align-items': 'center', 'justify-content': 'center',
   })
 
   return (
