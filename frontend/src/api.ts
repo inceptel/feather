@@ -53,6 +53,16 @@ export const resumeSession = (id: string, cwd?: string) =>
 export const interruptSession = (id: string) =>
   fetch(`${BASE}/api/sessions/${id}/interrupt`, { method: 'POST' })
 
+export async function uploadFile(blob: Blob, name: string): Promise<string> {
+  const r = await fetch(`${BASE}/api/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(name) },
+    body: blob,
+  })
+  const { path } = await r.json()
+  return path
+}
+
 export function subscribeMessages(id: string, onMessage: (msg: Message) => void): () => void {
   const es = new EventSource(`${BASE}/api/sessions/${id}/stream`)
   es.addEventListener('message', (e) => { try { onMessage(JSON.parse(e.data)) } catch {} })

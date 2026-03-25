@@ -2,7 +2,25 @@ import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
 import type { SessionMeta, Message } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, uploadFile } from './api'
+
+interface PendingFile { name: string; blob: Blob; dataUrl: string; isImage: boolean }
+
+function resizeImage(blob: Blob, maxDim = 1600): Promise<Blob> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const { width: w, height: h } = img
+      if (w <= maxDim && h <= maxDim) { resolve(blob); return }
+      const scale = Math.min(maxDim / w, maxDim / h)
+      const c = document.createElement('canvas')
+      c.width = w * scale; c.height = h * scale
+      c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+      c.toBlob(b => resolve(b || blob), 'image/png')
+    }
+    img.src = URL.createObjectURL(blob)
+  })
+}
 
 function timeAgo(iso: string) {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
@@ -22,8 +40,26 @@ export default function App() {
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'terminal'>('chat')
+  const [files, setFiles] = createSignal<PendingFile[]>([])
+  const [uploading, setUploading] = createSignal(false)
+  const [dragging, setDragging] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
   let textareaRef: HTMLTextAreaElement | undefined
+  let fileInputRef: HTMLInputElement | undefined
+  let dragCounter = 0
+
+  async function addFiles(fileList: FileList | File[]) {
+    const added: PendingFile[] = []
+    for (const f of fileList) {
+      const isImage = f.type.startsWith('image/')
+      const blob = isImage ? await resizeImage(f) : f
+      const dataUrl = await new Promise<string>(r => { const rd = new FileReader(); rd.onload = () => r(rd.result as string); rd.readAsDataURL(blob) })
+      added.push({ name: f.name, blob, dataUrl, isImage })
+    }
+    setFiles(prev => [...prev, ...added])
+  }
+
+  function removeFile(idx: number) { setFiles(prev => prev.filter((_, i) => i !== idx)) }
 
   onMount(async () => setSessions(await fetchSessions()))
   onCleanup(() => cleanupSSE?.())
@@ -74,21 +110,32 @@ export default function App() {
     select(id)
   }
 
-  function handleSend() {
+  async function handleSend() {
     const val = text().trim()
-    if (!val || !currentId()) return
-    const tempId = `optimistic-${Date.now()}`
-    // Optimistic insert with single check
-    setMessages(prev => [...prev, {
-      uuid: tempId,
-      role: 'user',
-      timestamp: new Date().toISOString(),
-      content: [{ type: 'text', text: val }],
-      delivery: 'sent',
-    }])
-    sendInput(currentId()!, val)
+    const pending = files()
+    if ((!val && !pending.length) || !currentId()) return
+    setUploading(true)
     setText('')
+    setFiles([])
     if (textareaRef) textareaRef.style.height = 'auto'
+
+    // Upload files, build message text
+    const parts: string[] = val ? [val] : []
+    for (const f of pending) {
+      try {
+        const uploadPath = await uploadFile(f.blob, f.name)
+        parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
+      } catch { parts.push(`[Upload failed: ${f.name}]`) }
+    }
+    const fullText = parts.join('\n')
+
+    const tempId = `optimistic-${Date.now()}`
+    setMessages(prev => [...prev, {
+      uuid: tempId, role: 'user', timestamp: new Date().toISOString(),
+      content: [{ type: 'text', text: fullText }], delivery: 'sent',
+    }])
+    sendInput(currentId()!, fullText)
+    setUploading(false)
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
@@ -98,7 +145,12 @@ export default function App() {
   })
 
   return (
-    <div style={{ display: 'flex', height: 'calc(var(--vh, 1vh) * 100)', width: '100%', 'font-family': "-apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif" }}>
+    <div
+      onDragEnter={(e) => { e.preventDefault(); dragCounter++; setDragging(true) }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={() => { dragCounter--; if (dragCounter <= 0) { dragCounter = 0; setDragging(false) } }}
+      onDrop={(e) => { e.preventDefault(); dragCounter = 0; setDragging(false); if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files) }}
+      style={{ display: 'flex', height: 'calc(var(--vh, 1vh) * 100)', width: '100%', 'font-family': "-apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif", position: 'relative' }}>
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
@@ -176,11 +228,39 @@ export default function App() {
           </Show>
         </div>
 
+        {/* Drag overlay */}
+        <Show when={dragging()}>
+          <div style={{ position: 'absolute', inset: '0', background: 'rgba(74,186,106,0.1)', border: '2px dashed #4aba6a', 'border-radius': '12px', 'z-index': '100', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'pointer-events': 'none' }}>
+            <span style={{ color: '#4aba6a', 'font-size': '18px', 'font-weight': '600' }}>Drop files to attach</span>
+          </div>
+        </Show>
+
         {/* Input (chat tab only) */}
         <Show when={currentId() && tab() === 'chat'}>
-          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
-            <textarea ref={textareaRef} value={text()} onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }} placeholder="Send a message..." rows={1} style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '15px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px' }} />
-            <button onClick={handleSend} style={{ background: text().trim() ? '#4aba6a' : '#333', color: text().trim() ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: text().trim() ? 'pointer' : 'default', 'min-height': '42px' }}>Send</button>
+          <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
+          {/* File previews */}
+          <Show when={files().length > 0}>
+            <div style={{ padding: '6px 12px 0', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'flex-wrap': 'wrap' }}>
+              <For each={files()}>{(f, i) => (
+                <div style={{ position: 'relative', background: '#1a1a2e', 'border-radius': '8px', padding: '4px', border: '1px solid #333' }}>
+                  {f.isImage
+                    ? <img src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
+                    : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#999', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
+                  }
+                  <button onClick={() => removeFile(i())} style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '11px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1' }}>&times;</button>
+                </div>
+              )}</For>
+            </div>
+          </Show>
+          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
+            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1' }} title="Attach file">+</button>
+            <textarea ref={textareaRef} value={text()}
+              onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
+              placeholder="Send a message..." rows={1}
+              style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '15px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px' }} />
+            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px' }}>{uploading() ? '...' : 'Send'}</button>
           </div>
         </Show>
       </div>

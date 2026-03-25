@@ -22,6 +22,35 @@ function renderMarkdown(text: string): string {
   return safe
 }
 
+// ── Tool rendering ──────────────────────────────────────────────────────────
+
+const TOOL_ICONS: Record<string, string> = {
+  Read: '📄', Write: '✏️', Edit: '✂️', Bash: '⚡', Grep: '🔍', Glob: '🗂️',
+  WebFetch: '🌐', WebSearch: '🔎', Agent: '🤖', Skill: '⚡',
+}
+
+const TOOL_COLORS: Record<string, string> = {
+  Bash: '#e5946b', Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a',
+  Grep: '#b48ead', Glob: '#88c0d0', WebFetch: '#88c0d0', WebSearch: '#b48ead',
+  Agent: '#73b8ff', Skill: '#b48ead',
+}
+
+function toolSummary(name: string, input: any): string {
+  if (!input) return ''
+  const fp = input.file_path as string || ''
+  const short = fp.split('/').slice(-2).join('/')
+  switch (name) {
+    case 'Read': return short + (input.offset ? ` L${input.offset}` : '')
+    case 'Write': return short
+    case 'Edit': return short + (input.replace_all ? ' ×all' : '')
+    case 'Bash': { const c = (input.command || '').split('\n')[0].trim(); return c.length > 80 ? c.slice(0, 80) + '…' : c }
+    case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`
+    case 'Glob': return input.pattern || ''
+    case 'Agent': return input.description || ''
+    default: return ''
+  }
+}
+
 // ── Block renderers ─────────────────────────────────────────────────────────
 
 function renderBlock(block: ContentBlock) {
@@ -39,13 +68,25 @@ function renderBlock(block: ContentBlock) {
     )
   }
   if (block.type === 'tool_use') {
-    return <div style={{ color: '#73b8ff', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>{block.name || 'tool_use'}</div>
+    const name = block.name || 'tool'
+    const color = TOOL_COLORS[name] || '#73b8ff'
+    const icon = TOOL_ICONS[name] || '⚙'
+    const summary = toolSummary(name, block.input)
+    return (
+      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', padding: '6px 10px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
+        <span style={{ color }}>{icon} {name}</span>
+        {summary && <span style={{ color: '#888', 'margin-left': '8px' }}>{summary}</span>}
+      </div>
+    )
   }
   if (block.type === 'tool_result') {
-    const preview = typeof block.content === 'string' ? block.content.slice(0, 80) : ''
+    const raw = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
+    const preview = raw.slice(0, 200)
+    const isErr = block.is_error
     return (
-      <div style={{ color: block.is_error ? '#d45555' : '#555', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
-        {block.is_error ? 'Error' : 'Result'}{preview ? `: ${preview}` : ''}
+      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}>
+        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666' }}>{isErr ? 'error' : 'output'}</div>
+        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '120px', overflow: 'auto', 'word-break': 'break-all' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
       </div>
     )
   }
@@ -88,9 +129,20 @@ const markdownCSS = `
 .markdown strong { font-weight: 600; }
 `
 
+// ── Image extraction ─────────────────────────────────────────────────────────
+
+const imgPattern = /\[Attached image: (\/uploads\/[^\]]+)\]/g
+
+function extractImages(text: string): { cleanText: string; images: string[] } {
+  const images: string[] = []
+  const cleanText = text.replace(imgPattern, (_, p) => { images.push(p); return '' }).trim()
+  return { cleanText, images }
+}
+
 // ── Component ───────────────────────────────────────────────────────────────
 
 export function MessageView(props: { messages: Message[], loading: boolean }) {
+  const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
 
@@ -113,16 +165,41 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
       </Show>
-      <For each={props.messages}>{(msg) => (
-        <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '16px' }}>
+      {/* Lightbox */}
+      <Show when={lightbox()}>
+        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}>
+          <img src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }} />
+        </div>
+      </Show>
+
+      <For each={props.messages}>{(msg) => {
+        // Extract images from text blocks
+        const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
+        const { cleanText, images } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [] }
+        const hasImages = images.length > 0
+
+        return <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '16px' }}>
           <div style={{
-            'max-width': '85%', padding: '10px 14px',
+            'max-width': '85%', padding: hasImages ? '6px' : '10px 14px',
             'border-radius': msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
             background: msg.role === 'user' ? 'rgba(74,186,106,0.15)' : '#1a1a2e',
-            color: '#e5e5e5',
+            color: '#e5e5e5', overflow: 'hidden',
             'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
           }}>
-            <For each={msg.content}>{(block) => renderBlock(block)}</For>
+            {/* Inline images */}
+            <For each={images}>{(src) => (
+              <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+            )}</For>
+            {/* Text + other blocks */}
+            <div style={hasImages ? { padding: '4px 8px 4px' } : {}}>
+              <For each={msg.content}>{(block) => {
+                if (block.type === 'text' && block.text) {
+                  const display = hasImages ? cleanText : block.text
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} /> : null
+                }
+                return renderBlock(block)
+              }}</For>
+            </div>
           </div>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
             <span style={{ 'font-size': '10px', color: '#444' }}>{formatTime(msg.timestamp)}</span>
@@ -133,7 +210,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
             )}
           </div>
         </div>
-      )}</For>
+      }}</For>
     </div>
   )
 }

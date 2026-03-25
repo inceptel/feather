@@ -240,8 +240,12 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
 
 // ── Express ─────────────────────────────────────────────────────────────────
 
+const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
+
 const app = express();
 app.use(express.json());
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/api/sessions', (req, res) => {
   try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }
@@ -280,6 +284,19 @@ app.post('/api/sessions/:id/resume', (req, res) => {
 app.post('/api/sessions/:id/interrupt', (req, res) => {
   try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/upload', async (req, res) => {
+  try {
+    const filename = decodeURIComponent(req.headers['x-filename'] || 'file');
+    const safe = filename.replace(/[^a-zA-Z0-9._\- ]/g, '').slice(0, 100);
+    const dest = `${Date.now()}-${safe || 'upload'}`;
+    const fpath = path.join(UPLOADS_DIR, dest);
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    fs.writeFileSync(fpath, Buffer.concat(chunks));
+    res.json({ path: `/uploads/${dest}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
