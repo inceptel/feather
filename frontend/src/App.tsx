@@ -314,7 +314,7 @@ export default function App() {
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden' }}>
           <Show when={currentId()} fallback={
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#7c8595', padding: 'max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px))' }}>
+            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#aeb6c2', padding: 'max(24px, env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) max(24px, env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px))' }}>
               <div style={{ 'text-align': 'center', width: '100%', 'max-width': '320px', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', gap: '12px' }}>
                 <p style={{ color: '#c9d1d9', 'font-size': '15px', 'font-weight': '500', 'line-height': '1.5', 'max-width': '22ch', margin: '0 auto' }}>Open a session or create a new one</p>
                 <button
