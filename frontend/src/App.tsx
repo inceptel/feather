@@ -171,7 +171,7 @@ export default function App() {
               <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', width: '44px', height: '44px', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&times;</button>
             </div>
             <div style={{ padding: '12px 16px' }}>
-              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
+              <button type="button" onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>

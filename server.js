@@ -106,6 +106,10 @@ function discoverSessions(limit = 50) {
   return sessions;
 }
 
+// ── Pending sessions (track newly spawned before JSONL exists) ──────────────
+
+const pendingSessions = new Map(); // id -> { createdAt }
+
 // ── Tmux management ─────────────────────────────────────────────────────────
 
 function tmuxName(id) { return `feather-${id.slice(0, 8)}`; }
@@ -119,6 +123,7 @@ function spawnSession(id, cwd) {
   const name = tmuxName(id);
   try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
   execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
+  pendingSessions.set(id, { createdAt: new Date() });
   setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
 }
 
@@ -248,7 +253,19 @@ app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 app.get('/api/sessions', (req, res) => {
-  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }
+  try {
+    const sessions = discoverSessions(parseInt(req.query.limit) || 50);
+    const knownIds = new Set(sessions.map(s => s.id));
+    const active = getActiveTmuxSessions();
+    // Include pending sessions whose JSONL hasn't appeared yet
+    for (const [id, { createdAt }] of pendingSessions) {
+      if (knownIds.has(id)) { pendingSessions.delete(id); continue; }
+      // Expire after 5 minutes
+      if (Date.now() - createdAt.getTime() > 300000) { pendingSessions.delete(id); continue; }
+      sessions.unshift({ id, title: 'New session', updatedAt: createdAt.toISOString(), isActive: active.has(id.slice(0, 8)) });
+    }
+    res.json({ sessions });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
