@@ -240,7 +240,7 @@ export default function App() {
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                     <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
                     <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{formatSessionTitle(s.title)}</span>
-                    <span style={{ 'font-size': '11px', color: '#7c8595' }}>{timeAgo(s.updatedAt)}</span>
+                    <span style={{ 'font-size': '11px', color: '#7c8595', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                   </div>
                 </button>
               )}</For>
