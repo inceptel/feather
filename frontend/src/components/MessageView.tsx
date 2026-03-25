@@ -72,11 +72,22 @@ function renderBlock(block: ContentBlock) {
     const color = TOOL_COLORS[name] || '#73b8ff'
     const icon = TOOL_ICONS[name] || '⚙'
     const summary = toolSummary(name, block.input)
+    const inp = block.input || {}
+    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write'
+    const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
     return (
-      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', padding: '6px 10px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
-        <span style={{ color }}>{icon} {name}</span>
-        {summary && <span style={{ color: '#888', 'margin-left': '8px' }}>{summary}</span>}
-      </div>
+      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
+        <summary style={{ padding: '6px 10px', cursor: hasDetail ? 'pointer' : 'default', 'list-style': hasDetail ? undefined : 'none' }}>
+          <span style={{ color }}>{icon} {name}</span>
+          {summary && <span style={{ color: '#888', 'margin-left': '8px' }}>{summary}</span>}
+        </summary>
+        {name === 'Edit' && <>
+          {inp.old_string && <pre style={`${pre}color:#d45555;background:#1a0000;border-top:1px solid #1e1e1e`}>{inp.old_string}</pre>}
+          {inp.new_string && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{inp.new_string}</pre>}
+        </>}
+        {name === 'Bash' && inp.command && <pre style={`${pre}color:#e5946b;border-top:1px solid #1e1e1e`}>{inp.command}</pre>}
+        {name === 'Write' && inp.content && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+      </details>
     )
   }
   if (block.type === 'tool_result') {

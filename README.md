@@ -20,6 +20,38 @@ The entire app is 6 files. Point Claude (or any AI agent) at this repo and tell 
 
 No abstractions to learn. No plugin API to read. One server file, one app shell, one message renderer. You describe it, the agent builds it.
 
+## Fork and share
+
+Feather is designed to diverge. Fork it, make it yours, share what you build.
+
+```bash
+# Fork on GitHub, then:
+git clone https://github.com/YOU/feather.git && cd feather
+npm install && npm start
+# hack away
+```
+
+**Pulling from other forks:**
+
+```bash
+# Add someone's fork as a remote
+git remote add phil https://github.com/phil/feather.git
+git fetch phil
+
+# See what they've been up to
+git log phil/main --oneline
+
+# Grab specific commits
+git cherry-pick <sha>
+
+# Or merge everything
+git merge phil/main
+```
+
+**Contributing back:**
+
+Open a PR to `inceptel/feather` from your fork. Or don't — your fork is yours.
+
 ## Why
 
 You're running Claude Code on a remote machine. You want to check on it from your phone, your iPad, another laptop. You want to send a follow-up message without SSH-ing in. You want to see the conversation rendered beautifully — like a texting app, not a terminal dump.
