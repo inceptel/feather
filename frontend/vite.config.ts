@@ -3,7 +3,7 @@ import solidPlugin from 'vite-plugin-solid'
 
 export default defineConfig({
   plugins: [solidPlugin()],
-  base: '/',
+  base: './',
   build: {
     outDir: '../static',
     emptyOutDir: true,

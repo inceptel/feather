@@ -67,7 +67,8 @@ export default function App() {
 
   onMount(async () => {
     setSessions(await fetchSessions())
-    fetch('/api/quick-links').then(r => r.json()).then(setLinks).catch(() => {})
+    const base = location.pathname.replace(/\/+$/, '')
+    fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
     const hash = location.hash.slice(1)
     if (hash) select(hash)
   })

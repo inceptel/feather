@@ -1,7 +1,8 @@
 import { onMount, onCleanup, createEffect } from 'solid-js'
 import { init, Terminal as GhosttyTerm, FitAddon } from 'ghostty-web'
 
-const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/new-dev/api/terminal`
+const basePath = location.pathname.replace(/\/+$/, '')
+const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${basePath}/api/terminal`
 
 let wasmReady: Promise<void> | null = null
 function ensureInit() {
@@ -71,9 +72,13 @@ export function Terminal(props: { sessionId: string | null }) {
   })
 
   return (
-    <div ref={containerRef} style={{
-      height: '100%', width: '100%', background: '#0a0e14',
-      padding: '4px',
+    <div ref={containerRef}
+      onKeyDown={(e) => e.stopPropagation()}
+      onKeyPress={(e) => e.stopPropagation()}
+      onKeyUp={(e) => e.stopPropagation()}
+      style={{
+        height: '100%', width: '100%', background: '#0a0e14',
+        padding: '4px',
     }} />
   )
 }

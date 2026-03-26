@@ -1,4 +1,4 @@
-const BASE = ''
+const BASE = location.pathname.replace(/\/+$/, '')
 
 export interface SessionMeta {
   id: string

@@ -2,6 +2,7 @@
   { "label": "Prod", "url": "/" },
   { "label": "Staging (Claude)", "url": "/staging/" },
   { "label": "Staging (Codex)", "url": "/staging-codex/" },
+  { "label": "Terminal", "url": "/terminal" },
   { "label": "Autoweb Dashboard", "url": "/autoweb/" },
   { "label": "AgentsView", "url": "/av/" }
 ]

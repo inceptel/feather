@@ -320,6 +320,7 @@ app.post('/api/quick-links', (req, res) => {
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
 app.use(express.static(STATIC_DIR));
+app.get('/terminal', (_req, res) => res.sendFile(path.join(STATIC_DIR, 'terminal.html')));
 app.get('/{*path}', (_req, res) => {
   const index = path.join(STATIC_DIR, 'index.html');
   if (fs.existsSync(index)) res.sendFile(index);
@@ -333,7 +334,7 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.url?.startsWith('/api/terminal')) {
+  if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else {
     socket.destroy();
@@ -342,19 +343,26 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
-  const sessionId = url.searchParams.get('session');
-  if (!sessionId) { ws.close(1008, 'session required'); return; }
-
-  const name = tmuxName(sessionId);
-  if (!tmuxIsActive(sessionId)) { ws.close(1000, 'Session not active'); return; }
+  const isShell = url.pathname === '/api/shell';
 
   const cleanEnv = { ...process.env };
   delete cleanEnv.TMUX; delete cleanEnv.TMUX_PANE;
   cleanEnv.TERM = 'xterm-256color';
 
-  const term = pty.spawn('tmux', ['attach', '-t', name], {
-    name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
-  });
+  let term;
+  if (isShell) {
+    term = pty.spawn('bash', ['--login'], {
+      name: 'xterm-256color', cols: 120, rows: 30, cwd: HOME, env: cleanEnv,
+    });
+  } else {
+    const sessionId = url.searchParams.get('session');
+    if (!sessionId) { ws.close(1008, 'session required'); return; }
+    const name = tmuxName(sessionId);
+    if (!tmuxIsActive(sessionId)) { ws.close(1000, 'Session not active'); return; }
+    term = pty.spawn('tmux', ['attach', '-t', name], {
+      name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
+    });
+  }
 
   term.onData(data => { try { ws.send(data); } catch {} });
   term.onExit(() => { try { ws.close(); } catch {} });
