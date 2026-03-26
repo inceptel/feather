@@ -1,3 +1,4 @@
+declare const __BUILD_TIME__: string
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
@@ -52,6 +53,29 @@ export default function App() {
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
 
+  // Swipe gesture state
+  let touchStartX = 0
+  let touchStartY = 0
+  let touchTracking = false
+
+  function onTouchStart(e: TouchEvent) {
+    const t = e.touches[0]
+    touchStartX = t.clientX
+    touchStartY = t.clientY
+    touchTracking = sidebar() || touchStartX < 30
+  }
+  function onTouchEnd(e: TouchEvent) {
+    if (!touchTracking) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - touchStartX
+    const dy = Math.abs(t.clientY - touchStartY)
+    if (dy > Math.abs(dx)) return
+    if (!sidebar() && dx > 60) setSidebar(true)
+    if (sidebar() && dx < -60) setSidebar(false)
+    touchTracking = false
+  }
+
+
   async function addFiles(fileList: FileList | File[]) {
     const added: PendingFile[] = []
     for (const f of fileList) {
@@ -86,7 +110,6 @@ export default function App() {
     cleanupSSE = subscribeMessages(id, (msg) => {
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
-        // Try to match an optimistic message (same text content, sent within 30s)
         if (msg.role === 'user') {
           const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
           const idx = prev.findIndex(m =>
@@ -130,7 +153,6 @@ export default function App() {
     setFiles([])
     if (textareaRef) textareaRef.style.height = 'auto'
 
-    // Upload files, build message text
     const parts: string[] = val ? [val] : []
     for (const f of pending) {
       try {
@@ -153,84 +175,97 @@ export default function App() {
   const tabStyle = (t: string) => ({
     padding: '6px 16px', border: 'none', 'border-bottom': tab() === t ? '2px solid #4aba6a' : '2px solid transparent',
     background: 'none', color: tab() === t ? '#e5e5e5' : '#666', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
+    '-webkit-tap-highlight-color': 'transparent',
   })
 
   return (
     <div
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
       onDragEnter={(e) => { e.preventDefault(); dragCounter++; setDragging(true) }}
       onDragOver={(e) => e.preventDefault()}
       onDragLeave={() => { dragCounter--; if (dragCounter <= 0) { dragCounter = 0; setDragging(false) } }}
       onDrop={(e) => { e.preventDefault(); dragCounter = 0; setDragging(false); if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files) }}
-      style={{ display: 'flex', height: 'calc(var(--vh, 1vh) * 100)', width: '100%', 'font-family': "-apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif", position: 'relative' }}>
+      style={{ display: 'flex', height: 'calc(var(--vh, 1vh) * 100)', width: '100%', 'font-family': "-apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif", position: 'relative', 'overscroll-behavior': 'none' }}>
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: '12px', left: '12px', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>&#9776;</button>
+        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
+      </Show>
+
+      {/* Sidebar backdrop */}
+      <Show when={sidebar()}>
+        <div onClick={() => setSidebar(false)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.5)', 'z-index': '59', '-webkit-tap-highlight-color': 'transparent' }} />
       </Show>
 
       {/* Sidebar */}
-      <div style={{ width: sidebar() ? '300px' : '0', 'min-width': sidebar() ? '300px' : '0', height: '100%', background: '#0d1117', 'border-right': sidebar() ? '1px solid #1e1e1e' : 'none', overflow: 'hidden', transition: 'width 0.2s, min-width 0.2s', 'z-index': '40' }}>
-        <Show when={sidebar()}>
-          <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
-            <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
-              <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
-              <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer' }}>&times;</button>
-            </div>
-            {/* Sidebar tabs */}
-            <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
-              <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Sessions</button>
-              <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Links</button>
-            </div>
-            {/* Sessions tab */}
-            <Show when={sidebarTab() === 'sessions'}>
-              <div style={{ padding: '12px 16px' }}>
-                <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer' }}>
-                  {creating() ? 'Starting...' : '+ New Claude'}
-                </button>
-              </div>
-              <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
-                <For each={sessions()}>{(s) => (
-                  <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111' }}>
-                    <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                      <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                      <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
-                      <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
-                    </div>
-                  </div>
-                )}</For>
-              </div>
-            </Show>
-            {/* Links tab */}
-            <Show when={sidebarTab() === 'links'}>
-              <div style={{ flex: '1', 'overflow-y': 'auto', padding: '8px 0' }}>
-                <For each={links()}>{(link) => (
-                  <a href={link.url} target="_blank" rel="noopener" style={{ display: 'block', padding: '10px 16px', color: '#73b8ff', 'text-decoration': 'none', 'font-size': '13px', 'font-weight': '500', 'border-bottom': '1px solid #111' }}
-                    onMouseOver={(e) => (e.currentTarget.style.background = '#1a1a2e')}
-                    onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}>
-                    {link.label}
-                    <span style={{ color: '#444', 'font-size': '11px', 'margin-left': '8px' }}>{link.url}</span>
-                  </a>
-                )}</For>
-                <Show when={links().length === 0}>
-                  <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No quick links yet. Use /feather add link to add some.</div>
-                </Show>
-              </div>
-            </Show>
+      <div style={{
+        position: 'fixed', top: '0', left: '0', bottom: '0', width: '300px', 'max-width': '85vw',
+        background: '#0d1117', 'z-index': '60',
+        transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)',
+        transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+        'will-change': 'transform',
+        'padding-top': 'env(safe-area-inset-top)', 'padding-left': 'env(safe-area-inset-left)',
+      }}>
+        <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
+          <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
+            <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
+            <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
           </div>
-        </Show>
+          {/* Sidebar tabs */}
+          <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
+            <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
+            <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
+          </div>
+          {/* Sessions tab */}
+          <Show when={sidebarTab() === 'sessions'}>
+            <div style={{ padding: '12px 16px' }}>
+              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                {creating() ? 'Starting...' : '+ New Claude'}
+              </button>
+            </div>
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
+              <For each={sessions()}>{(s) => (
+                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
+                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
+                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
+                    <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
+                  </div>
+                </div>
+              )}</For>
+            </div>
+          </Show>
+          {/* Links tab */}
+          <Show when={sidebarTab() === 'links'}>
+            <div style={{ flex: '1', 'overflow-y': 'auto', padding: '8px 0', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
+              <For each={links()}>{(link) => (
+                <a href={link.url} target="_blank" rel="noopener" style={{ display: 'block', padding: '10px 16px', color: '#73b8ff', 'text-decoration': 'none', 'font-size': '13px', 'font-weight': '500', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = '#1a1a2e')}
+                  onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}>
+                  {link.label}
+                  <span style={{ color: '#444', 'font-size': '11px', 'margin-left': '8px' }}>{link.url}</span>
+                </a>
+              )}</For>
+              <Show when={links().length === 0}>
+                <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No quick links yet. Use /feather add link to add some.</div>
+              </Show>
+            </div>
+          </Show>
+        </div>
       </div>
 
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
         {/* Header */}
-        <div style={{ padding: '8px 16px 0 56px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
+        <div style={{ padding: '8px 16px 0 56px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
               <div style={{ flex: '1' }} />
               <Show when={!s().isActive}>
-                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Resume</button>
+                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
             </>}
           </Show>
@@ -238,9 +273,10 @@ export default function App() {
 
         {/* Tabs */}
         <Show when={currentId()}>
-          <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
+          <div style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
             <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+            <span style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#333' }}>{__BUILD_TIME__}</span>
           </div>
         </Show>
 
@@ -282,20 +318,21 @@ export default function App() {
                     ? <img src={f.dataUrl} style={{ height: '56px', 'max-width': '100px', 'border-radius': '6px', 'object-fit': 'cover', display: 'block' }} />
                     : <div style={{ padding: '4px 8px', 'font-size': '11px', color: '#999', 'max-width': '100px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</div>
                   }
-                  <button onClick={() => removeFile(i())} style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '11px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1' }}>&times;</button>
+                  <button onClick={() => removeFile(i())} style={{ position: 'absolute', top: '-6px', right: '-6px', width: '22px', height: '22px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '12px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1' }}>&times;</button>
                 </div>
               )}</For>
             </div>
           </Show>
           <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
-            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1' }} title="Attach file">+</button>
+            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
             <textarea ref={textareaRef} value={text()}
               onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
+              enterkeyhint="send"
               placeholder="Send a message..." rows={1}
-              style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '15px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px' }} />
-            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px' }}>{uploading() ? '...' : 'Send'}</button>
+              style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px', '-webkit-appearance': 'none' }} />
+            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
           </div>
         </Show>
       </div>

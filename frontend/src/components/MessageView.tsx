@@ -171,7 +171,7 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
   })
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '16px', 'padding-bottom': '80px' }}>
+    <div ref={scrollRef} onScroll={onScroll} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
