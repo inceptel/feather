@@ -295,7 +295,7 @@ app.post('/api/upload', async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     fs.writeFileSync(fpath, Buffer.concat(chunks));
-    res.json({ path: `/uploads/${dest}` });
+    res.json({ path: fpath });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

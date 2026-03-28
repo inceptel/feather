@@ -3,3 +3,8 @@ static/
 *.log
 /tmp/
 .DS_Store
+uploads/
+quick-links.json
+missing-features.*
+generate-pdf.mjs
+MISSING-FEATURES.md
