@@ -59,15 +59,38 @@ function pushHistory(text: string) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(h))
 }
 
+// ── Status phrases ──────────────────────────────────────────────────────
+const STATUS_PHRASES = [
+  'Ready, spaghetti', 'Scampering along', 'Razmatazzing', 'Beboppin', 'Vibing quietly',
+  'Percolating', 'Noodling around', 'Idle mischief', 'Simmering gently', 'On standby, chef',
+  'Loitering elegantly', 'Twiddling bits', 'Daydreaming in hex', 'Purring softly',
+  'Coasting nicely', 'Drifting downstream', 'Humming along', 'All systems nominal',
+  'Chillin like a villain', 'Idly spectacular', 'Zen mode activated', 'At your service',
+  'Awaiting brilliance', 'Smooth operator', 'Freshly caffeinated',
+]
+let lastPhraseIdx = -1
+function readyPhrase() {
+  let idx: number
+  do { idx = Math.floor(Math.random() * STATUS_PHRASES.length) } while (idx === lastPhraseIdx && STATUS_PHRASES.length > 1)
+  lastPhraseIdx = idx
+  return STATUS_PHRASES[idx]
+}
+
 // ── Dynamic favicon ──────────────────────────────────────────────────────
 function setFavicon(color: string) {
   const size = 32, c = document.createElement('canvas')
   c.width = c.height = size
   const ctx = c.getContext('2d')!
+  // Colored circle with F
   ctx.beginPath()
-  ctx.arc(size / 2, size / 2, size / 3, 0, Math.PI * 2)
+  ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2)
   ctx.fillStyle = color
   ctx.fill()
+  ctx.fillStyle = '#0a0e14'
+  ctx.font = 'bold 18px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('F', size / 2, size / 2 + 1)
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link) }
   link.href = c.toDataURL()
@@ -431,10 +454,10 @@ export default function App() {
     const w = working()
     const unreadCount = unreadSessions().size
     const unreadPrefix = unreadCount > 0 ? `(${unreadCount > 99 ? '99+' : unreadCount}) ` : ''
-    const prefix = w ? '\u25CF ' : ''
-    const status = w ? 'Working' : 'Ready'
+    const prefix = w ? '\u25CF ' : '\u25CB '
+    const status = w ? 'Working...' : readyPhrase()
     if (s) {
-      document.title = `${unreadPrefix}${prefix}${status} - ${s.title} - Feather`
+      document.title = `${unreadPrefix}${prefix}${status} - ${s.title.slice(0, 30)} - Feather`
     } else {
       document.title = `${unreadPrefix}Feather`
     }
@@ -918,7 +941,7 @@ export default function App() {
                 </div>
               </Show>
             </div>
-            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
+            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '50%', padding: '0', width: '36px', height: '36px', 'font-size': '16px', 'line-height': '1', cursor: (text().trim() || files().length) ? 'pointer' : 'default', '-webkit-tap-highlight-color': 'transparent', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'flex-shrink': '0' }}>{uploading() ? '...' : '\u2191'}</button>
           </div>
         </Show>
       </div>

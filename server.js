@@ -128,10 +128,21 @@ function writeMeta(meta, userHome) {
   fs.writeFileSync(metaFilePath(userHome), JSON.stringify(meta, null, 2));
 }
 
+function readFileSudo(filePath) {
+  try { return fs.readFileSync(filePath, 'utf8'); } catch {
+    const m = filePath.match(/^\/home\/([^/]+)\//);
+    if (!m) return '';
+    try { return execSync(`sudo -u ${m[1]} cat "${filePath}"`, { encoding: 'utf8', timeout: 10000 }); }
+    catch { return ''; }
+  }
+}
+
 function getMessages(sessionId, limit = 100, before = 0, userHome) {
   const fpath = findJsonlPath(sessionId, userHome);
-  if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
-  const lines = fs.readFileSync(fpath, 'utf8').split('\n').filter(Boolean);
+  if (!fpath) return { messages: [], hasMore: false };
+  const content = readFileSudo(fpath);
+  if (!content) return { messages: [], hasMore: false };
+  const lines = content.split('\n').filter(Boolean);
   const msgs = [];
   for (const line of lines) {
     const m = parseMessage(line);
@@ -232,7 +243,7 @@ function spawnSession(id, cwd, username, userHome) {
   try { tmuxExec(username, ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
   const dir = cwd || userHome;
   const claudeCmd = `claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion`;
-  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic '${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
+  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic 'umask 007 && ${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
   tmuxExecShell(username, tmuxCmd, { stdio: 'ignore' });
   // Send Enter at multiple intervals to clear trust prompt and any onboarding dialogs
   for (const delay of [3000, 5000, 8000]) {
@@ -247,7 +258,7 @@ function resumeSession(id, cwd, username, userHome) {
   try { tmuxExec(username, ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
   const dir = cwd || userHome;
   const claudeCmd = `claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion`;
-  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic '${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
+  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic 'umask 007 && ${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
   tmuxExecShell(username, tmuxCmd, { stdio: 'ignore' });
   for (const delay of [3000, 5000, 8000]) {
     setTimeout(() => {
@@ -347,6 +358,66 @@ function discoverSessions(limit = 50, userHome, username) {
   return sessions;
 }
 
+// ── Auto-title generation ───────────────────────────────────────────────────
+
+const titleQueue = new Set();
+const TITLE_INTERVAL = 30000; // check every 30s
+
+async function generateTitle(sessionId, firstMessage, userHome) {
+  if (titleQueue.has(sessionId)) return;
+  titleQueue.add(sessionId);
+  try {
+    const prompt = `Generate a concise title (3-6 words) for a conversation that starts with: "${firstMessage.slice(0, 200)}". Reply with ONLY the title, no quotes, no explanation.`;
+    const result = execSync(`claude -p ${JSON.stringify(prompt)} --model haiku 2>/dev/null`, {
+      encoding: 'utf8', timeout: 15000
+    }).trim();
+    if (result && result.length < 60 && !result.includes('\n')) {
+      const meta = readMeta(userHome);
+      meta[sessionId] = { ...(meta[sessionId] || {}), title: result };
+      writeMeta(meta, userHome);
+    }
+  } catch {}
+  titleQueue.delete(sessionId);
+}
+
+// Periodically title untitled sessions
+setInterval(() => {
+  const projDir = path.join(HOME, '.claude/projects');
+  if (!fs.existsSync(projDir)) return;
+  const meta = readMeta(HOME);
+  for (const dir of fs.readdirSync(projDir)) {
+    const sessDir = path.join(projDir, dir, 'sessions');
+    if (!fs.existsSync(sessDir)) continue;
+    for (const file of fs.readdirSync(sessDir).slice(0, 10)) {
+      if (!file.endsWith('.jsonl')) continue;
+      const id = file.replace('.jsonl', '');
+      if (meta[id]?.title) continue; // already titled
+      try {
+        const fpath = path.join(sessDir, file);
+        const buf = Buffer.alloc(Math.min(16384, fs.statSync(fpath).size));
+        const fd = fs.openSync(fpath, 'r');
+        fs.readSync(fd, buf, 0, buf.length, 0);
+        fs.closeSync(fd);
+        for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+          try {
+            const d = JSON.parse(line);
+            if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
+              let text = '';
+              if (typeof d.message.content === 'string') text = d.message.content;
+              else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
+              text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
+              if (text && text.length > 10 && !text.startsWith('<')) {
+                generateTitle(id, text, HOME);
+                break;
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+}, TITLE_INTERVAL);
+
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 const sseClients = new Map(); // sessionId -> Set<res>
@@ -379,18 +450,39 @@ function initFileOffsets(projDir) {
   }
 }
 
+function readFileContent(filePath, offset, length) {
+  // Try direct read first, fall back to sudo for cross-user files
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(length);
+    fs.readSync(fd, buf, 0, buf.length, offset);
+    fs.closeSync(fd);
+    return buf.toString('utf8');
+  } catch {
+    // Find the owning user from the path (e.g. /home/lena/.claude/...)
+    const m = filePath.match(/^\/home\/([^/]+)\//);
+    if (!m) return null;
+    try {
+      return execSync(`sudo -u ${m[1]} tail -c +${offset + 1} "${filePath}"`, { encoding: 'utf8', timeout: 5000 });
+    } catch { return null; }
+  }
+}
+
 function processFileChange(filePath) {
   if (!filePath.endsWith('.jsonl')) return;
   const sessionId = path.basename(filePath, '.jsonl');
   const currentOffset = fileOffsets.get(sessionId) || 0;
   try {
-    const stat = fs.statSync(filePath);
-    if (stat.size <= currentOffset) return;
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(stat.size - currentOffset);
-    fs.readSync(fd, buf, 0, buf.length, currentOffset);
-    fs.closeSync(fd);
-    const content = buf.toString('utf8');
+    // stat via sudo if needed
+    let fileSize;
+    try { fileSize = fs.statSync(filePath).size; } catch {
+      const m = filePath.match(/^\/home\/([^/]+)\//);
+      if (!m) return;
+      try { fileSize = parseInt(execSync(`sudo -u ${m[1]} stat -c %s "${filePath}"`, { encoding: 'utf8', timeout: 5000 })); } catch { return; }
+    }
+    if (fileSize <= currentOffset) return;
+    const content = readFileContent(filePath, currentOffset, fileSize - currentOffset);
+    if (!content) return;
     const lastNL = content.lastIndexOf('\n');
     if (lastNL < 0) return;
     const complete = content.substring(0, lastNL + 1);
