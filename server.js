@@ -342,13 +342,10 @@ function discoverSessions(limit = 50, userHome, username) {
             // Clean up: strip attachment markers and whitespace
             text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
             if (text && !text.startsWith('Generate a concise title')) {
-              if (text.startsWith('<command-name>')) {
-                // Extract slash command name as title
-                const cmd = text.match(/<command-name>\/([^<]+)</)
-                if (cmd) { title = '/' + cmd[1]; break; }
-              } else if (!text.startsWith('<')) {
-                title = text.slice(0, 80); break;
-              }
+              // Extract slash command name from <command-name>/foo</command-name>
+              const cmdMatch = text.match(/<command-name>\/?([^<]+)</)
+              if (cmdMatch) { title = '/' + cmdMatch[1].trim(); break; }
+              if (!text.startsWith('<')) { title = text.slice(0, 80); break; }
             }
           }
         } catch {}
