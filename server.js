@@ -362,16 +362,20 @@ function discoverSessions(limit = 50, userHome, username) {
 // ── Auto-title generation ───────────────────────────────────────────────────
 
 const titleQueue = new Set();
-const TITLE_INTERVAL = 30000; // check every 30s
+const TITLE_INTERVAL = 60000; // check every 60s
+const MAX_CONCURRENT_TITLES = 2; // limit parallel title generation
 
 async function generateTitle(sessionId, firstMessage, userHome) {
-  if (titleQueue.has(sessionId)) return;
+  if (titleQueue.has(sessionId) || titleQueue.size >= MAX_CONCURRENT_TITLES) return;
   titleQueue.add(sessionId);
   try {
-    const prompt = `Generate a concise title (3-6 words) for a conversation that starts with: "${firstMessage.slice(0, 200)}". Reply with ONLY the title, no quotes, no explanation.`;
-    const result = execSync(`claude -p ${JSON.stringify(prompt)} --model haiku 2>/dev/null`, {
-      encoding: 'utf8', timeout: 15000
-    }).trim();
+    const prompt = `Generate a concise title (3-6 words) for a conversation that starts with: "${firstMessage.slice(0, 200).replace(/"/g, '\\"')}". Reply with ONLY the title, no quotes, no explanation.`;
+    const { execFile: execFileAsync } = await import('child_process');
+    const result = await new Promise((resolve, reject) => {
+      execFileAsync('claude', ['-p', prompt, '--model', 'haiku'], { encoding: 'utf8', timeout: 20000 }, (err, stdout) => {
+        if (err) reject(err); else resolve(stdout.trim());
+      });
+    });
     if (result && result.length < 60 && !result.includes('\n')) {
       const meta = readMeta(userHome);
       meta[sessionId] = { ...(meta[sessionId] || {}), title: result };
