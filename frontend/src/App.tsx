@@ -103,6 +103,7 @@ export default function App() {
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
+  const [showChangelog, setShowChangelog] = createSignal(false)
   const [projectsExpanded, setProjectsExpanded] = createSignal(false)
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
@@ -326,7 +327,18 @@ export default function App() {
   async function handleSend() {
     const val = text().trim()
     const pending = files()
-    if ((!val && !pending.length) || !currentId()) return
+    if (!val && !pending.length) return
+    // Auto-create session if none selected
+    if (!currentId()) {
+      try {
+        const id = await createSession()
+        setSessions(await fetchSessions())
+        select(id)
+        // Wait a tick for the SSE to connect
+        await new Promise(r => setTimeout(r, 500))
+      } catch { return }
+    }
+    if (!currentId()) return
     setUploading(true)
     setText('')
     setFiles([])
@@ -698,7 +710,36 @@ export default function App() {
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
             <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
             <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
-            <span style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#333' }}>{__BUILD_TIME__}</span>
+            <span onClick={() => setShowChangelog(!showChangelog())} style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#444', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{__BUILD_TIME__}</span>
+          </div>
+        </Show>
+
+        {/* What's New popover */}
+        <Show when={showChangelog()}>
+          <div onClick={() => setShowChangelog(false)} style={{ position: 'fixed', inset: '0', 'z-index': '150' }} />
+          <div style={{ position: 'absolute', right: '12px', top: '100px', width: '320px', 'max-width': '85vw', 'max-height': '60vh', 'overflow-y': 'auto', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', 'box-shadow': '0 8px 24px rgba(0,0,0,0.6)', 'z-index': '151', padding: '16px' }}>
+            <div style={{ display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'margin-bottom': '12px' }}>
+              <span style={{ 'font-size': '14px', 'font-weight': '700', color: '#e5e5e5' }}>What's New</span>
+              <button onClick={() => setShowChangelog(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer' }}>&times;</button>
+            </div>
+            <div style={{ 'font-size': '12px', color: '#aaa', 'line-height': '1.6' }}>
+              <div style={{ color: '#4aba6a', 'font-weight': '600', 'margin-bottom': '6px' }}>March 28, 2026</div>
+              <ul style={{ margin: '0', padding: '0 0 0 16px' }}>
+                <li>Typing indicator (bouncing dots while Claude works)</li>
+                <li>Session time grouping (Today / Yesterday / This Week)</li>
+                <li>Expandable tool cards (Agent, Grep, Read details)</li>
+                <li>Tool results collapse with line count</li>
+                <li>Project labels in header and sidebar</li>
+                <li>Sidebar rename (double-click or long-press)</li>
+                <li>Stop button moved to menu</li>
+                <li>Image and file preview in messages</li>
+                <li>Scroll-to-bottom button</li>
+                <li>Auto-resume reaped sessions</li>
+                <li>Collapsible project tree</li>
+                <li>ANSI stripping, URL links open in new tab</li>
+                <li>Session persistence across restarts</li>
+              </ul>
+            </div>
           </div>
         </Show>
 
@@ -754,7 +795,7 @@ export default function App() {
         </Show>
 
         {/* Input (chat tab only) */}
-        <Show when={currentId() && tab() === 'chat'}>
+        <Show when={tab() === 'chat' || !currentId()}>
           <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
           {/* File previews */}
           <Show when={files().length > 0}>
