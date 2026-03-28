@@ -345,21 +345,35 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
+  const [newMsgCount, setNewMsgCount] = createSignal(0)
+  let prevMsgLen = props.messages.length
 
   function onScroll() {
     if (!scrollRef) return
     const { scrollTop, scrollHeight, clientHeight } = scrollRef
-    setPinned(scrollHeight - scrollTop - clientHeight < 80)
+    const near = scrollHeight - scrollTop - clientHeight < 80
+    setPinned(near)
+    if (near) setNewMsgCount(0)
+  }
+
+  function scrollToBottom() {
+    scrollRef?.scrollTo({ top: scrollRef!.scrollHeight, behavior: 'smooth' })
+    setNewMsgCount(0)
   }
 
   createEffect(() => {
-    props.messages.length // track
+    const len = props.messages.length
+    const delta = len - prevMsgLen
+    prevMsgLen = len
     if (pinned()) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
+    } else if (delta > 0) {
+      setNewMsgCount(c => c + delta)
     }
   })
 
   return (
+    <div style={{ position: 'relative', height: '100%' }}>
     <div ref={(el) => { scrollRef = el; props.scrollRefCb?.(el) }} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
@@ -460,6 +474,14 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           </div>
         </div>
       </Show>
+    </div>
+    {/* Scroll to bottom button */}
+    <Show when={!pinned() && newMsgCount() > 0}>
+      <button onClick={scrollToBottom}
+        style={{ position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)', background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '20px', padding: '6px 16px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', 'box-shadow': '0 2px 8px rgba(0,0,0,0.4)', 'z-index': '10', '-webkit-tap-highlight-color': 'transparent' }}>
+        {newMsgCount()} new {'\u2193'}
+      </button>
+    </Show>
     </div>
   )
 }
