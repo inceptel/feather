@@ -233,6 +233,18 @@ function formatTime(iso: string) {
   catch { return '' }
 }
 
+function formatFullDate(iso: string) {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  } catch { return '' }
+}
+
+// Copy message text to clipboard
+function copyMessageText(el: HTMLElement) {
+  navigator.clipboard.writeText(el.textContent || '').catch(() => {})
+}
+
 // ── Markdown styles ─────────────────────────────────────────────────────────
 
 const markdownCSS = `
@@ -418,7 +430,8 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
             </div>
           </div>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <span style={{ 'font-size': '10px', color: '#444' }}>{formatTime(msg.timestamp)}</span>
+            <span onClick={(e) => { const el = e.currentTarget; el.textContent = el.textContent === formatTime(msg.timestamp) ? formatFullDate(msg.timestamp) : formatTime(msg.timestamp) }}
+              style={{ 'font-size': '10px', color: '#444', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{formatTime(msg.timestamp)}</span>
             {msg.role === 'user' && msg.delivery && (
               <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
