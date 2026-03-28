@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -11,6 +12,7 @@ const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
 const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 
 // ── JSONL parsing ───────────────────────────────────────────────────────────
 
@@ -268,6 +270,7 @@ const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 const app = express();
+app.use(compression());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 
@@ -480,9 +483,14 @@ function reapIdleSessions() {
 
 setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: VERSION, uptime: process.uptime() }));
 
-app.use(express.static(STATIC_DIR));
+app.use(express.static(STATIC_DIR, {
+  maxAge: '0',
+  setHeaders(res, filePath) {
+    if (filePath.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  },
+}));
 app.get('/terminal', (_req, res) => res.sendFile(path.join(STATIC_DIR, 'terminal.html')));
 app.get('/{*path}', (_req, res) => {
   const index = path.join(STATIC_DIR, 'index.html');
