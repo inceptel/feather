@@ -2,8 +2,8 @@ declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
-import type { SessionMeta, Message } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
+import type { SessionMeta, Message, Project } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchProjects, checkAuth, login, logout } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -74,6 +74,11 @@ function setFavicon(color: string) {
 }
 
 export default function App() {
+  const [authUser, setAuthUser] = createSignal<{ username: string; admin: boolean } | null>(null)
+  const [authChecked, setAuthChecked] = createSignal(false)
+  const [loginError, setLoginError] = createSignal('')
+  const [loginLoading, setLoginLoading] = createSignal(false)
+
   const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
   const [messages, setMessages] = createSignal<Message[]>([])
@@ -84,6 +89,7 @@ export default function App() {
   const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [uploading, setUploading] = createSignal(false)
+  const [working, setWorking] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
   const [menuOpen, setMenuOpen] = createSignal(false)
   const [historyIdx, setHistoryIdx] = createSignal(-1)
@@ -94,9 +100,15 @@ export default function App() {
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
   const [renameText, setRenameText] = createSignal('')
+  const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
+  const [sidebarRenameText, setSidebarRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
+  const [projectsExpanded, setProjectsExpanded] = createSignal(false)
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
+  const [projects, setProjects] = createSignal<Project[]>([])
+  const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-next-project'))
+  const [expandedGroups, setExpandedGroups] = createSignal<Record<string, boolean>>(JSON.parse(localStorage.getItem('feather-next-groups') || '{}'))
   let cleanupSSE: (() => void) | null = null
   let recognition: any = null
   let textareaRef: HTMLTextAreaElement | undefined
@@ -146,21 +158,29 @@ export default function App() {
     }
   }
 
-  onMount(async () => {
+  async function initApp() {
     document.addEventListener('keydown', onGlobalKeyDown)
     setSessions(await fetchSessions())
+    fetchProjects().then(setProjects).catch(() => {})
     const base = location.pathname.replace(/\/+$/, '')
-    fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
+    fetch(`${base}/api/quick-links`).then(r => r.ok ? r.json() : []).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
     const hash = location.hash.slice(1)
     if (hash) select(hash)
-    // Refresh session list when tab becomes visible
-    document.addEventListener('visibilitychange', onVisibility)
-  })
-  function onVisibility() {
-    if (document.visibilityState === 'visible') fetchSessions().then(s => setSessions(s)).catch(() => {})
   }
-  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility) })
+
+  onMount(async () => {
+    const user = await checkAuth()
+    setAuthChecked(true)
+    if (user) {
+      setAuthUser(user)
+      await initApp()
+    }
+  })
+  const pollTimer = setInterval(async () => {
+    try { setSessions(await fetchSessions()) } catch {}
+  }, 10000)
+  onCleanup(() => { clearInterval(pollTimer); cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown) })
 
   async function select(id: string) {
     const prev = currentId()
@@ -170,6 +190,7 @@ export default function App() {
     setSidebar(false)
     setLoading(true)
     setMessages([])
+    setWorking(false)
     setText(loadDraft(id))
     setHistoryIdx(-1)
     setHistoryOpen(false)
@@ -182,6 +203,7 @@ export default function App() {
     setLoading(false)
     setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
+      if (msg.role === 'assistant') setWorking(false)
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
         if (msg.role === 'user') {
@@ -239,6 +261,14 @@ export default function App() {
     await renameSession(id, title)
     setRenaming(false)
     setMenuOpen(false)
+    setSessions(await fetchSessions())
+  }
+
+  async function handleSidebarRename(id: string) {
+    const title = sidebarRenameText().trim()
+    if (!title) { setSidebarRenaming(null); return }
+    await renameSession(id, title)
+    setSidebarRenaming(null)
     setSessions(await fetchSessions())
   }
 
@@ -320,6 +350,7 @@ export default function App() {
     }])
     sendInput(currentId()!, fullText)
     setUploading(false)
+    setWorking(true)
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
@@ -356,7 +387,64 @@ export default function App() {
     '-webkit-tap-highlight-color': 'transparent',
   })
 
+  async function handleLogin(e: Event) {
+    e.preventDefault()
+    setLoginLoading(true)
+    setLoginError('')
+    const form = e.target as HTMLFormElement
+    const username = (form.querySelector('[name=username]') as HTMLInputElement).value
+    const password = (form.querySelector('[name=password]') as HTMLInputElement).value
+    try {
+      const result = await login(username, password)
+      if (result.ok) {
+        const user = await checkAuth()
+        if (user) {
+          setAuthUser(user)
+          await initApp()
+        }
+      } else {
+        setLoginError(result.error || 'Login failed')
+      }
+    } catch {
+      setLoginError('Connection error')
+    }
+    setLoginLoading(false)
+  }
+
+  async function handleLogout() {
+    await logout()
+    setAuthUser(null)
+    setSessions([])
+    setCurrentId(null)
+    setMessages([])
+  }
+
+  // Login screen component
+  const LoginScreen = () => (
+    <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: 'calc(var(--vh, 1vh) * 100)', background: '#0a0e14', 'font-family': "-apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif", padding: '20px' }}>
+      <form onSubmit={handleLogin} action="/api/login" method="POST" style={{ width: '100%', 'max-width': '320px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '16px', padding: '32px 24px', 'text-align': 'center' }}>
+        <div style={{ 'font-size': '40px', 'margin-bottom': '8px' }}>&#x1fab6;</div>
+        <h1 style={{ 'font-size': '20px', 'font-weight': '700', color: '#e5e5e5', 'margin-bottom': '24px' }}>Feather</h1>
+        <label for="username" style={{ display: 'none' }}>Username</label>
+        <input id="username" name="username" type="text" placeholder="Username" autocomplete="username" autofocus
+          style={{ width: '100%', padding: '12px 16px', background: '#161b22', border: '1px solid #333', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '15px', 'margin-bottom': '12px', outline: 'none', 'box-sizing': 'border-box' }} />
+        <label for="password" style={{ display: 'none' }}>Password</label>
+        <input id="password" name="password" type="password" placeholder="Password" autocomplete="current-password"
+          style={{ width: '100%', padding: '12px 16px', background: '#161b22', border: '1px solid #333', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '15px', 'margin-bottom': '16px', outline: 'none', 'box-sizing': 'border-box' }} />
+        <Show when={loginError()}>
+          <div style={{ color: '#d45555', 'font-size': '13px', 'margin-bottom': '12px' }}>{loginError()}</div>
+        </Show>
+        <button type="submit" disabled={loginLoading()}
+          style={{ width: '100%', padding: '12px', background: loginLoading() ? '#1a1a2e' : '#4aba6a', color: loginLoading() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '15px', 'font-weight': '600', cursor: loginLoading() ? 'wait' : 'pointer' }}>
+          {loginLoading() ? 'Signing in...' : 'Sign in'}
+        </button>
+      </form>
+    </div>
+  )
+
   return (
+    <Show when={authChecked()} fallback={<div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100vh', background: '#0a0e14', color: '#555', 'font-family': "-apple-system, system-ui, sans-serif" }}>Loading...</div>}>
+    <Show when={authUser()} fallback={<LoginScreen />}>
     <div
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
@@ -388,7 +476,11 @@ export default function App() {
         <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
           <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
             <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
-            <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+              <span style={{ 'font-size': '12px', color: '#4aba6a', 'font-weight': '500' }}>{authUser()?.username}</span>
+              <button onClick={handleLogout} style={{ background: 'none', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '2px 8px', 'border-radius': '4px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Logout</button>
+              <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
+            </div>
           </div>
           {/* Sidebar tabs */}
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
@@ -397,21 +489,137 @@ export default function App() {
           </div>
           {/* Sessions tab */}
           <Show when={sidebarTab() === 'sessions'}>
-            <div style={{ padding: '12px 16px' }}>
+            {/* Project tree (collapsed by default, click to expand) */}
+            <div style={{ 'border-bottom': '1px solid #1e1e1e', padding: '4px 0' }}>
+              <div style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '4px 16px' }}>
+                <div onClick={() => setProjectsExpanded(!projectsExpanded())}
+                  style={{ cursor: 'pointer', 'font-size': '11px', 'font-weight': '600', color: '#777', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', '-webkit-tap-highlight-color': 'transparent', display: 'flex', 'align-items': 'center', gap: '4px' }}>
+                  <span style={{ 'font-size': '8px', transition: 'transform 0.15s', transform: projectsExpanded() ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
+                  Projects
+                </div>
+                <Show when={currentProject()}>
+                  <span style={{ 'font-size': '11px', color: '#4aba6a', 'font-weight': '600' }}>{projects().find(p => p.id === currentProject())?.label || ''}</span>
+                  <span onClick={(e) => { e.stopPropagation(); setCurrentProject(null); localStorage.removeItem('feather-next-project') }}
+                    style={{ 'font-size': '10px', color: '#666', cursor: 'pointer', padding: '0 4px' }}>&times;</span>
+                </Show>
+              </div>
+              <Show when={projectsExpanded()}>
+              <div style={{ 'max-height': '35vh', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+              {/* All projects button */}
+              <div onClick={() => { setCurrentProject(null); localStorage.removeItem('feather-next-project'); setProjectsExpanded(false) }}
+                style={{ padding: '4px 16px', cursor: 'pointer', 'font-size': '11px', 'font-weight': '600', color: currentProject() === null ? '#4aba6a' : '#888', '-webkit-tap-highlight-color': 'transparent' }}>
+                All
+              </div>
+              {/* Grouped projects */}
+              {(() => {
+                const projs = projects()
+                const grouped: Record<string, Project[]> = {}
+                const ungrouped: Project[] = []
+                projs.forEach(p => {
+                  const idx = p.label.indexOf(' / ')
+                  if (idx >= 0) {
+                    const g = p.label.substring(0, idx)
+                    if (!grouped[g]) grouped[g] = []
+                    grouped[g].push({ ...p, label: p.label.substring(idx + 3) })
+                  } else {
+                    ungrouped.push(p)
+                  }
+                })
+                const groups = Object.keys(grouped).sort()
+                return <>
+                  <For each={groups}>{(group) => {
+                    const isOpen = () => expandedGroups()[group]
+                    const toggle = () => {
+                      const next = { ...expandedGroups(), [group]: !isOpen() }
+                      setExpandedGroups(next)
+                      localStorage.setItem('feather-next-groups', JSON.stringify(next))
+                    }
+                    return <>
+                      <div onClick={toggle} style={{ padding: '4px 16px', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '4px', 'font-size': '11px', 'font-weight': '600', color: '#777', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', '-webkit-tap-highlight-color': 'transparent' }}>
+                        <span style={{ 'font-size': '8px', transition: 'transform 0.15s', transform: isOpen() ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
+                        {group}
+                      </div>
+                      <Show when={isOpen()}>
+                        <For each={grouped[group]}>{(p) => (
+                          <div onClick={() => { setCurrentProject(p.id); localStorage.setItem('feather-next-project', p.id) }}
+                            style={{ padding: '3px 16px 3px 28px', cursor: 'pointer', 'font-size': '12px', color: currentProject() === p.id ? '#4aba6a' : '#aaa', 'font-weight': currentProject() === p.id ? '600' : '400', '-webkit-tap-highlight-color': 'transparent' }}>
+                            {p.label}
+                          </div>
+                        )}</For>
+                      </Show>
+                    </>
+                  }}</For>
+                  <For each={ungrouped}>{(p) => (
+                    <div onClick={() => { setCurrentProject(p.id); localStorage.setItem('feather-next-project', p.id) }}
+                      style={{ padding: '3px 16px', cursor: 'pointer', 'font-size': '12px', color: currentProject() === p.id ? '#4aba6a' : '#aaa', 'font-weight': currentProject() === p.id ? '600' : '400', '-webkit-tap-highlight-color': 'transparent' }}>
+                      {p.label}
+                    </div>
+                  )}</For>
+                </>
+              })()}
+              </div>
+              </Show>
+            </div>
+            {/* New session button */}
+            <div style={{ padding: '8px 16px' }}>
               <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                 {creating() ? 'Starting...' : '+ New Claude'}
               </button>
             </div>
+            {/* Session list (filtered by project, grouped by time) */}
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
-              <For each={sessions()}>{(s) => (
-                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
-                    <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
-                  </div>
-                </div>
-              )}</For>
+              {(() => {
+                const filtered = sessions().filter(s => !currentProject() || s.projectId === currentProject())
+                const now = new Date()
+                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                const yesterdayStart = todayStart - 86400000
+                const weekStart = todayStart - 6 * 86400000
+                const groups: { label: string, items: SessionMeta[] }[] = [
+                  { label: 'Today', items: [] },
+                  { label: 'Yesterday', items: [] },
+                  { label: 'This Week', items: [] },
+                  { label: 'Older', items: [] },
+                ]
+                for (const s of filtered) {
+                  const t = new Date(s.updatedAt).getTime()
+                  if (t >= todayStart) groups[0].items.push(s)
+                  else if (t >= yesterdayStart) groups[1].items.push(s)
+                  else if (t >= weekStart) groups[2].items.push(s)
+                  else groups[3].items.push(s)
+                }
+                return <For each={groups.filter(g => g.items.length > 0)}>{(group) => <>
+                  <div style={{ padding: '6px 16px 2px', 'font-size': '10px', 'font-weight': '600', color: '#555', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{group.label}</div>
+                  <For each={group.items}>{(s) => (
+                    <div onClick={() => { if (sidebarRenaming() !== s.id) select(s.id) }}
+                      onDblClick={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
+                      onContextMenu={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
+                      style={{ padding: '10px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
+                      <Show when={sidebarRenaming() === s.id} fallback={
+                        <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                          <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
+                          <div style={{ flex: '1', 'min-width': '0' }}>
+                            <div style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</div>
+                            <Show when={!currentProject() && s.projectLabel}>
+                              <div style={{ 'font-size': '10px', color: '#444', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.projectLabel}</div>
+                            </Show>
+                          </div>
+                          <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
+                        </div>
+                      }>
+                        <input
+                          value={sidebarRenameText()}
+                          onInput={(e) => setSidebarRenameText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSidebarRename(s.id); if (e.key === 'Escape') setSidebarRenaming(null) }}
+                          onBlur={() => handleSidebarRename(s.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          ref={(el) => setTimeout(() => { el.focus(); el.select() }, 0)}
+                          style={{ width: '100%', background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '4px', padding: '2px 6px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }}
+                        />
+                      </Show>
+                    </div>
+                  )}</For>
+                </>}</For>
+              })()}
             </div>
           </Show>
           {/* Links tab */}
@@ -441,7 +649,12 @@ export default function App() {
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <Show when={renaming()} fallback={
-                <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
+                <div style={{ overflow: 'hidden', 'min-width': '0' }}>
+                  <Show when={s().projectLabel || (s().projectId && projects().find(p => p.id === s().projectId)?.label)}>
+                    {(label) => <div style={{ 'font-size': '10px', color: '#666', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{label()}</div>}
+                  </Show>
+                  <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600', display: 'block' }}>{s().title}</span>
+                </div>
               }>
                 <input
                   value={renameText()}
@@ -453,9 +666,6 @@ export default function App() {
                 />
               </Show>
               <div style={{ flex: '1' }} />
-              <Show when={s().isActive}>
-                <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Stop</button>
-              </Show>
               <Show when={!s().isActive}>
                 <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
@@ -464,6 +674,10 @@ export default function App() {
                 <Show when={menuOpen()}>
                   <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '99' }} />
                   <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
+                    <Show when={s().isActive}>
+                      <button onClick={() => { handleInterrupt(s().id); setMenuOpen(false) }}
+                        style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Stop</button>
+                    </Show>
                     <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
                       style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
                     <button onClick={() => handleFork(s().id)}
@@ -504,7 +718,7 @@ export default function App() {
             </div>
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
             </div>
             <div style={{ display: tab() === 'files' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
               <Show when={touchedFiles().length === 0}>
@@ -594,5 +808,7 @@ export default function App() {
         </Show>
       </div>
     </div>
+    </Show>
+    </Show>
   )
 }

@@ -5,6 +5,13 @@ export interface SessionMeta {
   title: string
   updatedAt: string
   isActive: boolean
+  projectId?: string
+  projectLabel?: string | null
+}
+
+export interface Project {
+  id: string
+  label: string
 }
 
 export interface ContentBlock {
@@ -29,6 +36,12 @@ export async function fetchSessions(): Promise<SessionMeta[]> {
   const r = await fetch(`${BASE}/api/sessions`)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return (await r.json()).sessions
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const r = await fetch(`${BASE}/api/projects`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).projects
 }
 
 export async function fetchMessages(id: string, before = 0): Promise<{ messages: Message[], hasMore: boolean }> {
@@ -85,6 +98,27 @@ export const exportUrl = (id: string) => `${BASE}/api/sessions/${id}/export`
 
 export const openInEditor = (path: string) =>
   fetch(`${BASE}/api/open-in-editor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(r => r.json())
+
+export async function checkAuth(): Promise<{ username: string; admin: boolean } | null> {
+  try {
+    const r = await fetch(`${BASE}/api/me`)
+    if (!r.ok) return null
+    return await r.json()
+  } catch { return null }
+}
+
+export async function login(username: string, password: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await fetch(`${BASE}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  return await r.json()
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${BASE}/api/logout`, { method: 'POST' })
+}
 
 export function subscribeMessages(
   id: string,
