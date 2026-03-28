@@ -1,19 +1,15 @@
 import { defineConfig } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
-import { readFileSync } from 'fs'
-
-const version = (() => { try { return JSON.parse(readFileSync('../version.json', 'utf8')).version } catch { return new Date().toISOString() } })()
 
 export default defineConfig({
   plugins: [solidPlugin()],
   define: {
-    __BUILD_TIME__: JSON.stringify(version),
+    __BUILD_TIME__: JSON.stringify(new Date().toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })),
   },
   base: './',
   build: {
     outDir: '../static',
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 5174,

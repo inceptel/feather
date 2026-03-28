@@ -4,16 +4,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build": "echo {\\\"version\\\":\\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"} > version.json && cd frontend && npm install && npm run build",
-    "build:frontend": "npm run build",
-    "deploy": "npm run build && supervisorctl -s unix:///tmp/supervisor.sock restart feather",
+    "build:frontend": "cd frontend && npm install && npm run build",
     "prepare": "npm run build:frontend",
     "test": "node --test test/unit/*.test.js",
     "test:api": "node --test test/unit/api.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "compression": "^1.8.1",
     "express": "^5.1.0",
     "node-pty": "^1.1.0",
     "ws": "^8.20.0"

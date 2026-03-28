@@ -1,7 +1,7 @@
 declare const __BUILD_TIME__: string
-import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy } from 'solid-js'
+import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
-const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
+import { Terminal } from './components/Terminal'
 import type { SessionMeta, Message } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
 
