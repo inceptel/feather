@@ -270,7 +270,13 @@ const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 
 const app = express();
-app.use(compression());
+app.use(compression({
+  filter(req, res) {
+    // Don't compress SSE streams — buffering breaks real-time delivery
+    if (req.headers.accept === 'text/event-stream') return false;
+    return compression.filter(req, res);
+  },
+}));
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 
