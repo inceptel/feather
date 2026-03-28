@@ -886,6 +886,14 @@ export default function App() {
           </div>
         </Show>
 
+        {/* Status bar */}
+        <Show when={currentId() && tab() === 'chat'}>
+          <div style={{ padding: '2px 16px', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', 'align-items': 'center', gap: '6px', 'flex-shrink': '0' }}>
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: working() ? '#f5a742' : '#4aba6a', transition: 'background 0.3s' }} />
+            <span style={{ 'font-size': '10px', color: '#555', 'font-weight': '500' }}>{working() ? 'Working...' : readyPhrase()}</span>
+          </div>
+        </Show>
+
         {/* Input (chat tab only) */}
         <Show when={tab() === 'chat' || !currentId()}>
           <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
