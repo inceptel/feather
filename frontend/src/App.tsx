@@ -455,9 +455,11 @@ export default function App() {
     const unreadCount = unreadSessions().size
     const unreadPrefix = unreadCount > 0 ? `(${unreadCount}) ` : ''
     const dot = w ? '\u25CF' : '\u25CB'
-    const status = w ? 'Working' : 'Ready'
     if (s) {
-      document.title = `${unreadPrefix}${dot} ${status} - ${s.title.slice(0, 40)} - Feather`
+      // Use project label for title (like old feather), fall back to short session title
+      const proj = s.projectLabel || projects().find(p => p.id === s.projectId)?.label
+      const label = proj || s.title.slice(0, 30)
+      document.title = `${unreadPrefix}${dot} ${label}`
     } else {
       document.title = `${unreadPrefix}Feather`
     }

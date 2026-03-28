@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { parseMessage } from './lib/parse.js';
 
 const PORT = parseInt(process.env.PORT || '4870');
+const HOME = process.env.HOME || '/home/user';
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const USERS_FILE = path.resolve(import.meta.dirname, 'users.json');
 
@@ -380,21 +381,24 @@ async function generateTitle(sessionId, firstMessage, userHome) {
   titleQueue.delete(sessionId);
 }
 
-// Periodically title untitled sessions
+// Periodically title untitled sessions (reuses discoverSessions logic)
 setInterval(() => {
   const projDir = path.join(HOME, '.claude/projects');
   if (!fs.existsSync(projDir)) return;
   const meta = readMeta(HOME);
   for (const dir of fs.readdirSync(projDir)) {
-    const sessDir = path.join(projDir, dir, 'sessions');
-    if (!fs.existsSync(sessDir)) continue;
-    for (const file of fs.readdirSync(sessDir).slice(0, 10)) {
+    const dirPath = path.join(projDir, dir);
+    let files;
+    try { files = fs.readdirSync(dirPath); } catch { continue; }
+    for (const file of files.slice(0, 20)) {
       if (!file.endsWith('.jsonl')) continue;
       const id = file.replace('.jsonl', '');
       if (meta[id]?.title) continue; // already titled
       try {
-        const fpath = path.join(sessDir, file);
-        const buf = Buffer.alloc(Math.min(16384, fs.statSync(fpath).size));
+        const fpath = path.join(dirPath, file);
+        const stat = fs.statSync(fpath);
+        if (stat.size < 100) continue;
+        const buf = Buffer.alloc(Math.min(16384, stat.size));
         const fd = fs.openSync(fpath, 'r');
         fs.readSync(fd, buf, 0, buf.length, 0);
         fs.closeSync(fd);
