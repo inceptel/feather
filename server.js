@@ -341,7 +341,15 @@ function discoverSessions(limit = 50, userHome, username) {
             else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
             // Clean up: strip attachment markers and whitespace
             text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
-            if (text && !text.startsWith('<') && !text.startsWith('Generate a concise title')) { title = text.slice(0, 80); break; }
+            if (text && !text.startsWith('Generate a concise title')) {
+              if (text.startsWith('<command-name>')) {
+                // Extract slash command name as title
+                const cmd = text.match(/<command-name>\/([^<]+)</)
+                if (cmd) { title = '/' + cmd[1]; break; }
+              } else if (!text.startsWith('<')) {
+                title = text.slice(0, 80); break;
+              }
+            }
           }
         } catch {}
       }
