@@ -817,19 +817,27 @@ export default function App() {
             <div style={{ 'font-size': '12px', color: '#aaa', 'line-height': '1.6' }}>
               <div style={{ color: '#4aba6a', 'font-weight': '600', 'margin-bottom': '6px' }}>March 28, 2026</div>
               <ul style={{ margin: '0', padding: '0 0 0 16px' }}>
-                <li>Typing indicator (bouncing dots while Claude works)</li>
-                <li>Session time grouping (Today / Yesterday / This Week)</li>
-                <li>Expandable tool cards (Agent, Grep, Read details)</li>
+                <li>Auto-generated session titles (via Haiku)</li>
+                <li>Status bar with fun phrases (Razmatazzing!)</li>
+                <li>Page title shows project name + status dot</li>
+                <li>Favicon with "F" and status color</li>
+                <li>Copy button on tool result outputs</li>
+                <li>Clickable timestamps (tap for full date)</li>
+                <li>Auto-create session when you type</li>
+                <li>Typing indicator (bouncing dots)</li>
+                <li>Session time grouping (Today / Yesterday)</li>
+                <li>Expandable tool cards (Agent, Grep, Read)</li>
                 <li>Tool results collapse with line count</li>
                 <li>Project labels in header and sidebar</li>
                 <li>Sidebar rename (double-click or long-press)</li>
-                <li>Stop button moved to menu</li>
                 <li>Image and file preview in messages</li>
-                <li>Scroll-to-bottom button</li>
-                <li>Auto-resume reaped sessions</li>
                 <li>Collapsible project tree</li>
+                <li>Code block auto-collapse (25+ lines)</li>
+                <li>Keyboard shortcuts (Ctrl+B sidebar)</li>
+                <li>Unread session tracking (blue dot)</li>
+                <li>Character count in input area</li>
+                <li>Scroll-to-bottom button</li>
                 <li>ANSI stripping, URL links open in new tab</li>
-                <li>Session persistence across restarts</li>
               </ul>
             </div>
           </div>
