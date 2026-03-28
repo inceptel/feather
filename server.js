@@ -341,7 +341,7 @@ function discoverSessions(limit = 50, userHome, username) {
             else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
             // Clean up: strip attachment markers and whitespace
             text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
-            if (text && !text.startsWith('<')) { title = text.slice(0, 80); break; }
+            if (text && !text.startsWith('<') && !text.startsWith('Generate a concise title')) { title = text.slice(0, 80); break; }
           }
         } catch {}
       }
@@ -414,7 +414,7 @@ setInterval(() => {
               if (typeof d.message.content === 'string') text = d.message.content;
               else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
               text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
-              if (text && text.length > 10 && !text.startsWith('<')) {
+              if (text && text.length > 10 && !text.startsWith('<') && !text.startsWith('Generate a concise title')) {
                 generateTitle(id, text, HOME);
                 break;
               }
