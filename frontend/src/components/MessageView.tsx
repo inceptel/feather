@@ -221,7 +221,11 @@ function renderBlock(block: ContentBlock) {
           {label}
           {isLong && !isErr && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: '#555' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
         </summary>
-        {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
+        {raw && <div style={{ position: 'relative' }}>
+          <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>
+          <button onClick={(e) => { navigator.clipboard.writeText(raw); const b = e.currentTarget; b.textContent = 'Copied!'; setTimeout(() => b.textContent = 'Copy', 1200) }}
+            style={{ position: 'absolute', top: '4px', right: '4px', padding: '1px 6px', background: '#333', border: '1px solid #555', 'border-radius': '4px', color: '#999', 'font-size': '10px', cursor: 'pointer', opacity: '0.6' }}>Copy</button>
+        </div>}
       </details>
     )
   }

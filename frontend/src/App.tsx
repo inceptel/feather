@@ -453,11 +453,11 @@ export default function App() {
     const s = cur()
     const w = working()
     const unreadCount = unreadSessions().size
-    const unreadPrefix = unreadCount > 0 ? `(${unreadCount > 99 ? '99+' : unreadCount}) ` : ''
-    const prefix = w ? '\u25CF ' : '\u25CB '
-    const status = w ? 'Working...' : readyPhrase()
+    const unreadPrefix = unreadCount > 0 ? `(${unreadCount}) ` : ''
+    const dot = w ? '\u25CF' : '\u25CB'
+    const status = w ? 'Working' : 'Ready'
     if (s) {
-      document.title = `${unreadPrefix}${prefix}${status} - ${s.title.slice(0, 30)} - Feather`
+      document.title = `${unreadPrefix}${dot} ${status} - ${s.title.slice(0, 40)} - Feather`
     } else {
       document.title = `${unreadPrefix}Feather`
     }
