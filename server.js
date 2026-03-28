@@ -419,7 +419,7 @@ setInterval(() => {
               if (typeof d.message.content === 'string') text = d.message.content;
               else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
               text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
-              if (text && text.length > 10 && !text.startsWith('<') && !text.startsWith('Generate a concise title')) {
+              if (text && text.length > 3 && !text.startsWith('<') && !text.startsWith('Generate a concise title')) {
                 generateTitle(id, text, HOME);
                 break;
               }
