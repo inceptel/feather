@@ -5,39 +5,131 @@ import path from 'path';
 import { execFileSync, execSync } from 'child_process';
 import { WebSocketServer } from 'ws';
 import pty from 'node-pty';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { parseMessage } from './lib/parse.js';
 
 const PORT = parseInt(process.env.PORT || '4870');
-const HOME = process.env.HOME || '/home/user';
-const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
+const USERS_FILE = path.resolve(import.meta.dirname, 'users.json');
+
+// ── Users & Auth ────────────────────────────────────────────────────────────
+
+function loadUsers() {
+  try { return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')).users; }
+  catch { return {}; }
+}
+
+const SESSION_FILE = path.resolve(import.meta.dirname, '.sessions.json');
+const sessionStore = new Map(); // token -> { username, home, admin, createdAt }
+const loginAttempts = new Map(); // ip -> { count, resetAt }
+
+// Persist sessions to disk so restarts don't log everyone out
+function saveSessions() {
+  const data = Object.fromEntries(sessionStore);
+  fs.writeFileSync(SESSION_FILE, JSON.stringify(data), 'utf8');
+}
+function loadSessions() {
+  try {
+    const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+    for (const [k, v] of Object.entries(data)) {
+      // Skip sessions older than 30 days
+      if (v.createdAt && Date.now() - v.createdAt > 30 * 24 * 60 * 60 * 1000) continue;
+      sessionStore.set(k, v);
+    }
+  } catch {}
+}
+loadSessions();
+
+function parseCookies(req) {
+  const cookies = {};
+  const header = req.headers.cookie;
+  if (!header) return cookies;
+  for (const pair of header.split(';')) {
+    const [k, ...v] = pair.trim().split('=');
+    if (k) cookies[k] = v.join('=');
+  }
+  return cookies;
+}
+
+function getSession(req) {
+  const token = parseCookies(req).feather_session;
+  if (!token) return null;
+  return sessionStore.get(token) || null;
+}
+
+function requireAuth(req, res, next) {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ error: 'not authenticated' });
+  req.user = session;
+  next();
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + 60000 });
+    return true;
+  }
+  if (entry.count >= 5) return false;
+  entry.count++;
+  return true;
+}
+
+// ── Per-user path helpers ───────────────────────────────────────────────────
+
+function userProjectsDir(userHome) {
+  return path.join(userHome, '.claude/projects');
+}
+
+function userFeatherDir(userHome) {
+  const d = path.join(userHome, '.feather');
+  if (!fs.existsSync(d)) try { fs.mkdirSync(d, { recursive: true }); } catch {}
+  return d;
+}
+
+function userUploadsDir(userHome) {
+  const d = path.join(userHome, 'feather-uploads');
+  if (!fs.existsSync(d)) try { fs.mkdirSync(d, { recursive: true }); } catch {}
+  return d;
+}
+
+function safePath(userHome, filePath) {
+  const resolved = path.resolve(filePath);
+  const home = path.resolve(userHome);
+  return resolved === home || resolved.startsWith(home + '/');
+}
 
 // ── JSONL parsing ───────────────────────────────────────────────────────────
 
-function findJsonlPath(sessionId) {
-  if (!fs.existsSync(CLAUDE_PROJECTS)) return null;
-  for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
-    const p = path.join(CLAUDE_PROJECTS, dir, `${sessionId}.jsonl`);
+function findJsonlPath(sessionId, userHome) {
+  const projDir = userProjectsDir(userHome);
+  if (!fs.existsSync(projDir)) return null;
+  for (const dir of fs.readdirSync(projDir)) {
+    const p = path.join(projDir, dir, `${sessionId}.jsonl`);
     if (fs.existsSync(p)) return p;
   }
   return null;
 }
 
-// ── Session metadata ───────────────────────────────────────────────────────
+// ── Session metadata (per-user) ─────────────────────────────────────────────
 
-const META_FILE = path.resolve(import.meta.dirname, 'session-meta.json');
+function metaFilePath(userHome) {
+  return path.join(userFeatherDir(userHome), 'session-meta.json');
+}
 
-function readMeta() {
-  try { return JSON.parse(fs.readFileSync(META_FILE, 'utf8')); }
+function readMeta(userHome) {
+  try { return JSON.parse(fs.readFileSync(metaFilePath(userHome), 'utf8')); }
   catch { return {}; }
 }
 
-function writeMeta(meta) {
-  fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
+function writeMeta(meta, userHome) {
+  fs.writeFileSync(metaFilePath(userHome), JSON.stringify(meta, null, 2));
 }
 
-function getMessages(sessionId, limit = 100, before = 0) {
-  const fpath = findJsonlPath(sessionId);
+function getMessages(sessionId, limit = 100, before = 0, userHome) {
+  const fpath = findJsonlPath(sessionId, userHome);
   if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
   const lines = fs.readFileSync(fpath, 'utf8').split('\n').filter(Boolean);
   const msgs = [];
@@ -54,26 +146,152 @@ function getMessages(sessionId, limit = 100, before = 0) {
   return { messages: msgs.slice(start), hasMore: start > 0 };
 }
 
-// ── Session discovery ───────────────────────────────────────────────────────
+// ── Project labels (per-user) ───────────────────────────────────────────────
 
-function getActiveTmuxSessions() {
+function labelsFilePath(userHome) {
+  return path.join(userFeatherDir(userHome), 'project-labels.json');
+}
+
+function readProjectLabels(userHome) {
+  try { return JSON.parse(fs.readFileSync(labelsFilePath(userHome), 'utf8')); }
+  catch { return {}; }
+}
+
+// ── Quick links (per-user) ──────────────────────────────────────────────────
+
+function linksFilePath(userHome) {
+  return path.join(userFeatherDir(userHome), 'quick-links.json');
+}
+
+function readLinks(userHome) {
+  try { return JSON.parse(fs.readFileSync(linksFilePath(userHome), 'utf8')); }
+  catch { return []; }
+}
+
+// ── Starred (per-user) ─────────────────────────────────────────────────────
+
+function starredFilePath(userHome) {
+  return path.join(userFeatherDir(userHome), 'starred.json');
+}
+
+function readStarred(userHome) {
+  try { return JSON.parse(fs.readFileSync(starredFilePath(userHome), 'utf8')); }
+  catch { return {}; }
+}
+
+// ── Tmux management (multi-user) ────────────────────────────────────────────
+
+function tmuxName(id, username) {
+  return `f-${username}-${id.slice(0, 8)}`;
+}
+
+// Run a tmux command as the given user
+function tmuxExec(username, args, opts = {}) {
+  if (username === "user") {
+    return execFileSync('tmux', args, { encoding: 'utf8', ...opts });
+  }
+  return execFileSync('sudo', ['-u', username, 'tmux', ...args], { encoding: 'utf8', ...opts });
+}
+
+function tmuxExecShell(linuxUser, cmd, opts = {}) {
+  if (linuxUser === "user") {
+    return execSync(cmd, { encoding: 'utf8', ...opts });
+  }
+  return execSync(`sudo -u ${linuxUser} ${cmd}`, { encoding: 'utf8', ...opts });
+}
+
+function getActiveTmuxSessions(username) {
+  const prefix = `f-${username}-`;
   try {
-    const out = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8' });
+    const out = tmuxExec(username, ['list-sessions', '-F', '#{session_name}'], { stdio: ['pipe', 'pipe', 'pipe'] });
     const active = new Set();
     for (const line of out.split('\n')) {
-      if (line.startsWith('feather-')) active.add(line.slice(8)); // first 8 chars of session id
+      if (line.startsWith(prefix)) active.add(line.slice(prefix.length));
+      // Legacy compat for philip/user
+      if (username === "user" && line.startsWith('feather-')) active.add(line.slice(8));
     }
     return active;
   } catch { return new Set(); }
 }
 
-function discoverSessions(limit = 50) {
-  if (!fs.existsSync(CLAUDE_PROJECTS)) return [];
+function tmuxIsActive(id, username) {
+  const name = tmuxName(id, username);
+  try { tmuxExec(username, ['has-session', '-t', name], { stdio: 'ignore' }); return true; }
+  catch {
+    // Legacy compat for philip
+    if (username === "user") {
+      try { execFileSync('tmux', ['has-session', '-t', `feather-${id.slice(0, 8)}`], { stdio: 'ignore' }); return true; }
+      catch { return false; }
+    }
+    return false;
+  }
+}
 
-  // Collect all JSONL files with mtime (cheap stat only, no reads yet)
+function spawnSession(id, cwd, username, userHome) {
+  const name = tmuxName(id, username);
+  try { tmuxExec(username, ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+  const dir = cwd || userHome;
+  const claudeCmd = `claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion`;
+  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic '${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
+  tmuxExecShell(username, tmuxCmd, { stdio: 'ignore' });
+  // Send Enter at multiple intervals to clear trust prompt and any onboarding dialogs
+  for (const delay of [3000, 5000, 8000]) {
+    setTimeout(() => {
+      try { tmuxExec(username, ["send-keys", '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {}
+    }, delay);
+  }
+}
+
+function resumeSession(id, cwd, username, userHome) {
+  const name = tmuxName(id, username);
+  try { tmuxExec(username, ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+  const dir = cwd || userHome;
+  const claudeCmd = `claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion`;
+  const tmuxCmd = `tmux new-session -d -s ${name} -c "${dir}" "bash --rcfile ~/.bashrc -ic '${claudeCmd}'" \\; set-option -t ${name} prefix M-a`;
+  tmuxExecShell(username, tmuxCmd, { stdio: 'ignore' });
+  for (const delay of [3000, 5000, 8000]) {
+    setTimeout(() => {
+      try { tmuxExec(username, ["send-keys", '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {}
+    }, delay);
+  }
+}
+
+function sendInputToSession(id, text, username) {
+  const name = tmuxName(id, username);
+  // Also check legacy name for philip
+  let target = name;
+  try {
+    tmuxExec(username, ['has-session', '-t', name], { stdio: 'ignore' });
+  } catch {
+    if (username === "user") target = `feather-${id.slice(0, 8)}`;
+    else throw new Error('Session not active');
+  }
+
+  if (text.length > 500) {
+    const tmp = `/tmp/feather-send-${Date.now()}.txt`;
+    fs.writeFileSync(tmp, text);
+    try {
+      tmuxExec(username, ['load-buffer', tmp], { stdio: 'ignore' });
+      tmuxExec(username, ['paste-buffer', '-t', target], { stdio: 'ignore' });
+    } finally { try { fs.unlinkSync(tmp); } catch {} }
+    setTimeout(() => {
+      try { tmuxExec(username, ["send-keys", '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
+    }, 500);
+  } else {
+    tmuxExec(username, ["send-keys", '-t', target, '-l', text], { stdio: 'ignore' });
+    tmuxExec(username, ["send-keys", '-t', target, 'Enter'], { stdio: 'ignore' });
+  }
+}
+
+// ── Session discovery (per-user) ────────────────────────────────────────────
+
+function discoverSessions(limit = 50, userHome, username) {
+  const projDir = userProjectsDir(userHome);
+  if (!fs.existsSync(projDir)) return [];
+
   const candidates = [];
-  for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
-    const dirPath = path.join(CLAUDE_PROJECTS, dir);
+  for (const dir of fs.readdirSync(projDir)) {
+    const dirPath = path.join(projDir, dir);
     try {
       for (const file of fs.readdirSync(dirPath)) {
         if (!file.endsWith('.jsonl')) continue;
@@ -81,26 +299,23 @@ function discoverSessions(limit = 50) {
         try {
           const stat = fs.statSync(fpath);
           if (stat.size < 50) continue;
-          candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime });
+          candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, projectId: dir });
         } catch {}
       }
     } catch {}
   }
 
-  // Sort by mtime descending, take top N (avoid reading 7000+ files)
   candidates.sort((a, b) => b.mtime - a.mtime);
   const top = candidates.slice(0, limit);
-
-  // One tmux call to get all active sessions
-  const active = getActiveTmuxSessions();
-
-  // Now read titles only for the top N
-  const meta = readMeta();
+  const active = getActiveTmuxSessions(username);
+  const meta = readMeta(userHome);
+  const labels = readProjectLabels(userHome);
   const sessions = [];
-  for (const { id, fpath, mtime } of top) {
+
+  for (const { id, fpath, mtime, projectId } of top) {
     try {
       const fd = fs.openSync(fpath, 'r');
-      const buf = Buffer.alloc(Math.min(4096, fs.fstatSync(fd).size));
+      const buf = Buffer.alloc(Math.min(16384, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
@@ -109,7 +324,11 @@ function discoverSessions(limit = 50) {
         try {
           const d = JSON.parse(line);
           if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
-            const text = typeof d.message.content === 'string' ? d.message.content : '';
+            let text = '';
+            if (typeof d.message.content === 'string') text = d.message.content;
+            else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
+            // Clean up: strip attachment markers and whitespace
+            text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
             if (text && !text.startsWith('<')) { title = text.slice(0, 80); break; }
           }
         } catch {}
@@ -119,58 +338,13 @@ function discoverSessions(limit = 50) {
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
+        projectId,
+        projectLabel: labels[projectId] || null,
       });
     } catch {}
   }
 
   return sessions;
-}
-
-// ── Tmux management ─────────────────────────────────────────────────────────
-
-function tmuxName(id) { return `feather-${id.slice(0, 8)}`; }
-
-function tmuxIsActive(id) {
-  try { execFileSync('tmux', ['has-session', '-t', tmuxName(id)], { stdio: 'ignore' }); return true; }
-  catch { return false; }
-}
-
-function spawnSession(id, cwd) {
-  const name = tmuxName(id);
-  try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
-  setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
-}
-
-function resumeSession(id, cwd) {
-  const name = tmuxName(id);
-  try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
-  setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
-}
-
-async function sendInput(id, text) {
-  if (!tmuxIsActive(id)) {
-    resumeSession(id);
-    // Wait for Claude CLI to fully load before sending input
-    await new Promise(r => setTimeout(r, 6000));
-  }
-  const target = tmuxName(id);
-  if (text.length > 500) {
-    const tmp = `/tmp/feather-send-${Date.now()}.txt`;
-    fs.writeFileSync(tmp, text);
-    try {
-      execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
-      execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
-    } finally { try { fs.unlinkSync(tmp); } catch {} }
-    // Give Claude CLI a moment to process the paste, then submit
-    setTimeout(() => {
-      try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
-    }, 500);
-  } else {
-    execFileSync('tmux', ['send-keys', '-t', target, '-l', text], { stdio: 'ignore' });
-    execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' });
-  }
 }
 
 // ── SSE ─────────────────────────────────────────────────────────────────────
@@ -188,14 +362,14 @@ function broadcast(sessionId, line, offset) {
   }
 }
 
-// ── File watcher ────────────────────────────────────────────────────────────
+// ── File watcher (multi-user) ───────────────────────────────────────────────
 
 const fileOffsets = new Map();
 
-// Init offsets for existing files to current size
-if (fs.existsSync(CLAUDE_PROJECTS)) {
-  for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
-    const dp = path.join(CLAUDE_PROJECTS, dir);
+function initFileOffsets(projDir) {
+  if (!fs.existsSync(projDir)) return;
+  for (const dir of fs.readdirSync(projDir)) {
+    const dp = path.join(projDir, dir);
     try {
       for (const f of fs.readdirSync(dp)) {
         if (!f.endsWith('.jsonl')) continue;
@@ -229,10 +403,10 @@ function processFileChange(filePath) {
   } catch {}
 }
 
-// Watch each project subdirectory with fs.watch
-if (fs.existsSync(CLAUDE_PROJECTS)) {
-  for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
-    const dp = path.join(CLAUDE_PROJECTS, dir);
+function watchProjectDir(projDir) {
+  if (!fs.existsSync(projDir)) return;
+  for (const dir of fs.readdirSync(projDir)) {
+    const dp = path.join(projDir, dir);
     try {
       fs.watch(dp, (event, filename) => {
         if (filename?.endsWith('.jsonl')) {
@@ -244,10 +418,9 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
       });
     } catch {}
   }
-  // Watch for new project directories
-  fs.watch(CLAUDE_PROJECTS, (event, filename) => {
+  fs.watch(projDir, (event, filename) => {
     if (!filename) return;
-    const dp = path.join(CLAUDE_PROJECTS, filename);
+    const dp = path.join(projDir, filename);
     try {
       if (fs.statSync(dp).isDirectory()) {
         fs.watch(dp, (ev, fn) => {
@@ -262,34 +435,136 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
   });
 }
 
-// ── Express ─────────────────────────────────────────────────────────────────
+// Init watchers for all configured users
+const users = loadUsers();
+for (const [username, cfg] of Object.entries(users)) {
+  const projDir = userProjectsDir(cfg.home);
+  initFileOffsets(projDir);
+  watchProjectDir(projDir);
+}
 
-const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
+// ── Express ─────────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(express.json());
-app.use('/uploads', express.static(UPLOADS_DIR));
+
+// Serve static files (public, needed for login page)
+// Disable caching for index.html to ensure users get latest builds
+app.use(express.static(STATIC_DIR, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html') || filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
+  }
+}));
+
+// Serve legacy uploads
+app.use('/uploads', express.static(path.resolve(import.meta.dirname, 'uploads')));
+
+// Also serve files from /opt/feather/uploads (referenced in old messages)
+app.use('/opt/feather/uploads', express.static('/opt/feather/uploads'));
+
+// Serve user feather-uploads directories
+app.use('/home/user/feather-uploads', express.static('/home/user/feather-uploads'));
+
+// ── Auth routes (public) ────────────────────────────────────────────────────
+
+app.post('/api/login', (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in a minute.' });
+  }
+
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+
+  const allUsers = loadUsers();
+  const userCfg = allUsers[username.toLowerCase()];
+  if (!userCfg || !bcrypt.compareSync(password, userCfg.passwordHash)) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  const token = crypto.randomUUID();
+  sessionStore.set(token, {
+    linuxUser: userCfg.linuxUser || username.toLowerCase(),
+    username: username.toLowerCase(),
+    home: userCfg.home,
+    admin: userCfg.admin || false,
+    createdAt: Date.now(),
+  });
+  saveSessions();
+
+  res.cookie('feather_session', token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/',
+  });
+
+  res.json({ ok: true, username: username.toLowerCase(), admin: userCfg.admin || false });
+});
+
+app.get('/api/me', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ error: 'not authenticated' });
+  res.json({ username: session.username, admin: session.admin });
+});
+
+app.post('/api/logout', (req, res) => {
+  const token = parseCookies(req).feather_session;
+  if (token) { sessionStore.delete(token); saveSessions(); }
+  res.clearCookie('feather_session', { path: '/' });
+  res.json({ ok: true });
+});
+
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+// ── Auth middleware for all remaining /api routes ───────────────────────────
+
+app.use('/api', requireAuth);
+
+// ── Protected API routes ────────────────────────────────────────────────────
+
+app.get('/api/projects', (req, res) => {
+  const { home } = req.user;
+  const projDir = userProjectsDir(home);
+  const labels = readProjectLabels(home);
+  const hidden = new Set(['memory', 'dashboards', '.claude', 'projects']);
+  const projects = [];
+  if (!fs.existsSync(projDir)) return res.json({ projects });
+  for (const dir of fs.readdirSync(projDir)) {
+    // Clean up project path: "-home-user-feather" -> "feather", "-home-lena" -> "lena"
+    const segments = dir.replace(/^-/, '').split('-');
+    const basename = (segments.length > 2 ? segments.slice(2).join('-') : segments[segments.length - 1]) || dir;
+    if (hidden.has(basename)) continue;
+    projects.push({ id: dir, label: labels[dir] || basename || dir });
+  }
+  res.json({ projects });
+});
 
 app.get('/api/sessions', (req, res) => {
-  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }
+  const { home, username, linuxUser } = req.user;
+  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50, home, linuxUser) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/sessions/:id/messages', (req, res) => {
-  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
+  const { home } = req.user;
+  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0, home);
   res.json({ messages, hasMore });
 });
 
 app.get('/api/sessions/:id/stream', (req, res) => {
+  const { home } = req.user;
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('event: connected\ndata: {}\n\n');
   const sid = req.params.id;
 
-  // Replay missed messages from lastEventId (byte offset)
   const lastId = parseInt(req.query.lastEventId || req.headers['last-event-id'] || '0');
   if (lastId > 0) {
-    const fpath = findJsonlPath(sid);
+    const fpath = findJsonlPath(sid, home);
     if (fpath) {
       try {
         const stat = fs.statSync(fpath);
@@ -316,34 +591,49 @@ app.get('/api/sessions/:id/stream', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  try { spawnSession(req.body.id, req.body.cwd); res.json({ id: req.body.id, status: 'starting' }); }
+  const { username, home, linuxUser } = req.user;
+  try { spawnSession(req.body.id, req.body.cwd, linuxUser, home); res.json({ id: req.body.id, status: 'starting' }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/send', async (req, res) => {
-  try { await sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
+app.post('/api/sessions/:id/send', (req, res) => {
+  const { username, linuxUser } = req.user;
+  try { sendInputToSession(req.params.id, req.body.text, linuxUser); res.json({ ok: true, sentAt: new Date().toISOString() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/resume', (req, res) => {
-  try { resumeSession(req.params.id, req.body?.cwd); res.json({ ok: true }); }
+  const { username, home, linuxUser } = req.user;
+  try { resumeSession(req.params.id, req.body?.cwd, linuxUser, home); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/interrupt', (req, res) => {
-  try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  const { username, linuxUser } = req.user;
+  const name = tmuxName(req.params.id, linuxUser);
+  try { tmuxExec(linuxUser, ["send-keys", '-t', name, 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
+  catch (e) {
+    // Legacy compat
+    if (linuxUser === "user") {
+      try { execFileSync('tmux', ['send-keys', '-t', `feather-${req.params.id.slice(0, 8)}`, 'C-c'], { stdio: 'ignore' }); return res.json({ ok: true }); }
+      catch {}
+    }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/sessions/:id/delete', (req, res) => {
+  const { username, home, linuxUser } = req.user;
   try {
     const id = req.params.id;
-    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
-    const fpath = findJsonlPath(id);
+    try { tmuxExec(username, ['kill-session', '-t', tmuxName(id, username)], { stdio: 'ignore' }); } catch {}
+    // Legacy compat
+    if (linuxUser === "user") { try { execFileSync('tmux', ['kill-session', '-t', `feather-${id.slice(0, 8)}`], { stdio: 'ignore' }); } catch {} }
+    const fpath = findJsonlPath(id, home);
     if (fpath) fs.unlinkSync(fpath);
-    const meta = readMeta();
+    const meta = readMeta(home);
     delete meta[id];
-    writeMeta(meta);
+    writeMeta(meta, home);
     sseClients.delete(id);
     fileOffsets.delete(id);
     res.json({ ok: true });
@@ -351,31 +641,37 @@ app.post('/api/sessions/:id/delete', (req, res) => {
 });
 
 app.post('/api/sessions/:id/rename', (req, res) => {
+  const { home } = req.user;
   try {
-    const meta = readMeta();
+    const meta = readMeta(home);
     meta[req.params.id] = { ...(meta[req.params.id] || {}), title: req.body.title };
-    writeMeta(meta);
+    writeMeta(meta, home);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/fork', (req, res) => {
+  const { username, home, linuxUser } = req.user;
   try {
     const id = req.params.id;
-    const cwd = req.body?.cwd || HOME;
-    const forkName = `feather-f${Date.now().toString(36)}`;
-    try { execFileSync('tmux', ['kill-session', '-t', forkName], { stdio: 'ignore' }); } catch {}
-    execSync(`tmux new-session -d -s ${forkName} -c "${cwd}" "bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${forkName} prefix M-a`, { stdio: 'ignore' });
+    const cwd = req.body?.cwd || home;
+    const forkName = `f-${linuxUser}-f${Date.now().toString(36)}`;
+    try { tmuxExec(username, ['kill-session', '-t', forkName], { stdio: 'ignore' }); } catch {}
+    const claudeCmd = `claude --resume ${id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion`;
+    const tmuxCmd = `tmux new-session -d -s ${forkName} -c "${cwd}" "bash --rcfile ~/.bashrc -ic '${claudeCmd}'" \\; set-option -t ${forkName} prefix M-a`;
+    tmuxExecShell(linuxUser, tmuxCmd, { stdio: 'ignore' });
     res.json({ ok: true, tmux: forkName });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/upload', async (req, res) => {
+  const { home } = req.user;
   try {
+    const uploadsDir = userUploadsDir(home);
     const filename = decodeURIComponent(req.headers['x-filename'] || 'file');
     const safe = filename.replace(/[^a-zA-Z0-9._\- ]/g, '').slice(0, 100);
     const dest = `${Date.now()}-${safe || 'upload'}`;
-    const fpath = path.join(UPLOADS_DIR, dest);
+    const fpath = path.join(uploadsDir, dest);
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     fs.writeFileSync(fpath, Buffer.concat(chunks));
@@ -383,38 +679,24 @@ app.post('/api/upload', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Quick Links ─────────────────────────────────────────────────────────────
+// ── Quick Links (per-user) ──────────────────────────────────────────────────
 
-const LINKS_FILE = path.resolve(import.meta.dirname, 'quick-links.json');
-
-function readLinks() {
-  try { return JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8')); }
-  catch { return []; }
-}
-
-app.get('/api/quick-links', (_req, res) => res.json(readLinks()));
+app.get('/api/quick-links', (req, res) => res.json(readLinks(req.user.home)));
 
 app.post('/api/quick-links', (req, res) => {
   const links = req.body;
   if (!Array.isArray(links)) return res.status(400).json({ error: 'expected array' });
-  fs.writeFileSync(LINKS_FILE, JSON.stringify(links, null, 2));
+  fs.writeFileSync(linksFilePath(req.user.home), JSON.stringify(links, null, 2));
   res.json({ ok: true });
 });
 
-// ── Starred messages ───────────────────────────────────────────────────────
+// ── Starred (per-user) ─────────────────────────────────────────────────────
 
-const STARRED_FILE = path.resolve(import.meta.dirname, 'starred.json');
-
-function readStarred() {
-  try { return JSON.parse(fs.readFileSync(STARRED_FILE, 'utf8')); }
-  catch { return {}; }
-}
-
-app.get('/api/starred', (_req, res) => res.json(readStarred()));
+app.get('/api/starred', (req, res) => res.json(readStarred(req.user.home)));
 
 app.post('/api/starred', (req, res) => {
   try {
-    fs.writeFileSync(STARRED_FILE, JSON.stringify(req.body, null, 2));
+    fs.writeFileSync(starredFilePath(req.user.home), JSON.stringify(req.body, null, 2));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -422,8 +704,9 @@ app.post('/api/starred', (req, res) => {
 // ── Export ──────────────────────────────────────────────────────────────────
 
 app.get('/api/sessions/:id/export', (req, res) => {
+  const { home } = req.user;
   try {
-    const { messages } = getMessages(req.params.id, 10000);
+    const { messages } = getMessages(req.params.id, 10000, 0, home);
     const lines = [];
     for (const msg of messages) {
       const role = msg.role === 'user' ? 'You' : 'Claude';
@@ -442,47 +725,63 @@ app.get('/api/sessions/:id/export', (req, res) => {
 });
 
 app.post('/api/open-in-editor', (req, res) => {
+  const { home } = req.user;
   try {
     const fpath = req.body?.path;
     if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+    if (!safePath(home, fpath)) return res.status(403).json({ error: 'access denied' });
     execFileSync('code-server', [fpath], { stdio: 'ignore', timeout: 3000 });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Idle session reaper (kill after 1 hour of inactivity) ──────────────────
+// ── Project labels management ───────────────────────────────────────────────
 
-const IDLE_MS = 60 * 60 * 1000; // 1 hour
+app.post('/api/projects/:id/label', (req, res) => {
+  const { home } = req.user;
+  try {
+    const labels = readProjectLabels(home);
+    labels[req.params.id] = req.body.label;
+    fs.writeFileSync(labelsFilePath(home), JSON.stringify(labels, null, 2));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Idle session reaper (multi-user) ────────────────────────────────────────
+
+const IDLE_MS = 60 * 60 * 1000;
 
 function reapIdleSessions() {
-  const active = getActiveTmuxSessions();
-  if (active.size === 0) return;
+  const allUsers = loadUsers();
   const now = Date.now();
-  let dirs;
-  try { dirs = fs.readdirSync(CLAUDE_PROJECTS); } catch { return; }
-  for (const dir of dirs) {
-    const dirPath = path.join(CLAUDE_PROJECTS, dir);
-    try {
-      for (const file of fs.readdirSync(dirPath)) {
-        if (!file.endsWith('.jsonl')) continue;
-        const id = file.replace('.jsonl', '');
-        if (!active.has(id.slice(0, 8))) continue;
-        const stat = fs.statSync(path.join(dirPath, file));
-        if (now - stat.mtimeMs > IDLE_MS) {
-          const name = tmuxName(id);
-          try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-          console.log(`[reaper] killed idle session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+  for (const [username, cfg] of Object.entries(allUsers)) {
+    const active = getActiveTmuxSessions(username);
+    if (active.size === 0) continue;
+    const projDir = userProjectsDir(cfg.home);
+    if (!fs.existsSync(projDir)) continue;
+    for (const dir of fs.readdirSync(projDir)) {
+      const dirPath = path.join(projDir, dir);
+      try {
+        for (const file of fs.readdirSync(dirPath)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const id = file.replace('.jsonl', '');
+          if (!active.has(id.slice(0, 8))) continue;
+          const stat = fs.statSync(path.join(dirPath, file));
+          if (now - stat.mtimeMs > IDLE_MS) {
+            const name = tmuxName(id, username);
+            try { tmuxExec(username, ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+            console.log(`[reaper] killed idle session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
   }
 }
 
-setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
+setInterval(reapIdleSessions, 5 * 60 * 1000);
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+// ── SPA catch-all ───────────────────────────────────────────────────────────
 
-app.use(express.static(STATIC_DIR));
 app.get('/terminal', (_req, res) => res.sendFile(path.join(STATIC_DIR, 'terminal.html')));
 app.get('/{*path}', (_req, res) => {
   const index = path.join(STATIC_DIR, 'index.html');
@@ -490,23 +789,34 @@ app.get('/{*path}', (_req, res) => {
   else res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
 });
 
+// ── HTTP server ─────────────────────────────────────────────────────────────
+
 const server = http.createServer(app);
 
-// ── Terminal WebSocket ──────────────────────────────────────────────────────
+// ── Terminal WebSocket (with auth) ──────────────────────────────────────────
 
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-  if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
-  } else {
+  if (!req.url?.startsWith('/api/terminal') && !req.url?.startsWith('/api/shell')) {
     socket.destroy();
+    return;
   }
+  // Verify auth
+  const session = getSession(req);
+  if (!session) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  req.featherUser = session;
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const isShell = url.pathname === '/api/shell';
+  const { username, home, linuxUser } = req.featherUser;
 
   const cleanEnv = { ...process.env };
   delete cleanEnv.TMUX; delete cleanEnv.TMUX_PANE;
@@ -514,17 +824,34 @@ wss.on('connection', (ws, req) => {
 
   let term;
   if (isShell) {
-    term = pty.spawn('bash', ['--login'], {
-      name: 'xterm-256color', cols: 120, rows: 30, cwd: HOME, env: cleanEnv,
-    });
+    if (linuxUser === "user") {
+      term = pty.spawn('bash', ['--login'], {
+        name: 'xterm-256color', cols: 120, rows: 30, cwd: home, env: cleanEnv,
+      });
+    } else {
+      term = pty.spawn('sudo', ['-u', username, '-i'], {
+        name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
+      });
+    }
   } else {
     const sessionId = url.searchParams.get('session');
     if (!sessionId) { ws.close(1008, 'session required'); return; }
-    const name = tmuxName(sessionId);
-    if (!tmuxIsActive(sessionId)) { ws.close(1000, 'Session not active'); return; }
-    term = pty.spawn('tmux', ['attach', '-t', name], {
-      name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
-    });
+    if (!tmuxIsActive(sessionId, linuxUser)) { ws.close(1000, 'Session not active'); return; }
+    const name = tmuxName(sessionId, linuxUser);
+    // Check legacy name for philip
+    let attachName = name;
+    try { tmuxExec(username, ['has-session', '-t', name], { stdio: 'ignore' }); }
+    catch { if (linuxUser === "user") attachName = `feather-${sessionId.slice(0, 8)}`; }
+
+    if (linuxUser === "user") {
+      term = pty.spawn('tmux', ['attach', '-t', attachName], {
+        name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
+      });
+    } else {
+      term = pty.spawn('sudo', ['-u', username, 'tmux', 'attach', '-t', attachName], {
+        name: 'xterm-256color', cols: 120, rows: 30, env: cleanEnv,
+      });
+    }
   }
 
   term.onData(data => { try { ws.send(data); } catch {} });
@@ -539,10 +866,7 @@ wss.on('connection', (ws, req) => {
     term.write(str);
   });
 
-  ws.on('close', () => {
-    // Just kill the pty — tmux session survives when an attached client dies
-    try { term.kill(); } catch {}
-  });
+  ws.on('close', () => { try { term.kill(); } catch {} });
 });
 
-server.listen(PORT, '0.0.0.0', () => console.log(`Feather v2 on http://0.0.0.0:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Feather v2 (multi-user) on http://0.0.0.0:${PORT}`));
