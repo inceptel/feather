@@ -110,11 +110,31 @@ export default function App() {
   const [projects, setProjects] = createSignal<Project[]>([])
   const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-next-project'))
   const [expandedGroups, setExpandedGroups] = createSignal<Record<string, boolean>>(JSON.parse(localStorage.getItem('feather-next-groups') || '{}'))
+  const [unreadSessions, setUnreadSessions] = createSignal<Set<string>>(new Set())
+  const lastSeenUpdatedAt = new Map<string, string>() // session ID -> last known updatedAt
   let cleanupSSE: (() => void) | null = null
   let recognition: any = null
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
+
+  // Update sessions and detect unread changes
+  function updateSessions(newSessions: SessionMeta[]) {
+    const active = currentId()
+    const unread = new Set(unreadSessions())
+    for (const s of newSessions) {
+      const prev = lastSeenUpdatedAt.get(s.id)
+      if (prev && s.updatedAt !== prev && s.id !== active) {
+        unread.add(s.id)
+      }
+      // Only update lastSeen if this is the current session or first time seeing it
+      if (s.id === active || !prev) {
+        lastSeenUpdatedAt.set(s.id, s.updatedAt)
+      }
+    }
+    setUnreadSessions(unread)
+    setSessions(newSessions)
+  }
 
   // Swipe gesture state
   let touchStartX = 0
@@ -152,8 +172,20 @@ export default function App() {
 
   function removeFile(idx: number) { setFiles(prev => prev.filter((_, i) => i !== idx)) }
 
+  // Scroll position memory (in-memory, per session)
+  const scrollPositions = new Map<string, number>()
+  let messageScrollRef: HTMLDivElement | undefined
+
   function onGlobalKeyDown(e: KeyboardEvent) {
+    // Ctrl+B / Cmd+B: toggle sidebar
+    if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+      e.preventDefault()
+      setSidebar(!sidebar())
+      return
+    }
+    // Escape: close sidebar if open, otherwise interrupt active session
     if (e.key === 'Escape') {
+      if (sidebar()) { setSidebar(false); return }
       const s = cur()
       if (s?.isActive) handleInterrupt(s.id)
     }
@@ -161,7 +193,7 @@ export default function App() {
 
   async function initApp() {
     document.addEventListener('keydown', onGlobalKeyDown)
-    setSessions(await fetchSessions())
+    updateSessions(await fetchSessions())
     fetchProjects().then(setProjects).catch(() => {})
     const base = location.pathname.replace(/\/+$/, '')
     fetch(`${base}/api/quick-links`).then(r => r.ok ? r.json() : []).then(setLinks).catch(() => {})
@@ -179,13 +211,17 @@ export default function App() {
     }
   })
   const pollTimer = setInterval(async () => {
-    try { setSessions(await fetchSessions()) } catch {}
+    try { updateSessions(await fetchSessions()) } catch {}
   }, 10000)
   onCleanup(() => { clearInterval(pollTimer); cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown) })
 
   async function select(id: string) {
     const prev = currentId()
-    if (prev) saveDraft(prev, text())
+    if (prev) {
+      saveDraft(prev, text())
+      // Save scroll position of current session
+      if (messageScrollRef) scrollPositions.set(prev, messageScrollRef.scrollTop)
+    }
     setCurrentId(id)
     location.hash = id
     setSidebar(false)
@@ -195,6 +231,12 @@ export default function App() {
     setText(loadDraft(id))
     setHistoryIdx(-1)
     setHistoryOpen(false)
+    // Clear unread status and update lastSeen timestamp
+    const unread = new Set(unreadSessions())
+    unread.delete(id)
+    setUnreadSessions(unread)
+    const s = sessions().find(s => s.id === id)
+    if (s) lastSeenUpdatedAt.set(id, s.updatedAt)
     cleanupSSE?.()
     try {
       const result = await fetchMessages(id)
@@ -202,9 +244,18 @@ export default function App() {
       setHasMore(result.hasMore)
     } catch {}
     setLoading(false)
+    // Restore scroll position if we have one saved
+    const savedScroll = scrollPositions.get(id)
+    if (savedScroll !== undefined) {
+      requestAnimationFrame(() => {
+        if (messageScrollRef) messageScrollRef.scrollTop = savedScroll
+      })
+    }
     setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
       if (msg.role === 'assistant') setWorking(false)
+      // Keep lastSeen fresh so the current session doesn't go unread on next poll
+      lastSeenUpdatedAt.set(id, new Date().toISOString())
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
         if (msg.role === 'user') {
@@ -230,14 +281,14 @@ export default function App() {
     try {
       const id = await createSession()
       select(id)
-      fetchSessions().then(s => setSessions(s)).catch(() => {})
+      fetchSessions().then(s => updateSessions(s)).catch(() => {})
     } catch (e) { console.error(e) }
     finally { setCreating(false) }
   }
 
   async function handleResume(id: string) {
     await resumeSession(id)
-    setSessions(await fetchSessions())
+    updateSessions(await fetchSessions())
     select(id)
   }
 
@@ -253,7 +304,7 @@ export default function App() {
     location.hash = ''
     cleanupSSE?.()
     setMessages([])
-    setSessions(await fetchSessions())
+    updateSessions(await fetchSessions())
   }
 
   async function handleRename(id: string) {
@@ -262,7 +313,7 @@ export default function App() {
     await renameSession(id, title)
     setRenaming(false)
     setMenuOpen(false)
-    setSessions(await fetchSessions())
+    updateSessions(await fetchSessions())
   }
 
   async function handleSidebarRename(id: string) {
@@ -270,7 +321,7 @@ export default function App() {
     if (!title) { setSidebarRenaming(null); return }
     await renameSession(id, title)
     setSidebarRenaming(null)
-    setSessions(await fetchSessions())
+    updateSessions(await fetchSessions())
   }
 
   async function loadEarlier() {
@@ -300,7 +351,7 @@ export default function App() {
   async function handleFork(id: string) {
     setMenuOpen(false)
     await forkSession(id)
-    setTimeout(async () => { setSessions(await fetchSessions()) }, 3000)
+    setTimeout(async () => { updateSessions(await fetchSessions()) }, 3000)
   }
 
   function toggleVoice() {
@@ -332,7 +383,7 @@ export default function App() {
     if (!currentId()) {
       try {
         const id = await createSession()
-        setSessions(await fetchSessions())
+        updateSessions(await fetchSessions())
         select(id)
         // Wait a tick for the SSE to connect
         await new Promise(r => setTimeout(r, 500))
@@ -372,6 +423,21 @@ export default function App() {
     if (!s) setFavicon('#333')
     else if (s.isActive) setFavicon('#4aba6a')
     else setFavicon('#666')
+  })
+
+  // Page title: show working status, unread count, and session title
+  createEffect(() => {
+    const s = cur()
+    const w = working()
+    const unreadCount = unreadSessions().size
+    const unreadPrefix = unreadCount > 0 ? `(${unreadCount > 99 ? '99+' : unreadCount}) ` : ''
+    const prefix = w ? '\u25CF ' : ''
+    const status = w ? 'Working' : 'Ready'
+    if (s) {
+      document.title = `${unreadPrefix}${prefix}${status} - ${s.title} - Feather`
+    } else {
+      document.title = `${unreadPrefix}Feather`
+    }
   })
 
   const touchedFiles = () => {
@@ -609,8 +675,9 @@ export default function App() {
                       <Show when={sidebarRenaming() === s.id} fallback={
                         <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                           <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
+                          <Show when={!s.isActive && unreadSessions().has(s.id)}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#73b8ff', 'flex-shrink': '0' }} /></Show>
                           <div style={{ flex: '1', 'min-width': '0' }}>
-                            <div style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</div>
+                            <div style={{ 'font-size': '13px', 'font-weight': unreadSessions().has(s.id) ? '700' : '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</div>
                             <Show when={!currentProject() && s.projectLabel}>
                               <div style={{ 'font-size': '10px', color: '#444', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.projectLabel}</div>
                             </Show>
@@ -759,7 +826,7 @@ export default function App() {
             </div>
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} scrollRefCb={(el) => { messageScrollRef = el }} />
             </div>
             <div style={{ display: tab() === 'files' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
               <Show when={touchedFiles().length === 0}>
@@ -824,26 +891,33 @@ export default function App() {
             <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
             <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
             <button onClick={toggleVoice} style={{ background: 'none', border: 'none', color: listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'color 0.15s' }} title="Voice input">{'\uD83C\uDF99'}</button>
-            <textarea ref={textareaRef} value={text()}
-              onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
-                if (e.key === 'ArrowUp' && textareaRef?.selectionStart === 0) {
-                  const h = getHistory(); if (h.length === 0) return
-                  const idx = historyIdx() === -1 ? h.length - 1 : Math.max(0, historyIdx() - 1)
-                  setHistoryIdx(idx); setText(h[idx]); e.preventDefault()
-                }
-                if (e.key === 'ArrowDown' && historyIdx() >= 0) {
-                  const h = getHistory(); const idx = historyIdx() + 1
-                  if (idx >= h.length) { setHistoryIdx(-1); setText(loadDraft(currentId()!) || '') }
-                  else { setHistoryIdx(idx); setText(h[idx]) }
-                  e.preventDefault()
-                }
-              }}
-              onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
-              enterkeyhint="send"
-              placeholder="Send a message..." rows={1}
-              style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px', '-webkit-appearance': 'none' }} />
+            <div style={{ flex: '1', position: 'relative', 'min-width': '0' }}>
+              <textarea ref={textareaRef} value={text()}
+                onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+                  if (e.key === 'ArrowUp' && textareaRef?.selectionStart === 0) {
+                    const h = getHistory(); if (h.length === 0) return
+                    const idx = historyIdx() === -1 ? h.length - 1 : Math.max(0, historyIdx() - 1)
+                    setHistoryIdx(idx); setText(h[idx]); e.preventDefault()
+                  }
+                  if (e.key === 'ArrowDown' && historyIdx() >= 0) {
+                    const h = getHistory(); const idx = historyIdx() + 1
+                    if (idx >= h.length) { setHistoryIdx(-1); setText(loadDraft(currentId()!) || '') }
+                    else { setHistoryIdx(idx); setText(h[idx]) }
+                    e.preventDefault()
+                  }
+                }}
+                onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
+                enterkeyhint="send"
+                placeholder="Send a message..." rows={1}
+                style={{ width: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px', '-webkit-appearance': 'none', 'box-sizing': 'border-box' }} />
+              <Show when={text().length > 0}>
+                <div style={{ 'text-align': 'right', 'font-size': '10px', color: text().length >= 500 ? '#fab283' : '#555', padding: '2px 8px 0', 'line-height': '1' }}>
+                  {text().length >= 1000 ? (text().length / 1000).toFixed(1) + 'k' : text().length}
+                </div>
+              </Show>
+            </div>
             <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
           </div>
         </Show>

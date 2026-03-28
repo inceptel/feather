@@ -81,6 +81,32 @@ function handleCopyClick(e: MouseEvent) {
   })
 }
 
+// Auto-collapse long code blocks (>25 lines)
+function collapseCodeBlocks(el: HTMLElement) {
+  for (const pre of el.querySelectorAll('pre')) {
+    if (pre.querySelector('.code-expand-btn') || pre.closest('.code-collapse-wrapper')) continue
+    const code = pre.querySelector('code')
+    if (!code) continue
+    const lineCount = (code.textContent || '').split('\n').length
+    if (lineCount < 25) continue
+    const hiddenLines = lineCount - 15
+    pre.classList.add('code-collapsed')
+    const wrapper = document.createElement('div')
+    wrapper.className = 'code-collapse-wrapper'
+    pre.parentNode!.insertBefore(wrapper, pre)
+    wrapper.appendChild(pre)
+    const btn = document.createElement('button')
+    btn.className = 'code-expand-btn'
+    btn.textContent = `Show ${hiddenLines} more lines`
+    btn.onclick = (e) => {
+      e.stopPropagation()
+      const collapsed = pre.classList.toggle('code-collapsed')
+      btn.textContent = collapsed ? `Show ${hiddenLines} more lines` : 'Collapse'
+    }
+    wrapper.appendChild(btn)
+  }
+}
+
 // Make all links open in new tab
 function fixLinks(el: HTMLElement) {
   for (const a of el.querySelectorAll('a')) {
@@ -140,7 +166,7 @@ function toolSummary(name: string, input: any): string {
 
 function renderBlock(block: ContentBlock) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el); collapseCodeBlocks(el) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -223,8 +249,12 @@ const markdownCSS = `
   background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px;
   font-family: 'SF Mono', Menlo, 'Courier New', monospace; font-size: 0.88em;
 }
-.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; }
+.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; position: relative; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: #c9d1d9; }
+.markdown pre.code-collapsed { max-height: 360px; overflow: hidden; }
+.markdown pre.code-collapsed::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(transparent, #0d1117); pointer-events: none; border-radius: 0 0 6px 6px; }
+.code-expand-btn { display: block; width: 100%; padding: 4px 0; margin-top: -1px; background: #0d1117; border: 1px solid #333; border-top: none; border-radius: 0 0 6px 6px; color: #fab283; font-size: 0.75em; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; text-align: center; transition: background-color 0.2s, color 0.2s; }
+.code-expand-btn:hover { background: #161b22; color: #fcd9b8; }
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
 }
@@ -295,7 +325,7 @@ function extractImages(text: string): { cleanText: string; images: string[]; fil
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean, scrollRefCb?: (el: HTMLDivElement) => void }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
@@ -314,7 +344,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
   })
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
+    <div ref={(el) => { scrollRef = el; props.scrollRefCb?.(el) }} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
@@ -366,7 +396,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
               <For each={msg.content}>{(block) => {
                 if (block.type === 'text' && block.text) {
                   const display = hasAttachments ? cleanText : block.text
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el); collapseCodeBlocks(el) }} /> : null
                 }
                 if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
                   const q = block.input?.question || 'Claude is asking a question...'
