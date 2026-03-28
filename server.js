@@ -102,7 +102,7 @@ function discoverSessions(limit = 50) {
   for (const { id, fpath, mtime } of top) {
     try {
       const fd = fs.openSync(fpath, 'r');
-      const buf = Buffer.alloc(Math.min(4096, fs.fstatSync(fd).size));
+      const buf = Buffer.alloc(Math.min(16384, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
@@ -111,7 +111,17 @@ function discoverSessions(limit = 50) {
         try {
           const d = JSON.parse(line);
           if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
-            const text = typeof d.message.content === 'string' ? d.message.content : '';
+            let text = '';
+            if (typeof d.message.content === 'string') text = d.message.content;
+            else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
+            text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
+            // Extract title from /command args if message is a skill invocation
+            if (text.startsWith('<command-message>')) {
+              const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
+              const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
+              if (argsMatch?.[1]?.trim()) { title = `${nameMatch?.[1] || '/cmd'} ${argsMatch[1].trim()}`.slice(0, 80); break; }
+              continue;
+            }
             if (text && !text.startsWith('<')) { title = text.slice(0, 80); break; }
           }
         } catch {}
@@ -137,19 +147,18 @@ function tmuxIsActive(id) {
   catch { return false; }
 }
 
-function spawnSession(id, cwd) {
-  const name = tmuxName(id);
+function launchClaude(name, claudeArgs, cwd) {
   try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
-  setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
+  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude ${claudeArgs} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
+  for (const delay of [3000, 5000, 8000]) {
+    setTimeout(() => {
+      try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {}
+    }, delay);
+  }
 }
 
-function resumeSession(id, cwd) {
-  const name = tmuxName(id);
-  try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
-  setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
-}
+function spawnSession(id, cwd) { launchClaude(tmuxName(id), `--session-id ${id}`, cwd); }
+function resumeSession(id, cwd) { launchClaude(tmuxName(id), `--resume ${id}`, cwd); }
 
 async function sendInput(id, text) {
   if (!tmuxIsActive(id)) {
@@ -370,11 +379,8 @@ app.post('/api/sessions/:id/rename', (req, res) => {
 
 app.post('/api/sessions/:id/fork', (req, res) => {
   try {
-    const id = req.params.id;
-    const cwd = req.body?.cwd || HOME;
     const forkName = `feather-f${Date.now().toString(36)}`;
-    try { execFileSync('tmux', ['kill-session', '-t', forkName], { stdio: 'ignore' }); } catch {}
-    execSync(`tmux new-session -d -s ${forkName} -c "${cwd}" "bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${forkName} prefix M-a`, { stdio: 'ignore' });
+    launchClaude(forkName, `--resume ${req.params.id} --fork-session`, req.body?.cwd);
     res.json({ ok: true, tmux: forkName });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -495,6 +501,10 @@ app.use(express.static(STATIC_DIR, {
   maxAge: '0',
   setHeaders(res, filePath) {
     if (filePath.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
   },
 }));
 app.get('/terminal', (_req, res) => res.sendFile(path.join(STATIC_DIR, 'terminal.html')));

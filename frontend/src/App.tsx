@@ -3,7 +3,7 @@ import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
 import type { SessionMeta, Message } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -84,6 +84,7 @@ export default function App() {
   const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [uploading, setUploading] = createSignal(false)
+  const [working, setWorking] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
   const [menuOpen, setMenuOpen] = createSignal(false)
   const [historyIdx, setHistoryIdx] = createSignal(-1)
@@ -94,6 +95,8 @@ export default function App() {
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
   const [renameText, setRenameText] = createSignal('')
+  const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
+  const [sidebarRenameText, setSidebarRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
@@ -170,6 +173,7 @@ export default function App() {
     setSidebar(false)
     setLoading(true)
     setMessages([])
+    setWorking(false)
     setText(loadDraft(id))
     setHistoryIdx(-1)
     setHistoryOpen(false)
@@ -182,6 +186,7 @@ export default function App() {
     setLoading(false)
     setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
+      if (msg.role === 'assistant') setWorking(false)
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
         if (msg.role === 'user') {
@@ -242,6 +247,14 @@ export default function App() {
     setSessions(await fetchSessions())
   }
 
+  async function handleSidebarRename(id: string) {
+    const title = sidebarRenameText().trim()
+    if (!title) { setSidebarRenaming(null); return }
+    await renameSession(id, title)
+    setSidebarRenaming(null)
+    setSessions(await fetchSessions())
+  }
+
   async function loadEarlier() {
     const id = currentId()
     if (!id || loadingMore()) return
@@ -266,11 +279,7 @@ export default function App() {
     saveStarred(s).catch(() => {})
   }
 
-  async function handleFork(id: string) {
-    setMenuOpen(false)
-    await forkSession(id)
-    setTimeout(async () => { setSessions(await fetchSessions()) }, 3000)
-  }
+
 
   function toggleVoice() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -320,6 +329,7 @@ export default function App() {
     }])
     sendInput(currentId()!, fullText)
     setUploading(false)
+    setWorking(true)
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
@@ -403,15 +413,53 @@ export default function App() {
               </button>
             </div>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
-              <For each={sessions()}>{(s) => (
-                <div onClick={() => select(s.id)} style={{ padding: '12px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                    <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-                    <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
-                    <span style={{ 'font-size': '11px', color: '#555' }}>{timeAgo(s.updatedAt)}</span>
-                  </div>
-                </div>
-              )}</For>
+              {(() => {
+                const all = sessions()
+                const now = new Date()
+                const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+                const yesterdayStart = todayStart - 86400000
+                const weekStart = todayStart - 6 * 86400000
+                const groups: { label: string, items: SessionMeta[] }[] = [
+                  { label: 'Today', items: [] },
+                  { label: 'Yesterday', items: [] },
+                  { label: 'This Week', items: [] },
+                  { label: 'Older', items: [] },
+                ]
+                for (const s of all) {
+                  const t = new Date(s.updatedAt).getTime()
+                  if (t >= todayStart) groups[0].items.push(s)
+                  else if (t >= yesterdayStart) groups[1].items.push(s)
+                  else if (t >= weekStart) groups[2].items.push(s)
+                  else groups[3].items.push(s)
+                }
+                return <For each={groups.filter(g => g.items.length > 0)}>{(group) => <>
+                  <div style={{ padding: '6px 16px 2px', 'font-size': '10px', 'font-weight': '600', color: '#555', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{group.label}</div>
+                  <For each={group.items}>{(s) => (
+                    <div onClick={() => { if (sidebarRenaming() !== s.id) select(s.id) }}
+                      onDblClick={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
+                      onContextMenu={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
+                      style={{ padding: '10px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
+                      <Show when={sidebarRenaming() === s.id} fallback={
+                        <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                          <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
+                          <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
+                          <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
+                        </div>
+                      }>
+                        <input
+                          value={sidebarRenameText()}
+                          onInput={(e) => setSidebarRenameText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleSidebarRename(s.id); if (e.key === 'Escape') setSidebarRenaming(null) }}
+                          onBlur={() => handleSidebarRename(s.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          ref={(el) => setTimeout(() => { el.focus(); el.select() }, 0)}
+                          style={{ width: '100%', background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '4px', padding: '2px 6px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }}
+                        />
+                      </Show>
+                    </div>
+                  )}</For>
+                </>}</For>
+              })()}
             </div>
           </Show>
           {/* Links tab */}
@@ -466,8 +514,6 @@ export default function App() {
                   <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
                     <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
                       style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
-                    <button onClick={() => handleFork(s().id)}
-                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork</button>
                     <a href={exportUrl(s().id)} download style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
                     <button onClick={() => handleDelete(s().id)}
                       style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Delete</button>
@@ -504,7 +550,7 @@ export default function App() {
             </div>
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
             </div>
             <div style={{ display: tab() === 'files' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
               <Show when={touchedFiles().length === 0}>

@@ -59,7 +59,7 @@ function renderMarkdown(text: string): string {
   const cached = mdCache.get(text)
   if (cached !== undefined) return cached
   const html = marked.parse(text.trimEnd()) as string
-  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ['class'] })
+  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'] })
   if (mdCache.size >= MD_CACHE_MAX) {
     const first = mdCache.keys().next().value!
     mdCache.delete(first)
@@ -81,6 +81,14 @@ function handleCopyClick(e: MouseEvent) {
   })
 }
 
+// Make all links open in new tab
+function fixLinks(el: HTMLElement) {
+  for (const a of el.querySelectorAll('a')) {
+    a.setAttribute('target', '_blank')
+    a.setAttribute('rel', 'noopener')
+  }
+}
+
 // Inject copy buttons into rendered HTML pre blocks
 function injectCopyButtons(el: HTMLElement) {
   for (const pre of el.querySelectorAll('pre')) {
@@ -91,6 +99,12 @@ function injectCopyButtons(el: HTMLElement) {
     btn.textContent = 'Copy'
     pre.appendChild(btn)
   }
+}
+
+// ── Utilities ───────────────────────────────────────────────────────────────
+
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 }
 
 // ── Tool rendering ──────────────────────────────────────────────────────────
@@ -126,7 +140,7 @@ function toolSummary(name: string, input: any): string {
 
 function renderBlock(block: ContentBlock) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el) }} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -144,7 +158,7 @@ function renderBlock(block: ContentBlock) {
     const icon = TOOL_ICONS[name] || '⚙'
     const summary = toolSummary(name, block.input)
     const inp = block.input || {}
-    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write'
+    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read'
     const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
     return (
       <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
@@ -158,18 +172,31 @@ function renderBlock(block: ContentBlock) {
         </>}
         {name === 'Bash' && inp.command && <pre style={`${pre}color:#e5946b;border-top:1px solid #1e1e1e`}>{inp.command}</pre>}
         {name === 'Write' && inp.content && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        {name === 'Agent' && <>
+          {inp.subagent_type && <div style={{ padding: '4px 10px', 'border-top': '1px solid #1e1e1e', 'font-size': '11px', color: '#888' }}>Type: <span style={{ color: '#c4993a' }}>{inp.subagent_type}</span></div>}
+          {inp.prompt && <pre style={`${pre}color:#73b8ff;border-top:1px solid #1e1e1e`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
+        </>}
+        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:#b48ead;border-top:1px solid #1e1e1e`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
+        {name === 'Read' && inp.file_path && <pre style={`${pre}color:#73b8ff;border-top:1px solid #1e1e1e`}>{inp.file_path}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
       </details>
     )
   }
   if (block.type === 'tool_result') {
-    const raw = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
-    const preview = raw.slice(0, 200)
+    const rawContent = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
+    const raw = stripAnsi(rawContent)
     const isErr = block.is_error
+    const isLong = raw.length > 200
+    const preview = raw.slice(0, 200)
+    const lineCount = raw.split('\n').length
+    const label = isErr ? 'error' : `output${isLong ? ` (${lineCount} lines)` : ''}`
     return (
-      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }}>
-        <div style={{ padding: '2px 10px', background: '#111318', 'border-bottom': '1px solid #1e1e1e', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666' }}>{isErr ? 'error' : 'output'}</div>
-        {preview && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '120px', overflow: 'auto', 'word-break': 'break-all' }}>{preview}{raw.length > 200 ? '…' : ''}</div>}
-      </div>
+      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong}>
+        <summary style={{ padding: '2px 10px', background: '#111318', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666', cursor: isLong ? 'pointer' : 'default', 'list-style': isLong ? undefined : 'none' }}>
+          {label}
+          {isLong && !isErr && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: '#555' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
+        </summary>
+        {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
+      </details>
     )
   }
   return null
@@ -221,6 +248,12 @@ const markdownCSS = `
 pre:hover .copy-btn { opacity: 1; }
 .copy-btn:hover { background: rgba(255,255,255,0.2); color: #ccc; }
 
+/* Typing indicator bounce */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
 /* Star button - show on hover */
 .star-btn { -webkit-tap-highlight-color: transparent; }
 div:hover > div > .star-btn { opacity: 0.6 !important; }
@@ -248,17 +281,21 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 
 // ── Image extraction ─────────────────────────────────────────────────────────
 
-const imgPattern = /\[Attached image: (\/uploads\/[^\]]+)\]/g
+const imgPattern = /\[Attached image: (\/[^\]]+)\]/g
 
-function extractImages(text: string): { cleanText: string; images: string[] } {
+const filePattern = /\[Attached file: (\/[^\]]+)\]\s*\(([^)]+)\)/g
+
+function extractImages(text: string): { cleanText: string; images: string[]; files: { path: string; name: string }[] } {
   const images: string[] = []
-  const cleanText = text.replace(imgPattern, (_, p) => { images.push(p); return '' }).trim()
-  return { cleanText, images }
+  const files: { path: string; name: string }[] = []
+  let cleaned = text.replace(imgPattern, (_, p) => { images.push(p); return '' })
+  cleaned = cleaned.replace(filePattern, (_, p, name) => { files.push({ path: p, name }); return '' }).trim()
+  return { cleanText: cleaned, images, files }
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
@@ -315,12 +352,14 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
       <For each={props.messages}>{(msg) => {
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
-        const { cleanText, images } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [] }
+        const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
         const hasImages = images.length > 0
+        const hasFiles = files.length > 0
+        const hasAttachments = hasImages || hasFiles
 
-        return <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '16px' }}>
+        return <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '10px' }}>
           <div style={{
-            'max-width': '85%', padding: hasImages ? '6px' : '10px 14px',
+            'max-width': '85%', padding: hasAttachments ? '6px' : '10px 14px',
             'border-radius': msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
             background: msg.role === 'user' ? 'rgba(74,186,106,0.15)' : '#1a1a2e',
             color: '#e5e5e5', overflow: 'hidden',
@@ -328,14 +367,21 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           }}>
             {/* Inline images */}
             <For each={images}>{(src) => (
-              <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasImages ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+              <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasAttachments ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+            )}</For>
+            {/* File attachments */}
+            <For each={files}>{(f) => (
+              <a href={f.path} target="_blank" rel="noopener" style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: '#73b8ff', 'font-size': '12px' }}>
+                <span style={{ 'font-size': '16px' }}>{f.name.endsWith('.pdf') ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
+                <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
+              </a>
             )}</For>
             {/* Text + other blocks */}
-            <div style={hasImages ? { padding: '4px 8px 4px' } : {}}>
+            <div style={hasAttachments ? { padding: '4px 8px 4px' } : {}}>
               <For each={msg.content}>{(block) => {
                 if (block.type === 'text' && block.text) {
-                  const display = hasImages ? cleanText : block.text
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el) }} /> : null
+                  const display = hasAttachments ? cleanText : block.text
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
                 }
                 if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
                   const q = block.input?.question || 'Claude is asking a question...'
@@ -371,6 +417,17 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           </div>
         </div>
       }}</For>
+
+      {/* Typing indicator */}
+      <Show when={props.working}>
+        <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
+          <div style={{ padding: '10px 16px', 'border-radius': '16px 16px 16px 4px', background: '#1a1a2e', display: 'flex', gap: '4px', 'align-items': 'center' }}>
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out infinite' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite' }} />
+          </div>
+        </div>
+      </Show>
     </div>
     <Show when={!pinned()}>
       <button
