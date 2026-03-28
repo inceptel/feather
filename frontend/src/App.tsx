@@ -154,8 +154,13 @@ export default function App() {
     fetchStarred().then(setStarred).catch(() => {})
     const hash = location.hash.slice(1)
     if (hash) select(hash)
+    // Refresh session list when tab becomes visible
+    document.addEventListener('visibilitychange', onVisibility)
   })
-  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown) })
+  function onVisibility() {
+    if (document.visibilityState === 'visible') fetchSessions().then(s => setSessions(s)).catch(() => {})
+  }
+  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility) })
 
   async function select(id: string) {
     const prev = currentId()

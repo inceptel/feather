@@ -262,21 +262,36 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
+  const [unreadCount, setUnreadCount] = createSignal(0)
 
   function onScroll() {
     if (!scrollRef) return
     const { scrollTop, scrollHeight, clientHeight } = scrollRef
-    setPinned(scrollHeight - scrollTop - clientHeight < 80)
+    const near = scrollHeight - scrollTop - clientHeight < 80
+    setPinned(near)
+    if (near) setUnreadCount(0)
   }
 
+  function scrollToBottom() {
+    scrollRef?.scrollTo({ top: scrollRef!.scrollHeight, behavior: 'smooth' })
+    setUnreadCount(0)
+  }
+
+  let prevMsgLen = props.messages.length
+
   createEffect(() => {
-    props.messages.length // track
+    const len = props.messages.length // track
+    const delta = len - prevMsgLen
+    prevMsgLen = len
     if (pinned()) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
+    } else if (delta > 0) {
+      setUnreadCount(c => c + delta)
     }
   })
 
   return (
+    <div style={{ position: 'relative', height: '100%' }}>
     <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
@@ -356,6 +371,32 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           </div>
         </div>
       }}</For>
+    </div>
+    <Show when={!pinned()}>
+      <button
+        onClick={scrollToBottom}
+        title="Scroll to bottom"
+        style={{
+          position: 'absolute', bottom: '12px', right: '16px', 'z-index': '10',
+          width: '32px', height: '32px', 'border-radius': '50%',
+          background: '#1a1a2e', color: '#e5e5e5',
+          border: '1px solid #333', cursor: 'pointer',
+          'font-size': '16px', display: 'flex', 'align-items': 'center', 'justify-content': 'center',
+          'box-shadow': '0 2px 8px rgba(0,0,0,0.35)', opacity: '0.9',
+        }}
+      >
+        <Show when={unreadCount() > 0}>
+          <span style={{
+            position: 'absolute', top: '-8px', right: '-8px',
+            'min-width': '20px', height: '20px', padding: '0 5px',
+            background: '#4aba6a', color: '#000',
+            'font-size': '11px', 'font-weight': '600', 'border-radius': '10px',
+            display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1',
+          }}>{unreadCount() > 99 ? '99+' : unreadCount()}</span>
+        </Show>
+        ↓
+      </button>
+    </Show>
     </div>
   )
 }

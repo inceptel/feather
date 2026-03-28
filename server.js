@@ -149,8 +149,12 @@ function resumeSession(id, cwd) {
   setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {} }, 3000);
 }
 
-function sendInput(id, text) {
-  if (!tmuxIsActive(id)) resumeSession(id);
+async function sendInput(id, text) {
+  if (!tmuxIsActive(id)) {
+    resumeSession(id);
+    // Wait for Claude CLI to fully load before sending input
+    await new Promise(r => setTimeout(r, 6000));
+  }
   const target = tmuxName(id);
   if (text.length > 500) {
     const tmp = `/tmp/feather-send-${Date.now()}.txt`;
@@ -316,8 +320,8 @@ app.post('/api/sessions', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/send', (req, res) => {
-  try { sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
+app.post('/api/sessions/:id/send', async (req, res) => {
+  try { await sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
