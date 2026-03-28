@@ -843,10 +843,11 @@ export default function App() {
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden' }}>
           <Show when={currentId()} fallback={
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444' }}>
-              <div style={{ 'text-align': 'center' }}>
-                <div style={{ 'font-size': '32px', 'margin-bottom': '12px', opacity: '0.3' }}>~</div>
-                <div>Open a session or create a new one</div>
+            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#555' }}>
+              <div style={{ 'text-align': 'center', padding: '20px' }}>
+                <div style={{ 'font-size': '48px', 'margin-bottom': '16px', opacity: '0.2' }}>~</div>
+                <div style={{ 'font-size': '15px', 'margin-bottom': '16px' }}>Type below to start chatting</div>
+                <div style={{ 'font-size': '11px', color: '#333' }}>or open a session from the sidebar</div>
               </div>
             </div>
           }>
