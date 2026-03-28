@@ -5,6 +5,8 @@ static/
 .DS_Store
 uploads/
 quick-links.json
+session-meta.json
+starred.json
 missing-features.*
 generate-pdf.mjs
 MISSING-FEATURES.md

@@ -31,10 +31,13 @@ export async function fetchSessions(): Promise<SessionMeta[]> {
   return (await r.json()).sessions
 }
 
-export async function fetchMessages(id: string): Promise<Message[]> {
-  const r = await fetch(`${BASE}/api/sessions/${id}/messages`)
+export async function fetchMessages(id: string, before = 0): Promise<{ messages: Message[], hasMore: boolean }> {
+  const url = before > 0
+    ? `${BASE}/api/sessions/${id}/messages?before=${before}`
+    : `${BASE}/api/sessions/${id}/messages`
+  const r = await fetch(url)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return (await r.json()).messages
+  return await r.json()
 }
 
 export const sendInput = (id: string, text: string): Promise<{ ok: boolean, sentAt: string }> =>
@@ -63,8 +66,57 @@ export async function uploadFile(blob: Blob, name: string): Promise<string> {
   return path
 }
 
-export function subscribeMessages(id: string, onMessage: (msg: Message) => void): () => void {
-  const es = new EventSource(`${BASE}/api/sessions/${id}/stream`)
-  es.addEventListener('message', (e) => { try { onMessage(JSON.parse(e.data)) } catch {} })
-  return () => es.close()
+export const deleteSession = (id: string) =>
+  fetch(`${BASE}/api/sessions/${id}/delete`, { method: 'POST' }).then(r => r.json())
+
+export const renameSession = (id: string, title: string) =>
+  fetch(`${BASE}/api/sessions/${id}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(r => r.json())
+
+export const forkSession = (id: string, cwd?: string) =>
+  fetch(`${BASE}/api/sessions/${id}/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd }) }).then(r => r.json())
+
+export const fetchStarred = (): Promise<Record<string, string[]>> =>
+  fetch(`${BASE}/api/starred`).then(r => r.json())
+
+export const saveStarred = (data: Record<string, string[]>) =>
+  fetch(`${BASE}/api/starred`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+
+export const exportUrl = (id: string) => `${BASE}/api/sessions/${id}/export`
+
+export const openInEditor = (path: string) =>
+  fetch(`${BASE}/api/open-in-editor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(r => r.json())
+
+export function subscribeMessages(
+  id: string,
+  onMessage: (msg: Message) => void,
+  onStatus?: (status: 'connected' | 'reconnecting') => void,
+): () => void {
+  let es: EventSource | null = null
+  let closed = false
+  let retries = 0
+  let lastEventId = ''
+
+  function connect() {
+    if (closed) return
+    const url = lastEventId
+      ? `${BASE}/api/sessions/${id}/stream?lastEventId=${lastEventId}`
+      : `${BASE}/api/sessions/${id}/stream`
+    es = new EventSource(url)
+
+    es.addEventListener('connected', () => { retries = 0; onStatus?.('connected') })
+    es.addEventListener('message', (e) => {
+      if (e.lastEventId) lastEventId = e.lastEventId
+      try { onMessage(JSON.parse(e.data)) } catch {}
+    })
+    es.onerror = () => {
+      es?.close(); es = null
+      if (closed) return
+      retries++
+      onStatus?.('reconnecting')
+      setTimeout(connect, Math.min(1000 * 2 ** Math.min(retries - 1, 5), 30000))
+    }
+  }
+
+  connect()
+  return () => { closed = true; es?.close(); es = null }
 }

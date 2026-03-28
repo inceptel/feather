@@ -1,9 +1,9 @@
 declare const __BUILD_TIME__: string
-import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
+import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
 import type { SessionMeta, Message } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -34,6 +34,45 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d`
 }
 
+// ── Draft persistence ────────────────────────────────────────────────────
+function saveDraft(id: string, val: string) {
+  if (val) localStorage.setItem(`feather-draft-${id}`, val)
+  else localStorage.removeItem(`feather-draft-${id}`)
+}
+function loadDraft(id: string): string {
+  return localStorage.getItem(`feather-draft-${id}`) || ''
+}
+
+// ── Input history ────────────────────────────────────────────────────────
+const HISTORY_KEY = 'feather-input-history'
+const MAX_HISTORY = 50
+function getHistory(): string[] {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') }
+  catch { return [] }
+}
+function pushHistory(text: string) {
+  const h = getHistory()
+  const idx = h.indexOf(text)
+  if (idx >= 0) h.splice(idx, 1)
+  h.push(text)
+  if (h.length > MAX_HISTORY) h.shift()
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(h))
+}
+
+// ── Dynamic favicon ──────────────────────────────────────────────────────
+function setFavicon(color: string) {
+  const size = 32, c = document.createElement('canvas')
+  c.width = c.height = size
+  const ctx = c.getContext('2d')!
+  ctx.beginPath()
+  ctx.arc(size / 2, size / 2, size / 3, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link) }
+  link.href = c.toDataURL()
+}
+
 export default function App() {
   const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
@@ -42,13 +81,24 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'terminal'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [uploading, setUploading] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
+  const [menuOpen, setMenuOpen] = createSignal(false)
+  const [historyIdx, setHistoryIdx] = createSignal(-1)
+  const [historyOpen, setHistoryOpen] = createSignal(false)
+  const [sseStatus, setSSEStatus] = createSignal<'connected' | 'reconnecting'>('connected')
+  const [listening, setListening] = createSignal(false)
+  const [hasMore, setHasMore] = createSignal(false)
+  const [loadingMore, setLoadingMore] = createSignal(false)
+  const [renaming, setRenaming] = createSignal(false)
+  const [renameText, setRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
   const [links, setLinks] = createSignal<QuickLink[]>([])
+  const [starred, setStarred] = createSignal<Record<string, string[]>>({})
   let cleanupSSE: (() => void) | null = null
+  let recognition: any = null
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
@@ -89,24 +139,43 @@ export default function App() {
 
   function removeFile(idx: number) { setFiles(prev => prev.filter((_, i) => i !== idx)) }
 
+  function onGlobalKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      const s = cur()
+      if (s?.isActive) handleInterrupt(s.id)
+    }
+  }
+
   onMount(async () => {
+    document.addEventListener('keydown', onGlobalKeyDown)
     setSessions(await fetchSessions())
     const base = location.pathname.replace(/\/+$/, '')
     fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
+    fetchStarred().then(setStarred).catch(() => {})
     const hash = location.hash.slice(1)
     if (hash) select(hash)
   })
-  onCleanup(() => cleanupSSE?.())
+  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown) })
 
   async function select(id: string) {
+    const prev = currentId()
+    if (prev) saveDraft(prev, text())
     setCurrentId(id)
     location.hash = id
     setSidebar(false)
     setLoading(true)
     setMessages([])
+    setText(loadDraft(id))
+    setHistoryIdx(-1)
+    setHistoryOpen(false)
     cleanupSSE?.()
-    try { setMessages(await fetchMessages(id)) } catch {}
+    try {
+      const result = await fetchMessages(id)
+      setMessages(result.messages)
+      setHasMore(result.hasMore)
+    } catch {}
     setLoading(false)
+    setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
@@ -125,7 +194,7 @@ export default function App() {
         }
         return [...prev, msg]
       })
-    })
+    }, setSSEStatus)
   }
 
   async function handleNew() {
@@ -148,6 +217,77 @@ export default function App() {
     await interruptSession(id)
   }
 
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this session?')) return
+    setMenuOpen(false)
+    await deleteSession(id)
+    setCurrentId(null)
+    location.hash = ''
+    cleanupSSE?.()
+    setMessages([])
+    setSessions(await fetchSessions())
+  }
+
+  async function handleRename(id: string) {
+    const title = renameText().trim()
+    if (!title) { setRenaming(false); return }
+    await renameSession(id, title)
+    setRenaming(false)
+    setMenuOpen(false)
+    setSessions(await fetchSessions())
+  }
+
+  async function loadEarlier() {
+    const id = currentId()
+    if (!id || loadingMore()) return
+    setLoadingMore(true)
+    try {
+      const result = await fetchMessages(id, messages().length)
+      setMessages(prev => [...result.messages, ...prev])
+      setHasMore(result.hasMore)
+    } catch {}
+    setLoadingMore(false)
+  }
+
+  async function toggleStar(sessionId: string, msgUuid: string) {
+    const s = { ...starred() }
+    const list = s[sessionId] || []
+    const idx = list.indexOf(msgUuid)
+    if (idx >= 0) list.splice(idx, 1)
+    else list.push(msgUuid)
+    s[sessionId] = list.filter(Boolean)
+    if (s[sessionId].length === 0) delete s[sessionId]
+    setStarred(s)
+    saveStarred(s).catch(() => {})
+  }
+
+  async function handleFork(id: string) {
+    setMenuOpen(false)
+    await forkSession(id)
+    setTimeout(async () => { setSessions(await fetchSessions()) }, 3000)
+  }
+
+  function toggleVoice() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) return
+    if (listening()) { recognition?.stop(); setListening(false); return }
+    recognition = new SR()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-US'
+    recognition.onresult = (e: any) => {
+      let t = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) t += e.results[i][0].transcript
+      }
+      if (t) setText(prev => prev + (prev ? ' ' : '') + t)
+    }
+    recognition.onend = () => setListening(false)
+    recognition.onerror = () => setListening(false)
+    recognition.start()
+    setListening(true)
+  }
+
   async function handleSend() {
     const val = text().trim()
     const pending = files()
@@ -165,6 +305,8 @@ export default function App() {
       } catch { parts.push(`[Upload failed: ${f.name}]`) }
     }
     const fullText = parts.join('\n')
+    pushHistory(fullText)
+    saveDraft(currentId()!, '')
 
     const tempId = `optimistic-${Date.now()}`
     setMessages(prev => [...prev, {
@@ -176,6 +318,33 @@ export default function App() {
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
+
+  createEffect(() => {
+    const s = cur()
+    if (!s) setFavicon('#333')
+    else if (s.isActive) setFavicon('#4aba6a')
+    else setFavicon('#666')
+  })
+
+  const touchedFiles = () => {
+    const files = new Map<string, { actions: Set<string>, lastSeen: string }>()
+    for (const msg of messages()) {
+      for (const block of msg.content || []) {
+        if (block.type !== 'tool_use') continue
+        // Only use file_path (Read/Write/Edit) — not path (Grep/Glob search dirs)
+        const fp = block.input?.file_path
+        if (typeof fp === 'string' && fp.startsWith('/')) {
+          const existing = files.get(fp)
+          if (existing) { existing.actions.add(block.name || 'tool'); existing.lastSeen = msg.timestamp }
+          else files.set(fp, { actions: new Set([block.name || 'tool']), lastSeen: msg.timestamp })
+        }
+      }
+    }
+    return [...files.entries()]
+      .map(([path, { actions, lastSeen }]) => ({ path, actions: [...actions], lastSeen }))
+      .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
+  }
+
   const tabStyle = (t: string) => ({
     padding: '6px 16px', border: 'none', 'border-bottom': tab() === t ? '2px solid #4aba6a' : '2px solid transparent',
     background: 'none', color: tab() === t ? '#e5e5e5' : '#666', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
@@ -266,7 +435,18 @@ export default function App() {
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
-              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
+              <Show when={renaming()} fallback={
+                <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
+              }>
+                <input
+                  value={renameText()}
+                  onInput={(e) => setRenameText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRename(s().id); if (e.key === 'Escape') setRenaming(false) }}
+                  onBlur={() => handleRename(s().id)}
+                  ref={(el) => setTimeout(() => el.focus(), 0)}
+                  style={{ background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '6px', padding: '2px 8px', color: '#e5e5e5', 'font-size': '14px', 'font-weight': '600', outline: 'none', flex: '1', 'min-width': '0' }}
+                />
+              </Show>
               <div style={{ flex: '1' }} />
               <Show when={s().isActive}>
                 <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Stop</button>
@@ -274,6 +454,21 @@ export default function App() {
               <Show when={!s().isActive}>
                 <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>
+                <Show when={menuOpen()}>
+                  <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '99' }} />
+                  <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
+                    <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
+                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
+                    <button onClick={() => handleFork(s().id)}
+                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork</button>
+                    <a href={exportUrl(s().id)} download style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
+                    <button onClick={() => handleDelete(s().id)}
+                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Delete</button>
+                  </div>
+                </Show>
+              </div>
             </>}
           </Show>
         </div>
@@ -282,9 +477,15 @@ export default function App() {
         <Show when={currentId()}>
           <div style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
+            <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
             <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
             <span style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#333' }}>{__BUILD_TIME__}</span>
           </div>
+        </Show>
+
+        {/* Reconnecting banner */}
+        <Show when={sseStatus() === 'reconnecting' && currentId()}>
+          <div style={{ padding: '4px 16px', background: '#c4993a', color: '#000', 'font-size': '12px', 'font-weight': '600', 'text-align': 'center', 'flex-shrink': '0' }}>Reconnecting...</div>
         </Show>
 
         {/* Content */}
@@ -298,7 +499,27 @@ export default function App() {
             </div>
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} />
+            </div>
+            <div style={{ display: tab() === 'files' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
+              <Show when={touchedFiles().length === 0}>
+                <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>No files touched yet</div>
+              </Show>
+              <For each={touchedFiles()}>{(f) => {
+                const short = f.path.split('/').slice(-2).join('/')
+                const actionColors: Record<string, string> = { Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a', Grep: '#b48ead', Glob: '#88c0d0' }
+                return (
+                  <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px' }}>
+                    <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+                      <span style={{ color: '#e5e5e5', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={f.path}>{short}</span>
+                      <For each={f.actions}>{(a) => (
+                        <span style={{ 'font-size': '10px', padding: '1px 5px', 'border-radius': '3px', background: 'rgba(255,255,255,0.05)', color: actionColors[a] || '#888' }}>{a}</span>
+                      )}</For>
+                    </div>
+                    <div style={{ color: '#444', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", 'margin-top': '2px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.path}</div>
+                  </div>
+                )
+              }}</For>
             </div>
             <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
               <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
@@ -330,11 +551,35 @@ export default function App() {
               )}</For>
             </div>
           </Show>
-          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0' }}>
+          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0', position: 'relative' }}>
+            <Show when={historyOpen()}>
+              <div onClick={() => setHistoryOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '49' }} />
+              <div style={{ position: 'absolute', bottom: '100%', left: '0', right: '0', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px 8px 0 0', 'max-height': '200px', 'overflow-y': 'auto', 'z-index': '50' }}>
+                <For each={getHistory().slice().reverse()}>{(item) => (
+                  <button onClick={() => { setText(item); setHistoryOpen(false) }}
+                    style={{ display: 'block', width: '100%', padding: '8px 12px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#ccc', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>{item}</button>
+                )}</For>
+              </div>
+            </Show>
             <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
+            <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
+            <button onClick={toggleVoice} style={{ background: 'none', border: 'none', color: listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'color 0.15s' }} title="Voice input">{'\uD83C\uDF99'}</button>
             <textarea ref={textareaRef} value={text()}
               onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+                if (e.key === 'ArrowUp' && textareaRef?.selectionStart === 0) {
+                  const h = getHistory(); if (h.length === 0) return
+                  const idx = historyIdx() === -1 ? h.length - 1 : Math.max(0, historyIdx() - 1)
+                  setHistoryIdx(idx); setText(h[idx]); e.preventDefault()
+                }
+                if (e.key === 'ArrowDown' && historyIdx() >= 0) {
+                  const h = getHistory(); const idx = historyIdx() + 1
+                  if (idx >= h.length) { setHistoryIdx(-1); setText(loadDraft(currentId()!) || '') }
+                  else { setHistoryIdx(idx); setText(h[idx]) }
+                  e.preventDefault()
+                }
+              }}
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
               enterkeyhint="send"
               placeholder="Send a message..." rows={1}

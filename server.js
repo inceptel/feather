@@ -23,16 +23,35 @@ function findJsonlPath(sessionId) {
   return null;
 }
 
-function getMessages(sessionId, limit = 100) {
+// ── Session metadata ───────────────────────────────────────────────────────
+
+const META_FILE = path.resolve(import.meta.dirname, 'session-meta.json');
+
+function readMeta() {
+  try { return JSON.parse(fs.readFileSync(META_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+function writeMeta(meta) {
+  fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
+}
+
+function getMessages(sessionId, limit = 100, before = 0) {
   const fpath = findJsonlPath(sessionId);
-  if (!fpath || !fs.existsSync(fpath)) return [];
+  if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
   const lines = fs.readFileSync(fpath, 'utf8').split('\n').filter(Boolean);
   const msgs = [];
   for (const line of lines) {
     const m = parseMessage(line);
     if (m) msgs.push(m);
   }
-  return msgs.slice(-limit);
+  if (before > 0) {
+    const end = Math.max(0, msgs.length - before);
+    const start = Math.max(0, end - limit);
+    return { messages: msgs.slice(start, end), hasMore: start > 0 };
+  }
+  const start = Math.max(0, msgs.length - limit);
+  return { messages: msgs.slice(start), hasMore: start > 0 };
 }
 
 // ── Session discovery ───────────────────────────────────────────────────────
@@ -76,6 +95,7 @@ function discoverSessions(limit = 50) {
   const active = getActiveTmuxSessions();
 
   // Now read titles only for the top N
+  const meta = readMeta();
   const sessions = [];
   for (const { id, fpath, mtime } of top) {
     try {
@@ -96,7 +116,7 @@ function discoverSessions(limit = 50) {
       }
 
       sessions.push({
-        id, title: title || id.slice(0, 8),
+        id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
       });
@@ -253,13 +273,38 @@ app.get('/api/sessions', (req, res) => {
 });
 
 app.get('/api/sessions/:id/messages', (req, res) => {
-  res.json({ messages: getMessages(req.params.id, parseInt(req.query.limit) || 100) });
+  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
+  res.json({ messages, hasMore });
 });
 
 app.get('/api/sessions/:id/stream', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('event: connected\ndata: {}\n\n');
   const sid = req.params.id;
+
+  // Replay missed messages from lastEventId (byte offset)
+  const lastId = parseInt(req.query.lastEventId || req.headers['last-event-id'] || '0');
+  if (lastId > 0) {
+    const fpath = findJsonlPath(sid);
+    if (fpath) {
+      try {
+        const stat = fs.statSync(fpath);
+        if (stat.size > lastId) {
+          const fd = fs.openSync(fpath, 'r');
+          const buf = Buffer.alloc(stat.size - lastId);
+          fs.readSync(fd, buf, 0, buf.length, lastId);
+          fs.closeSync(fd);
+          let offset = lastId;
+          for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+            offset += Buffer.byteLength(line + '\n');
+            const parsed = parseMessage(line);
+            if (parsed) res.write(`id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`);
+          }
+        }
+      } catch {}
+    }
+  }
+
   if (!sseClients.has(sid)) sseClients.set(sid, new Set());
   sseClients.get(sid).add(res);
   const hb = setInterval(() => { try { res.write('event: heartbeat\ndata: {}\n\n'); } catch { clearInterval(hb); } }, 15000);
@@ -284,6 +329,41 @@ app.post('/api/sessions/:id/resume', (req, res) => {
 app.post('/api/sessions/:id/interrupt', (req, res) => {
   try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:id/delete', (req, res) => {
+  try {
+    const id = req.params.id;
+    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
+    const fpath = findJsonlPath(id);
+    if (fpath) fs.unlinkSync(fpath);
+    const meta = readMeta();
+    delete meta[id];
+    writeMeta(meta);
+    sseClients.delete(id);
+    fileOffsets.delete(id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:id/rename', (req, res) => {
+  try {
+    const meta = readMeta();
+    meta[req.params.id] = { ...(meta[req.params.id] || {}), title: req.body.title };
+    writeMeta(meta);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:id/fork', (req, res) => {
+  try {
+    const id = req.params.id;
+    const cwd = req.body?.cwd || HOME;
+    const forkName = `feather-f${Date.now().toString(36)}`;
+    try { execFileSync('tmux', ['kill-session', '-t', forkName], { stdio: 'ignore' }); } catch {}
+    execSync(`tmux new-session -d -s ${forkName} -c "${cwd}" "bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${forkName} prefix M-a`, { stdio: 'ignore' });
+    res.json({ ok: true, tmux: forkName });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/upload', async (req, res) => {
@@ -316,6 +396,85 @@ app.post('/api/quick-links', (req, res) => {
   fs.writeFileSync(LINKS_FILE, JSON.stringify(links, null, 2));
   res.json({ ok: true });
 });
+
+// ── Starred messages ───────────────────────────────────────────────────────
+
+const STARRED_FILE = path.resolve(import.meta.dirname, 'starred.json');
+
+function readStarred() {
+  try { return JSON.parse(fs.readFileSync(STARRED_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+app.get('/api/starred', (_req, res) => res.json(readStarred()));
+
+app.post('/api/starred', (req, res) => {
+  try {
+    fs.writeFileSync(STARRED_FILE, JSON.stringify(req.body, null, 2));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Export ──────────────────────────────────────────────────────────────────
+
+app.get('/api/sessions/:id/export', (req, res) => {
+  try {
+    const { messages } = getMessages(req.params.id, 10000);
+    const lines = [];
+    for (const msg of messages) {
+      const role = msg.role === 'user' ? 'You' : 'Claude';
+      lines.push(`## ${role} — ${msg.timestamp}\n`);
+      for (const block of msg.content || []) {
+        if (block.type === 'text' && block.text) lines.push(block.text);
+        else if (block.type === 'tool_use') lines.push(`> **${block.name}** ${block.input?.file_path || block.input?.command?.split('\\n')[0] || ''}\n`);
+      }
+      lines.push('');
+    }
+    const md = lines.join('\n');
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="session-${req.params.id.slice(0, 8)}.md"`);
+    res.send(md);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/open-in-editor', (req, res) => {
+  try {
+    const fpath = req.body?.path;
+    if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+    execFileSync('code-server', [fpath], { stdio: 'ignore', timeout: 3000 });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Idle session reaper (kill after 1 hour of inactivity) ──────────────────
+
+const IDLE_MS = 60 * 60 * 1000; // 1 hour
+
+function reapIdleSessions() {
+  const active = getActiveTmuxSessions();
+  if (active.size === 0) return;
+  const now = Date.now();
+  let dirs;
+  try { dirs = fs.readdirSync(CLAUDE_PROJECTS); } catch { return; }
+  for (const dir of dirs) {
+    const dirPath = path.join(CLAUDE_PROJECTS, dir);
+    try {
+      for (const file of fs.readdirSync(dirPath)) {
+        if (!file.endsWith('.jsonl')) continue;
+        const id = file.replace('.jsonl', '');
+        if (!active.has(id.slice(0, 8))) continue;
+        const stat = fs.statSync(path.join(dirPath, file));
+        if (now - stat.mtimeMs > IDLE_MS) {
+          const name = tmuxName(id);
+          try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+          console.log(`[reaper] killed idle session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+        }
+      }
+    } catch {}
+  }
+}
+
+setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 

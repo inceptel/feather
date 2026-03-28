@@ -1,11 +1,57 @@
 import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { Message, ContentBlock } from '../api'
 import { Marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
+import css from 'highlight.js/lib/languages/css'
+import xml from 'highlight.js/lib/languages/xml'
+import rust from 'highlight.js/lib/languages/rust'
+import go from 'highlight.js/lib/languages/go'
+import diff from 'highlight.js/lib/languages/diff'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import markdown from 'highlight.js/lib/languages/markdown'
+
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('ts', typescript)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('py', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('css', css)
+hljs.registerLanguage('html', xml)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('rust', rust)
+hljs.registerLanguage('go', go)
+hljs.registerLanguage('diff', diff)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('yml', yaml)
+hljs.registerLanguage('markdown', markdown)
+hljs.registerLanguage('md', markdown)
 
 // ── Markdown renderer with LRU cache ────────────────────────────────────────
 
-const marked = new Marked({ gfm: true, breaks: true })
+const marked = new Marked(
+  { gfm: true, breaks: true },
+  markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value
+      return code
+    },
+  }),
+)
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
 
@@ -13,13 +59,38 @@ function renderMarkdown(text: string): string {
   const cached = mdCache.get(text)
   if (cached !== undefined) return cached
   const html = marked.parse(text.trimEnd()) as string
-  const safe = DOMPurify.sanitize(html)
+  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ['class'] })
   if (mdCache.size >= MD_CACHE_MAX) {
     const first = mdCache.keys().next().value!
     mdCache.delete(first)
   }
   mdCache.set(text, safe)
   return safe
+}
+
+// Copy button handler — attached via event delegation
+function handleCopyClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest('.copy-btn') as HTMLElement | null
+  if (!btn) return
+  const pre = btn.closest('pre')
+  const code = pre?.querySelector('code')
+  if (!code) return
+  navigator.clipboard.writeText(code.textContent || '').then(() => {
+    btn.textContent = 'Copied!'
+    setTimeout(() => { btn.textContent = 'Copy' }, 1500)
+  })
+}
+
+// Inject copy buttons into rendered HTML pre blocks
+function injectCopyButtons(el: HTMLElement) {
+  for (const pre of el.querySelectorAll('pre')) {
+    if (pre.querySelector('.copy-btn')) continue
+    pre.style.position = 'relative'
+    const btn = document.createElement('button')
+    btn.className = 'copy-btn'
+    btn.textContent = 'Copy'
+    pre.appendChild(btn)
+  }
 }
 
 // ── Tool rendering ──────────────────────────────────────────────────────────
@@ -55,7 +126,7 @@ function toolSummary(name: string, input: any): string {
 
 function renderBlock(block: ContentBlock) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -138,6 +209,41 @@ const markdownCSS = `
 .markdown img { max-width: 100%; border-radius: 6px; }
 .markdown hr { border: none; border-top: 1px solid #333; margin: 12px 0; }
 .markdown strong { font-weight: 600; }
+
+/* Copy button */
+.copy-btn {
+  position: absolute; top: 6px; right: 6px;
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+  color: #999; font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  cursor: pointer; opacity: 0; transition: opacity 0.15s;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: rgba(255,255,255,0.2); color: #ccc; }
+
+/* Star button - show on hover */
+.star-btn { -webkit-tap-highlight-color: transparent; }
+div:hover > div > .star-btn { opacity: 0.6 !important; }
+.star-btn:hover { opacity: 1 !important; }
+
+/* highlight.js dark theme */
+.hljs { color: #c9d1d9; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: #ff7b72; }
+.hljs-function .hljs-keyword { color: #ff7b72; }
+.hljs-string, .hljs-attr { color: #a5d6ff; }
+.hljs-number, .hljs-meta { color: #79c0ff; }
+.hljs-comment, .hljs-quote { color: #8b949e; font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: #d2a8ff; }
+.hljs-built_in { color: #ffa657; }
+.hljs-type, .hljs-class .hljs-title { color: #ffa657; }
+.hljs-variable, .hljs-template-variable { color: #ffa657; }
+.hljs-name { color: #7ee787; }
+.hljs-selector-class { color: #7ee787; }
+.hljs-addition { color: #aff5b4; background: rgba(46,160,67,0.15); }
+.hljs-deletion { color: #ffdcd7; background: rgba(248,81,73,0.15); }
+.hljs-regexp, .hljs-symbol { color: #f0883e; }
+.hljs-params { color: #c9d1d9; }
+.hljs-property { color: #79c0ff; }
 `
 
 // ── Image extraction ─────────────────────────────────────────────────────────
@@ -152,7 +258,7 @@ function extractImages(text: string): { cleanText: string; images: string[] } {
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MessageView(props: { messages: Message[], loading: boolean }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
@@ -171,10 +277,18 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
   })
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
+    <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
         <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
+      </Show>
+      <Show when={props.hasMore && !props.loading}>
+        <div style={{ 'text-align': 'center', padding: '12px' }}>
+          <button onClick={() => props.onLoadEarlier?.()} disabled={props.loadingMore}
+            style={{ background: '#1a1a2e', border: '1px solid #333', color: '#73b8ff', padding: '6px 16px', 'border-radius': '6px', 'font-size': '12px', cursor: props.loadingMore ? 'wait' : 'pointer' }}>
+            {props.loadingMore ? 'Loading...' : 'Load earlier messages'}
+          </button>
+        </div>
       </Show>
       {/* Lightbox */}
       <Show when={lightbox()}>
@@ -206,7 +320,22 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
               <For each={msg.content}>{(block) => {
                 if (block.type === 'text' && block.text) {
                   const display = hasImages ? cleanText : block.text
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el) }} /> : null
+                }
+                if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
+                  const q = block.input?.question || 'Claude is asking a question...'
+                  return (
+                    <div style={{ background: '#1a1a2e', border: '1px solid #c4993a', 'border-radius': '8px', padding: '12px', margin: '6px 0' }}>
+                      <div style={{ color: '#c4993a', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '6px' }}>QUESTION</div>
+                      <div style={{ color: '#e5e5e5', 'font-size': '14px', 'margin-bottom': '10px' }}>{q}</div>
+                      <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap' }}>
+                        <For each={['Yes', 'No', 'Continue']}>{(label) => (
+                          <button onClick={() => props.onAnswer?.(label)}
+                            style={{ background: '#333', border: '1px solid #555', color: '#e5e5e5', padding: '4px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}>{label}</button>
+                        )}</For>
+                      </div>
+                    </div>
+                  )
                 }
                 return renderBlock(block)
               }}</For>
@@ -218,6 +347,11 @@ export function MessageView(props: { messages: Message[], loading: boolean }) {
               <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
               </span>
+            )}
+            {!msg.uuid.startsWith('optimistic-') && (
+              <button onClick={() => props.onToggleStar?.(msg.uuid)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', 'font-size': '12px', padding: '0 2px', color: props.starred?.has(msg.uuid) ? '#c4993a' : '#333', opacity: props.starred?.has(msg.uuid) ? '1' : '0', transition: 'opacity 0.15s' }}
+                class="star-btn">{props.starred?.has(msg.uuid) ? '\u2605' : '\u2606'}</button>
             )}
           </div>
         </div>
