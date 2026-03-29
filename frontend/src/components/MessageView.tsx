@@ -138,7 +138,7 @@ function toolSummary(name: string, input: any): string {
 
 // ── Block renderers ─────────────────────────────────────────────────────────
 
-function renderBlock(block: ContentBlock) {
+function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void) {
   if (block.type === 'text' && block.text) {
     return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
   }
@@ -182,19 +182,27 @@ function renderBlock(block: ContentBlock) {
     )
   }
   if (block.type === 'tool_result') {
-    const rawContent = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((c: any) => c.text || '').join('') : ''
+    const contentArr = Array.isArray(block.content) ? block.content : typeof block.content === 'string' ? [{ type: 'text', text: block.content }] : []
+    const images = contentArr.filter((c: any) => c.type === 'image' && c.source?.data)
+    const rawContent = contentArr.filter((c: any) => c.type !== 'image').map((c: any) => c.text || '').join('')
     const raw = stripAnsi(rawContent)
     const isErr = block.is_error
+    const hasImages = images.length > 0
     const isLong = raw.length > 200
     const preview = raw.slice(0, 200)
     const lineCount = raw.split('\n').length
-    const label = isErr ? 'error' : `output${isLong ? ` (${lineCount} lines)` : ''}`
+    const label = isErr ? 'error' : hasImages ? `image${images.length > 1 ? 's' : ''}` : `output${isLong ? ` (${lineCount} lines)` : ''}`
     return (
-      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong}>
-        <summary style={{ padding: '2px 10px', background: '#111318', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666', cursor: isLong ? 'pointer' : 'default', 'list-style': isLong ? undefined : 'none' }}>
+      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong || hasImages}>
+        <summary style={{ padding: '2px 10px', background: '#111318', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666', cursor: isLong || hasImages ? 'pointer' : 'default', 'list-style': isLong || hasImages ? undefined : 'none' }}>
           {label}
-          {isLong && !isErr && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: '#555' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
+          {isLong && !isErr && !hasImages && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: '#555' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
         </summary>
+        {images.map((img: any) => (
+          <div style={{ padding: '6px 10px' }}>
+            <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
+          </div>
+        ))}
         {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
       </details>
     )
@@ -228,8 +236,8 @@ const markdownCSS = `
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
 }
-.markdown table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 0.9em; }
-.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+.markdown table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; white-space: nowrap; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
 .markdown a { color: #73b8ff; text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
@@ -342,11 +350,94 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           </button>
         </div>
       </Show>
-      {/* Lightbox */}
+      {/* Lightbox with pinch-to-zoom */}
       <Show when={lightbox()}>
-        <div onClick={() => setLightbox(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: 'zoom-out' }}>
-          <img src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px' }} />
-        </div>
+        {(() => {
+          const [scale, setScale] = createSignal(1)
+          const [tx, setTx] = createSignal(0)
+          const [ty, setTy] = createSignal(0)
+          let startDist = 0
+          let startScale = 1
+          let startTx = 0
+          let startTy = 0
+          let startMidX = 0
+          let startMidY = 0
+          let lastTap = 0
+          let moved = false
+
+          function dist(t: TouchList) {
+            const dx = t[1].clientX - t[0].clientX
+            const dy = t[1].clientY - t[0].clientY
+            return Math.sqrt(dx * dx + dy * dy)
+          }
+
+          function onTouch(e: TouchEvent) {
+            if (e.type === 'touchstart') {
+              moved = false
+              if (e.touches.length === 2) {
+                e.preventDefault()
+                startDist = dist(e.touches)
+                startScale = scale()
+                startTx = tx()
+                startTy = ty()
+                startMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+                startMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+              } else if (e.touches.length === 1 && scale() > 1) {
+                e.preventDefault()
+                startTx = tx()
+                startTy = ty()
+                startMidX = e.touches[0].clientX
+                startMidY = e.touches[0].clientY
+              }
+            } else if (e.type === 'touchmove') {
+              if (e.touches.length === 2) {
+                e.preventDefault()
+                moved = true
+                const newScale = Math.min(5, Math.max(1, startScale * (dist(e.touches) / startDist)))
+                setScale(newScale)
+                const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+                const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+                setTx(startTx + midX - startMidX)
+                setTy(startTy + midY - startMidY)
+              } else if (e.touches.length === 1 && scale() > 1) {
+                e.preventDefault()
+                moved = true
+                setTx(startTx + e.touches[0].clientX - startMidX)
+                setTy(startTy + e.touches[0].clientY - startMidY)
+              }
+            } else if (e.type === 'touchend') {
+              // Snap back if scale went below 1
+              if (scale() <= 1) { setScale(1); setTx(0); setTy(0) }
+            }
+          }
+
+          function onClick(e: MouseEvent) {
+            // Double-tap to zoom
+            const now = Date.now()
+            if (now - lastTap < 300) {
+              e.stopPropagation()
+              if (scale() > 1) { setScale(1); setTx(0); setTy(0) }
+              else { setScale(2.5) }
+              lastTap = 0
+              return
+            }
+            lastTap = now
+            // Single tap close (with delay to detect double-tap)
+            if (!moved && scale() <= 1) {
+              setTimeout(() => { if (Date.now() - lastTap >= 280) setLightbox(null) }, 300)
+            }
+          }
+
+          return (
+            <div
+              onClick={onClick}
+              onTouchStart={onTouch} onTouchMove={onTouch} onTouchEnd={onTouch}
+              style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.85)', 'z-index': '200', display: 'flex', 'align-items': 'center', 'justify-content': 'center', cursor: scale() > 1 ? 'grab' : 'zoom-out', 'touch-action': 'none' }}
+            >
+              <img src={lightbox()!} style={{ 'max-width': '95vw', 'max-height': '95vh', 'object-fit': 'contain', 'border-radius': '8px', transform: `translate(${tx()}px, ${ty()}px) scale(${scale()})`, 'transform-origin': 'center center', transition: scale() === 1 ? 'transform 0.2s ease' : 'none', 'pointer-events': 'none' }} draggable={false} />
+            </div>
+          )
+        })()}
       </Show>
 
       <For each={props.messages}>{(msg) => {
@@ -398,7 +489,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                     </div>
                   )
                 }
-                return renderBlock(block)
+                return renderBlock(block, setLightbox)
               }}</For>
             </div>
           </div>

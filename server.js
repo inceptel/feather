@@ -529,60 +529,37 @@ const server = http.createServer(app);
 // ── Terminal WebSocket ──────────────────────────────────────────────────────
 
 const wss = new WebSocketServer({ noServer: true });
-const sttWss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
-  } else if (req.url?.startsWith('/api/stt')) {
-    sttWss.handleUpgrade(req, socket, head, (ws) => sttWss.emit('connection', ws, req));
   } else {
     socket.destroy();
   }
 });
 
-// ── Deepgram STT WebSocket proxy ────────────────────────────────────────────
+// ── Deepgram batch transcription ────────────────────────────────────────────
 
-sttWss.on('connection', (client) => {
-  if (!DEEPGRAM_API_KEY) {
-    client.send(JSON.stringify({ error: 'No Deepgram API key configured' }));
-    client.close();
-    return;
-  }
-
-  const dgUrl = 'wss://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&interim_results=true&endpointing=300&smart_format=true&encoding=linear16&sample_rate=16000&channels=1';
-  const dg = new WS(dgUrl, { headers: { Authorization: `Token ${DEEPGRAM_API_KEY}` } });
-
-  dg.on('open', () => client.send(JSON.stringify({ type: 'ready' })));
-
-  dg.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === 'Results' && msg.channel?.alternatives?.[0]) {
-        const alt = msg.channel.alternatives[0];
-        client.send(JSON.stringify({
-          type: 'transcript',
-          text: alt.transcript || '',
-          is_final: msg.is_final,
-          speech_final: msg.speech_final,
-        }));
-      }
-    } catch {}
-  });
-
-  dg.on('close', () => { if (client.readyState === WS.OPEN) client.close(); });
-  dg.on('error', () => { if (client.readyState === WS.OPEN) client.close(); });
-
-  client.on('message', (data) => {
-    if (dg.readyState === WS.OPEN) dg.send(data);
-  });
-
-  client.on('close', () => {
-    if (dg.readyState === WS.OPEN) {
-      dg.send(JSON.stringify({ type: 'CloseStream' }));
-      dg.close();
+app.post('/api/transcribe', async (req, res) => {
+  if (!DEEPGRAM_API_KEY) return res.status(500).json({ error: 'No Deepgram API key configured' });
+  try {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const audio = Buffer.concat(chunks);
+    const contentType = req.headers['content-type'] || 'audio/webm';
+    const dgRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&smart_format=true', {
+      method: 'POST',
+      headers: { Authorization: `Token ${DEEPGRAM_API_KEY}`, 'Content-Type': contentType },
+      body: audio,
+    });
+    if (!dgRes.ok) {
+      const errText = await dgRes.text();
+      return res.status(dgRes.status).json({ error: errText });
     }
-  });
+    const data = await dgRes.json();
+    const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+    res.json({ transcript });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 wss.on('connection', (ws, req) => {

@@ -22,7 +22,7 @@
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
       -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
+      touch-action: pan-x pan-y;
       overscroll-behavior: none;
     }
   </style>
@@ -30,6 +30,8 @@
     // iOS PWA keyboard fix — pin the root to the visual viewport so it shrinks with the keyboard
     function syncViewport() {
       var vv = window.visualViewport;
+      // Skip if user is pinch-zoomed — don't resize layout during zoom
+      if (vv && vv.scale > 1.01) return;
       var h = vv ? vv.height : window.innerHeight;
       var root = document.getElementById('root');
       document.documentElement.style.setProperty('--vh', h * 0.01 + 'px');
@@ -45,6 +47,10 @@
       window.visualViewport.addEventListener('scroll', syncViewport);
     }
     window.addEventListener('resize', syncViewport);
+    // Prevent pinch-to-zoom (iOS Safari ignores user-scalable=no)
+    document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
+    document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
+    document.addEventListener('gestureend', function(e) { e.preventDefault(); });
     // Run after DOM ready
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', syncViewport);

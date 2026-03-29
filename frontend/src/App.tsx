@@ -91,6 +91,10 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [sseStatus, setSSEStatus] = createSignal<'connected' | 'reconnecting'>('connected')
   const [listening, setListening] = createSignal(false)
+  const [interimText, setInterimText] = createSignal('')
+  const [recordingTime, setRecordingTime] = createSignal(0)
+  const [transcribing, setTranscribing] = createSignal(false)
+  const [audioLevel, setAudioLevel] = createSignal(0)
   const [hasMore, setHasMore] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
@@ -100,8 +104,15 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
+  const [expanded, setExpanded] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
-  let recognition: any = null
+  let mediaRecorder: MediaRecorder | null = null
+  let audioChunks: Blob[] = []
+  let audioContext: AudioContext | null = null
+  let mediaStream: MediaStream | null = null
+  let recordingTimer: ReturnType<typeof setInterval> | null = null
+  let levelTimer: ReturnType<typeof requestAnimationFrame> | null = null
+  let analyser: AnalyserNode | null = null
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
@@ -281,25 +292,90 @@ export default function App() {
 
 
 
-  function toggleVoice() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!SR) return
-    if (listening()) { recognition?.stop(); setListening(false); return }
-    recognition = new SR()
-    recognition.continuous = true
-    recognition.interimResults = false
-    recognition.lang = 'en-US'
-    recognition.onresult = (e: any) => {
-      let t = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) t += e.results[i][0].transcript
+  function stopVoice() {
+    setListening(false)
+    setRecordingTime(0)
+    setAudioLevel(0)
+    setInterimText('')
+    if (recordingTimer) { clearInterval(recordingTimer); recordingTimer = null }
+    if (levelTimer) { cancelAnimationFrame(levelTimer); levelTimer = null }
+    if (audioContext) { audioContext.close(); audioContext = null }
+    analyser = null
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null }
+    mediaRecorder = null
+    audioChunks = []
+  }
+
+  async function toggleVoice() {
+    if (listening()) {
+      // Stop recording and transcribe
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop()
+      } else {
+        stopVoice()
       }
-      if (t) setText(prev => prev + (prev ? ' ' : '') + t)
+      return
     }
-    recognition.onend = () => setListening(false)
-    recognition.onerror = () => setListening(false)
-    recognition.start()
+
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+    } catch { return }
+
+    audioChunks = []
     setListening(true)
+    setRecordingTime(0)
+
+    // Timer
+    const start = Date.now()
+    recordingTimer = setInterval(() => setRecordingTime(Math.floor((Date.now() - start) / 1000)), 200)
+
+    // Audio level meter
+    audioContext = new AudioContext()
+    const source = audioContext.createMediaStreamSource(mediaStream)
+    analyser = audioContext.createAnalyser()
+    analyser.fftSize = 256
+    source.connect(analyser)
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+    function updateLevel() {
+      if (!analyser) return
+      analyser.getByteFrequencyData(dataArray)
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+      setAudioLevel(avg / 255)
+      levelTimer = requestAnimationFrame(updateLevel)
+    }
+    updateLevel()
+
+    // Record
+    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm' })
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data) }
+    mediaRecorder.onstop = async () => {
+      const blob = new Blob(audioChunks, { type: mediaRecorder!.mimeType })
+      const wasListening = listening()
+      stopVoice()
+      if (blob.size < 1000) return // too short, ignore
+
+      setTranscribing(true)
+      try {
+        const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob })
+        const data = await res.json()
+        if (data.transcript) {
+          const prev = text().trim()
+          setText(prev ? prev + ' ' + data.transcript : data.transcript)
+        } else if (data.error) {
+          console.error('Transcription error:', data.error)
+        }
+      } catch (err) {
+        console.error('Transcription failed:', err)
+        // Offer download so audio isn't lost
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = `voice-memo-${Date.now()}.webm`; a.click()
+        URL.revokeObjectURL(url)
+      } finally {
+        setTranscribing(false)
+      }
+    }
+    mediaRecorder.start(1000) // collect chunks every second
   }
 
   async function handleSend() {
@@ -540,7 +616,7 @@ export default function App() {
         </Show>
 
         {/* Content */}
-        <div style={{ flex: '1', overflow: 'hidden' }}>
+        <div style={{ flex: '1', overflow: 'hidden', display: expanded() ? 'none' : 'block' }}>
           <Show when={currentId()} fallback={
             <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444' }}>
               <div style={{ 'text-align': 'center' }}>
@@ -602,7 +678,7 @@ export default function App() {
               )}</For>
             </div>
           </Show>
-          <div style={{ padding: '8px 12px', 'padding-bottom': 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', gap: '8px', 'align-items': 'flex-end', 'flex-shrink': '0', position: 'relative' }}>
+          <div style={{ padding: expanded() ? '0' : '8px 12px', 'padding-bottom': expanded() ? '0' : 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', 'flex-direction': expanded() ? 'column' : 'row', gap: expanded() ? '0' : '8px', 'align-items': expanded() ? 'stretch' : 'flex-end', 'flex-shrink': '0', 'flex-grow': expanded() ? '1' : '0', position: 'relative', ...(expanded() ? { 'min-height': '0' } : {}) }}>
             <Show when={historyOpen()}>
               <div onClick={() => setHistoryOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '49' }} />
               <div style={{ position: 'absolute', bottom: '100%', left: '0', right: '0', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px 8px 0 0', 'max-height': '200px', 'overflow-y': 'auto', 'z-index': '50' }}>
@@ -612,13 +688,17 @@ export default function App() {
                 )}</For>
               </div>
             </Show>
-            <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
-            <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
-            <button onClick={toggleVoice} style={{ background: 'none', border: 'none', color: listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'color 0.15s' }} title="Voice input">{'\uD83C\uDF99'}</button>
+            <Show when={!expanded()}>
+              <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
+              <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
+              <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={transcribing() ? 'Transcribing...' : listening() ? 'Stop & transcribe' : 'Record voice memo'}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
+              <button onClick={() => { setExpanded(true); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.focus() } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Expand editor">{'\u2922'}</button>
+            </Show>
             <textarea ref={textareaRef} value={text()}
-              onInput={(e) => { setText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
+              onInput={(e) => { setText(e.target.value); if (!expanded()) { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' } }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); setExpanded(false) }
+                if (e.key === 'Escape') { setExpanded(false) }
                 if (e.key === 'ArrowUp' && textareaRef?.selectionStart === 0) {
                   const h = getHistory(); if (h.length === 0) return
                   const idx = historyIdx() === -1 ? h.length - 1 : Math.max(0, historyIdx() - 1)
@@ -633,9 +713,19 @@ export default function App() {
               }}
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
               enterkeyhint="send"
-              placeholder="Send a message..." rows={1}
-              style={{ flex: '1', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '12px', padding: '10px 14px', color: '#e5e5e5', 'font-size': '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.4', 'max-height': '120px', '-webkit-appearance': 'none' }} />
-            <button onClick={handleSend} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
+              placeholder={transcribing() ? 'Transcribing...' : listening() ? `Recording ${Math.floor(recordingTime() / 60)}:${(recordingTime() % 60).toString().padStart(2, '0')}` : "Send a message..."} rows={expanded() ? undefined : 1}
+              style={{ flex: expanded() ? '1' : undefined, width: expanded() ? '100%' : undefined, 'flex-grow': expanded() ? '1' : undefined, background: '#1a1a2e', border: expanded() ? 'none' : '1px solid #333', 'border-radius': expanded() ? '0' : '12px', padding: expanded() ? '14px 16px' : '10px 14px', color: '#e5e5e5', 'font-size': expanded() ? '18px' : '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.5', 'max-height': expanded() ? 'none' : '120px', '-webkit-appearance': 'none', ...(listening() ? { '::placeholder': { color: '#73b8ff' } } : {}), ...(expanded() ? { 'min-height': '0', 'overflow-y': 'auto' } : { flex: '1' }) }} />
+            <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', padding: expanded() ? '8px 12px' : '0', 'padding-bottom': expanded() ? 'max(8px, env(safe-area-inset-bottom))' : '0', background: expanded() ? '#0a0e14' : 'transparent', 'border-top': expanded() ? '1px solid #1e1e1e' : 'none', 'justify-content': expanded() ? 'space-between' : 'flex-start' }}>
+              <Show when={expanded()}>
+                <div style={{ display: 'flex', gap: '8px', 'align-items': 'center' }}>
+                  <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
+                  <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
+                  <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={transcribing() ? 'Transcribing...' : listening() ? 'Stop & transcribe' : 'Record voice memo'}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
+                  <button onClick={() => { setExpanded(false); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px' } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 6px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-height': '42px' }} title="Collapse">{'\u2193'} Collapse</button>
+                </div>
+              </Show>
+              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
+            </div>
           </div>
         </Show>
       </div>
