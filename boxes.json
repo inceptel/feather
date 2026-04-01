@@ -1,0 +1,4 @@
+{
+  "testbox": { "url": "http://127.0.0.1:9001", "label": "Testbox" },
+  "mac-mini": { "url": "http://127.0.0.1:9002", "label": "Mac Mini" }
+}

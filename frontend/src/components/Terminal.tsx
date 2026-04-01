@@ -10,7 +10,7 @@ function ensureInit() {
   return wasmReady
 }
 
-export function Terminal(props: { sessionId: string | null }) {
+export function Terminal(props: { sessionId: string | null, box?: string }) {
   let containerRef: HTMLDivElement | undefined
   let term: GhosttyTerm | null = null
   let fitAddon: FitAddon | null = null
@@ -18,7 +18,7 @@ export function Terminal(props: { sessionId: string | null }) {
 
   async function connect(sessionId: string) {
     disconnect()
-    await ensureInit()
+    try { await ensureInit() } catch { return }
 
     term = new GhosttyTerm({
       theme: { background: '#0a0e14', foreground: '#e5e5e5', cursor: '#4aba6a' },
@@ -34,7 +34,8 @@ export function Terminal(props: { sessionId: string | null }) {
       fitAddon.fit()
     }
 
-    ws = new WebSocket(`${BASE_WS}?session=${sessionId}`)
+    const boxParam = props.box && props.box !== 'local' ? `&box=${props.box}` : ''
+    ws = new WebSocket(`${BASE_WS}?session=${sessionId}${boxParam}`)
     ws.onmessage = (e) => term?.write(e.data)
     ws.onclose = () => term?.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n')
 
@@ -72,13 +73,15 @@ export function Terminal(props: { sessionId: string | null }) {
   })
 
   return (
-    <div ref={containerRef}
-      onKeyDown={(e) => e.stopPropagation()}
-      onKeyPress={(e) => e.stopPropagation()}
-      onKeyUp={(e) => e.stopPropagation()}
-      style={{
-        height: '100%', width: '100%', background: '#0a0e14',
-        padding: '4px',
-    }} />
+    <>
+      <div ref={containerRef}
+        onKeyDown={(e) => e.stopPropagation()}
+        onKeyPress={(e) => e.stopPropagation()}
+        onKeyUp={(e) => e.stopPropagation()}
+        style={{
+          height: '100%', width: '100%', background: '#0a0e14',
+          padding: '4px',
+      }} />
+    </>
   )
 }

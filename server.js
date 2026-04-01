@@ -24,6 +24,50 @@ const HOME = process.env.HOME || '/home/user';
 const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
+const BOXES_FILE = path.resolve(import.meta.dirname, 'boxes.json');
+
+// ── Remote box helpers ────────────────────────────────────────────────────
+
+function readBoxes() {
+  try { return JSON.parse(fs.readFileSync(BOXES_FILE, 'utf8')); } catch { return {}; }
+}
+
+async function proxyToBox(boxUrl, req, res) {
+  const u = new URL(req.originalUrl, 'http://x');
+  u.searchParams.delete('box');
+  const url = `${boxUrl}${u.pathname}${u.search}`;
+  const isSSE = req.headers.accept?.includes('text/event-stream');
+  try {
+    const fetchOpts = { method: req.method, headers: {} };
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      fetchOpts.headers['content-type'] = 'application/json';
+      fetchOpts.body = JSON.stringify(req.body);
+    }
+    const upRes = await fetch(url, fetchOpts);
+    const headers = {};
+    upRes.headers.forEach((v, k) => { headers[k] = v; });
+    if (isSSE) headers['x-accel-buffering'] = 'no';
+    res.writeHead(upRes.status, headers);
+    if (isSSE || upRes.headers.get('content-type')?.includes('text/event-stream')) {
+      // Stream SSE responses
+      const reader = upRes.body.getReader();
+      const pump = async () => {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { res.end(); break; }
+          res.write(value);
+        }
+      };
+      pump().catch(() => {});
+      req.on('close', () => { try { reader.cancel(); } catch {} });
+    } else {
+      const buf = Buffer.from(await upRes.arrayBuffer());
+      res.end(buf);
+    }
+  } catch (e) {
+    if (!res.headersSent) res.status(502).json({ error: `Box unreachable: ${e.message}` });
+  }
+}
 
 // ── JSONL parsing ───────────────────────────────────────────────────────────
 
@@ -300,17 +344,76 @@ app.use(compression({
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-app.get('/api/sessions', (req, res) => {
-  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+app.get('/api/boxes', async (_req, res) => {
+  const boxes = readBoxes();
+  const status = { local: 'ok' };
+  await Promise.allSettled(
+    Object.entries(boxes).map(async ([name, box]) => {
+      try {
+        const r = await fetch(`${box.url}/api/health`, { signal: AbortSignal.timeout(2000) });
+        status[name] = r.ok ? 'ok' : 'error';
+      } catch { status[name] = 'unreachable'; }
+    })
+  );
+  res.json({ boxes: { local: { url: null, label: 'Local' }, ...boxes }, status });
+});
+
+app.get('/api/sessions', async (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const boxFilter = req.query.box;
+  try {
+    // If requesting a specific remote box, proxy directly
+    const boxes = readBoxes();
+    if (boxFilter && boxFilter !== 'local' && boxFilter !== 'all' && boxes[boxFilter]) {
+      return proxyToBox(boxes[boxFilter].url, req, res);
+    }
+
+    // Local sessions
+    const localSessions = (!boxFilter || boxFilter === 'local' || boxFilter === 'all')
+      ? discoverSessions(limit).map(s => ({ ...s, box: 'local', boxLabel: 'Local' }))
+      : [];
+
+    // If only local requested, return immediately
+    if (boxFilter === 'local' || Object.keys(boxes).length === 0) {
+      return res.json({ sessions: localSessions });
+    }
+
+    // Fetch remote boxes in parallel with timeout
+    const remoteResults = await Promise.allSettled(
+      Object.entries(boxes).map(async ([name, box]) => {
+        const r = await fetch(`${box.url}/api/sessions?limit=${limit}`, { signal: AbortSignal.timeout(2000) });
+        const data = await r.json();
+        return (data.sessions || []).map(s => ({ ...s, box: name, boxLabel: box.label }));
+      })
+    );
+
+    const remoteSessions = remoteResults
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value);
+
+    const all = [...localSessions, ...remoteSessions]
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      .slice(0, limit);
+
+    const boxStatus = { local: 'ok' };
+    Object.keys(boxes).forEach((name, i) => {
+      boxStatus[name] = remoteResults[i].status === 'fulfilled' ? 'ok' : 'unreachable';
+    });
+
+    res.json({ sessions: all, boxStatus });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/sessions/:id/messages', (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
   res.json({ messages, hasMore });
 });
 
 app.get('/api/sessions/:id/stream', (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('event: connected\ndata: {}\n\n');
   const sid = req.params.id;
@@ -345,26 +448,36 @@ app.get('/api/sessions/:id/stream', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
+  const box = req.query.box || req.body.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   try { spawnSession(req.body.id, req.body.cwd); res.json({ id: req.body.id, status: 'starting' }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/send', async (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   try { await sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/resume', (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   try { resumeSession(req.params.id, req.body?.cwd); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/interrupt', (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/delete', (req, res) => {
+  const box = req.query.box; const boxes = readBoxes();
+  if (box && box !== 'local' && boxes[box]) return proxyToBox(boxes[box].url, req, res);
   try {
     const id = req.params.id;
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -532,6 +645,27 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
+    // Check for ?box= param to proxy to remote
+    const u = new URL(req.url, 'http://x');
+    const box = u.searchParams.get('box');
+    const boxes = readBoxes();
+    if (box && box !== 'local' && boxes[box]) {
+      // WebSocket proxy to remote box
+      u.searchParams.delete('box');
+      const remoteUrl = boxes[box].url.replace(/^http/, 'ws') + u.pathname + u.search;
+      console.log('[ws-proxy] connecting to remote:', remoteUrl);
+      const remote = new WS(remoteUrl);
+      remote.on('open', () => {
+        wss.handleUpgrade(req, socket, head, (clientWs) => {
+          remote.on('message', (data) => { try { clientWs.send(typeof data === 'string' ? data : data.toString()); } catch {} });
+          clientWs.on('message', (data) => { try { remote.send(typeof data === 'string' ? data : data.toString()); } catch {} });
+          remote.on('close', () => clientWs.close());
+          clientWs.on('close', () => remote.close());
+        });
+      });
+      remote.on('error', () => socket.destroy());
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else {
     socket.destroy();
