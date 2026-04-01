@@ -11,3 +11,4 @@ missing-features.*
 generate-pdf.mjs
 MISSING-FEATURES.md
 issues/
+.gstack/

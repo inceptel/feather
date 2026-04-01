@@ -303,8 +303,13 @@ function extractImages(text: string): { cleanText: string; images: string[]; fil
 
 // ── Component ───────────────────────────────────────────────────────────────
 
+function fileUrl(absPath: string): string {
+  return `${location.pathname.replace(/\/+$/, '')}/api/file?path=${encodeURIComponent(absPath)}`
+}
+
 export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
+  const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
   const [unreadCount, setUnreadCount] = createSignal(0)
@@ -440,6 +445,17 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         })()}
       </Show>
 
+      {/* PDF viewer modal */}
+      <Show when={pdfViewer()}>
+        <div style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.92)', 'z-index': '200', display: 'flex', 'flex-direction': 'column' }}>
+          <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '8px 12px', background: '#111' }}>
+            <span style={{ color: '#999', 'font-size': '13px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{pdfViewer()!.split('/').pop()}</span>
+            <button onClick={() => setPdfViewer(null)} style={{ background: 'none', border: 'none', color: '#e5e5e5', 'font-size': '24px', cursor: 'pointer', padding: '4px 8px', 'line-height': '1' }}>&times;</button>
+          </div>
+          <iframe src={pdfViewer()!} style={{ flex: '1', border: 'none', width: '100%', background: '#fff' }} />
+        </div>
+      </Show>
+
       <For each={props.messages}>{(msg) => {
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
@@ -461,12 +477,18 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
               <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasAttachments ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
             )}</For>
             {/* File attachments */}
-            <For each={files}>{(f) => (
-              <a href={f.path} target="_blank" rel="noopener" style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: '#73b8ff', 'font-size': '12px' }}>
-                <span style={{ 'font-size': '16px' }}>{f.name.endsWith('.pdf') ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
-                <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
-              </a>
-            )}</For>
+            <For each={files}>{(f) => {
+              const isPdf = f.name.toLowerCase().endsWith('.pdf')
+              const url = fileUrl(f.path)
+              return (
+                <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
+                  onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
+                  style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: '#73b8ff', 'font-size': '12px' }}>
+                  <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
+                  <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
+                </a>
+              )
+            }}</For>
             {/* Text + other blocks */}
             <div style={hasAttachments ? { padding: '4px 8px 4px' } : {}}>
               <For each={msg.content}>{(block) => {

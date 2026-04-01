@@ -467,6 +467,20 @@ app.get('/api/sessions/:id/export', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── File serving (for attached files by absolute path) ─────────────────────
+
+app.get('/api/file', (req, res) => {
+  const fpath = req.query.path;
+  if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+  if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
+  try {
+    const stat = fs.statSync(fpath);
+    if (!stat.isFile()) return res.status(400).json({ error: 'not a file' });
+    if (stat.size > 100 * 1024 * 1024) return res.status(413).json({ error: 'file too large' });
+    res.sendFile(fpath);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/open-in-editor', (req, res) => {
   try {
     const fpath = req.body?.path;
