@@ -2,6 +2,7 @@ declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
+import CaptainLog from './components/CaptainLog'
 import type { SessionMeta, Message } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
 
@@ -81,7 +82,7 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'captainlog'>('chat')
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [uploading, setUploading] = createSignal(false)
   const [working, setWorking] = createSignal(false)
@@ -606,6 +607,7 @@ export default function App() {
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
             <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
             <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+            <button onClick={() => setTab('captainlog')} style={tabStyle('captainlog')}>CaptainLog</button>
             <span style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#333' }}>{__BUILD_TIME__}</span>
           </div>
         </Show>
@@ -650,6 +652,9 @@ export default function App() {
             </div>
             <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
               <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
+            </div>
+            <div style={{ display: tab() === 'captainlog' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+              <CaptainLog active={tab() === 'captainlog'} />
             </div>
           </Show>
         </div>

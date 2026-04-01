@@ -522,6 +522,57 @@ setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: VERSION, uptime: process.uptime() }));
 
+// ── CaptainLog (OneNote) API ────────────────────────────────────────────────
+
+app.get('/api/captainlog', (_req, res) => {
+  try {
+    const stateFile = path.join(HOME, '.onenote-chat/state.json');
+    if (!fs.existsSync(stateFile)) return res.status(404).json({ error: 'No CaptainLog configured' });
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    res.json(state);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/captainlog/content', async (_req, res) => {
+  try {
+    const result = execSync(`python3 -c "
+import sys; sys.path.insert(0, '${HOME}/onenote-chat')
+from onenote_core import get_client, OneNoteAPI
+api = get_client()
+state = OneNoteAPI.load_state()
+print(api.get_page_content(state['page_id']))
+"`, { encoding: 'utf8', timeout: 15000 });
+    res.type('text/html').send(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/captainlog/text', async (_req, res) => {
+  try {
+    const result = execSync(`python3 -c "
+import sys; sys.path.insert(0, '${HOME}/onenote-chat')
+from onenote_core import get_client, OneNoteAPI
+api = get_client()
+state = OneNoteAPI.load_state()
+print(api.get_page_text(state['page_id']))
+"`, { encoding: 'utf8', timeout: 15000 });
+    res.type('text/plain').send(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/captainlog/meta', async (_req, res) => {
+  try {
+    const result = execSync(`python3 -c "
+import sys, json; sys.path.insert(0, '${HOME}/onenote-chat')
+from onenote_core import get_client, OneNoteAPI
+api = get_client()
+state = OneNoteAPI.load_state()
+meta = api.get_page_metadata(state['page_id'])
+print(json.dumps(meta))
+"`, { encoding: 'utf8', timeout: 15000 });
+    res.json(JSON.parse(result));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.use(express.static(STATIC_DIR, {
   maxAge: '0',
   setHeaders(res, filePath) {
