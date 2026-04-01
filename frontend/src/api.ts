@@ -5,6 +5,13 @@ export interface SessionMeta {
   title: string
   updatedAt: string
   isActive: boolean
+  agent?: string
+}
+
+export interface AgentInfo {
+  id: string
+  label: string
+  available: boolean
 }
 
 export interface ContentBlock {
@@ -23,6 +30,12 @@ export interface Message {
   timestamp: string
   content: ContentBlock[]
   delivery?: 'sent' | 'delivered'
+}
+
+export async function fetchAgents(): Promise<AgentInfo[]> {
+  const r = await fetch(`${BASE}/api/agents`)
+  if (!r.ok) return [{ id: 'claude', label: 'Claude Code', available: true }]
+  return (await r.json()).agents
 }
 
 export async function fetchSessions(): Promise<SessionMeta[]> {
@@ -44,9 +57,9 @@ export const sendInput = (id: string, text: string): Promise<{ ok: boolean, sent
   fetch(`${BASE}/api/sessions/${id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
     .then(r => r.json())
 
-export async function createSession(cwd?: string): Promise<string> {
+export async function createSession(cwd?: string, agent?: string): Promise<string> {
   const id = crypto.randomUUID()
-  await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cwd }) })
+  await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cwd, agent }) })
   return id
 }
 

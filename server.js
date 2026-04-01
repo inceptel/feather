@@ -6,7 +6,7 @@ import path from 'path';
 import { execFileSync, execSync } from 'child_process';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
-import { parseMessage } from './lib/parse.js';
+import { parseMessage, parseOmpMessage, parseMessageForAgent } from './lib/parse.js';
 
 // Load ~/.env if present
 try {
@@ -22,18 +22,46 @@ const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
 const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
+const OMP_SESSIONS = path.join(HOME, '.feather/omp-sessions');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 
-// ── JSONL parsing ───────────────────────────────────────────────────────────
+// Ensure omp session directory exists
+try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
 
-function findJsonlPath(sessionId) {
+// ── JSONL path lookup ──────────────────────────────────────────────────────
+
+function findClaudeJsonlPath(sessionId) {
   if (!fs.existsSync(CLAUDE_PROJECTS)) return null;
   for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
     const p = path.join(CLAUDE_PROJECTS, dir, `${sessionId}.jsonl`);
     if (fs.existsSync(p)) return p;
   }
   return null;
+}
+
+function findOmpJsonlPath(sessionId) {
+  const dir = path.join(OMP_SESSIONS, sessionId);
+  if (!fs.existsSync(dir)) return null;
+  try {
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+    if (files.length === 0) return null;
+    // Most recent JSONL (omp names them {timestamp}_{snowflake}.jsonl)
+    files.sort().reverse();
+    return path.join(dir, files[0]);
+  } catch { return null; }
+}
+
+function findJsonlPath(sessionId, agent) {
+  if (agent === 'omp') return findOmpJsonlPath(sessionId);
+  if (agent === 'claude') return findClaudeJsonlPath(sessionId);
+  // Unknown agent — try both
+  return findClaudeJsonlPath(sessionId) || findOmpJsonlPath(sessionId);
+}
+
+function getAgentForSession(sessionId) {
+  const meta = readMeta();
+  return meta[sessionId]?.agent || 'claude';
 }
 
 // ── Session metadata ───────────────────────────────────────────────────────
@@ -50,12 +78,13 @@ function writeMeta(meta) {
 }
 
 function getMessages(sessionId, limit = 100, before = 0) {
-  const fpath = findJsonlPath(sessionId);
+  const agent = getAgentForSession(sessionId);
+  const fpath = findJsonlPath(sessionId, agent);
   if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
   const lines = fs.readFileSync(fpath, 'utf8').split('\n').filter(Boolean);
   const msgs = [];
   for (const line of lines) {
-    const m = parseMessage(line);
+    const m = parseMessageForAgent(line, agent);
     if (m) msgs.push(m);
   }
   if (before > 0) {
@@ -80,68 +109,108 @@ function getActiveTmuxSessions() {
   } catch { return new Set(); }
 }
 
-function discoverSessions(limit = 50) {
-  if (!fs.existsSync(CLAUDE_PROJECTS)) return [];
-
-  // Collect all JSONL files with mtime (cheap stat only, no reads yet)
-  const candidates = [];
-  for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
-    const dirPath = path.join(CLAUDE_PROJECTS, dir);
+function extractClaudeTitle(buf) {
+  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
     try {
-      for (const file of fs.readdirSync(dirPath)) {
-        if (!file.endsWith('.jsonl')) continue;
-        const fpath = path.join(dirPath, file);
-        try {
-          const stat = fs.statSync(fpath);
-          if (stat.size < 50) continue;
-          candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime });
-        } catch {}
+      const d = JSON.parse(line);
+      if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
+        let text = '';
+        if (typeof d.message.content === 'string') text = d.message.content;
+        else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
+        text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
+        if (text.startsWith('<command-message>')) {
+          const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
+          const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
+          if (argsMatch?.[1]?.trim()) return `${nameMatch?.[1] || '/cmd'} ${argsMatch[1].trim()}`.slice(0, 80);
+          continue;
+        }
+        if (text && !text.startsWith('<')) return text.slice(0, 80);
       }
     } catch {}
   }
+  return null;
+}
 
-  // Sort by mtime descending, take top N (avoid reading 7000+ files)
+function extractOmpTitle(buf) {
+  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+    try {
+      const d = JSON.parse(line);
+      // omp session header has title
+      if (d.type === 'session' && d.title) return d.title.slice(0, 80);
+      // Fall back to first user message
+      if (d.type === 'message' && d.message?.role === 'user') {
+        const content = d.message.content;
+        let text = '';
+        if (typeof content === 'string') text = content;
+        else if (Array.isArray(content)) text = content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
+        text = text.trim();
+        if (text) return text.slice(0, 80);
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function discoverSessions(limit = 50) {
+  const candidates = [];
+  const meta = readMeta();
+
+  // Claude sessions
+  if (fs.existsSync(CLAUDE_PROJECTS)) {
+    for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
+      const dirPath = path.join(CLAUDE_PROJECTS, dir);
+      try {
+        for (const file of fs.readdirSync(dirPath)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const fpath = path.join(dirPath, file);
+          try {
+            const stat = fs.statSync(fpath);
+            if (stat.size < 50) continue;
+            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude' });
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
+  // omp sessions
+  if (fs.existsSync(OMP_SESSIONS)) {
+    for (const dir of fs.readdirSync(OMP_SESSIONS)) {
+      const dirPath = path.join(OMP_SESSIONS, dir);
+      try {
+        if (!fs.statSync(dirPath).isDirectory()) continue;
+        const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+        if (files.length === 0) continue;
+        files.sort().reverse();
+        const fpath = path.join(dirPath, files[0]);
+        const stat = fs.statSync(fpath);
+        if (stat.size < 50) continue;
+        candidates.push({ id: dir, fpath, mtime: stat.mtime, agent: 'omp' });
+      } catch {}
+    }
+  }
+
+  // Sort by mtime descending, take top N
   candidates.sort((a, b) => b.mtime - a.mtime);
   const top = candidates.slice(0, limit);
 
-  // One tmux call to get all active sessions
   const active = getActiveTmuxSessions();
 
-  // Now read titles only for the top N
-  const meta = readMeta();
   const sessions = [];
-  for (const { id, fpath, mtime } of top) {
+  for (const { id, fpath, mtime, agent } of top) {
     try {
       const fd = fs.openSync(fpath, 'r');
       const buf = Buffer.alloc(Math.min(16384, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
-      let title = null;
-      for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
-        try {
-          const d = JSON.parse(line);
-          if (d.type === 'user' && !d.isMeta && !d.isSidechain && d.message?.content) {
-            let text = '';
-            if (typeof d.message.content === 'string') text = d.message.content;
-            else if (Array.isArray(d.message.content)) text = d.message.content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
-            text = text.replace(/\[Attached (?:image|file): [^\]]+\]\s*(?:\([^)]*\))?/g, '').trim();
-            // Extract title from /command args if message is a skill invocation
-            if (text.startsWith('<command-message>')) {
-              const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
-              const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
-              if (argsMatch?.[1]?.trim()) { title = `${nameMatch?.[1] || '/cmd'} ${argsMatch[1].trim()}`.slice(0, 80); break; }
-              continue;
-            }
-            if (text && !text.startsWith('<')) { title = text.slice(0, 80); break; }
-          }
-        } catch {}
-      }
+      const title = agent === 'omp' ? extractOmpTitle(buf) : extractClaudeTitle(buf);
 
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
+        agent,
       });
     } catch {}
   }
@@ -158,9 +227,9 @@ function tmuxIsActive(id) {
   catch { return false; }
 }
 
-function launchClaude(name, claudeArgs, cwd) {
+function launchInTmux(name, cmd, cwd) {
   try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "bash --rcfile ~/.bashrc -ic 'claude ${claudeArgs} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
+  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "${cmd}" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
   for (const delay of [3000, 5000, 8000]) {
     setTimeout(() => {
       try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {}
@@ -168,8 +237,52 @@ function launchClaude(name, claudeArgs, cwd) {
   }
 }
 
-function spawnSession(id, cwd) { launchClaude(tmuxName(id), `--session-id ${id}`, cwd); }
-function resumeSession(id, cwd) { launchClaude(tmuxName(id), `--resume ${id}`, cwd); }
+function spawnSession(id, cwd, agent = 'claude') {
+  const name = tmuxName(id);
+  // Persist agent type in metadata
+  const meta = readMeta();
+  meta[id] = { ...(meta[id] || {}), agent };
+  writeMeta(meta);
+
+  if (agent === 'omp') {
+    const sessionDir = path.join(OMP_SESSIONS, id);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    watchOmpSessionDir(sessionDir, id);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp --session-dir ${sessionDir} --allow-home'`, cwd);
+  } else {
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
+  }
+}
+
+function resumeSession(id, cwd) {
+  const agent = getAgentForSession(id);
+  const name = tmuxName(id);
+  if (agent === 'omp') {
+    const sessionDir = path.join(OMP_SESSIONS, id);
+    // Read the omp Snowflake ID from the JSONL header for resume
+    const ompId = getOmpSessionId(id);
+    const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
+    watchOmpSessionDir(sessionDir, id);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} --session-dir ${sessionDir} --allow-home'`, cwd);
+  } else {
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
+  }
+}
+
+function getOmpSessionId(featherId) {
+  const fpath = findOmpJsonlPath(featherId);
+  if (!fpath) return null;
+  try {
+    const fd = fs.openSync(fpath, 'r');
+    const buf = Buffer.alloc(Math.min(4096, fs.fstatSync(fd).size));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const firstLine = buf.toString('utf8').split('\n')[0];
+    const d = JSON.parse(firstLine);
+    if (d.type === 'session' && d.id) return d.id;
+  } catch {}
+  return null;
+}
 
 async function sendInput(id, text) {
   if (!tmuxIsActive(id)) {
@@ -202,7 +315,8 @@ const sseClients = new Map(); // sessionId -> Set<res>
 function broadcast(sessionId, line, offset) {
   const clients = sseClients.get(sessionId);
   if (!clients || clients.size === 0) return;
-  const parsed = parseMessage(line);
+  const agent = getAgentForSession(sessionId);
+  const parsed = parseMessageForAgent(line, agent);
   if (!parsed) return;
   const chunk = `id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`;
   for (const res of clients) {
@@ -227,9 +341,9 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
   }
 }
 
-function processFileChange(filePath) {
+function processFileChange(filePath, sessionIdOverride) {
   if (!filePath.endsWith('.jsonl')) return;
-  const sessionId = path.basename(filePath, '.jsonl');
+  const sessionId = sessionIdOverride || path.basename(filePath, '.jsonl');
   const currentOffset = fileOffsets.get(sessionId) || 0;
   try {
     const stat = fs.statSync(filePath);
@@ -249,6 +363,41 @@ function processFileChange(filePath) {
     }
     fileOffsets.set(sessionId, currentOffset + Buffer.byteLength(complete));
   } catch {}
+}
+
+// ── omp session dir watchers ────────────────────────────────────────────────
+
+const watchedOmpDirs = new Set();
+
+function watchOmpSessionDir(dirPath, featherId) {
+  if (watchedOmpDirs.has(dirPath)) return;
+  watchedOmpDirs.add(dirPath);
+  try {
+    fs.watch(dirPath, (event, filename) => {
+      if (!filename?.endsWith('.jsonl')) return;
+      const full = path.join(dirPath, filename);
+      if (!fileOffsets.has(featherId)) fileOffsets.set(featherId, 0);
+      processFileChange(full, featherId);
+    });
+  } catch {}
+}
+
+// Watch existing omp session dirs on startup
+if (fs.existsSync(OMP_SESSIONS)) {
+  for (const dir of fs.readdirSync(OMP_SESSIONS)) {
+    const dirPath = path.join(OMP_SESSIONS, dir);
+    try {
+      if (fs.statSync(dirPath).isDirectory()) {
+        const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+        if (files.length > 0) {
+          files.sort().reverse();
+          const fpath = path.join(dirPath, files[0]);
+          try { fileOffsets.set(dir, fs.statSync(fpath).size); } catch {}
+        }
+        watchOmpSessionDir(dirPath, dir);
+      }
+    } catch {}
+  }
 }
 
 // Watch each project subdirectory with fs.watch
@@ -318,7 +467,8 @@ app.get('/api/sessions/:id/stream', (req, res) => {
   // Replay missed messages from lastEventId (byte offset)
   const lastId = parseInt(req.query.lastEventId || req.headers['last-event-id'] || '0');
   if (lastId > 0) {
-    const fpath = findJsonlPath(sid);
+    const agent = getAgentForSession(sid);
+    const fpath = findJsonlPath(sid, agent);
     if (fpath) {
       try {
         const stat = fs.statSync(fpath);
@@ -330,7 +480,7 @@ app.get('/api/sessions/:id/stream', (req, res) => {
           let offset = lastId;
           for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
             offset += Buffer.byteLength(line + '\n');
-            const parsed = parseMessage(line);
+            const parsed = parseMessageForAgent(line, agent);
             if (parsed) res.write(`id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`);
           }
         }
@@ -345,8 +495,11 @@ app.get('/api/sessions/:id/stream', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  try { spawnSession(req.body.id, req.body.cwd); res.json({ id: req.body.id, status: 'starting' }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const agent = req.body.agent || 'claude';
+    spawnSession(req.body.id, req.body.cwd, agent);
+    res.json({ id: req.body.id, status: 'starting', agent });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/send', async (req, res) => {
@@ -367,9 +520,15 @@ app.post('/api/sessions/:id/interrupt', (req, res) => {
 app.post('/api/sessions/:id/delete', (req, res) => {
   try {
     const id = req.params.id;
+    const agent = getAgentForSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
-    const fpath = findJsonlPath(id);
-    if (fpath) fs.unlinkSync(fpath);
+    if (agent === 'omp') {
+      const dir = path.join(OMP_SESSIONS, id);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    } else {
+      const fpath = findJsonlPath(id, agent);
+      if (fpath) fs.unlinkSync(fpath);
+    }
     const meta = readMeta();
     delete meta[id];
     writeMeta(meta);
@@ -390,8 +549,17 @@ app.post('/api/sessions/:id/rename', (req, res) => {
 
 app.post('/api/sessions/:id/fork', (req, res) => {
   try {
+    const agent = getAgentForSession(req.params.id);
     const forkName = `feather-f${Date.now().toString(36)}`;
-    launchClaude(forkName, `--resume ${req.params.id} --fork-session`, req.body?.cwd);
+    if (agent === 'omp') {
+      // omp doesn't have --fork-session; just resume in a new tmux
+      const sessionDir = path.join(OMP_SESSIONS, req.params.id);
+      const ompId = getOmpSessionId(req.params.id);
+      const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
+      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
+    } else {
+      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
+    }
     res.json({ ok: true, tmux: forkName });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -498,8 +666,10 @@ function reapIdleSessions() {
   const active = getActiveTmuxSessions();
   if (active.size === 0) return;
   const now = Date.now();
+
+  // Reap Claude sessions
   let dirs;
-  try { dirs = fs.readdirSync(CLAUDE_PROJECTS); } catch { return; }
+  try { dirs = fs.readdirSync(CLAUDE_PROJECTS); } catch { dirs = []; }
   for (const dir of dirs) {
     const dirPath = path.join(CLAUDE_PROJECTS, dir);
     try {
@@ -516,11 +686,41 @@ function reapIdleSessions() {
       }
     } catch {}
   }
+
+  // Reap omp sessions
+  try {
+    for (const dir of fs.readdirSync(OMP_SESSIONS)) {
+      if (!active.has(dir.slice(0, 8))) continue;
+      const dirPath = path.join(OMP_SESSIONS, dir);
+      const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+      if (files.length === 0) continue;
+      files.sort().reverse();
+      const stat = fs.statSync(path.join(dirPath, files[0]));
+      if (now - stat.mtimeMs > IDLE_MS) {
+        const name = tmuxName(dir);
+        try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+        console.log(`[reaper] killed idle omp session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+      }
+    }
+  } catch {}
 }
 
 setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: VERSION, uptime: process.uptime() }));
+
+// ── Agent discovery ─────────────────────────────────────────────────────────
+
+app.get('/api/agents', (_req, res) => {
+  const agents = [{ id: 'claude', label: 'Claude Code', available: true }];
+  try {
+    const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+    agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
+  } catch {
+    agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
+  }
+  res.json({ agents });
+});
 
 app.use(express.static(STATIC_DIR, {
   maxAge: '0',

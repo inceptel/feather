@@ -2,8 +2,8 @@ declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
 import { MessageView } from './components/MessageView'
 import { Terminal } from './components/Terminal'
-import type { SessionMeta, Message } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor } from './api'
+import type { SessionMeta, Message, AgentInfo } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -105,6 +105,8 @@ export default function App() {
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
   const [expanded, setExpanded] = createSignal(false)
+  const [agents, setAgents] = createSignal<AgentInfo[]>([])
+  const [agentDropdown, setAgentDropdown] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
@@ -163,6 +165,7 @@ export default function App() {
   onMount(async () => {
     document.addEventListener('keydown', onGlobalKeyDown)
     setSessions(await fetchSessions())
+    fetchAgents().then(setAgents).catch(() => {})
     const base = location.pathname.replace(/\/+$/, '')
     fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
@@ -218,10 +221,11 @@ export default function App() {
     }, setSSEStatus)
   }
 
-  async function handleNew() {
+  async function handleNew(agent?: string) {
     setCreating(true)
+    setAgentDropdown(false)
     try {
-      const id = await createSession()
+      const id = await createSession(undefined, agent)
       select(id)
       fetchSessions().then(s => setSessions(s)).catch(() => {})
     } catch (e) { console.error(e) }
@@ -459,7 +463,7 @@ export default function App() {
 
       {/* Sidebar backdrop */}
       <Show when={sidebar()}>
-        <div onClick={() => setSidebar(false)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.5)', 'z-index': '59', '-webkit-tap-highlight-color': 'transparent' }} />
+        <div onClick={() => { setSidebar(false); setAgentDropdown(false) }} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.5)', 'z-index': '59', '-webkit-tap-highlight-color': 'transparent' }} />
       </Show>
 
       {/* Sidebar */}
@@ -483,10 +487,30 @@ export default function App() {
           </div>
           {/* Sessions tab */}
           <Show when={sidebarTab() === 'sessions'}>
-            <div style={{ padding: '12px 16px' }}>
-              <button onClick={handleNew} disabled={creating()} style={{ width: '100%', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                {creating() ? 'Starting...' : '+ New Claude'}
-              </button>
+            <div style={{ padding: '12px 16px', position: 'relative' }}>
+              <div style={{ display: 'flex', 'border-radius': '8px', overflow: 'hidden' }}>
+                <button onClick={() => handleNew('claude')} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                  {creating() ? 'Starting...' : '+ New Session'}
+                </button>
+                <Show when={agents().filter(a => a.available).length > 1}>
+                  <button onClick={() => setAgentDropdown(!agentDropdown())} disabled={creating()} style={{ width: '36px', background: creating() ? '#1a1a2e' : agentDropdown() ? '#3a9a5a' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-left': '1px solid rgba(0,0,0,0.15)', cursor: creating() ? 'wait' : 'pointer', 'font-size': '12px', '-webkit-tap-highlight-color': 'transparent' }}>
+                    &#9662;
+                  </button>
+                </Show>
+              </div>
+              <Show when={agentDropdown()}>
+                <div style={{ position: 'absolute', top: '52px', left: '16px', right: '16px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'z-index': '100', overflow: 'hidden' }}>
+                  <For each={agents().filter(a => a.available)}>{(agent) =>
+                    <button onClick={() => handleNew(agent.id)} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                    >
+                      <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: agent.id === 'omp' ? '#ff7b00' : '#4aba6a', 'flex-shrink': '0' }} />
+                      <span style={{ flex: '1' }}>{agent.label}</span>
+                    </button>
+                  }</For>
+                </div>
+              </Show>
             </div>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
               {(() => {
@@ -519,6 +543,7 @@ export default function App() {
                         <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
                           <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
                           <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
+                          <Show when={s.agent === 'omp'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2200', color: '#ff7b00', 'flex-shrink': '0', 'font-weight': '600' }}>omp</span></Show>
                           <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                         </div>
                       }>
