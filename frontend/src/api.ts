@@ -6,6 +6,7 @@ export interface SessionMeta {
   updatedAt: string
   isActive: boolean
   agent?: string
+  isWorker?: boolean
 }
 
 export interface AgentInfo {

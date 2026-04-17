@@ -7,6 +7,7 @@ uploads/
 quick-links.json
 session-meta.json
 starred.json
+boxes.json
 missing-features.*
 generate-pdf.mjs
 MISSING-FEATURES.md

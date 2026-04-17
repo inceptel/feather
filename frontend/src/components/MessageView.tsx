@@ -115,9 +115,9 @@ const TOOL_ICONS: Record<string, string> = {
 }
 
 const TOOL_COLORS: Record<string, string> = {
-  Bash: '#e5946b', Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a',
-  Grep: '#b48ead', Glob: '#88c0d0', WebFetch: '#88c0d0', WebSearch: '#b48ead',
-  Agent: '#73b8ff', Skill: '#b48ead',
+  Bash: 'var(--tool-bash)', Read: 'var(--tool-read)', Write: 'var(--tool-write)', Edit: 'var(--tool-edit)',
+  Grep: 'var(--tool-grep)', Glob: 'var(--tool-glob)', WebFetch: 'var(--tool-glob)', WebSearch: 'var(--tool-grep)',
+  Agent: 'var(--tool-agent)', Skill: 'var(--tool-skill)',
 }
 
 function toolSummary(name: string, input: any): string {
@@ -145,8 +145,8 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
   if (block.type === 'thinking' && block.thinking) {
     return (
       <details style={{ margin: '4px 0' }}>
-        <summary style={{ color: '#c4993a', 'font-size': '12px', cursor: 'pointer' }}>Thinking...</summary>
-        <div style={{ color: '#999', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '200px', overflow: 'auto', padding: '8px', background: '#0d1117', 'border-radius': '4px', 'margin-top': '4px' }}>
+        <summary style={{ color: 'var(--warning)', 'font-size': '12px', cursor: 'pointer' }}>Thinking...</summary>
+        <div style={{ color: 'var(--text-secondary)', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '200px', overflow: 'auto', padding: '8px', background: 'var(--bg-secondary)', 'border-radius': '4px', 'margin-top': '4px' }}>
           {block.thinking}
         </div>
       </details>
@@ -154,30 +154,30 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
   }
   if (block.type === 'tool_use') {
     const name = block.name || 'tool'
-    const color = TOOL_COLORS[name] || '#73b8ff'
+    const color = TOOL_COLORS[name] || 'var(--info)'
     const icon = TOOL_ICONS[name] || '⚙'
     const summary = toolSummary(name, block.input)
     const inp = block.input || {}
     const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read'
     const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
     return (
-      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
+      <details style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-base)', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
         <summary style={{ padding: '6px 10px', cursor: hasDetail ? 'pointer' : 'default', 'list-style': hasDetail ? undefined : 'none' }}>
           <span style={{ color }}>{icon} {name}</span>
-          {summary && <span style={{ color: '#888', 'margin-left': '8px' }}>{summary}</span>}
+          {summary && <span style={{ color: 'var(--text-secondary)', 'margin-left': '8px' }}>{summary}</span>}
         </summary>
         {name === 'Edit' && <>
-          {inp.old_string && <pre style={`${pre}color:#d45555;background:#1a0000;border-top:1px solid #1e1e1e`}>{inp.old_string}</pre>}
-          {inp.new_string && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{inp.new_string}</pre>}
+          {inp.old_string && <pre style={`${pre}color:var(--diff-del-text);background:var(--diff-del-bg);border-top:1px solid var(--border-base)`}>{inp.old_string}</pre>}
+          {inp.new_string && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);border-top:1px solid var(--border-base)`}>{inp.new_string}</pre>}
         </>}
-        {name === 'Bash' && inp.command && <pre style={`${pre}color:#e5946b;border-top:1px solid #1e1e1e`}>{inp.command}</pre>}
-        {name === 'Write' && inp.content && <pre style={`${pre}color:#4aba6a;background:#001a00;border-top:1px solid #1e1e1e`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        {name === 'Bash' && inp.command && <pre style={`${pre}color:var(--tool-bash);border-top:1px solid var(--border-base)`}>{inp.command}</pre>}
+        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);border-top:1px solid var(--border-base)`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
-          {inp.subagent_type && <div style={{ padding: '4px 10px', 'border-top': '1px solid #1e1e1e', 'font-size': '11px', color: '#888' }}>Type: <span style={{ color: '#c4993a' }}>{inp.subagent_type}</span></div>}
-          {inp.prompt && <pre style={`${pre}color:#73b8ff;border-top:1px solid #1e1e1e`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
+          {inp.subagent_type && <div style={{ padding: '4px 10px', 'border-top': '1px solid var(--border-base)', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
+          {inp.prompt && <pre style={`${pre}color:var(--tool-agent);border-top:1px solid var(--border-base)`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
         </>}
-        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:#b48ead;border-top:1px solid #1e1e1e`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
-        {name === 'Read' && inp.file_path && <pre style={`${pre}color:#73b8ff;border-top:1px solid #1e1e1e`}>{inp.file_path}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);border-top:1px solid var(--border-base)`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
+        {name === 'Read' && inp.file_path && <pre style={`${pre}color:var(--tool-read);border-top:1px solid var(--border-base)`}>{inp.file_path}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
       </details>
     )
   }
@@ -193,17 +193,17 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
     const lineCount = raw.split('\n').length
     const label = isErr ? 'error' : hasImages ? `image${images.length > 1 ? 's' : ''}` : `output${isLong ? ` (${lineCount} lines)` : ''}`
     return (
-      <details style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-left': `3px solid ${isErr ? '#d45555' : '#4aba6a'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong || hasImages}>
-        <summary style={{ padding: '2px 10px', background: '#111318', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? '#d45555' : '#666', cursor: isLong || hasImages ? 'pointer' : 'default', 'list-style': isLong || hasImages ? undefined : 'none' }}>
+      <details style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-base)', 'border-left': `3px solid ${isErr ? 'var(--error)' : 'var(--success)'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong || hasImages}>
+        <summary style={{ padding: '2px 10px', background: 'var(--bg-result-header)', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? 'var(--error)' : 'var(--text-muted)', cursor: isLong || hasImages ? 'pointer' : 'default', 'list-style': isLong || hasImages ? undefined : 'none' }}>
           {label}
-          {isLong && !isErr && !hasImages && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: '#555' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
+          {isLong && !isErr && !hasImages && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: 'var(--text-dim)' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
         </summary>
         {images.map((img: any) => (
           <div style={{ padding: '6px 10px' }}>
             <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
           </div>
         ))}
-        {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? '#d45555' : '#888', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
+        {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
       </details>
     )
   }
@@ -228,33 +228,33 @@ const markdownCSS = `
 .markdown ul, .markdown ol { margin: 4px 0; padding-left: 20px; }
 .markdown li { margin: 2px 0; }
 .markdown code {
-  background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px;
+  background: var(--code-bg); padding: 1px 5px; border-radius: 3px;
   font-family: 'SF Mono', Menlo, 'Courier New', monospace; font-size: 0.88em;
 }
-.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: #0d1117; padding: 10px 12px; }
-.markdown pre code { background: none; padding: 0; font-size: 0.85em; color: #c9d1d9; }
+.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: var(--bg-secondary); padding: 10px 12px; }
+.markdown pre code { background: none; padding: 0; font-size: 0.85em; color: var(--code-text); }
 .markdown blockquote {
-  margin: 6px 0; padding: 4px 12px; border-left: 3px solid #444; color: #999;
+  margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--text-faint); color: var(--text-secondary);
 }
 .markdown table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.markdown th, .markdown td { border: 1px solid #333; padding: 5px 10px; text-align: left; white-space: nowrap; }
+.markdown th, .markdown td { border: 1px solid var(--border-medium); padding: 5px 10px; text-align: left; white-space: nowrap; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
-.markdown a { color: #73b8ff; text-decoration: none; }
+.markdown a { color: var(--link); text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
 .markdown img { max-width: 100%; border-radius: 6px; }
-.markdown hr { border: none; border-top: 1px solid #333; margin: 12px 0; }
+.markdown hr { border: none; border-top: 1px solid var(--border-medium); margin: 12px 0; }
 .markdown strong { font-weight: 600; }
 
 /* Copy button */
 .copy-btn {
   position: absolute; top: 6px; right: 6px;
   background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
-  color: #999; font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  color: var(--text-secondary); font-size: 11px; padding: 2px 8px; border-radius: 4px;
   cursor: pointer; opacity: 0; transition: opacity 0.15s;
   font-family: -apple-system, system-ui, sans-serif;
 }
 pre:hover .copy-btn { opacity: 1; }
-.copy-btn:hover { background: rgba(255,255,255,0.2); color: #ccc; }
+.copy-btn:hover { background: rgba(255,255,255,0.2); color: var(--text-primary); }
 
 /* Typing indicator bounce */
 @keyframes typing-bounce {
@@ -267,24 +267,24 @@ pre:hover .copy-btn { opacity: 1; }
 div:hover > div > .star-btn { opacity: 0.6 !important; }
 .star-btn:hover { opacity: 1 !important; }
 
-/* highlight.js dark theme */
-.hljs { color: #c9d1d9; }
-.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: #ff7b72; }
-.hljs-function .hljs-keyword { color: #ff7b72; }
-.hljs-string, .hljs-attr { color: #a5d6ff; }
-.hljs-number, .hljs-meta { color: #79c0ff; }
-.hljs-comment, .hljs-quote { color: #8b949e; font-style: italic; }
-.hljs-title, .hljs-title.function_ { color: #d2a8ff; }
-.hljs-built_in { color: #ffa657; }
-.hljs-type, .hljs-class .hljs-title { color: #ffa657; }
-.hljs-variable, .hljs-template-variable { color: #ffa657; }
-.hljs-name { color: #7ee787; }
-.hljs-selector-class { color: #7ee787; }
-.hljs-addition { color: #aff5b4; background: rgba(46,160,67,0.15); }
-.hljs-deletion { color: #ffdcd7; background: rgba(248,81,73,0.15); }
-.hljs-regexp, .hljs-symbol { color: #f0883e; }
-.hljs-params { color: #c9d1d9; }
-.hljs-property { color: #79c0ff; }
+/* highlight.js theme — uses CSS variables for theme switching */
+.hljs { color: var(--code-text); }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
+.hljs-function .hljs-keyword { color: var(--hljs-keyword); }
+.hljs-string, .hljs-attr { color: var(--hljs-string); }
+.hljs-number, .hljs-meta { color: var(--hljs-number); }
+.hljs-comment, .hljs-quote { color: var(--hljs-comment); font-style: italic; }
+.hljs-title, .hljs-title.function_ { color: var(--hljs-function); }
+.hljs-built_in { color: var(--hljs-builtin); }
+.hljs-type, .hljs-class .hljs-title { color: var(--hljs-builtin); }
+.hljs-variable, .hljs-template-variable { color: var(--hljs-builtin); }
+.hljs-name { color: var(--hljs-name); }
+.hljs-selector-class { color: var(--hljs-name); }
+.hljs-addition { color: var(--hljs-addition); background: var(--hljs-addition-bg); }
+.hljs-deletion { color: var(--hljs-deletion); background: var(--hljs-deletion-bg); }
+.hljs-regexp, .hljs-symbol { color: var(--hljs-regexp); }
+.hljs-params { color: var(--code-text); }
+.hljs-property { color: var(--hljs-property); }
 `
 
 // ── Image extraction ─────────────────────────────────────────────────────────
@@ -307,7 +307,7 @@ function fileUrl(absPath: string): string {
   return `${location.pathname.replace(/\/+$/, '')}/api/file?path=${encodeURIComponent(absPath)}`
 }
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean, activeTool?: string | null }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   let scrollRef: HTMLDivElement | undefined
@@ -345,12 +345,12 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
     <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={props.loading}>
-        <div style={{ color: '#555', 'text-align': 'center', padding: '40px' }}>Loading...</div>
+        <div style={{ color: 'var(--text-dim)', 'text-align': 'center', padding: '40px' }}>Loading...</div>
       </Show>
       <Show when={props.hasMore && !props.loading}>
         <div style={{ 'text-align': 'center', padding: '12px' }}>
           <button onClick={() => props.onLoadEarlier?.()} disabled={props.loadingMore}
-            style={{ background: '#1a1a2e', border: '1px solid #333', color: '#73b8ff', padding: '6px 16px', 'border-radius': '6px', 'font-size': '12px', cursor: props.loadingMore ? 'wait' : 'pointer' }}>
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-medium)', color: 'var(--link)', padding: '6px 16px', 'border-radius': '6px', 'font-size': '12px', cursor: props.loadingMore ? 'wait' : 'pointer' }}>
             {props.loadingMore ? 'Loading...' : 'Load earlier messages'}
           </button>
         </div>
@@ -448,9 +448,9 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
       {/* PDF viewer modal */}
       <Show when={pdfViewer()}>
         <div style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.92)', 'z-index': '200', display: 'flex', 'flex-direction': 'column' }}>
-          <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '8px 12px', background: '#111' }}>
-            <span style={{ color: '#999', 'font-size': '13px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{pdfViewer()!.split('/').pop()}</span>
-            <button onClick={() => setPdfViewer(null)} style={{ background: 'none', border: 'none', color: '#e5e5e5', 'font-size': '24px', cursor: 'pointer', padding: '4px 8px', 'line-height': '1' }}>&times;</button>
+          <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '8px 12px', background: 'var(--bg-secondary)' }}>
+            <span style={{ color: 'var(--text-secondary)', 'font-size': '13px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{pdfViewer()!.split('/').pop()}</span>
+            <button onClick={() => setPdfViewer(null)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', 'font-size': '24px', cursor: 'pointer', padding: '4px 8px', 'line-height': '1' }}>&times;</button>
           </div>
           <iframe src={pdfViewer()!} style={{ flex: '1', border: 'none', width: '100%', background: '#fff' }} />
         </div>
@@ -468,8 +468,8 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           <div style={{
             'max-width': '85%', padding: hasAttachments ? '6px' : '10px 14px',
             'border-radius': msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-            background: msg.role === 'user' ? 'rgba(74,186,106,0.15)' : '#1a1a2e',
-            color: '#e5e5e5', overflow: 'hidden',
+            background: msg.role === 'user' ? 'var(--accent-subtle)' : 'var(--bg-surface)',
+            color: 'var(--text-primary)', overflow: 'hidden',
             'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
           }}>
             {/* Inline images */}
@@ -483,7 +483,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
               return (
                 <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
                   onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
-                  style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: '#73b8ff', 'font-size': '12px' }}>
+                  style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
                   <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
                   <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
                 </a>
@@ -499,13 +499,13 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
                   const q = block.input?.question || 'Claude is asking a question...'
                   return (
-                    <div style={{ background: '#1a1a2e', border: '1px solid #c4993a', 'border-radius': '8px', padding: '12px', margin: '6px 0' }}>
-                      <div style={{ color: '#c4993a', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '6px' }}>QUESTION</div>
-                      <div style={{ color: '#e5e5e5', 'font-size': '14px', 'margin-bottom': '10px' }}>{q}</div>
+                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--warning)', 'border-radius': '8px', padding: '12px', margin: '6px 0' }}>
+                      <div style={{ color: 'var(--warning)', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '6px' }}>QUESTION</div>
+                      <div style={{ color: 'var(--text-primary)', 'font-size': '14px', 'margin-bottom': '10px' }}>{q}</div>
                       <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap' }}>
                         <For each={['Yes', 'No', 'Continue']}>{(label) => (
                           <button onClick={() => props.onAnswer?.(label)}
-                            style={{ background: '#333', border: '1px solid #555', color: '#e5e5e5', padding: '4px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}>{label}</button>
+                            style={{ background: 'var(--border-medium)', border: '1px solid var(--text-dim)', color: 'var(--text-primary)', padding: '4px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}>{label}</button>
                         )}</For>
                       </div>
                     </div>
@@ -516,15 +516,15 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
             </div>
           </div>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <span style={{ 'font-size': '10px', color: '#444' }}>{formatTime(msg.timestamp)}</span>
+            <span style={{ 'font-size': '10px', color: 'var(--text-faint)' }}>{formatTime(msg.timestamp)}</span>
             {msg.role === 'user' && msg.delivery && (
-              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? '#4aba6a' : '#555' }}>
+              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? 'var(--success)' : 'var(--text-dim)' }}>
                 {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
               </span>
             )}
             {!msg.uuid.startsWith('optimistic-') && (
               <button onClick={() => props.onToggleStar?.(msg.uuid)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', 'font-size': '12px', padding: '0 2px', color: props.starred?.has(msg.uuid) ? '#c4993a' : '#333', opacity: props.starred?.has(msg.uuid) ? '1' : '0', transition: 'opacity 0.15s' }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', 'font-size': '12px', padding: '0 2px', color: props.starred?.has(msg.uuid) ? 'var(--warning)' : 'var(--text-ghost)', opacity: props.starred?.has(msg.uuid) ? '1' : '0', transition: 'opacity 0.15s' }}
                 class="star-btn">{props.starred?.has(msg.uuid) ? '\u2605' : '\u2606'}</button>
             )}
           </div>
@@ -534,10 +534,13 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
       {/* Typing indicator */}
       <Show when={props.working}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{ padding: '10px 16px', 'border-radius': '16px 16px 16px 4px', background: '#1a1a2e', display: 'flex', gap: '4px', 'align-items': 'center' }}>
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out infinite' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#888', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite' }} />
+          <div style={{ padding: '10px 16px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center' }}>
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite' }} />
+            <Show when={props.activeTool}>
+              <span style={{ 'margin-left': '6px', 'font-size': '11px', color: 'var(--info)', 'font-family': "'SF Mono', Menlo, monospace" }}>{props.activeTool}</span>
+            </Show>
           </div>
         </div>
       </Show>
@@ -549,8 +552,8 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         style={{
           position: 'absolute', bottom: '12px', right: '16px', 'z-index': '10',
           width: '32px', height: '32px', 'border-radius': '50%',
-          background: '#1a1a2e', color: '#e5e5e5',
-          border: '1px solid #333', cursor: 'pointer',
+          background: 'var(--bg-surface)', color: 'var(--text-primary)',
+          border: '1px solid var(--border-medium)', cursor: 'pointer',
           'font-size': '16px', display: 'flex', 'align-items': 'center', 'justify-content': 'center',
           'box-shadow': '0 2px 8px rgba(0,0,0,0.35)', opacity: '0.9',
         }}
@@ -559,7 +562,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           <span style={{
             position: 'absolute', top: '-8px', right: '-8px',
             'min-width': '20px', height: '20px', padding: '0 5px',
-            background: '#4aba6a', color: '#000',
+            background: 'var(--accent)', color: 'var(--accent-text)',
             'font-size': '11px', 'font-weight': '600', 'border-radius': '10px',
             display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1',
           }}>{unreadCount() > 99 ? '99+' : unreadCount()}</span>

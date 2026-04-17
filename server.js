@@ -1,6 +1,7 @@
 import express from 'express';
 import compression from 'compression';
 import http from 'http';
+import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync, execSync } from 'child_process';
@@ -25,9 +26,78 @@ const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const OMP_SESSIONS = path.join(HOME, '.feather/omp-sessions');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
+const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
+const BOXES_FILE = path.resolve(import.meta.dirname, 'boxes.json');
 
 // Ensure omp session directory exists
 try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
+
+// ── Box proxy (remote machines) ────────────────────────────────────────────
+
+function readBoxes() {
+  try { return JSON.parse(fs.readFileSync(BOXES_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+async function proxyToBox(boxId, req, res) {
+  const boxes = readBoxes();
+  const box = boxes[boxId];
+  if (!box) return res.status(404).json({ error: `Unknown box: ${boxId}` });
+
+  // Build target URL: strip ?box= param, forward everything else
+  const url = new URL(req.originalUrl, 'http://localhost');
+  url.searchParams.delete('box');
+  const target = `${box.url}${url.pathname}${url.search}`;
+
+  const ac = new AbortController();
+  const connectTimeout = setTimeout(() => ac.abort(new Error('Connect timeout')), 15000);
+
+  try {
+    const opts = {
+      method: req.method,
+      headers: { 'Content-Type': req.headers['content-type'] || 'application/json' },
+      signal: ac.signal,
+    };
+    if (req.method === 'POST' && req.body) opts.body = JSON.stringify(req.body);
+
+    const resp = await fetch(target, opts);
+    clearTimeout(connectTimeout);
+
+    // SSE streams need special handling — pipe through (no timeout on long-lived streams)
+    if (resp.headers.get('content-type')?.includes('text/event-stream')) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(decoder.decode(value, { stream: true }));
+          }
+        } catch {}
+        res.end();
+      })();
+      res.on('close', () => { try { reader.cancel(); } catch {} });
+      return;
+    }
+
+    const data = await resp.text();
+    res.status(resp.status);
+    if (resp.headers.get('content-type')?.includes('json')) {
+      res.setHeader('Content-Type', 'application/json');
+    }
+    res.send(data);
+  } catch (e) {
+    clearTimeout(connectTimeout);
+    res.status(502).json({ error: `Box ${boxId} unreachable: ${e.message}` });
+  }
+}
 
 // ── JSONL path lookup ──────────────────────────────────────────────────────
 
@@ -166,7 +236,8 @@ function discoverSessions(limit = 50) {
           try {
             const stat = fs.statSync(fpath);
             if (stat.size < 50) continue;
-            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude' });
+            const isWorker = /autoweb|feather-aw/.test(dir);
+            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude', isWorker });
           } catch {}
         }
       } catch {}
@@ -197,20 +268,22 @@ function discoverSessions(limit = 50) {
   const active = getActiveTmuxSessions();
 
   const sessions = [];
-  for (const { id, fpath, mtime, agent } of top) {
+  for (const { id, fpath, mtime, agent, isWorker } of top) {
     try {
       const fd = fs.openSync(fpath, 'r');
       const buf = Buffer.alloc(Math.min(16384, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
-      const title = agent === 'omp' ? extractOmpTitle(buf) : extractClaudeTitle(buf);
+      let title = agent === 'omp' ? extractOmpTitle(buf) : extractClaudeTitle(buf);
+      if (title && /You have a hard 20.minute timeout/i.test(title)) title = 'Worker (20min)';
 
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
         agent,
+        ...(isWorker ? { isWorker: true } : {}),
       });
     } catch {}
   }
@@ -448,6 +521,40 @@ app.use(compression({
 }));
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
+
+// ── Box discovery (cached) ──────────────────────────────────────────────────
+
+const boxStatusCache = new Map(); // id -> { available, ts }
+const BOX_CACHE_TTL = 30_000; // 30 seconds
+
+app.get('/api/boxes', async (_req, res) => {
+  const boxes = readBoxes();
+  const result = [{ id: 'local', label: 'Local', available: true }];
+  const now = Date.now();
+  for (const [id, box] of Object.entries(boxes)) {
+    const cached = boxStatusCache.get(id);
+    if (cached && now - cached.ts < BOX_CACHE_TTL) {
+      result.push({ id, label: box.label || id, available: cached.available });
+      continue;
+    }
+    let available = false;
+    try {
+      const r = await fetch(`${box.url}/api/health`, { signal: AbortSignal.timeout(8000) });
+      available = r.ok;
+    } catch {}
+    boxStatusCache.set(id, { available, ts: now });
+    result.push({ id, label: box.label || id, available });
+  }
+  res.json({ boxes: result });
+});
+
+// ── Box proxy middleware for session routes ──────────────────────────────────
+
+app.use('/api/sessions', (req, res, next) => {
+  const box = req.query.box;
+  if (box && box !== 'local') return proxyToBox(box, req, res);
+  next();
+});
 
 app.get('/api/sessions', (req, res) => {
   try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }

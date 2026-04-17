@@ -102,6 +102,7 @@ export default function App() {
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
+  const [hideWorkers, setHideWorkers] = createSignal(localStorage.getItem('feather-hide-workers') === 'true')
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
   const [expanded, setExpanded] = createSignal(false)
@@ -512,9 +513,18 @@ export default function App() {
                 </div>
               </Show>
             </div>
+            <Show when={sessions().some(s => s.isWorker)}>
+              <div style={{ padding: '4px 16px', display: 'flex', 'align-items': 'center', gap: '8px', 'border-bottom': '1px solid #1e1e1e' }}>
+                <button onClick={() => { const v = !hideWorkers(); setHideWorkers(v); localStorage.setItem('feather-hide-workers', String(v)) }}
+                  style={{ background: hideWorkers() ? '#4aba6a' : '#333', border: 'none', width: '32px', height: '18px', 'border-radius': '9px', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', 'flex-shrink': '0', padding: '0' }}>
+                  <span style={{ position: 'absolute', top: '2px', left: hideWorkers() ? '16px' : '2px', width: '14px', height: '14px', 'border-radius': '50%', background: '#fff', transition: 'left 0.2s' }} />
+                </button>
+                <span style={{ 'font-size': '11px', color: '#888' }}>Hide workers</span>
+              </div>
+            </Show>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
               {(() => {
-                const all = sessions()
+                const all = hideWorkers() ? sessions().filter(s => !s.isWorker) : sessions()
                 const now = new Date()
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
                 const yesterdayStart = todayStart - 86400000

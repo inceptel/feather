@@ -1,5 +1,6 @@
 import { onMount, onCleanup, createEffect } from 'solid-js'
 import { init, Terminal as GhosttyTerm, FitAddon } from 'ghostty-web'
+import { themeColors } from '../theme'
 
 const basePath = location.pathname.replace(/\/+$/, '')
 const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${basePath}/api/terminal`
@@ -10,7 +11,7 @@ function ensureInit() {
   return wasmReady
 }
 
-export function Terminal(props: { sessionId: string | null }) {
+export function Terminal(props: { sessionId: string | null; box?: string }) {
   let containerRef: HTMLDivElement | undefined
   let term: GhosttyTerm | null = null
   let fitAddon: FitAddon | null = null
@@ -20,8 +21,9 @@ export function Terminal(props: { sessionId: string | null }) {
     disconnect()
     await ensureInit()
 
+    const tc = themeColors()
     term = new GhosttyTerm({
-      theme: { background: '#0a0e14', foreground: '#e5e5e5', cursor: '#4aba6a' },
+      theme: { background: tc.termBg, foreground: tc.termFg, cursor: tc.termCursor },
       fontSize: 13,
       fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
       cursorBlink: true,
@@ -34,7 +36,8 @@ export function Terminal(props: { sessionId: string | null }) {
       fitAddon.fit()
     }
 
-    ws = new WebSocket(`${BASE_WS}?session=${sessionId}`)
+    const boxParam = props.box ? `&box=${props.box}` : ''
+    ws = new WebSocket(`${BASE_WS}?session=${sessionId}${boxParam}`)
     ws.onmessage = (e) => term?.write(e.data)
     ws.onclose = () => term?.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n')
 
@@ -77,7 +80,7 @@ export function Terminal(props: { sessionId: string | null }) {
       onKeyPress={(e) => e.stopPropagation()}
       onKeyUp={(e) => e.stopPropagation()}
       style={{
-        height: '100%', width: '100%', background: '#0a0e14',
+        height: '100%', width: '100%', background: 'var(--term-bg)',
         padding: '4px',
     }} />
   )
