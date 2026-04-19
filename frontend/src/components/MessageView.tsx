@@ -81,11 +81,89 @@ function handleCopyClick(e: MouseEvent) {
   })
 }
 
-// Make all links open in new tab
-function fixLinks(el: HTMLElement) {
+// Auto-collapse long code blocks (>25 lines) with a "Show N more lines" button
+function collapseCodeBlocks(el: HTMLElement) {
+  for (const pre of el.querySelectorAll('pre')) {
+    if (pre.querySelector('.code-expand-btn') || pre.closest('.code-collapse-wrapper')) continue
+    const code = pre.querySelector('code')
+    if (!code) continue
+    const lineCount = (code.textContent || '').split('\n').length
+    if (lineCount < 25) continue
+    const hiddenLines = lineCount - 15
+    pre.classList.add('code-collapsed')
+    const wrapper = document.createElement('div')
+    wrapper.className = 'code-collapse-wrapper'
+    pre.parentNode!.insertBefore(wrapper, pre)
+    wrapper.appendChild(pre)
+    const btn = document.createElement('button')
+    btn.className = 'code-expand-btn'
+    btn.textContent = `Show ${hiddenLines} more lines`
+    btn.onclick = (e) => {
+      e.stopPropagation()
+      const collapsed = pre.classList.toggle('code-collapsed')
+      btn.textContent = collapsed ? `Show ${hiddenLines} more lines` : 'Collapse'
+    }
+    wrapper.appendChild(btn)
+  }
+}
+
+// Make links open in new tab + linkify absolute file paths so they're clickable
+// (images open inline, other files route through /api/file).
+const FILE_PATH_RE = /((?:\/(?:home|opt|tmp|var|etc|usr)\/[^\s,;:)"'`\]>]+)|(?:~\/[^\s,;:)"'`\]>]+))/g
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'])
+
+function fixLinks(el: HTMLElement, onImageClick?: (src: string) => void) {
   for (const a of el.querySelectorAll('a')) {
     a.setAttribute('target', '_blank')
     a.setAttribute('rel', 'noopener')
+  }
+  const base = location.pathname.replace(/\/+$/, '')
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+  for (const node of nodes) {
+    if (node.parentElement?.tagName === 'A') continue
+    // Skip code blocks (<pre><code>) but allow inline <code> to be linkified
+    if (node.parentElement?.tagName === 'CODE' && node.parentElement?.parentElement?.tagName === 'PRE') continue
+    const text = node.textContent || ''
+    if (!text.match(FILE_PATH_RE)) continue
+    const frag = document.createDocumentFragment()
+    let last = 0
+    for (const match of text.matchAll(FILE_PATH_RE)) {
+      const idx = match.index!
+      if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)))
+      const path = match[0]
+      const resolvedPath = path.replace(/^~/, '/home/' + (document.querySelector<HTMLElement>('[data-username]')?.dataset.username || 'user'))
+      const ext = path.substring(path.lastIndexOf('.')).toLowerCase()
+      const url = `${base}/api/file?path=${encodeURIComponent(resolvedPath)}`
+      const a = document.createElement('a')
+      a.textContent = path
+      a.style.cursor = 'pointer'
+      if (IMAGE_EXTS.has(ext)) {
+        a.href = url
+        a.onclick = (e) => { e.preventDefault(); onImageClick?.(url) }
+        frag.appendChild(a)
+        // Auto-preview: inline image below the link so the reader sees it immediately
+        const img = document.createElement('img')
+        img.src = url
+        img.style.maxWidth = '100%'
+        img.style.maxHeight = '300px'
+        img.style.borderRadius = '8px'
+        img.style.marginTop = '4px'
+        img.style.display = 'block'
+        img.style.cursor = 'zoom-in'
+        img.onclick = () => onImageClick?.(url)
+        frag.appendChild(img)
+      } else {
+        a.href = url
+        a.target = '_blank'
+        a.rel = 'noopener'
+        frag.appendChild(a)
+      }
+      last = idx + path.length
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)))
+    node.parentNode?.replaceChild(frag, node)
   }
 }
 
@@ -140,7 +218,7 @@ function toolSummary(name: string, input: any): string {
 
 function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); collapseCodeBlocks(el); fixLinks(el, setLightbox) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -231,8 +309,12 @@ const markdownCSS = `
   background: var(--code-bg); padding: 1px 5px; border-radius: 3px;
   font-family: 'SF Mono', Menlo, 'Courier New', monospace; font-size: 0.88em;
 }
-.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: var(--bg-secondary); padding: 10px 12px; }
+.markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: var(--bg-secondary); padding: 10px 12px; position: relative; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: var(--code-text); }
+.markdown pre.code-collapsed { max-height: 360px; overflow: hidden; }
+.markdown pre.code-collapsed::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(transparent, var(--bg-secondary)); pointer-events: none; border-radius: 0 0 6px 6px; }
+.code-expand-btn { display: block; width: 100%; padding: 4px 0; margin-top: -1px; background: var(--bg-secondary); border: 1px solid var(--border-medium); border-top: none; border-radius: 0 0 6px 6px; color: var(--link); font-size: 0.75em; font-family: -apple-system, system-ui, sans-serif; cursor: pointer; text-align: center; transition: background-color 0.2s, color 0.2s; }
+.code-expand-btn:hover { background: var(--bg-surface); }
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--text-faint); color: var(--text-secondary);
 }
@@ -494,7 +576,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
               <For each={msg.content}>{(block) => {
                 if (block.type === 'text' && block.text) {
                   const display = hasAttachments ? cleanText : block.text
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); collapseCodeBlocks(el); fixLinks(el, setLightbox) }} /> : null
                 }
                 if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
                   const q = block.input?.question || 'Claude is asking a question...'
