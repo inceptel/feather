@@ -509,7 +509,7 @@ export default function App() {
                       onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                     >
-                      <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: agent.id === 'omp' ? '#ff7b00' : '#4aba6a', 'flex-shrink': '0' }} />
+                      <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: agent.id === 'omp' ? '#ff7b00' : agent.id === 'codex' ? '#c084fc' : '#4aba6a', 'flex-shrink': '0' }} />
                       <span style={{ flex: '1' }}>{agent.label}</span>
                     </button>
                   }</For>
@@ -557,6 +557,7 @@ export default function App() {
                           <Show when={s.isActive}><span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
                           <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
                           <Show when={s.agent === 'omp'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2200', color: '#ff7b00', 'flex-shrink': '0', 'font-weight': '600' }}>omp</span></Show>
+                          <Show when={s.agent === 'codex'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#2a1e3a', color: '#c084fc', 'flex-shrink': '0', 'font-weight': '600' }}>codex</span></Show>
                           <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                         </div>
                       }>

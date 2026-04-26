@@ -7,7 +7,7 @@ import path from 'path';
 import { execFileSync, execSync } from 'child_process';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
-import { parseMessage, parseOmpMessage, parseMessageForAgent } from './lib/parse.js';
+import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
 
 // Load ~/.env if present
 try {
@@ -24,6 +24,7 @@ const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
 const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const OMP_SESSIONS = path.join(HOME, '.feather/omp-sessions');
+const CODEX_SESSIONS_ROOT = path.join(HOME, '.codex/sessions');
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
@@ -122,16 +123,43 @@ function findOmpJsonlPath(sessionId) {
   } catch { return null; }
 }
 
+function findCodexJsonlPath(idOrUuid) {
+  // Codex stores files at ~/.codex/sessions/YYYY/MM/DD/rollout-*-<UUID>.jsonl
+  // Caller may pass either feather's local id (mapped via session-meta.codexUuid)
+  // or the raw codex UUID itself.
+  if (!fs.existsSync(CODEX_SESSIONS_ROOT)) return null;
+  const meta = readMeta();
+  const uuid = meta[idOrUuid]?.codexUuid || idOrUuid;
+  const stack = [CODEX_SESSIONS_ROOT];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) stack.push(full);
+      else if (ent.isFile() && ent.name.endsWith(`-${uuid}.jsonl`)) return full;
+    }
+  }
+  return null;
+}
+
 function findJsonlPath(sessionId, agent) {
   if (agent === 'omp') return findOmpJsonlPath(sessionId);
+  if (agent === 'codex') return findCodexJsonlPath(sessionId);
   if (agent === 'claude') return findClaudeJsonlPath(sessionId);
-  // Unknown agent — try both
-  return findClaudeJsonlPath(sessionId) || findOmpJsonlPath(sessionId);
+  // Unknown agent — try all
+  return findClaudeJsonlPath(sessionId) || findOmpJsonlPath(sessionId) || findCodexJsonlPath(sessionId);
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function getAgentForSession(sessionId) {
   const meta = readMeta();
-  return meta[sessionId]?.agent || 'claude';
+  if (meta[sessionId]?.agent) return meta[sessionId].agent;
+  // Auto-detect codex sessions discovered from disk (id is the codex UUID itself).
+  if (UUID_RE.test(sessionId) && findCodexJsonlPath(sessionId)) return 'codex';
+  return 'claude';
 }
 
 // ── Session metadata ───────────────────────────────────────────────────────
@@ -201,6 +229,65 @@ function extractClaudeTitle(buf) {
   return null;
 }
 
+function extractCodexTitle(buf) {
+  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+    try {
+      const d = JSON.parse(line);
+      if (d.type !== 'response_item') continue;
+      const p = d.payload;
+      if (p?.type !== 'message' || p.role !== 'user') continue;
+      const text = (p.content || [])
+        .filter(b => b.type === 'input_text' && b.text)
+        .map(b => b.text)
+        .join(' ')
+        .trim();
+      if (!text) continue;
+      if (text.startsWith('<environment_context>') || text.startsWith('<permissions instructions>') || text.startsWith('<skills_instructions>') || text.startsWith('<user_instructions>')) continue;
+      return text.slice(0, 80);
+    } catch {}
+  }
+  return null;
+}
+
+function extractCodexCwd(buf) {
+  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+    try {
+      const d = JSON.parse(line);
+      if (d.type === 'session_meta' && d.payload?.cwd) return d.payload.cwd;
+      if (d.type === 'turn_context' && d.payload?.cwd) return d.payload.cwd;
+    } catch {}
+  }
+  return null;
+}
+
+function extractCodexUuid(filename) {
+  // rollout-2026-04-25T18-27-29-019d9cb2-afd3-7d30-aabb-d0b6f3f0f3e6.jsonl
+  const m = filename.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/);
+  return m ? m[1] : null;
+}
+
+function listCodexJsonlFiles() {
+  // Returns [{ uuid, fpath, mtime }] across all year/month/day dirs
+  const out = [];
+  if (!fs.existsSync(CODEX_SESSIONS_ROOT)) return out;
+  const stack = [CODEX_SESSIONS_ROOT];
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) stack.push(full);
+      else if (ent.isFile() && ent.name.startsWith('rollout-') && ent.name.endsWith('.jsonl')) {
+        const uuid = extractCodexUuid(ent.name);
+        if (!uuid) continue;
+        try { out.push({ uuid, fpath: full, mtime: fs.statSync(full).mtime }); } catch {}
+      }
+    }
+  }
+  return out;
+}
+
 function extractOmpTitle(buf) {
   for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
     try {
@@ -261,6 +348,15 @@ function discoverSessions(limit = 50) {
     }
   }
 
+  // codex sessions
+  for (const { uuid, fpath, mtime } of listCodexJsonlFiles()) {
+    try {
+      const stat = fs.statSync(fpath);
+      if (stat.size < 50) continue;
+      candidates.push({ id: uuid, fpath, mtime, agent: 'codex' });
+    } catch {}
+  }
+
   // Sort by mtime descending, take top N
   candidates.sort((a, b) => b.mtime - a.mtime);
   const top = candidates.slice(0, limit);
@@ -271,11 +367,17 @@ function discoverSessions(limit = 50) {
   for (const { id, fpath, mtime, agent, isWorker } of top) {
     try {
       const fd = fs.openSync(fpath, 'r');
-      const buf = Buffer.alloc(Math.min(16384, fs.fstatSync(fd).size));
+      // Codex session_meta line alone can be ~15KB, plus a developer permissions
+      // block before the first user message — read more for codex.
+      const bufCap = agent === 'codex' ? 65536 : 16384;
+      const buf = Buffer.alloc(Math.min(bufCap, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
-      let title = agent === 'omp' ? extractOmpTitle(buf) : extractClaudeTitle(buf);
+      let title;
+      if (agent === 'omp') title = extractOmpTitle(buf);
+      else if (agent === 'codex') title = extractCodexTitle(buf);
+      else title = extractClaudeTitle(buf);
       if (title && /You have a hard 20.minute timeout/i.test(title)) title = 'Worker (20min)';
 
       sessions.push({
@@ -310,6 +412,20 @@ function launchInTmux(name, cmd, cwd) {
   }
 }
 
+// Pre-mark cwd as trusted in ~/.codex/config.toml so codex skips the
+// "Do you trust the contents of this directory?" prompt at startup.
+// Codex persists trust per-cwd; runtime `-c` overrides do NOT skip this prompt.
+function ensureCodexTrust(cwd) {
+  if (!cwd) return;
+  const cfg = path.join(HOME, '.codex/config.toml');
+  let body = '';
+  try { body = fs.readFileSync(cfg, 'utf8'); } catch {}
+  const header = `[projects."${cwd}"]`;
+  if (body.includes(header)) return;
+  const block = `\n${header}\ntrust_level = "trusted"\n`;
+  try { fs.appendFileSync(cfg, block); } catch (e) { console.warn(`[codex] could not write trust for ${cwd}:`, e.message); }
+}
+
 function spawnSession(id, cwd, agent = 'claude') {
   const name = tmuxName(id);
   // Persist agent type in metadata
@@ -322,9 +438,44 @@ function spawnSession(id, cwd, agent = 'claude') {
     fs.mkdirSync(sessionDir, { recursive: true });
     watchOmpSessionDir(sessionDir, id);
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp --session-dir ${sessionDir} --allow-home'`, cwd);
+  } else if (agent === 'codex') {
+    // Codex doesn't accept a preset session id (issue openai/codex#15767).
+    // Snapshot existing rollout files, spawn codex, then poll for the new file
+    // and adopt its UUID into session-meta.
+    ensureCodexTrust(cwd);
+    const before = new Set(listCodexJsonlFiles().map(f => f.uuid));
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex --dangerously-bypass-approvals-and-sandbox'`, cwd);
+    adoptNewCodexUuid(id, before);
   } else {
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
   }
+}
+
+function adoptNewCodexUuid(featherId, beforeUuids, attempts = 30) {
+  // Poll ~/.codex/sessions for a rollout file that didn't exist before spawn.
+  // Codex usually writes the session_meta line within ~1s of launch.
+  let n = 0;
+  const tick = () => {
+    n++;
+    const after = listCodexJsonlFiles();
+    const fresh = after.filter(f => !beforeUuids.has(f.uuid));
+    if (fresh.length > 0) {
+      // Pick the newest fresh file
+      fresh.sort((a, b) => b.mtime - a.mtime);
+      const uuid = fresh[0].uuid;
+      const meta = readMeta();
+      meta[featherId] = { ...(meta[featherId] || {}), agent: 'codex', codexUuid: uuid };
+      writeMeta(meta);
+      // Start watching this file for SSE broadcasts
+      fileOffsets.set(featherId, 0);
+      watchCodexFile(fresh[0].fpath, featherId);
+      console.log(`[codex] adopted UUID ${uuid} for feather session ${featherId}`);
+      return;
+    }
+    if (n < attempts) setTimeout(tick, 500);
+    else console.warn(`[codex] failed to adopt UUID for ${featherId} after ${attempts} attempts`);
+  };
+  setTimeout(tick, 500);
 }
 
 function resumeSession(id, cwd) {
@@ -337,6 +488,22 @@ function resumeSession(id, cwd) {
     const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
     watchOmpSessionDir(sessionDir, id);
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} --session-dir ${sessionDir} --allow-home'`, cwd);
+  } else if (agent === 'codex') {
+    const meta = readMeta();
+    const codexUuid = meta[id]?.codexUuid || (UUID_RE.test(id) ? id : null);
+    const fpath = findCodexJsonlPath(id);
+    if (fpath) { fileOffsets.set(id, fs.statSync(fpath).size); watchCodexFile(fpath, id); }
+    // Codex resume writes back to the same jsonl file (no UUID adoption needed).
+    // Pass --cd to skip the "choose working directory" picker that appears when
+    // the recorded session cwd differs from the launch cwd.
+    let sessionCwd = cwd;
+    if (!sessionCwd && fpath) {
+      try { sessionCwd = extractCodexCwd(fs.readFileSync(fpath).slice(0, 65536)); } catch {}
+    }
+    sessionCwd = (sessionCwd || HOME).replace(/[^a-zA-Z0-9._\-/]/g, '');
+    ensureCodexTrust(sessionCwd);
+    const resumeArg = codexUuid ? `resume ${codexUuid}` : 'resume --last';
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex ${resumeArg} --cd ${sessionCwd} --dangerously-bypass-approvals-and-sandbox'`, cwd || sessionCwd);
   } else {
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
   }
@@ -364,6 +531,23 @@ async function sendInput(id, text) {
     await new Promise(r => setTimeout(r, 6000));
   }
   const target = tmuxName(id);
+  const agent = getAgentForSession(id);
+  // Codex: typing via send-keys -l after the first message leaves the input
+  // in a state where Enter inserts a newline instead of submitting. Routing
+  // the text through paste-buffer (bracketed paste) avoids that and submits
+  // reliably across many turns.
+  if (agent === 'codex') {
+    const tmp = `/tmp/feather-send-${Date.now()}.txt`;
+    fs.writeFileSync(tmp, text);
+    try {
+      execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
+      execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
+    } finally { try { fs.unlinkSync(tmp); } catch {} }
+    setTimeout(() => {
+      try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
+    }, 300);
+    return;
+  }
   if (text.length > 500) {
     const tmp = `/tmp/feather-send-${Date.now()}.txt`;
     fs.writeFileSync(tmp, text);
@@ -453,6 +637,41 @@ function watchOmpSessionDir(dirPath, featherId) {
       processFileChange(full, featherId);
     });
   } catch {}
+}
+
+// ── codex file watchers ────────────────────────────────────────────────────
+
+const watchedCodexDirs = new Map(); // dirPath -> Map<filename, featherId>
+
+function watchCodexFile(fpath, featherId) {
+  const dirPath = path.dirname(fpath);
+  const filename = path.basename(fpath);
+  if (!watchedCodexDirs.has(dirPath)) {
+    watchedCodexDirs.set(dirPath, new Map());
+    try {
+      fs.watch(dirPath, (event, fn) => {
+        if (!fn) return;
+        const map = watchedCodexDirs.get(dirPath);
+        const fid = map?.get(fn);
+        if (!fid) return;
+        const full = path.join(dirPath, fn);
+        if (!fileOffsets.has(fid)) fileOffsets.set(fid, 0);
+        processFileChange(full, fid);
+      });
+    } catch {}
+  }
+  watchedCodexDirs.get(dirPath).set(filename, featherId);
+}
+
+// Watch existing codex session files on startup (only recent ones to avoid huge fs.watch fanout)
+{
+  const recent = listCodexJsonlFiles().sort((a, b) => b.mtime - a.mtime).slice(0, 100);
+  for (const { uuid, fpath } of recent) {
+    try {
+      fileOffsets.set(uuid, fs.statSync(fpath).size);
+      watchCodexFile(fpath, uuid);
+    } catch {}
+  }
 }
 
 // Watch existing omp session dirs on startup
@@ -810,6 +1029,18 @@ function reapIdleSessions() {
       }
     }
   } catch {}
+
+  // Reap codex sessions
+  try {
+    for (const { uuid, fpath, mtime } of listCodexJsonlFiles()) {
+      if (!active.has(uuid.slice(0, 8))) continue;
+      if (now - mtime.getTime() > IDLE_MS) {
+        const name = tmuxName(uuid);
+        try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
+        console.log(`[reaper] killed idle codex session ${name} (inactive ${Math.round((now - mtime.getTime()) / 60000)}m)`);
+      }
+    }
+  } catch {}
 }
 
 setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
@@ -825,6 +1056,12 @@ app.get('/api/agents', (_req, res) => {
     agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
   } catch {
     agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
+  }
+  try {
+    const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+    agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
+  } catch {
+    agents.push({ id: 'codex', label: 'Codex', available: false });
   }
   res.json({ agents });
 });
