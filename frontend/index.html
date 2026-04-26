@@ -25,6 +25,10 @@
       touch-action: pan-x pan-y;
       overscroll-behavior: none;
     }
+    /* Chat bubble metadata — action icons subtly visible by default (matches pi-dashboard) */
+    .msg-row .msg-action { opacity: 0.35 !important; transition: opacity 0.15s, color 0.15s; }
+    .msg-row:hover .msg-action { opacity: 0.75 !important; }
+    .msg-row .msg-action:hover { opacity: 1 !important; color: var(--text-primary) !important; }
   </style>
   <script>
     // iOS PWA keyboard fix — pin the root to the visual viewport so it shrinks with the keyboard

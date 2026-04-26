@@ -1,8 +1,10 @@
-import { For, Show, createEffect, createSignal } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { Message, ContentBlock } from '../api'
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
+import Anser from 'anser'
+import { createTwoFilesPatch } from 'diff'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -107,6 +109,35 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 }
 
+// Render ANSI escape sequences as inline-styled HTML. Anser escapes entities.
+function ansiToSafeHtml(raw: string): string {
+  const html = Anser.ansiToHtml(raw)
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['style'] })
+}
+
+type DiffKind = 'meta' | 'hunk' | 'add' | 'del' | 'ctx'
+function buildUnifiedDiff(oldText: string, newText: string, filePath: string): Array<{ line: string; kind: DiffKind }> {
+  const patch = createTwoFilesPatch(filePath, filePath, oldText, newText, 'before', 'after', { context: 3 })
+  const lines = patch.split('\n')
+  // Skip the first 4 header lines (Index, ===, ---, +++) — too noisy inline
+  return lines.slice(4).map(l => {
+    if (l.startsWith('@@')) return { line: l, kind: 'hunk' as const }
+    if (l.startsWith('+')) return { line: l, kind: 'add' as const }
+    if (l.startsWith('-')) return { line: l, kind: 'del' as const }
+    return { line: l, kind: 'ctx' as const }
+  })
+}
+
+function diffLineStyle(kind: DiffKind): Record<string, string> {
+  switch (kind) {
+    case 'hunk': return { color: 'var(--info)', background: 'rgba(59,130,246,0.10)' }
+    case 'add':  return { color: 'var(--diff-add-text)', background: 'var(--diff-add-bg)' }
+    case 'del':  return { color: 'var(--diff-del-text)', background: 'var(--diff-del-bg)' }
+    case 'meta': return { color: 'var(--text-dim)', 'font-weight': '600' }
+    default:     return { color: 'var(--text-secondary)' }
+  }
+}
+
 // ── Tool rendering ──────────────────────────────────────────────────────────
 
 const TOOL_ICONS: Record<string, string> = {
@@ -120,9 +151,25 @@ const TOOL_COLORS: Record<string, string> = {
   Agent: 'var(--tool-agent)', Skill: 'var(--tool-skill)',
 }
 
+// Normalize raw tool name (Anthropic 'Bash', MCP 'mcp__oc__bash', oc 'bash') to a
+// canonical PascalCase key used for icon/color/summary/detail lookups.
+const TOOL_ALIASES: Record<string, string> = {
+  bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit',
+  grep: 'Grep', glob: 'Glob', find: 'Glob',
+  task: 'Agent', agent: 'Agent',
+  webfetch: 'WebFetch', fetch: 'WebFetch',
+  websearch: 'WebSearch', web_search: 'WebSearch',
+}
+
+function canonicalName(raw: string): string {
+  if (!raw) return 'tool'
+  const stripped = raw.replace(/^mcp__.+?__/, '')
+  return TOOL_ALIASES[stripped.toLowerCase()] || stripped.charAt(0).toUpperCase() + stripped.slice(1)
+}
+
 function toolSummary(name: string, input: any): string {
   if (!input) return ''
-  const fp = input.file_path as string || ''
+  const fp = ((input.file_path || input.path) as string) || ''
   const short = fp.split('/').slice(-2).join('/')
   switch (name) {
     case 'Read': return short + (input.offset ? ` L${input.offset}` : '')
@@ -131,56 +178,97 @@ function toolSummary(name: string, input: any): string {
     case 'Bash': { const c = (input.command || '').split('\n')[0].trim(); return c.length > 80 ? c.slice(0, 80) + '…' : c }
     case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`
     case 'Glob': return input.pattern || ''
-    case 'Agent': return input.description || ''
+    case 'Agent': { const d = input.description || (input.prompt as string || '').split('\n')[0]; return d ? (d.length > 80 ? d.slice(0, 80) + '…' : d) : '' }
+    case 'WebFetch': return input.url || ''
+    case 'WebSearch': return input.query || ''
     default: return ''
   }
 }
 
 // ── Block renderers ─────────────────────────────────────────────────────────
 
-function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void) {
+function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | null) => void) {
+  const contentArr = Array.isArray(block.content) ? block.content : typeof block.content === 'string' ? [{ type: 'text', text: block.content }] : []
+  const images = contentArr.filter((c: any) => c.type === 'image' && c.source?.data)
+  const rawContent = contentArr.filter((c: any) => c.type !== 'image').map((c: any) => c.text || '').join('')
+  const isErr = block.is_error
+  const hasImages = images.length > 0
+  const label = isErr ? 'error' : hasImages ? `image${images.length > 1 ? 's' : ''}` : `output${rawContent.length > 200 ? ` (${rawContent.split('\n').length} lines)` : ''}`
+  return (
+    <div style={{ 'margin-top': '6px', 'border-top': '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}>
+      <div style={{ padding: '4px 12px', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em', color: isErr ? 'var(--error)' : 'var(--text-muted)' }}>{label}</div>
+      {images.map((img: any) => (
+        <div style={{ padding: '6px 12px' }}>
+          <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
+        </div>
+      ))}
+      {rawContent && <div style={{ padding: '6px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} />}
+    </div>
+  )
+}
+
+function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void, getResult?: (toolUseId: string) => ContentBlock | undefined) {
   if (block.type === 'text' && block.text) {
     return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
-      <details style={{ margin: '4px 0' }}>
-        <summary style={{ color: 'var(--warning)', 'font-size': '12px', cursor: 'pointer' }}>Thinking...</summary>
-        <div style={{ color: 'var(--text-secondary)', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '200px', overflow: 'auto', padding: '8px', background: 'var(--bg-secondary)', 'border-radius': '4px', 'margin-top': '4px' }}>
+      <details style={{ margin: '4px 0', 'border-left': '2px solid rgba(168,85,247,0.35)', 'padding-left': '12px' }}>
+        <summary style={{ display: 'flex', 'align-items': 'center', gap: '6px', color: 'var(--text-muted)', 'font-size': '12px', cursor: 'pointer', 'list-style': 'none', 'user-select': 'none', padding: '2px 0' }}>
+          <span style={{ color: '#c084fc', 'font-size': '13px', 'line-height': '1', width: '12px', display: 'inline-flex', 'align-items': 'center' }}>◉</span>
+          <span style={{ color: '#c084fc' }}>Reasoning</span>
+          <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px' }}>▸</span>
+        </summary>
+        <div style={{ 'margin-top': '6px', 'margin-left': '4px', padding: '10px 14px', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', 'border-radius': '10px', color: 'var(--text-secondary)', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '400px', 'overflow-y': 'auto', 'line-height': '1.55', 'box-shadow': '0 1px 3px rgba(0,0,0,0.15)' }}>
           {block.thinking}
         </div>
       </details>
     )
   }
   if (block.type === 'tool_use') {
-    const name = block.name || 'tool'
+    const name = canonicalName(block.name || '')
     const color = TOOL_COLORS[name] || 'var(--info)'
     const icon = TOOL_ICONS[name] || '⚙'
     const summary = toolSummary(name, block.input)
     const inp = block.input || {}
-    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read'
-    const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:6px 10px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
+    const result = block.id && getResult ? getResult(block.id) : undefined
+    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read' || !!result
+    const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:8px 12px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
+    const isErr = result?.is_error
+    const statusColor = isErr ? 'var(--error)' : result ? 'var(--success)' : 'var(--warning)'
+    const statusIcon = isErr ? '✗' : result ? '✓' : '●'
     return (
-      <details style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-base)', 'border-left': `3px solid ${color}`, 'border-radius': '6px', margin: '4px 0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace" }}>
-        <summary style={{ padding: '6px 10px', cursor: hasDetail ? 'pointer' : 'default', 'list-style': hasDetail ? undefined : 'none' }}>
-          <span style={{ color }}>{icon} {name}</span>
-          {summary && <span style={{ color: 'var(--text-secondary)', 'margin-left': '8px' }}>{summary}</span>}
+      <details style={{ margin: '4px 0', 'border-left': '2px solid var(--border-medium)', 'padding-left': '12px' }}>
+        <summary style={{ display: 'flex', 'align-items': 'center', gap: '6px', 'font-size': '12px', color: 'var(--text-muted)', cursor: hasDetail ? 'pointer' : 'default', 'list-style': 'none', 'user-select': 'none', padding: '2px 0' }}>
+          <span style={{ color: statusColor, 'font-size': '11px', 'line-height': '1', display: 'inline-flex', 'align-items': 'center', width: '12px', 'flex-shrink': '0' }}>{statusIcon}</span>
+          <span style={{ color, 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', 'flex-shrink': '0' }}>{icon} {name}</span>
+          {summary && <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1', 'min-width': '0', 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px' }}>{summary}</span>}
+          {hasDetail && <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px', 'flex-shrink': '0' }}>▸</span>}
         </summary>
-        {name === 'Edit' && <>
-          {inp.old_string && <pre style={`${pre}color:var(--diff-del-text);background:var(--diff-del-bg);border-top:1px solid var(--border-base)`}>{inp.old_string}</pre>}
-          {inp.new_string && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);border-top:1px solid var(--border-base)`}>{inp.new_string}</pre>}
-        </>}
-        {name === 'Bash' && inp.command && <pre style={`${pre}color:var(--tool-bash);border-top:1px solid var(--border-base)`}>{inp.command}</pre>}
-        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);border-top:1px solid var(--border-base)`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        <div style={{ 'margin-top': '6px', 'margin-left': '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', 'border-radius': '10px', overflow: 'hidden', 'box-shadow': '0 1px 3px rgba(0,0,0,0.2)' }}>
+        {name === 'Edit' && inp.old_string != null && inp.new_string != null && (
+          <div style={{ 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", 'line-height': '1.5', 'max-height': '400px', overflow: 'auto' }}>
+            <For each={buildUnifiedDiff(inp.old_string as string, inp.new_string as string, (inp.file_path as string) || 'file')}>
+              {({ line, kind }) => (
+                <div style={{ padding: '0 12px', 'white-space': 'pre', ...diffLineStyle(kind) }}>{line || ' '}</div>
+              )}
+            </For>
+          </div>
+        )}
+        {name === 'Bash' && inp.command && <pre style={`${pre}color:var(--tool-bash);`}>{inp.command}</pre>}
+        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
-          {inp.subagent_type && <div style={{ padding: '4px 10px', 'border-top': '1px solid var(--border-base)', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
-          {inp.prompt && <pre style={`${pre}color:var(--tool-agent);border-top:1px solid var(--border-base)`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
+          {inp.subagent_type && <div style={{ padding: '6px 12px', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
+          {inp.prompt && <pre style={`${pre}color:var(--tool-agent);`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
         </>}
-        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);border-top:1px solid var(--border-base)`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
-        {name === 'Read' && inp.file_path && <pre style={`${pre}color:var(--tool-read);border-top:1px solid var(--border-base)`}>{inp.file_path}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
+        {name === 'Read' && (inp.file_path || inp.path) && <pre style={`${pre}color:var(--tool-read);`}>{(inp.file_path || inp.path) as string}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {result && renderToolResultInner(result, setLightbox)}
+        </div>
       </details>
     )
   }
+  // Orphaned tool_result (no matching tool_use in loaded messages) — render standalone
   if (block.type === 'tool_result') {
     const contentArr = Array.isArray(block.content) ? block.content : typeof block.content === 'string' ? [{ type: 'text', text: block.content }] : []
     const images = contentArr.filter((c: any) => c.type === 'image' && c.source?.data)
@@ -193,17 +281,19 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
     const lineCount = raw.split('\n').length
     const label = isErr ? 'error' : hasImages ? `image${images.length > 1 ? 's' : ''}` : `output${isLong ? ` (${lineCount} lines)` : ''}`
     return (
-      <details style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-base)', 'border-left': `3px solid ${isErr ? 'var(--error)' : 'var(--success)'}`, 'border-radius': '6px', margin: '4px 0', overflow: 'hidden' }} open={isErr || !isLong || hasImages}>
-        <summary style={{ padding: '2px 10px', background: 'var(--bg-result-header)', 'font-size': '9px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', color: isErr ? 'var(--error)' : 'var(--text-muted)', cursor: isLong || hasImages ? 'pointer' : 'default', 'list-style': isLong || hasImages ? undefined : 'none' }}>
-          {label}
-          {isLong && !isErr && !hasImages && <span style={{ 'font-weight': '400', 'text-transform': 'none', 'margin-left': '8px', color: 'var(--text-dim)' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
+      <details style={{ margin: '4px 0', 'border-left': `2px solid ${isErr ? 'var(--error)' : 'var(--border-medium)'}`, 'padding-left': '12px' }} open={isErr || !isLong || hasImages}>
+        <summary style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em', color: isErr ? 'var(--error)' : 'var(--text-muted)', cursor: isLong || hasImages ? 'pointer' : 'default', 'list-style': 'none', 'user-select': 'none', padding: '2px 0' }}>
+          <span>{label}</span>
+          {isLong && !isErr && !hasImages && <span style={{ 'font-weight': '400', 'text-transform': 'none', color: 'var(--text-dim)', 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px' }}>{preview.split('\n')[0].slice(0, 60)}</span>}
         </summary>
+        <div style={{ 'margin-top': '6px', 'margin-left': '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', 'border-radius': '10px', overflow: 'hidden', 'box-shadow': '0 1px 3px rgba(0,0,0,0.2)' }}>
         {images.map((img: any) => (
-          <div style={{ padding: '6px 10px' }}>
+          <div style={{ padding: '6px 12px' }}>
             <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
           </div>
         ))}
-        {raw && <div style={{ padding: '6px 10px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }}>{raw.length > 3000 ? raw.slice(0, 3000) + '\n… (truncated)' : raw}</div>}
+        {rawContent && <div style={{ padding: '8px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} />}
+        </div>
       </details>
     )
   }
@@ -213,6 +303,89 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
 function formatTime(iso: string) {
   try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
   catch { return '' }
+}
+
+// ── Consecutive tool-call grouping ──────────────────────────────────────────
+// Mirrors pi-dashboard's groupConsecutiveToolCalls: runs of 3+ assistant messages
+// whose only content is a tool_use with the SAME name + SAME JSON-stringified input
+// collapse into a single expandable group (e.g. retry loops).
+// Adjacent tool-only assistant messages (even with different args) are also wrapped
+// into a single flat "tool chain" container so they read as one sequence instead of
+// a stack of separate bubbles.
+
+function isToolOnlyAssistantMsg(m: Message): boolean {
+  if (m.role !== 'assistant' || !m.content || m.content.length === 0) return false
+  let hasTool = false
+  for (const b of m.content) {
+    if (b.type === 'tool_use') {
+      // AskUserQuestion is rendered as a special question bubble, not a tool step
+      if ((b as any).name === 'AskUserQuestion') return false
+      hasTool = true
+    } else if (b.type === 'text' && (b as any).text?.trim()) {
+      return false
+    }
+    // thinking blocks are collapsed details, allow them
+    // tool_result blocks only appear on user-role messages
+  }
+  return hasTool
+}
+
+function toolSig(m: Message): { name: string; input: string } {
+  const tu = (m.content || []).find(b => b.type === 'tool_use') as any
+  return { name: tu?.name || '', input: JSON.stringify(tu?.input || {}) }
+}
+
+type RenderItem =
+  | { kind: 'msg'; msg: Message }
+  | { kind: 'chain'; messages: Message[] }
+
+function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) => boolean): RenderItem[] {
+  const out: RenderItem[] = []
+  let i = 0
+  while (i < messages.length) {
+    const m = messages[i]
+    if (isPureToolResult(m)) { i++; continue }
+    if (isToolOnlyAssistantMsg(m)) {
+      const chain: Message[] = [m]
+      let j = i + 1
+      while (j < messages.length) {
+        const n = messages[j]
+        if (isPureToolResult(n)) { j++; continue }
+        if (!isToolOnlyAssistantMsg(n)) break
+        chain.push(n)
+        j++
+      }
+      out.push({ kind: 'chain', messages: chain })
+      i = j
+    } else {
+      out.push({ kind: 'msg', msg: m })
+      i++
+    }
+  }
+  return out
+}
+
+type ChainSegment =
+  | { kind: 'single'; msg: Message }
+  | { kind: 'group'; messages: Message[]; name: string; input: string }
+
+function segmentChain(chain: Message[]): ChainSegment[] {
+  const out: ChainSegment[] = []
+  let i = 0
+  while (i < chain.length) {
+    const sig = toolSig(chain[i])
+    let j = i + 1
+    while (j < chain.length) {
+      const s = toolSig(chain[j])
+      if (s.name !== sig.name || s.input !== sig.input) break
+      j++
+    }
+    const run = chain.slice(i, j)
+    if (run.length >= 3) out.push({ kind: 'group', messages: run, name: sig.name, input: sig.input })
+    else for (const m of run) out.push({ kind: 'single', msg: m })
+    i = j
+  }
+  return out
 }
 
 // ── Markdown styles ─────────────────────────────────────────────────────────
@@ -307,9 +480,32 @@ function fileUrl(absPath: string): string {
   return `${location.pathname.replace(/\/+$/, '')}/api/file?path=${encodeURIComponent(absPath)}`
 }
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, working?: boolean, activeTool?: string | null }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, activeTool?: string | null }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
+
+  // Pair tool_use blocks with their matching tool_result so they render as one unit.
+  const toolResultsById = createMemo(() => {
+    const map = new Map<string, ContentBlock>()
+    for (const m of props.messages) {
+      if (!m.content) continue
+      for (const b of m.content) {
+        if (b.type === 'tool_result' && b.tool_use_id) map.set(b.tool_use_id, b)
+      }
+    }
+    return map
+  })
+  const getResult = (id: string) => toolResultsById().get(id)
+
+  // A message whose visible content is only tool_result gets folded into the tool_use above — skip it.
+  function isPureToolResultMsg(m: Message): boolean {
+    if (!m.content || m.content.length === 0) return false
+    return m.content.every(b =>
+      b.type === 'tool_result' ||
+      (b.type === 'text' && !b.text?.trim())
+    ) && m.content.some(b => b.type === 'tool_result')
+  }
+
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
   const [unreadCount, setUnreadCount] = createSignal(0)
@@ -456,51 +652,200 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         </div>
       </Show>
 
-      <For each={props.messages}>{(msg) => {
+      <For each={buildRenderItems(props.messages, isPureToolResultMsg)}>{(item) => {
+        if (item.kind === 'chain') {
+          // Flat tool-chain: one compact container wrapping consecutive tool-only
+          // assistant messages. Runs of 3+ identical calls collapse into a group.
+          const segments = segmentChain(item.messages)
+          return (
+            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
+              <div style={{
+                'max-width': '78%', padding: '6px 12px',
+                'border-radius': '12px', background: '#1e1e1e',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: 'var(--text-primary)', overflow: 'hidden',
+                'font-size': '14px', 'line-height': '1.45', 'word-break': 'break-word',
+                display: 'flex', 'flex-direction': 'column', gap: '2px',
+              }}>
+                <For each={segments}>{(seg) => {
+                  if (seg.kind === 'group') {
+                    const [expanded, setExpanded] = createSignal(false)
+                    const firstInput = (seg.messages[0].content || []).find(b => b.type === 'tool_use') as any
+                    const segName = canonicalName(seg.name || '')
+                    const sumText = toolSummary(segName, firstInput?.input) || segName
+                    const color = TOOL_COLORS[segName] || 'var(--info)'
+                    const icon = TOOL_ICONS[segName] || '⚙'
+                    return (
+                      <div style={{ 'border-left': '2px solid var(--border-medium)', 'padding-left': '10px', margin: '2px 0' }}>
+                        <button onClick={() => setExpanded(!expanded())}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '12px', display: 'flex', 'align-items': 'center', gap: '6px', padding: '2px 0', width: '100%', 'text-align': 'left' }}>
+                          <span style={{ color: 'var(--text-muted)', 'font-size': '11px' }}>↻</span>
+                          <span style={{ color, 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', 'flex-shrink': '0' }}>{icon} {segName}</span>
+                          <span style={{ color: 'var(--text-secondary)', 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'min-width': '0' }}>{sumText}</span>
+                          <span style={{ 'margin-left': 'auto', background: 'var(--bg-secondary)', color: 'var(--text-muted)', 'font-size': '10px', padding: '1px 7px', 'border-radius': '10px', 'font-weight': '600', 'flex-shrink': '0' }}>×{seg.messages.length}</span>
+                          <span style={{ color: 'var(--text-ghost)', 'font-size': '10px', 'flex-shrink': '0' }}>{expanded() ? '▾' : '▸'}</span>
+                        </button>
+                        <Show when={expanded()}>
+                          <div style={{ 'margin-top': '4px' }}>
+                            <For each={seg.messages}>{(m) => (
+                              <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult)}</For>
+                            )}</For>
+                          </div>
+                        </Show>
+                      </div>
+                    )
+                  }
+                  // single tool-only message — render its blocks flat, no per-message bubble
+                  const m = seg.msg
+                  return (
+                    <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult)}</For>
+                  )
+                }}</For>
+                {/* one metadata row at the bottom, using last message's timestamp */}
+                {(() => {
+                  const last = item.messages[item.messages.length - 1]
+                  return (
+                    <div class="msg-meta" style={{
+                      display: 'flex', 'align-items': 'center', 'justify-content': 'space-between',
+                      gap: '8px', 'margin-top': '6px', 'padding-top': '4px',
+                      'border-top': '1px solid rgba(255,255,255,0.06)',
+                      'font-size': '11px', color: 'var(--text-faint)',
+                    }}>
+                      <span>{formatTime(last.timestamp)}</span>
+                      <span style={{ color: 'var(--text-ghost)', 'font-size': '10px' }}>{item.messages.length} tool call{item.messages.length === 1 ? '' : 's'}</span>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )
+        }
+
+        const msg = item.msg
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
-        const hasImages = images.length > 0
-        const hasFiles = files.length > 0
-        const hasAttachments = hasImages || hasFiles
+        const hasAttachments = images.length > 0 || files.length > 0
 
-        return <div style={{ display: 'flex', 'flex-direction': 'column', 'align-items': msg.role === 'user' ? 'flex-end' : 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{
-            'max-width': '85%', padding: hasAttachments ? '6px' : '10px 14px',
-            'border-radius': msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-            background: msg.role === 'user' ? 'var(--accent-subtle)' : 'var(--bg-surface)',
-            color: 'var(--text-primary)', overflow: 'hidden',
-            'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
+        // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
+        // matching pi-dashboard's style: timestamp on the left, action icons on the right.
+        const copyMsgText = () => {
+          const txt = (msg.content || []).map(b => b.type === 'text' ? (b.text || '') : '').join('\n').trim()
+          if (txt) navigator.clipboard?.writeText(txt).catch(() => {})
+        }
+        const metadataRow = (
+          <div class="msg-meta" style={{
+            display: 'flex', 'align-items': 'center', 'justify-content': 'space-between',
+            gap: '8px', 'margin-top': '8px', 'padding-top': '6px',
+            'border-top': '1px solid rgba(255,255,255,0.06)',
+            'font-size': '11px', color: 'var(--text-faint)',
           }}>
-            {/* Inline images */}
-            <For each={images}>{(src) => (
-              <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': hasAttachments ? '12px' : '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
-            )}</For>
-            {/* File attachments */}
-            <For each={files}>{(f) => {
-              const isPdf = f.name.toLowerCase().endsWith('.pdf')
-              const url = fileUrl(f.path)
-              return (
-                <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
-                  onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
-                  style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
-                  <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
-                  <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
-                </a>
-              )
-            }}</For>
-            {/* Text + other blocks */}
-            <div style={hasAttachments ? { padding: '4px 8px 4px' } : {}}>
+            <span>{formatTime(msg.timestamp)}</span>
+            <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
+              {msg.role === 'user' && msg.delivery && (
+                <span style={{ color: msg.delivery === 'delivered' ? 'var(--success)' : 'var(--text-dim)' }}>
+                  {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
+                </span>
+              )}
+              <button class="msg-action" title="Copy message" onClick={copyMsgText}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-faint)', display: 'inline-flex', 'align-items': 'center', opacity: '0.6' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+              <button class="msg-action" title="View raw" onClick={() => props.onViewRaw?.(msg)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-faint)', display: 'inline-flex', 'align-items': 'center', opacity: '0.6' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              </button>
+              {!msg.uuid.startsWith('optimistic-') && (
+                <button class="msg-action" title={props.starred?.has(msg.uuid) ? 'Unstar' : 'Star'} onClick={() => props.onToggleStar?.(msg.uuid)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: props.starred?.has(msg.uuid) ? 'var(--warning)' : 'var(--text-faint)', opacity: props.starred?.has(msg.uuid) ? '1' : '0.6', display: 'inline-flex', 'align-items': 'center' }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill={props.starred?.has(msg.uuid) ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )
+
+        // User message: single blue-tinted bubble right-aligned; metadata INSIDE the bubble.
+        if (msg.role === 'user') {
+          return (
+            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '12px' }}>
+              <div style={{
+                'max-width': '70%', padding: '10px 14px 8px',
+                'border-radius': '12px',
+                background: '#1e1e1e',
+                border: '1px solid rgba(96, 165, 250, 0.22)',
+                color: 'var(--text-primary)', overflow: 'hidden',
+                'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
+              }}>
+                <For each={images}>{(src) => (
+                  <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                )}</For>
+                <For each={files}>{(f) => {
+                  const isPdf = f.name.toLowerCase().endsWith('.pdf')
+                  const url = fileUrl(f.path)
+                  return (
+                    <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
+                      onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
+                      style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
+                      <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
+                      <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
+                    </a>
+                  )
+                }}</For>
+                {(() => {
+                  const display = hasAttachments ? cleanText : (textBlock?.text || '')
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
+                })()}
+                {metadataRow}
+              </div>
+            </div>
+          )
+        }
+
+        // Assistant message: single wide bubble containing all blocks (text, tool_use, thinking) + metadata inside.
+        return (
+          <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
+            <div style={{
+              'max-width': '78%', padding: '10px 14px 8px',
+              'border-radius': '12px',
+              background: '#1e1e1e',
+              border: '1px solid rgba(255,255,255,0.06)',
+              color: 'var(--text-primary)', overflow: 'hidden',
+              'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
+            }}>
               <For each={msg.content}>{(block) => {
                 if (block.type === 'text' && block.text) {
-                  const display = hasAttachments ? cleanText : block.text
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
+                  const { cleanText: bText, images: bImgs, files: bFiles } = extractImages(block.text)
+                  const hasAny = bImgs.length > 0 || bFiles.length > 0 || bText.trim().length > 0
+                  if (!hasAny) return null
+                  return (
+                    <div>
+                      <For each={bImgs}>{(src) => (
+                        <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                      )}</For>
+                      <For each={bFiles}>{(f) => {
+                        const isPdf = f.name.toLowerCase().endsWith('.pdf')
+                        const url = fileUrl(f.path)
+                        return (
+                          <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
+                            onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
+                            style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
+                            <span style={{ 'font-size': '16px' }}>{isPdf ? '📄' : '📎'}</span>
+                            <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
+                          </a>
+                        )
+                      }}</For>
+                      {bText.trim() && (
+                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
+                      )}
+                    </div>
+                  )
                 }
                 if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
                   const q = block.input?.question || 'Claude is asking a question...'
                   return (
-                    <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--warning)', 'border-radius': '8px', padding: '12px', margin: '6px 0' }}>
-                      <div style={{ color: 'var(--warning)', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '6px' }}>QUESTION</div>
+                    <div style={{ 'margin': '6px 0', background: 'rgba(168, 85, 247, 0.06)', border: '1px solid rgba(168, 85, 247, 0.25)', 'border-left': '2px solid #a855f7', 'border-radius': '10px', padding: '12px' }}>
+                      <div style={{ color: '#a855f7', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em', 'margin-bottom': '6px' }}>Question</div>
                       <div style={{ color: 'var(--text-primary)', 'font-size': '14px', 'margin-bottom': '10px' }}>{q}</div>
                       <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap' }}>
                         <For each={['Yes', 'No', 'Continue']}>{(label) => (
@@ -511,24 +856,13 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                     </div>
                   )
                 }
-                return renderBlock(block, setLightbox)
+                // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
+                return renderBlock(block, setLightbox, getResult)
               }}</For>
+              {metadataRow}
             </div>
           </div>
-          <div style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'margin-top': '4px', padding: '0 4px', 'justify-content': msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <span style={{ 'font-size': '10px', color: 'var(--text-faint)' }}>{formatTime(msg.timestamp)}</span>
-            {msg.role === 'user' && msg.delivery && (
-              <span style={{ 'font-size': '11px', color: msg.delivery === 'delivered' ? 'var(--success)' : 'var(--text-dim)' }}>
-                {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
-              </span>
-            )}
-            {!msg.uuid.startsWith('optimistic-') && (
-              <button onClick={() => props.onToggleStar?.(msg.uuid)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', 'font-size': '12px', padding: '0 2px', color: props.starred?.has(msg.uuid) ? 'var(--warning)' : 'var(--text-ghost)', opacity: props.starred?.has(msg.uuid) ? '1' : '0', transition: 'opacity 0.15s' }}
-                class="star-btn">{props.starred?.has(msg.uuid) ? '\u2605' : '\u2606'}</button>
-            )}
-          </div>
-        </div>
+        )
       }}</For>
 
       {/* Typing indicator */}

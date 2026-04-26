@@ -1,7 +1,7 @@
 declare const __BUILD_TIME__: string
-import { createSignal, createEffect, onMount, onCleanup, Show, For } from 'solid-js'
+import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
 import { MessageView } from './components/MessageView'
-import { Terminal } from './components/Terminal'
+const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents } from './api'
 
@@ -174,6 +174,9 @@ export default function App() {
     if (hash) select(hash)
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
+    // Prefetch Terminal chunk during idle so the tab click feels instant
+    const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 2000))
+    idle(() => { import('./components/Terminal').catch(() => {}) })
   })
   function onVisibility() {
     if (document.visibilityState === 'visible') fetchSessions().then(s => setSessions(s)).catch(() => {})
@@ -684,7 +687,11 @@ export default function App() {
               }}</For>
             </div>
             <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
-              <Terminal sessionId={tab() === 'terminal' ? currentId() : null} />
+              <Show when={tab() === 'terminal'}>
+                <Suspense fallback={<div style={{ padding: '12px', color: '#888' }}>Loading terminal…</div>}>
+                  <Terminal sessionId={currentId()} />
+                </Suspense>
+              </Show>
             </div>
           </Show>
         </div>
