@@ -155,6 +155,7 @@ const TOOL_COLORS: Record<string, string> = {
 // canonical PascalCase key used for icon/color/summary/detail lookups.
 const TOOL_ALIASES: Record<string, string> = {
   bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit',
+  exec: 'Bash', exec_command: 'Bash', exec_comman: 'Bash',
   grep: 'Grep', glob: 'Glob', find: 'Glob',
   task: 'Agent', agent: 'Agent',
   webfetch: 'WebFetch', fetch: 'WebFetch',
@@ -163,8 +164,12 @@ const TOOL_ALIASES: Record<string, string> = {
 
 function canonicalName(raw: string): string {
   if (!raw) return 'tool'
-  const stripped = raw.replace(/^mcp__.+?__/, '')
+  const stripped = raw.replace(/^mcp__.+?__/, '').split('.').pop() || raw
   return TOOL_ALIASES[stripped.toLowerCase()] || stripped.charAt(0).toUpperCase() + stripped.slice(1)
+}
+
+function commandText(input: any): string {
+  return ((input?.command || input?.cmd) as string || '').trim()
 }
 
 function toolSummary(name: string, input: any): string {
@@ -175,7 +180,7 @@ function toolSummary(name: string, input: any): string {
     case 'Read': return short + (input.offset ? ` L${input.offset}` : '')
     case 'Write': return short
     case 'Edit': return short + (input.replace_all ? ' ×all' : '')
-    case 'Bash': { const c = (input.command || '').split('\n')[0].trim(); return c.length > 80 ? c.slice(0, 80) + '…' : c }
+    case 'Bash': { const c = commandText(input).split('\n')[0]; return c.length > 80 ? c.slice(0, 80) + '…' : c }
     case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`
     case 'Glob': return input.pattern || ''
     case 'Agent': { const d = input.description || (input.prompt as string || '').split('\n')[0]; return d ? (d.length > 80 ? d.slice(0, 80) + '…' : d) : '' }
@@ -255,7 +260,7 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
             </For>
           </div>
         )}
-        {name === 'Bash' && inp.command && <pre style={`${pre}color:var(--tool-bash);`}>{inp.command}</pre>}
+        {name === 'Bash' && commandText(inp) && <pre style={`${pre}color:var(--tool-bash);`}>{commandText(inp)}</pre>}
         {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
           {inp.subagent_type && <div style={{ padding: '6px 12px', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
