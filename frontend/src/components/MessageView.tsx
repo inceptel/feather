@@ -143,12 +143,14 @@ function diffLineStyle(kind: DiffKind): Record<string, string> {
 const TOOL_ICONS: Record<string, string> = {
   Read: '📄', Write: '✏️', Edit: '✂️', Bash: '⚡', Grep: '🔍', Glob: '🗂️',
   WebFetch: '🌐', WebSearch: '🔎', Agent: '🤖', Skill: '⚡',
+  Patch: '✂️', Input: '↵',
 }
 
 const TOOL_COLORS: Record<string, string> = {
   Bash: 'var(--tool-bash)', Read: 'var(--tool-read)', Write: 'var(--tool-write)', Edit: 'var(--tool-edit)',
   Grep: 'var(--tool-grep)', Glob: 'var(--tool-glob)', WebFetch: 'var(--tool-glob)', WebSearch: 'var(--tool-grep)',
   Agent: 'var(--tool-agent)', Skill: 'var(--tool-skill)',
+  Patch: 'var(--tool-edit)', Input: 'var(--tool-read)',
 }
 
 // Normalize raw tool name (Anthropic 'Bash', MCP 'mcp__oc__bash', oc 'bash') to a
@@ -156,6 +158,7 @@ const TOOL_COLORS: Record<string, string> = {
 const TOOL_ALIASES: Record<string, string> = {
   bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit',
   exec: 'Bash', exec_command: 'Bash', exec_comman: 'Bash',
+  apply_patch: 'Patch', write_stdin: 'Input',
   grep: 'Grep', glob: 'Glob', find: 'Glob',
   task: 'Agent', agent: 'Agent',
   webfetch: 'WebFetch', fetch: 'WebFetch',
@@ -172,6 +175,38 @@ function commandText(input: any): string {
   return ((input?.command || input?.cmd) as string || '').trim()
 }
 
+function patchText(input: any): string {
+  return ((input?.raw || input?.input || input?.patch) as string || '').trim()
+}
+
+function stdinText(input: any): string {
+  return ((input?.chars || input?.input) as string || '')
+}
+
+function patchSummary(input: any): string {
+  const text = patchText(input)
+  if (!text) return ''
+  const firstFile = text.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m)?.[1]
+  const changeCount = (text.match(/^\*\*\* (?:Update|Add|Delete) File: /gm) || []).length
+  if (firstFile) {
+    const short = firstFile.split('/').slice(-2).join('/')
+    return changeCount > 1 ? `${short} +${changeCount - 1}` : short
+  }
+  const firstLine = text.split('\n').find(Boolean) || ''
+  return firstLine.length > 80 ? firstLine.slice(0, 80) + '…' : firstLine
+}
+
+function stdinSummary(input: any): string {
+  const chars = stdinText(input)
+  if (!chars) return input?.session_id != null ? `session ${input.session_id}` : ''
+  const visible = chars
+    .replace(/\u0003/g, '^C')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+  const prefix = input?.session_id != null ? `session ${input.session_id}: ` : ''
+  return prefix + (visible.length > 60 ? visible.slice(0, 60) + '…' : visible)
+}
+
 function toolSummary(name: string, input: any): string {
   if (!input) return ''
   const fp = ((input.file_path || input.path) as string) || ''
@@ -181,6 +216,8 @@ function toolSummary(name: string, input: any): string {
     case 'Write': return short
     case 'Edit': return short + (input.replace_all ? ' ×all' : '')
     case 'Bash': { const c = commandText(input).split('\n')[0]; return c.length > 80 ? c.slice(0, 80) + '…' : c }
+    case 'Patch': return patchSummary(input)
+    case 'Input': return stdinSummary(input)
     case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`
     case 'Glob': return input.pattern || ''
     case 'Agent': { const d = input.description || (input.prompt as string || '').split('\n')[0]; return d ? (d.length > 80 ? d.slice(0, 80) + '…' : d) : '' }
@@ -237,7 +274,7 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
     const summary = toolSummary(name, block.input)
     const inp = block.input || {}
     const result = block.id && getResult ? getResult(block.id) : undefined
-    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read' || !!result
+    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Patch' || name === 'Input' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read' || !!result
     const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:8px 12px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
     const isErr = result?.is_error
     const statusColor = isErr ? 'var(--error)' : result ? 'var(--success)' : 'var(--warning)'
@@ -261,6 +298,8 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
           </div>
         )}
         {name === 'Bash' && commandText(inp) && <pre style={`${pre}color:var(--tool-bash);`}>{commandText(inp)}</pre>}
+        {name === 'Patch' && patchText(inp) && <pre style={`${pre}color:var(--tool-edit);`}>{patchText(inp).slice(0, 2000)}{patchText(inp).length > 2000 ? '\n…' : ''}</pre>}
+        {name === 'Input' && <pre style={`${pre}color:var(--tool-read);`}>{stdinText(inp).replace(/\u0003/g, '^C') || '(empty stdin)'}{inp.session_id != null ? `\n\nsession: ${inp.session_id}` : ''}</pre>}
         {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
           {inp.subagent_type && <div style={{ padding: '6px 12px', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
