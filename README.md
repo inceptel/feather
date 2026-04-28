@@ -58,6 +58,30 @@ You're running Claude Code on a remote machine. You want to check on it from you
 
 Feather reads Claude's raw JSONL session files, streams updates via SSE, and connects to tmux sessions via WebSocket terminals. No database. No build pipeline beyond Vite. Just `node server.js`.
 
+## /auto — autonomous improvement loops
+
+Feather has a built-in dashboard for **autoweb** instances — long-running self-improvement loops that iterate on a goal in the background. Each instance is a directory at `~/autoweb-NAME/` with a `run.sh` (the loop), a `program.md` (the spec), and a `results.tsv` (the keep/revert/crash log). The Feather UI lets you start, stop, retarget, and inspect each loop without ever touching a terminal.
+
+Click the **Auto** tab in the sidebar to see all your loops, sorted by recent activity:
+
+![Auto sidebar](docs/screenshots/auto-sidebar.png)
+
+Click one to open a full detail view — stats, current iteration, controls, recent log:
+
+![Auto detail — top](docs/screenshots/auto-detail-top.png)
+
+Scroll down for the worker session list (each iteration's worker chat is one click away) and the rendered program spec:
+
+![Auto detail — bottom](docs/screenshots/auto-detail-bottom.png)
+
+Workers tag themselves with `AUTO_WORKER=TRUE` so they're filtered out of the main session list — you reach them through the Auto tab instead. **+ New auto** spins up a fresh `~/autoweb-NAME/` directory and a linked main-chat session in one click.
+
+The companion `/auto` slash command (CLI control via `curl`) lives at [`skills/auto/SKILL.md`](skills/auto/SKILL.md). Symlink it into your Claude skills dir to use it from any chat:
+
+```bash
+ln -sf "$(pwd)/skills/auto" ~/.claude/skills/auto
+```
+
 ## Quick start
 
 ```bash
