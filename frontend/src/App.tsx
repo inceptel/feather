@@ -1,9 +1,10 @@
 declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
+import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents, BASE } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -101,8 +102,76 @@ export default function App() {
   const [renameText, setRenameText] = createSignal('')
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
-  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
-  const [hideWorkers, setHideWorkers] = createSignal(localStorage.getItem('feather-hide-workers') === 'true')
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto'>('sessions')
+  interface AutoInstance {
+    name: string; dir: string; running: boolean; current: string;
+    keeps: number; reverts: number; crashes: number; skips: number; iterations: number;
+    last: { timestamp: string; status: string; description: string } | null;
+    mainChat: string | null;
+  }
+  interface WorkerSession { id: string; agent: string; mtime: string }
+  const [autoInstances, setAutoInstances] = createSignal<AutoInstance[]>([])
+  const [currentAuto, setCurrentAuto] = createSignal<string | null>(null)
+  const [autoDetail, setAutoDetail] = createSignal<(AutoInstance & { program?: string; results?: string; workerSessions?: WorkerSession[] }) | null>(null)
+  const [autoNewName, setAutoNewName] = createSignal('')
+  const [autoNewGoal, setAutoNewGoal] = createSignal('')
+  const [autoCreating, setAutoCreating] = createSignal(false)
+  const [autoBusy, setAutoBusy] = createSignal<string | null>(null)
+  function autoLastTs(i: AutoInstance): number {
+    return i.last ? new Date(i.last.timestamp).getTime() : 0
+  }
+  const sortedAutos = () => [...autoInstances()].sort((a, b) => autoLastTs(b) - autoLastTs(a))
+  async function loadAutoInstances() {
+    try {
+      const r = await fetch(`${BASE}/api/auto/instances`)
+      const d = await r.json()
+      setAutoInstances(d.instances || [])
+    } catch {}
+  }
+  async function loadAutoDetail(name: string) {
+    try {
+      const r = await fetch(`${BASE}/api/auto/instances/${name}`)
+      if (r.ok) setAutoDetail(await r.json())
+    } catch {}
+  }
+  async function autoAction(name: string, action: 'start' | 'stop') {
+    setAutoBusy(name + ':' + action)
+    try { await fetch(`${BASE}/api/auto/instances/${name}/${action}`, { method: 'POST' }); await loadAutoInstances() }
+    finally { setAutoBusy(null) }
+  }
+  async function autoFocus(name: string, focus: string) {
+    if (!focus.trim()) return
+    await fetch(`${BASE}/api/auto/instances/${name}/focus`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus }) })
+    await loadAutoInstances()
+  }
+  async function autoBtw(name: string, note: string) {
+    if (!note.trim()) return
+    await fetch(`${BASE}/api/auto/instances/${name}/btw`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) })
+    await loadAutoInstances()
+  }
+  async function autoLink(name: string, sessionId: string) {
+    await fetch(`${BASE}/api/auto/instances/${name}/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) })
+    await loadAutoInstances()
+  }
+  async function autoCreate() {
+    const name = autoNewName().trim()
+    const goal = autoNewGoal().trim()
+    if (!name || !goal) return
+    setAutoCreating(true)
+    try {
+      const r = await fetch(`${BASE}/api/auto/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, template: 'simple', goal }) })
+      if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Create failed: ' + (e.error || r.status)); return }
+      try {
+        const sessionId = await createSession(undefined, 'claude')
+        await fetch(`${BASE}/api/auto/instances/${name}/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) })
+        fetchSessions().then(s => setSessions(s)).catch(() => {})
+      } catch {}
+      setAutoNewName(''); setAutoNewGoal('')
+      await loadAutoInstances()
+      setCurrentAuto(name)
+      setSidebar(false)
+    } finally { setAutoCreating(false) }
+  }
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
   const [expanded, setExpanded] = createSignal(false)
@@ -186,6 +255,7 @@ export default function App() {
   async function select(id: string) {
     const prev = currentId()
     if (prev) saveDraft(prev, text())
+    setCurrentAuto(null)
     setCurrentId(id)
     location.hash = id
     setSidebar(false)
@@ -425,6 +495,22 @@ export default function App() {
     else setFavicon('#666')
   })
 
+  createEffect(() => {
+    const needList = (sidebarTab() === 'auto' && sidebar()) || currentAuto() !== null
+    if (!needList) return
+    loadAutoInstances()
+    const id = setInterval(loadAutoInstances, 5000)
+    onCleanup(() => clearInterval(id))
+  })
+
+  createEffect(() => {
+    const name = currentAuto()
+    if (!name) { setAutoDetail(null); return }
+    loadAutoDetail(name)
+    const id = setInterval(() => loadAutoDetail(name), 4000)
+    onCleanup(() => clearInterval(id))
+  })
+
   const touchedFiles = () => {
     const files = new Map<string, { actions: Set<string>, lastSeen: string }>()
     for (const msg of messages()) {
@@ -487,6 +573,7 @@ export default function App() {
           {/* Sidebar tabs */}
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
             <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
+            <button onClick={() => setSidebarTab('auto')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'auto' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'auto' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Auto</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
           </div>
           {/* Sessions tab */}
@@ -516,18 +603,9 @@ export default function App() {
                 </div>
               </Show>
             </div>
-            <Show when={sessions().some(s => s.isWorker)}>
-              <div style={{ padding: '4px 16px', display: 'flex', 'align-items': 'center', gap: '8px', 'border-bottom': '1px solid #1e1e1e' }}>
-                <button onClick={() => { const v = !hideWorkers(); setHideWorkers(v); localStorage.setItem('feather-hide-workers', String(v)) }}
-                  style={{ background: hideWorkers() ? '#4aba6a' : '#333', border: 'none', width: '32px', height: '18px', 'border-radius': '9px', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', 'flex-shrink': '0', padding: '0' }}>
-                  <span style={{ position: 'absolute', top: '2px', left: hideWorkers() ? '16px' : '2px', width: '14px', height: '14px', 'border-radius': '50%', background: '#fff', transition: 'left 0.2s' }} />
-                </button>
-                <span style={{ 'font-size': '11px', color: '#888' }}>Hide workers</span>
-              </div>
-            </Show>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
               {(() => {
-                const all = hideWorkers() ? sessions().filter(s => !s.isWorker) : sessions()
+                const all = sessions().filter(s => !s.isWorker)
                 const now = new Date()
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
                 const yesterdayStart = todayStart - 86400000
@@ -593,11 +671,135 @@ export default function App() {
               </Show>
             </div>
           </Show>
+          {/* Auto tab */}
+          <Show when={sidebarTab() === 'auto'}>
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
+              <div style={{ padding: '12px 16px', 'border-bottom': '1px solid #1e1e1e' }}>
+                <input value={autoNewName()} onInput={(e) => setAutoNewName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="name (lowercase)" style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', 'margin-bottom': '6px', outline: 'none' }} />
+                <textarea value={autoNewGoal()} onInput={(e) => setAutoNewGoal(e.target.value)} placeholder="goal (what should it loop on?)" rows={2} style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', resize: 'vertical', 'font-family': 'inherit', outline: 'none' }} />
+                <button onClick={autoCreate} disabled={autoCreating() || !autoNewName() || !autoNewGoal()} style={{ width: '100%', 'margin-top': '6px', padding: '6px', background: autoCreating() ? '#1a1a2e' : '#4aba6a', color: autoCreating() ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: autoCreating() ? 'wait' : 'pointer' }}>{autoCreating() ? 'Creating...' : '+ New auto'}</button>
+              </div>
+              <Show when={autoInstances().length === 0}>
+                <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No autos yet.</div>
+              </Show>
+              <For each={sortedAutos()}>{(inst) => (
+                <div onClick={() => { setCurrentAuto(inst.name); setSidebar(false) }}
+                  style={{ padding: '10px 16px', cursor: 'pointer', 'border-bottom': '1px solid #111', 'border-left': currentAuto() === inst.name ? '3px solid #4aba6a' : '3px solid transparent', background: currentAuto() === inst.name ? '#1a1a2e' : 'transparent', '-webkit-tap-highlight-color': 'transparent' }}>
+                  <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: inst.running ? '#4aba6a' : '#555', 'flex-shrink': '0' }} />
+                    <span style={{ 'font-size': '13px', 'font-weight': '600', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{inst.name}</span>
+                    <span style={{ 'font-size': '10px', color: '#888', 'flex-shrink': '0' }}>k{inst.keeps}/r{inst.reverts}/c{inst.crashes}</span>
+                  </div>
+                  <Show when={inst.last}>
+                    <div style={{ 'font-size': '10px', color: '#555', 'margin-top': '2px' }}>{timeAgo(inst.last!.timestamp)} ago — {inst.last!.status}</div>
+                  </Show>
+                </div>
+              )}</For>
+            </div>
+          </Show>
         </div>
       </div>
 
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
+        <Show when={currentAuto()}>{(name) => {
+          const inst = () => autoDetail() || autoInstances().find(i => i.name === name())
+          const recent = () => {
+            const r = autoDetail()?.results
+            if (!r) return [] as { ts: string; status: string; desc: string }[]
+            return r.split('\n').slice(1).filter(Boolean).slice(-15).reverse().map(line => {
+              const [ts, status, ...rest] = line.split('\t')
+              return { ts, status, desc: rest.join('\t') }
+            })
+          }
+          return (
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
+              <div style={{ padding: '12px 24px 12px 56px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
+                <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: inst()?.running ? '#4aba6a' : '#555' }} />
+                <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{name()}</span>
+                <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{inst()?.running ? 'RUNNING' : 'STOPPED'}</span>
+                <div style={{ flex: '1' }} />
+                <Show when={inst()?.mainChat}>
+                  <button onClick={(e) => { e.preventDefault(); select(inst()!.mainChat!) }} style={{ background: 'none', border: '1px solid #2a3a55', color: '#73b8ff', padding: '4px 10px', 'border-radius': '6px', 'font-size': '13px', cursor: 'pointer' }}>→ main chat</button>
+                </Show>
+                <button onClick={() => setCurrentAuto(null)} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '4px 8px' }}>×</button>
+              </div>
+              <div style={{ padding: '20px 24px 20px 56px', 'max-width': '900px' }}>
+                <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', 'margin-bottom': '20px' }}>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Iterations</div>
+                    <div style={{ 'font-size': '24px', 'font-weight': '700', 'margin-top': '4px' }}>{inst()?.iterations ?? 0}</div>
+                  </div>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Keeps</div>
+                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#4aba6a', 'margin-top': '4px' }}>{inst()?.keeps ?? 0}</div>
+                  </div>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Reverts</div>
+                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#d4a050', 'margin-top': '4px' }}>{inst()?.reverts ?? 0}</div>
+                  </div>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Crashes</div>
+                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#d45555', 'margin-top': '4px' }}>{inst()?.crashes ?? 0}</div>
+                  </div>
+                </div>
+                <Show when={inst()?.current}>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa' }}>
+                    <span style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-right': '8px' }}>Now</span>
+                    {inst()!.current}
+                  </div>
+                </Show>
+                <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px' }}>
+                  <Show when={!inst()?.running} fallback={
+                    <button onClick={() => autoAction(name(), 'stop')} disabled={autoBusy() !== null} style={{ padding: '10px 20px', background: '#d45555', color: '#fff', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: 'pointer' }}>{autoBusy() === name() + ':stop' ? '...' : 'Stop'}</button>
+                  }>
+                    <button onClick={() => autoAction(name(), 'start')} disabled={autoBusy() !== null} style={{ padding: '10px 20px', background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: 'pointer' }}>{autoBusy() === name() + ':start' ? '...' : 'Start'}</button>
+                  </Show>
+                  <Show when={!inst()?.mainChat}>
+                    <button onClick={() => { const id = currentId(); if (id) autoLink(name(), id); else alert('Open a chat first to link.') }} style={{ padding: '10px 16px', background: 'none', border: '1px solid #333', 'border-radius': '8px', color: '#888', 'font-size': '13px', cursor: 'pointer' }}>Link current chat</button>
+                  </Show>
+                </div>
+                <div style={{ 'margin-bottom': '16px' }}>
+                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>Set focus</div>
+                  <input placeholder="What should it work on next?" onKeyDown={async (e) => { if (e.key === 'Enter') { await autoFocus(name(), e.currentTarget.value); e.currentTarget.value = '' } }} style={{ width: '100%', padding: '10px 12px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }} />
+                </div>
+                <div style={{ 'margin-bottom': '24px' }}>
+                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>BTW (heads-up to the worker)</div>
+                  <input placeholder="Add a note for the next iteration..." onKeyDown={async (e) => { if (e.key === 'Enter') { await autoBtw(name(), e.currentTarget.value); e.currentTarget.value = ''; loadAutoDetail(name()) } }} style={{ width: '100%', padding: '10px 12px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }} />
+                </div>
+                <Show when={recent().length > 0}>
+                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '8px' }}>Recent activity</div>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', overflow: 'hidden' }}>
+                    <For each={recent()}>{(r) => (
+                      <div style={{ padding: '8px 12px', 'border-bottom': '1px solid #1a1a2e', 'font-size': '12px', display: 'flex', gap: '8px', 'align-items': 'flex-start' }}>
+                        <span style={{ color: '#555', 'flex-shrink': '0', 'font-family': 'monospace' }}>{timeAgo(r.ts)}</span>
+                        <span style={{ color: r.status === 'keep' ? '#4aba6a' : r.status === 'revert' ? '#d4a050' : '#d45555', 'font-weight': '600', 'flex-shrink': '0', 'min-width': '50px' }}>{r.status}</span>
+                        <span style={{ color: '#aaa', flex: '1', 'word-break': 'break-word' }}>{r.desc}</span>
+                      </div>
+                    )}</For>
+                  </div>
+                </Show>
+                <Show when={autoDetail()?.workerSessions && autoDetail()!.workerSessions!.length > 0}>
+                  <div style={{ 'margin-top': '24px', 'margin-bottom': '8px', 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Worker sessions</div>
+                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', overflow: 'hidden' }}>
+                    <For each={autoDetail()!.workerSessions!}>{(w) => (
+                      <div onClick={() => select(w.id)} style={{ padding: '8px 12px', 'border-bottom': '1px solid #1a1a2e', 'font-size': '12px', display: 'flex', gap: '8px', 'align-items': 'center', cursor: 'pointer' }}>
+                        <span style={{ color: '#555', 'flex-shrink': '0', 'font-family': 'monospace', 'min-width': '34px' }}>{timeAgo(w.mtime)}</span>
+                        <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: w.agent === 'codex' ? '#2a1e3a' : '#1e2a3a', color: w.agent === 'codex' ? '#c084fc' : '#73b8ff', 'flex-shrink': '0', 'font-weight': '600' }}>{w.agent}</span>
+                        <span style={{ color: '#888', 'font-family': 'monospace', 'font-size': '11px' }}>{w.id.slice(0, 8)}</span>
+                      </div>
+                    )}</For>
+                  </div>
+                </Show>
+                <Show when={autoDetail()?.program}>
+                  <div style={{ 'margin-top': '24px', 'margin-bottom': '8px', 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Program</div>
+                  <div class="prose" style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '4px 20px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={marked.parse(autoDetail()!.program!) as string} />
+                </Show>
+              </div>
+            </div>
+          )
+        }}</Show>
+        <Show when={!currentAuto()}>
         {/* Header */}
         <div style={{ padding: '8px 16px 0 56px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
@@ -770,6 +972,7 @@ export default function App() {
               <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
             </div>
           </div>
+        </Show>
         </Show>
       </div>
     </div>

@@ -29,6 +29,21 @@
     .msg-row .msg-action { opacity: 0.35 !important; transition: opacity 0.15s, color 0.15s; }
     .msg-row:hover .msg-action { opacity: 0.75 !important; }
     .msg-row .msg-action:hover { opacity: 1 !important; color: var(--text-primary) !important; }
+    /* Markdown rendering (auto detail view) */
+    .prose h1 { font-size: 18px; font-weight: 700; margin: 18px 0 8px; color: #fff; }
+    .prose h2 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; color: #e5e5e5; text-transform: uppercase; letter-spacing: 0.05em; }
+    .prose h3 { font-size: 13px; font-weight: 600; margin: 14px 0 4px; color: #c8c8c8; }
+    .prose p { margin: 6px 0; color: #c0c0c0; }
+    .prose ul, .prose ol { margin: 6px 0 6px 20px; color: #c0c0c0; }
+    .prose li { margin: 2px 0; }
+    .prose code { background: #1a1a2e; color: #ffb86c; padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: ui-monospace, monospace; }
+    .prose pre { background: #06080c; border: 1px solid #1e1e1e; border-radius: 6px; padding: 10px 12px; margin: 8px 0; overflow-x: auto; }
+    .prose pre code { background: none; color: #d0d0d0; padding: 0; font-size: 12px; }
+    .prose a { color: #73b8ff; text-decoration: none; }
+    .prose a:hover { text-decoration: underline; }
+    .prose strong { color: #fff; font-weight: 600; }
+    .prose hr { border: none; border-top: 1px solid #1e1e1e; margin: 16px 0; }
+    .prose blockquote { border-left: 3px solid #2a3a55; padding-left: 12px; color: #888; margin: 8px 0; }
   </style>
   <script>
     // iOS PWA keyboard fix — pin the root to the visual viewport so it shrinks with the keyboard

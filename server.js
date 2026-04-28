@@ -4,7 +4,7 @@ import http from 'http';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
@@ -380,12 +380,16 @@ function discoverSessions(limit = 50) {
       else title = extractClaudeTitle(buf);
       if (title && /You have a hard 20.minute timeout/i.test(title)) title = 'Worker (20min)';
 
+      // Worker detection: canary, or autoweb path in prompt, or (legacy) cwd dir name
+      const workerByContent = buf.includes('AUTO_WORKER=TRUE') || buf.includes('/home/user/autoweb-');
+      const finalIsWorker = isWorker || workerByContent;
+
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
         agent,
-        ...(isWorker ? { isWorker: true } : {}),
+        ...(finalIsWorker ? { isWorker: true } : {}),
       });
     } catch {}
   }
@@ -1064,6 +1068,257 @@ app.get('/api/agents', (_req, res) => {
     agents.push({ id: 'codex', label: 'Codex', available: false });
   }
   res.json({ agents });
+});
+
+// ── /api/auto: autoweb instances ────────────────────────────────────────────
+
+const AUTO_TEMPLATE = path.join(HOME, 'autoweb-marketdata');
+
+const autoDir = (name) => path.join(HOME, `autoweb-${name}`);
+const safeName = (n) => /^[a-z0-9][a-z0-9-]{0,30}$/.test(n);
+
+function readSafe(p, fallback = '') {
+  try { return fs.readFileSync(p, 'utf8'); } catch { return fallback; }
+}
+
+function isRunning(pidPath) {
+  const pid = parseInt(readSafe(pidPath).trim());
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function summarizeInstance(name) {
+  const dir = autoDir(name);
+  if (!fs.existsSync(path.join(dir, 'run.sh'))) return null;
+  const tsv = readSafe(path.join(dir, 'results.tsv'));
+  const rows = tsv.split('\n').slice(1).filter(Boolean);
+  let keeps = 0, reverts = 0, crashes = 0, skips = 0;
+  for (const r of rows) {
+    const status = r.split('\t')[1];
+    if (status === 'keep') keeps++;
+    else if (status === 'revert') reverts++;
+    else if (status === 'crash') crashes++;
+    else if (status === 'skip') skips++;
+  }
+  const last = rows.slice(-1)[0]?.split('\t') || [];
+  const mainChat = readSafe(path.join(dir, 'main_chat.txt')).trim() || null;
+  return {
+    name,
+    dir,
+    running: isRunning(path.join(dir, 'auto.pid')),
+    current: readSafe(path.join(dir, 'current.txt')).trim(),
+    keeps, reverts, crashes, skips,
+    iterations: rows.length,
+    last: last.length ? { timestamp: last[0], status: last[1], description: last[2] } : null,
+    mainChat,
+  };
+}
+
+function listInstances() {
+  const out = [];
+  for (const entry of fs.readdirSync(HOME)) {
+    if (!entry.startsWith('autoweb-')) continue;
+    const name = entry.slice('autoweb-'.length);
+    if (!safeName(name)) continue;
+    const s = summarizeInstance(name);
+    if (s) out.push(s);
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+app.get('/api/auto/instances', (_req, res) => {
+  res.json({ instances: listInstances() });
+});
+
+app.get('/api/auto/instances/:name', (req, res) => {
+  const { name } = req.params;
+  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
+  const s = summarizeInstance(name);
+  if (!s) return res.status(404).json({ error: 'not found' });
+  s.program = readSafe(path.join(s.dir, 'program.md'));
+  s.results = readSafe(path.join(s.dir, 'results.tsv'));
+  s.workerSessions = listWorkerSessions(name);
+  res.json(s);
+});
+
+function listWorkerSessions(name, limit = 20) {
+  const out = [];
+  // Claude project dir convention: leading dash + path with slashes → dashes
+  const projDir = path.join(CLAUDE_PROJECTS, `-home-user-autoweb-${name}`);
+  if (fs.existsSync(projDir)) {
+    try {
+      for (const f of fs.readdirSync(projDir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const fp = path.join(projDir, f);
+        const st = fs.statSync(fp);
+        if (st.size < 50) continue;
+        out.push({ id: f.replace('.jsonl', ''), agent: 'claude', mtime: st.mtime.toISOString() });
+      }
+    } catch {}
+  }
+  // Codex: scan recent files for the autoweb dir path in their buffers
+  for (const { uuid, fpath, mtime } of listCodexJsonlFiles().slice(0, 200)) {
+    try {
+      const fd = fs.openSync(fpath, 'r');
+      const buf = Buffer.alloc(Math.min(65536, fs.fstatSync(fd).size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      fs.closeSync(fd);
+      if (buf.includes(`autoweb-${name}`)) {
+        out.push({ id: uuid, agent: 'codex', mtime: mtime.toISOString() });
+      }
+    } catch {}
+  }
+  out.sort((a, b) => b.mtime.localeCompare(a.mtime));
+  return out.slice(0, limit);
+}
+
+app.post('/api/auto/instances', express.json(), (req, res) => {
+  const { name, target, url, repo, template, goal } = req.body || {};
+  if (!safeName(name)) return res.status(400).json({ error: 'bad name (lowercase, digits, dashes)' });
+  const dir = autoDir(name);
+  if (fs.existsSync(dir)) return res.status(409).json({ error: 'already exists' });
+  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+
+  let runSh;
+  let program;
+  if (template === 'simple') {
+    runSh = `#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PROGRAM="$DIR/program.md"
+RESULTS="$DIR/results.tsv"
+LOGDIR="$DIR/logs"
+TIMEOUT=600
+SLEEP_BETWEEN=15
+[ -f /home/user/.env ] && . /home/user/.env
+[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && unset ANTHROPIC_API_KEY
+mkdir -p "$LOGDIR"
+[ ! -f "$RESULTS" ] && printf "timestamp\\tstatus\\tdescription\\n" > "$RESULTS"
+ITER=0
+while true; do
+  ITER=$((ITER+1))
+  TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  LOG="$LOGDIR/iter-$(printf '%04d' $ITER)-$(date +%s).log"
+  echo "iter $ITER at $(date -u +'%H:%M UTC')" > "$DIR/current.txt"
+  echo "$(($(date +%s) + TIMEOUT))" > "$DIR/deadline"
+  PROMPT="AUTO_WORKER=TRUE — autoweb iteration for ${name}.
+Read $PROGRAM. Do one iteration. Log result to $RESULTS as: printf '%s\\tkeep\\tDESCRIPTION\\n' \\"\\$(date -u +%Y-%m-%dT%H:%M:%SZ)\\" >> $RESULTS"
+  timeout "$TIMEOUT" claude --print --dangerously-skip-permissions -p "$PROMPT" < /dev/null > "$LOG" 2>&1
+  EC=$?
+  [ $EC -eq 124 ] && printf "%s\\tcrash\\ttimeout\\n" "$TS" >> "$RESULTS"
+  [ $EC -ne 0 ] && [ $EC -ne 124 ] && printf "%s\\tcrash\\texit %d\\n" "$TS" "$EC" >> "$RESULTS"
+  sleep "$SLEEP_BETWEEN"
+done
+`;
+    program = [
+      `# autoweb — ${name}`,
+      '',
+      '## Goal',
+      goal || target || '(set me)',
+      '',
+      '## CURRENT FOCUS',
+      'general',
+      '',
+      '## Known issues',
+      '(none)',
+      '',
+      '## How to log',
+      `Append a row to ${dir}/results.tsv with: printf '%s\\tkeep\\tDESCRIPTION\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ${dir}/results.tsv`,
+      '',
+    ].join('\n');
+  } else {
+    if (!fs.existsSync(AUTO_TEMPLATE)) return res.status(500).json({ error: 'template missing: ' + AUTO_TEMPLATE });
+    runSh = readSafe(path.join(AUTO_TEMPLATE, 'run.sh'));
+    runSh = runSh.replace(/autoweb-marketdata/g, `autoweb-${name}`);
+    if (repo) runSh = runSh.replace(/-C \/home\/user\/hft\/crypto-trading/g, `-C ${repo}`);
+    program = `# autoweb — ${name}\n\n## Target\n- File: ${target || '(set me)'}\n- URL: ${url || '(set me)'}\n${repo ? `- Repo: ${repo}\n` : ''}\n## CURRENT FOCUS\ngeneral\n\n## Known issues\n(none)\n\n## CAN\n- (list)\n\n## CANNOT\n- Break the page\n\n## How to verify\nScreenshot the URL with agent-browser, sanity check.\n`;
+  }
+  fs.writeFileSync(path.join(dir, 'run.sh'), runSh, { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, 'program.md'), program);
+  fs.writeFileSync(path.join(dir, 'results.tsv'), 'timestamp\tstatus\tdescription\n');
+  res.json({ ok: true, instance: summarizeInstance(name) });
+});
+
+app.post('/api/auto/instances/:name/start', (req, res) => {
+  const { name } = req.params;
+  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
+  const dir = autoDir(name);
+  if (!fs.existsSync(path.join(dir, 'run.sh'))) return res.status(404).json({ error: 'not found' });
+  const pidPath = path.join(dir, 'auto.pid');
+  if (isRunning(pidPath)) return res.json({ ok: true, alreadyRunning: true });
+  const out = fs.openSync(path.join(dir, 'auto.log'), 'a');
+  const child = spawn('bash', [path.join(dir, 'run.sh')], {
+    detached: true,
+    stdio: ['ignore', out, out],
+    cwd: dir,
+  });
+  fs.writeFileSync(pidPath, String(child.pid));
+  child.unref();
+  res.json({ ok: true, pid: child.pid });
+});
+
+app.post('/api/auto/instances/:name/stop', (req, res) => {
+  const { name } = req.params;
+  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
+  const pidPath = path.join(autoDir(name), 'auto.pid');
+  const pid = parseInt(readSafe(pidPath).trim());
+  if (!pid) return res.json({ ok: true, alreadyStopped: true });
+  try { process.kill(-pid, 'SIGTERM'); } catch {}
+  try { process.kill(pid, 'SIGTERM'); } catch {}
+  fs.unlinkSync(pidPath);
+  res.json({ ok: true });
+});
+
+app.post('/api/auto/instances/:name/focus', express.json(), (req, res) => {
+  const { name } = req.params;
+  const { focus } = req.body || {};
+  if (!safeName(name) || !focus) return res.status(400).json({ error: 'bad input' });
+  const programPath = path.join(autoDir(name), 'program.md');
+  let p = readSafe(programPath);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  if (/^## CURRENT FOCUS\n.*$/m.test(p)) {
+    p = p.replace(/^## CURRENT FOCUS\n.*$/m, `## CURRENT FOCUS\n${focus}`);
+  } else {
+    p += `\n## CURRENT FOCUS\n${focus}\n`;
+  }
+  fs.writeFileSync(programPath, p);
+  res.json({ ok: true });
+});
+
+app.post('/api/auto/instances/:name/btw', express.json(), (req, res) => {
+  const { name } = req.params;
+  const { note } = req.body || {};
+  if (!safeName(name) || !note) return res.status(400).json({ error: 'bad input' });
+  const programPath = path.join(autoDir(name), 'program.md');
+  let p = readSafe(programPath);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  const stamp = new Date().toISOString();
+  const line = `- (${stamp}) ${note}`;
+  if (/^## Known issues\n/m.test(p)) {
+    p = p.replace(/^## Known issues\n(\(none\)\n)?/m, `## Known issues\n${line}\n`);
+  } else {
+    p += `\n## Known issues\n${line}\n`;
+  }
+  fs.writeFileSync(programPath, p);
+  res.json({ ok: true });
+});
+
+app.post('/api/auto/instances/:name/link', express.json(), (req, res) => {
+  const { name } = req.params;
+  const { sessionId } = req.body || {};
+  if (!safeName(name) || !sessionId) return res.status(400).json({ error: 'bad input' });
+  const dir = autoDir(name);
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'not found' });
+  fs.writeFileSync(path.join(dir, 'main_chat.txt'), sessionId);
+  res.json({ ok: true });
+});
+
+app.delete('/api/auto/instances/:name', (req, res) => {
+  const { name } = req.params;
+  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
+  const dir = autoDir(name);
+  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'not found' });
+  if (isRunning(path.join(dir, 'auto.pid'))) return res.status(409).json({ error: 'still running, stop first' });
+  res.json({ ok: true, hint: 'rm -rf ' + dir + ' to remove on disk (server does not delete)' });
 });
 
 app.use(express.static(STATIC_DIR, {
