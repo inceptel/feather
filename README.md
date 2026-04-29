@@ -86,11 +86,17 @@ Scroll down for the worker session list (each iteration's worker chat is one cli
 
 Workers tag themselves with `AUTO_WORKER=TRUE` so they're filtered out of the main session list — you reach them through the Auto tab instead. **+ New auto** spins up a fresh `~/auto-NAME/` directory and a linked main-chat session in one click.
 
-The companion `/auto` slash command (CLI control via `curl`) lives at [`skills/auto/SKILL.md`](skills/auto/SKILL.md). Symlink it into your Claude skills dir to use it from any chat:
+## Slash commands
+
+Feather ships two Claude Code skills under [`skills/`](skills/). Symlink them into your Claude skills dir to use from any chat:
 
 ```bash
-ln -sf "$(pwd)/skills/auto" ~/.claude/skills/auto
+ln -sf "$(pwd)/skills/auto"    ~/.claude/skills/auto
+ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
 ```
+
+- [`/auto`](skills/auto/SKILL.md) — start, stop, focus, and inspect auto instances via `curl` against `/api/auto/*`.
+- [`/feather`](skills/feather/SKILL.md) — manage the running Feather server (status, logs, quick links, deploy).
 
 ## Quick start
 
