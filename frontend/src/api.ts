@@ -100,6 +100,18 @@ export const exportUrl = (id: string) => `${BASE}/api/sessions/${id}/export`
 export const openInEditor = (path: string) =>
   fetch(`${BASE}/api/open-in-editor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(r => r.json())
 
+export interface FileEntry { name: string; type: 'dir' | 'file'; size: number; mtime: number }
+export interface FileListing { path: string; parent: string | null; entries: FileEntry[] }
+
+export async function fetchFiles(dir?: string, hidden = false): Promise<FileListing> {
+  const params = new URLSearchParams()
+  if (dir) params.set('path', dir)
+  if (hidden) params.set('hidden', '1')
+  const r = await fetch(`${BASE}/api/files${params.toString() ? `?${params}` : ''}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
+
 export function subscribeMessages(
   id: string,
   onMessage: (msg: Message) => void,

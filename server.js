@@ -981,6 +981,26 @@ app.get('/api/file', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/files', (req, res) => {
+  const dir = req.query.path || HOME;
+  if (!dir.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+  try {
+    const stat = fs.statSync(dir);
+    if (!stat.isDirectory()) return res.status(400).json({ error: 'not a directory' });
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => !e.name.startsWith('.') || req.query.hidden === '1')
+      .map(e => {
+        const full = path.join(dir, e.name);
+        try {
+          const s = fs.statSync(full);
+          return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
+        } catch { return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: 0, mtime: 0 }; }
+      })
+      .sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name));
+    res.json({ path: dir, parent: dir === '/' ? null : path.dirname(dir), entries });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/open-in-editor', (req, res) => {
   try {
     const fpath = req.body?.path;

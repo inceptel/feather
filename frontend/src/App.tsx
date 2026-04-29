@@ -3,8 +3,8 @@ import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspen
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents, BASE } from './api'
+import type { SessionMeta, Message, AgentInfo, FileListing } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents, fetchFiles, BASE } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -83,6 +83,15 @@ export default function App() {
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
+  const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
+  const [browse, setBrowse] = createSignal<FileListing | null>(null)
+  const [browseLoading, setBrowseLoading] = createSignal(false)
+  async function loadBrowse(dir?: string) {
+    setBrowseLoading(true)
+    try { setBrowse(await fetchFiles(dir)) }
+    catch (e) { console.error(e) }
+    finally { setBrowseLoading(false) }
+  }
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [viewingFile, setViewingFile] = createSignal<{ path: string; content: string; error?: string } | null>(null)
   async function openFile(path: string) {
@@ -522,6 +531,17 @@ export default function App() {
     onCleanup(() => clearInterval(id))
   })
 
+  createEffect(() => {
+    if (tab() === 'files' && filesMode() === 'all' && !browse() && !browseLoading()) loadBrowse()
+  })
+
+  function formatSize(n: number): string {
+    if (n < 1024) return n + 'B'
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + 'K'
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + 'M'
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + 'G'
+  }
+
   const touchedFiles = () => {
     const files = new Map<string, { actions: Set<string>, lastSeen: string }>()
     for (const msg of messages()) {
@@ -880,25 +900,94 @@ export default function App() {
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
             </div>
-            <div style={{ display: tab() === 'files' ? 'block' : 'none', height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
-              <Show when={touchedFiles().length === 0}>
-                <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>No files touched yet</div>
+            <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
+              {/* Mode toggle */}
+              <div style={{ display: 'flex', gap: '4px', padding: '8px 12px', 'border-bottom': '1px solid #1e1e1e', 'flex-shrink': '0' }}>
+                <button onClick={() => setFilesMode('changed')}
+                  style={{ background: filesMode() === 'changed' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: filesMode() === 'changed' ? '#e5e5e5' : '#888', 'font-size': '12px', padding: '4px 10px', 'border-radius': '6px', cursor: 'pointer' }}>
+                  Changed{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}
+                </button>
+                <button onClick={() => setFilesMode('all')}
+                  style={{ background: filesMode() === 'all' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: filesMode() === 'all' ? '#e5e5e5' : '#888', 'font-size': '12px', padding: '4px 10px', 'border-radius': '6px', cursor: 'pointer' }}>
+                  All files
+                </button>
+              </div>
+              {/* Changed files view */}
+              <Show when={filesMode() === 'changed'}>
+                <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
+                  <Show when={touchedFiles().length === 0}>
+                    <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>No files touched yet</div>
+                  </Show>
+                  <For each={touchedFiles()}>{(f) => {
+                    const short = f.path.split('/').slice(-2).join('/')
+                    const actionColors: Record<string, string> = { Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a', Grep: '#b48ead', Glob: '#88c0d0' }
+                    return (
+                      <div onClick={() => openFile(f.path)} style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                        <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+                          <span style={{ color: '#e5e5e5', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={f.path}>{short}</span>
+                          <For each={f.actions}>{(a) => (
+                            <span style={{ 'font-size': '10px', padding: '1px 5px', 'border-radius': '3px', background: 'rgba(255,255,255,0.05)', color: actionColors[a] || '#888' }}>{a}</span>
+                          )}</For>
+                        </div>
+                        <div style={{ color: '#444', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", 'margin-top': '2px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.path}</div>
+                      </div>
+                    )
+                  }}</For>
+                </div>
               </Show>
-              <For each={touchedFiles()}>{(f) => {
-                const short = f.path.split('/').slice(-2).join('/')
-                const actionColors: Record<string, string> = { Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a', Grep: '#b48ead', Glob: '#88c0d0' }
-                return (
-                  <div onClick={() => openFile(f.path)} style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                    <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-                      <span style={{ color: '#e5e5e5', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={f.path}>{short}</span>
-                      <For each={f.actions}>{(a) => (
-                        <span style={{ 'font-size': '10px', padding: '1px 5px', 'border-radius': '3px', background: 'rgba(255,255,255,0.05)', color: actionColors[a] || '#888' }}>{a}</span>
-                      )}</For>
-                    </div>
-                    <div style={{ color: '#444', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", 'margin-top': '2px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.path}</div>
+              {/* All files view */}
+              <Show when={filesMode() === 'all'}>
+                <Show when={browse()}>
+                  <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #1e1e1e', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'flex-shrink': '0', 'overflow-x': 'auto', 'white-space': 'nowrap' }}>
+                    {(() => {
+                      const p = browse()!.path
+                      const parts = p === '/' ? [''] : p.split('/')
+                      return <For each={parts}>{(part, i) => {
+                        const isLast = i() === parts.length - 1
+                        const segment = parts.slice(0, i() + 1).join('/') || '/'
+                        return <>
+                          <span onClick={() => !isLast && loadBrowse(segment)}
+                            style={{ color: isLast ? '#e5e5e5' : '#73b8ff', cursor: isLast ? 'default' : 'pointer' }}>
+                            {i() === 0 ? '/' : part}
+                          </span>
+                          {i() > 0 && !isLast && <span style={{ color: '#444' }}>/</span>}
+                        </>
+                      }}</For>
+                    })()}
                   </div>
-                )
-              }}</For>
+                </Show>
+                <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+                  <Show when={browseLoading() && !browse()}>
+                    <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>Loading…</div>
+                  </Show>
+                  <Show when={browse()}>
+                    <Show when={browse()!.parent !== null}>
+                      <div onClick={() => loadBrowse(browse()!.parent!)}
+                        style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', color: '#888', cursor: 'pointer', 'font-family': "'SF Mono', Menlo, monospace" }}>
+                        ../
+                      </div>
+                    </Show>
+                    <For each={browse()!.entries}>{(e) => {
+                      const full = browse()!.path === '/' ? '/' + e.name : browse()!.path + '/' + e.name
+                      return e.type === 'dir' ? (
+                        <div onClick={() => loadBrowse(full)}
+                          style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '8px', 'font-family': "'SF Mono', Menlo, monospace" }}>
+                          <span style={{ color: '#73b8ff' }}>{e.name}/</span>
+                        </div>
+                      ) : (
+                        <div onClick={() => openFile(full)}
+                          style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', color: '#e5e5e5', cursor: 'pointer', 'font-family': "'SF Mono', Menlo, monospace" }}>
+                          <span style={{ flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{e.name}</span>
+                          <span style={{ color: '#444', 'font-size': '11px' }}>{formatSize(e.size)}</span>
+                        </div>
+                      )
+                    }}</For>
+                    <Show when={browse()!.entries.length === 0}>
+                      <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>Empty</div>
+                    </Show>
+                  </Show>
+                </div>
+              </Show>
             </div>
             <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
               <Show when={tab() === 'terminal'}>
