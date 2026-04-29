@@ -1,6 +1,6 @@
 ---
 name: auto
-description: Manage autonomous improvement instances via Feather's /api/auto endpoints. Use when user says /auto or wants to start/stop/inspect a self-improving loop. Each instance lives in ~/auto-NAME/ with run.sh + program.md + results.tsv. Pipeline definitions live in feather-test/templates/auto/*.json.
+description: Manage autonomous improvement instances via Feather's /api/auto endpoints. Use when user says /auto or wants to start/stop/inspect a self-improving loop. Each instance lives in ~/auto-NAME/ with run.sh + program.md + results.tsv. Pipeline definitions live in feather/templates/auto/*.json.
 ---
 
 # /auto — autonomous loop control
@@ -15,7 +15,7 @@ ln -sf "$(pwd)/skills/auto" ~/.claude/skills/auto
 
 (Run from the feather repo root.) The skill talks to a running Feather server's `/api/auto/*` endpoints.
 
-All commands hit `localhost:3310/api/auto/*` (Feather dev). For prod, swap to 3300.
+All commands hit `localhost:4870/api/auto/*`. Change the port to match your install.
 
 ## Pipelines
 
@@ -36,7 +36,7 @@ Legacy `template:"simple"` and `template:"full"` still work; `full` maps to `cla
 ### `/auto status` (or `/auto`)
 
 ```bash
-curl -s localhost:3310/api/auto/instances | python3 -c "
+curl -s localhost:4870/api/auto/instances | python3 -c "
 import json, sys
 for i in json.load(sys.stdin)['instances']:
     flag = '●' if i['running'] else '○'
@@ -47,28 +47,28 @@ for i in json.load(sys.stdin)['instances']:
 ### `/auto pipelines`
 
 ```bash
-curl -s localhost:3310/api/auto/pipelines | python3 -m json.tool
+curl -s localhost:4870/api/auto/pipelines | python3 -m json.tool
 ```
 
 ### `/auto new <name> [args]`
 
 **simple** (claude-only, ~30s/iter — for quick goals like "what is 1+1"):
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances \
+curl -s -X POST localhost:4870/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"simple","goal":"GOAL TEXT"}'
 ```
 
 **all-claude** (5-phase, claude-only, real codebase work without codex):
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances \
+curl -s -X POST localhost:4870/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"all-claude","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
 ```
 
 **claude-codex** (default, 6-phase claude+codex):
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances \
+curl -s -X POST localhost:4870/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"claude-codex","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
 ```
@@ -78,15 +78,15 @@ After create, edit `~/auto-NAME/program.md` to flesh out CAN/CANNOT/verify, then
 ### `/auto start <name>` / `/auto stop <name>`
 
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances/NAME/start
-curl -s -X POST localhost:3310/api/auto/instances/NAME/stop
+curl -s -X POST localhost:4870/api/auto/instances/NAME/start
+curl -s -X POST localhost:4870/api/auto/instances/NAME/stop
 ```
 
 ### `/auto focus <name> <text>`
 
 Replace (or append) `## CURRENT FOCUS` section in program.md.
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances/NAME/focus \
+curl -s -X POST localhost:4870/api/auto/instances/NAME/focus \
   -H "Content-Type: application/json" -d '{"focus":"TEXT"}'
 ```
 
@@ -94,7 +94,7 @@ curl -s -X POST localhost:3310/api/auto/instances/NAME/focus \
 
 Append a timestamped note to `## Known issues` (worker picks up next iteration).
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances/NAME/btw \
+curl -s -X POST localhost:4870/api/auto/instances/NAME/btw \
   -H "Content-Type: application/json" -d '{"note":"TEXT"}'
 ```
 
@@ -102,14 +102,14 @@ curl -s -X POST localhost:3310/api/auto/instances/NAME/btw \
 
 Bind a Feather chat session as the "main chat" for this instance (steering wheel).
 ```bash
-curl -s -X POST localhost:3310/api/auto/instances/NAME/link \
+curl -s -X POST localhost:4870/api/auto/instances/NAME/link \
   -H "Content-Type: application/json" -d '{"sessionId":"SID"}'
 ```
 
 ### `/auto show <name>`
 
 ```bash
-curl -s localhost:3310/api/auto/instances/NAME | python3 -m json.tool
+curl -s localhost:4870/api/auto/instances/NAME | python3 -m json.tool
 ```
 
 ### `/auto tail <name>`
@@ -121,7 +121,7 @@ ls -t ~/auto-NAME/logs/ | head -3  # per-iteration claude/codex output
 
 ### `/auto deploy <name>`
 
-Instance-specific. For feather: merge dev branch + npm deploy. Read `~/auto-NAME/deploy.sh` if present, else ask user.
+Per-instance deploy. If `~/auto-NAME/deploy.sh` exists, run it. Otherwise ask the user how their project ships and write the script for them — once it exists, future `/auto deploy <name>` invocations are a single `bash ~/auto-NAME/deploy.sh`.
 
 ## Files per instance
 
@@ -142,4 +142,3 @@ Instance-specific. For feather: merge dev branch + npm deploy. Read `~/auto-NAME
 - Names: lowercase alphanumeric + dashes, max 30 chars.
 - `claude-codex` and `all-claude` honor the `repo` field for the codex `-C` working dir; pass any existing dir if you don't have a real repo.
 - `simple` is claude-only, 10-min timeout, no codex calls. Use for harness tests or trivial goals.
-- Pre-rename instances at `~/autoweb-NAME/` are still readable and controllable (the server resolves both prefixes). New instances always get created at `~/auto-NAME/`.
