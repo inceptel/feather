@@ -324,8 +324,8 @@ function discoverSessions(limit = 50) {
           try {
             const stat = fs.statSync(fpath);
             if (stat.size < 50) continue;
-            const isWorker = /-home-user-(?:auto|autoweb)-|feather-aw/.test(dir);
-            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude', isWorker });
+            if (/-home-user-(?:auto|autoweb)-|feather-aw/.test(dir)) continue;
+            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude' });
           } catch {}
         }
       } catch {}
@@ -358,14 +358,15 @@ function discoverSessions(limit = 50) {
     } catch {}
   }
 
-  // Sort by mtime descending, take top N
+  // Sort by mtime descending; loop until we have `limit` non-worker sessions.
+  // Content-based worker detection requires reading the file, so we can't pre-filter.
   candidates.sort((a, b) => b.mtime - a.mtime);
-  const top = candidates.slice(0, limit);
 
   const active = getActiveTmuxSessions();
 
   const sessions = [];
-  for (const { id, fpath, mtime, agent, isWorker } of top) {
+  for (const { id, fpath, mtime, agent } of candidates) {
+    if (sessions.length >= limit) break;
     try {
       const fd = fs.openSync(fpath, 'r');
       // Codex session_meta line alone can be ~15KB, plus a developer permissions
@@ -375,25 +376,22 @@ function discoverSessions(limit = 50) {
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
+      // Worker detection: AUTO_WORKER canary, or instance dir path in prompt
+      // (covers both new ~/auto- and legacy ~/autoweb- paths).
+      if (buf.includes('AUTO_WORKER=TRUE')
+        || buf.includes('/home/user/auto-')
+        || buf.includes('/home/user/autoweb-')) continue;
+
       let title;
       if (agent === 'omp') title = extractOmpTitle(buf);
       else if (agent === 'codex') title = extractCodexTitle(buf);
       else title = extractClaudeTitle(buf);
-      if (title && /You have a hard 20.minute timeout/i.test(title)) title = 'Worker (20min)';
-
-      // Worker detection: AUTO_WORKER canary, or instance dir path in prompt
-      // (covers both new ~/auto- and legacy ~/autoweb- paths), or cwd dir name.
-      const workerByContent = buf.includes('AUTO_WORKER=TRUE')
-        || buf.includes('/home/user/auto-')
-        || buf.includes('/home/user/autoweb-');
-      const finalIsWorker = isWorker || workerByContent;
 
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
         agent,
-        ...(finalIsWorker ? { isWorker: true } : {}),
       });
     } catch {}
   }
