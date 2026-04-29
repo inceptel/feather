@@ -84,6 +84,17 @@ export default function App() {
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
   const [files, setFiles] = createSignal<PendingFile[]>([])
+  const [viewingFile, setViewingFile] = createSignal<{ path: string; content: string; error?: string } | null>(null)
+  async function openFile(path: string) {
+    setViewingFile({ path, content: '' })
+    try {
+      const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`)
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      setViewingFile({ path, content: await r.text() })
+    } catch (e: any) {
+      setViewingFile({ path, content: '', error: e.message || 'failed to load' })
+    }
+  }
   const [uploading, setUploading] = createSignal(false)
   const [working, setWorking] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
@@ -877,7 +888,7 @@ export default function App() {
                 const short = f.path.split('/').slice(-2).join('/')
                 const actionColors: Record<string, string> = { Read: '#73b8ff', Write: '#4aba6a', Edit: '#c4993a', Grep: '#b48ead', Glob: '#88c0d0' }
                 return (
-                  <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px' }}>
+                  <div onClick={() => openFile(f.path)} style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                     <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
                       <span style={{ color: '#e5e5e5', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={f.path}>{short}</span>
                       <For each={f.actions}>{(a) => (
@@ -898,6 +909,39 @@ export default function App() {
             </div>
           </Show>
         </div>
+
+        {/* File viewer modal */}
+        <Show when={viewingFile()}>
+          {(() => {
+            const v = viewingFile()!
+            const isMd = v.path.toLowerCase().endsWith('.md')
+            return (
+              <div onClick={() => setViewingFile(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.6)', 'z-index': '200', display: 'flex', 'align-items': 'stretch', 'justify-content': 'center', padding: 'max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))' }}>
+                <div onClick={(e) => e.stopPropagation()} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'max-width': '900px', width: '100%', display: 'flex', 'flex-direction': 'column', 'overflow': 'hidden' }}>
+                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '10px 14px', 'border-bottom': '1px solid #1e1e1e', background: '#0a0e14', 'flex-shrink': '0' }}>
+                    <span style={{ color: '#888', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={v.path}>{v.path}</span>
+                    <button onClick={() => openInEditor(v.path)} style={{ background: 'transparent', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '3px 8px', 'border-radius': '6px', cursor: 'pointer' }}>Open</button>
+                    <button onClick={() => setViewingFile(null)} style={{ background: 'transparent', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '0 4px', 'line-height': '1' }}>&times;</button>
+                  </div>
+                  <div style={{ 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', flex: '1' }}>
+                    <Show when={v.error}>
+                      <div style={{ padding: '20px', color: '#c44', 'font-size': '13px' }}>{v.error}</div>
+                    </Show>
+                    <Show when={!v.error && !v.content}>
+                      <div style={{ padding: '20px', color: '#666', 'font-size': '13px' }}>Loading…</div>
+                    </Show>
+                    <Show when={!v.error && v.content && isMd}>
+                      <div class="prose" style={{ padding: '4px 24px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={marked.parse(v.content) as string} />
+                    </Show>
+                    <Show when={!v.error && v.content && !isMd}>
+                      <pre style={{ margin: '0', padding: '16px 20px', color: '#d0d0d0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{v.content}</pre>
+                    </Show>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+        </Show>
 
         {/* Drag overlay */}
         <Show when={dragging()}>
