@@ -15,7 +15,11 @@ ln -sf "$(pwd)/skills/auto" ~/.claude/skills/auto
 
 (Run from the feather repo root.) The skill talks to a running Feather server's `/api/auto/*` endpoints.
 
-All commands hit `localhost:4870/api/auto/*`. Change the port to match your install.
+Set `PORT` to your feather port (4870 by default). All `curl` examples below use `localhost:$PORT`:
+
+```bash
+export PORT=4870   # change to match your install
+```
 
 ## Pipelines
 
@@ -36,7 +40,7 @@ Legacy `template:"simple"` and `template:"full"` still work; `full` maps to `cla
 ### `/auto status` (or `/auto`)
 
 ```bash
-curl -s localhost:4870/api/auto/instances | python3 -c "
+curl -s localhost:$PORT/api/auto/instances | python3 -c "
 import json, sys
 for i in json.load(sys.stdin)['instances']:
     flag = '●' if i['running'] else '○'
@@ -47,28 +51,28 @@ for i in json.load(sys.stdin)['instances']:
 ### `/auto pipelines`
 
 ```bash
-curl -s localhost:4870/api/auto/pipelines | python3 -m json.tool
+curl -s localhost:$PORT/api/auto/pipelines | python3 -m json.tool
 ```
 
 ### `/auto new <name> [args]`
 
 **simple** (claude-only, ~30s/iter — for quick goals like "what is 1+1"):
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances \
+curl -s -X POST localhost:$PORT/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"simple","goal":"GOAL TEXT"}'
 ```
 
 **all-claude** (5-phase, claude-only, real codebase work without codex):
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances \
+curl -s -X POST localhost:$PORT/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"all-claude","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
 ```
 
 **claude-codex** (default, 6-phase claude+codex):
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances \
+curl -s -X POST localhost:$PORT/api/auto/instances \
   -H "Content-Type: application/json" \
   -d '{"name":"NAME","pipeline":"claude-codex","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
 ```
@@ -78,15 +82,15 @@ After create, edit `~/auto-NAME/program.md` to flesh out CAN/CANNOT/verify, then
 ### `/auto start <name>` / `/auto stop <name>`
 
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances/NAME/start
-curl -s -X POST localhost:4870/api/auto/instances/NAME/stop
+curl -s -X POST localhost:$PORT/api/auto/instances/NAME/start
+curl -s -X POST localhost:$PORT/api/auto/instances/NAME/stop
 ```
 
 ### `/auto focus <name> <text>`
 
 Replace (or append) `## CURRENT FOCUS` section in program.md.
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances/NAME/focus \
+curl -s -X POST localhost:$PORT/api/auto/instances/NAME/focus \
   -H "Content-Type: application/json" -d '{"focus":"TEXT"}'
 ```
 
@@ -94,7 +98,7 @@ curl -s -X POST localhost:4870/api/auto/instances/NAME/focus \
 
 Append a timestamped note to `## Known issues` (worker picks up next iteration).
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances/NAME/btw \
+curl -s -X POST localhost:$PORT/api/auto/instances/NAME/btw \
   -H "Content-Type: application/json" -d '{"note":"TEXT"}'
 ```
 
@@ -102,14 +106,14 @@ curl -s -X POST localhost:4870/api/auto/instances/NAME/btw \
 
 Bind a Feather chat session as the "main chat" for this instance (steering wheel).
 ```bash
-curl -s -X POST localhost:4870/api/auto/instances/NAME/link \
+curl -s -X POST localhost:$PORT/api/auto/instances/NAME/link \
   -H "Content-Type: application/json" -d '{"sessionId":"SID"}'
 ```
 
 ### `/auto show <name>`
 
 ```bash
-curl -s localhost:4870/api/auto/instances/NAME | python3 -m json.tool
+curl -s localhost:$PORT/api/auto/instances/NAME | python3 -m json.tool
 ```
 
 ### `/auto tail <name>`

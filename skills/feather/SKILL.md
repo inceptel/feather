@@ -5,7 +5,11 @@ description: Manage a running Feather Claude session viewer — health, logs, qu
 
 # /feather — server ops
 
-Feather defaults to **port 4870** (override via `PORT`). All endpoints below assume `localhost:4870` — change the port to match your install.
+Set `PORT` to your feather port (4870 by default). All `curl` examples below use `localhost:$PORT`:
+
+```bash
+export PORT=4870   # change to match your install
+```
 
 ## Install
 
@@ -20,7 +24,7 @@ ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
 ## Health
 
 ```bash
-curl -sf localhost:4870/api/health | python3 -m json.tool
+curl -sf localhost:$PORT/api/health | python3 -m json.tool
 ```
 
 Non-200 → server is down. Returns `{version, ...}`.
@@ -60,17 +64,17 @@ The "Links" tab in the sidebar reads `quick-links.json`.
 
 ```bash
 # List
-curl -s localhost:4870/api/quick-links | python3 -m json.tool
+curl -s localhost:$PORT/api/quick-links | python3 -m json.tool
 
 # Add
-links=$(curl -s localhost:4870/api/quick-links)
-curl -s -X POST localhost:4870/api/quick-links \
+links=$(curl -s localhost:$PORT/api/quick-links)
+curl -s -X POST localhost:$PORT/api/quick-links \
   -H "Content-Type: application/json" \
   -d "$(echo "$links" | python3 -c "import sys,json; l=json.load(sys.stdin); l.append({'label':'LABEL','url':'URL'}); print(json.dumps(l))")"
 
 # Remove
-links=$(curl -s localhost:4870/api/quick-links)
-curl -s -X POST localhost:4870/api/quick-links \
+links=$(curl -s localhost:$PORT/api/quick-links)
+curl -s -X POST localhost:$PORT/api/quick-links \
   -H "Content-Type: application/json" \
   -d "$(echo "$links" | python3 -c "import sys,json; l=json.load(sys.stdin); l=[x for x in l if x['label']!='LABEL']; print(json.dumps(l))")"
 ```
