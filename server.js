@@ -8,6 +8,7 @@ import { execFileSync, execSync, spawn } from 'child_process';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
+import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
 
 // Load ~/.env if present
 try {
@@ -323,7 +324,7 @@ function discoverSessions(limit = 50) {
           try {
             const stat = fs.statSync(fpath);
             if (stat.size < 50) continue;
-            const isWorker = /autoweb|feather-aw/.test(dir);
+            const isWorker = /-home-user-(?:auto|autoweb)-|feather-aw/.test(dir);
             candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude', isWorker });
           } catch {}
         }
@@ -380,8 +381,11 @@ function discoverSessions(limit = 50) {
       else title = extractClaudeTitle(buf);
       if (title && /You have a hard 20.minute timeout/i.test(title)) title = 'Worker (20min)';
 
-      // Worker detection: canary, or autoweb path in prompt, or (legacy) cwd dir name
-      const workerByContent = buf.includes('AUTO_WORKER=TRUE') || buf.includes('/home/user/autoweb-');
+      // Worker detection: AUTO_WORKER canary, or instance dir path in prompt
+      // (covers both new ~/auto- and legacy ~/autoweb- paths), or cwd dir name.
+      const workerByContent = buf.includes('AUTO_WORKER=TRUE')
+        || buf.includes('/home/user/auto-')
+        || buf.includes('/home/user/autoweb-');
       const finalIsWorker = isWorker || workerByContent;
 
       sessions.push({
@@ -1070,11 +1074,21 @@ app.get('/api/agents', (_req, res) => {
   res.json({ agents });
 });
 
-// ── /api/auto: autoweb instances ────────────────────────────────────────────
+// ── /api/auto: instances ────────────────────────────────────────────────────
 
-const AUTO_TEMPLATE = path.join(HOME, 'autoweb-marketdata');
+// New instances live at ~/auto-NAME/. Legacy instances (created before the
+// rename) live at ~/autoweb-NAME/ and are still resolved for back-compat.
+const AUTO_PREFIX = 'auto-';
+const LEGACY_PREFIX = 'autoweb-';
 
-const autoDir = (name) => path.join(HOME, `autoweb-${name}`);
+function autoDir(name) {
+  const fresh = path.join(HOME, AUTO_PREFIX + name);
+  if (fs.existsSync(fresh)) return fresh;
+  const legacy = path.join(HOME, LEGACY_PREFIX + name);
+  if (fs.existsSync(legacy)) return legacy;
+  return fresh; // default for not-yet-created
+}
+
 const safeName = (n) => /^[a-z0-9][a-z0-9-]{0,30}$/.test(n);
 
 function readSafe(p, fallback = '') {
@@ -1116,10 +1130,14 @@ function summarizeInstance(name) {
 
 function listInstances() {
   const out = [];
+  const seen = new Set();
   for (const entry of fs.readdirSync(HOME)) {
-    if (!entry.startsWith('autoweb-')) continue;
-    const name = entry.slice('autoweb-'.length);
-    if (!safeName(name)) continue;
+    let name;
+    if (entry.startsWith(AUTO_PREFIX)) name = entry.slice(AUTO_PREFIX.length);
+    else if (entry.startsWith(LEGACY_PREFIX)) name = entry.slice(LEGACY_PREFIX.length);
+    else continue;
+    if (!safeName(name) || seen.has(name)) continue;
+    seen.add(name);
     const s = summarizeInstance(name);
     if (s) out.push(s);
   }
@@ -1143,9 +1161,14 @@ app.get('/api/auto/instances/:name', (req, res) => {
 
 function listWorkerSessions(name, limit = 20) {
   const out = [];
-  // Claude project dir convention: leading dash + path with slashes → dashes
-  const projDir = path.join(CLAUDE_PROJECTS, `-home-user-autoweb-${name}`);
-  if (fs.existsSync(projDir)) {
+  // Claude project dir convention: leading dash + path with slashes → dashes.
+  // Check the new path first, then the legacy autoweb- path.
+  const projDirs = [
+    path.join(CLAUDE_PROJECTS, `-home-user-${AUTO_PREFIX}${name}`),
+    path.join(CLAUDE_PROJECTS, `-home-user-${LEGACY_PREFIX}${name}`),
+  ];
+  for (const projDir of projDirs) {
+    if (!fs.existsSync(projDir)) continue;
     try {
       for (const f of fs.readdirSync(projDir)) {
         if (!f.endsWith('.jsonl')) continue;
@@ -1156,14 +1179,14 @@ function listWorkerSessions(name, limit = 20) {
       }
     } catch {}
   }
-  // Codex: scan recent files for the autoweb dir path in their buffers
+  // Codex: scan recent files for the instance dir path in their buffers.
   for (const { uuid, fpath, mtime } of listCodexJsonlFiles().slice(0, 200)) {
     try {
       const fd = fs.openSync(fpath, 'r');
       const buf = Buffer.alloc(Math.min(65536, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
-      if (buf.includes(`autoweb-${name}`)) {
+      if (buf.includes(`${AUTO_PREFIX}${name}`) || buf.includes(`${LEGACY_PREFIX}${name}`)) {
         out.push({ id: uuid, agent: 'codex', mtime: mtime.toISOString() });
       }
     } catch {}
@@ -1172,68 +1195,80 @@ function listWorkerSessions(name, limit = 20) {
   return out.slice(0, limit);
 }
 
+app.get('/api/auto/pipelines', (_req, res) => {
+  res.json({ pipelines: listPipelines() });
+});
+
+// Map legacy `template` values onto pipeline names.
+function resolvePipelineName({ pipeline, template }) {
+  if (pipeline) return pipeline;
+  if (!template || template === 'full') return 'claude-codex';
+  if (template === 'simple') return 'simple';
+  return template;
+}
+
 app.post('/api/auto/instances', express.json(), (req, res) => {
-  const { name, target, url, repo, template, goal } = req.body || {};
+  const { name, target, url, repo, template, pipeline, goal } = req.body || {};
   if (!safeName(name)) return res.status(400).json({ error: 'bad name (lowercase, digits, dashes)' });
-  const dir = autoDir(name);
-  if (fs.existsSync(dir)) return res.status(409).json({ error: 'already exists' });
+
+  // Refuse if either the new path or a legacy autoweb- path already exists.
+  const dir = path.join(HOME, AUTO_PREFIX + name);
+  const legacyDir = path.join(HOME, LEGACY_PREFIX + name);
+  if (fs.existsSync(dir) || fs.existsSync(legacyDir)) {
+    return res.status(409).json({ error: 'already exists' });
+  }
+
+  const pipelineName = resolvePipelineName({ pipeline, template });
+  const available = listPipelines();
+  if (!available.includes(pipelineName)) {
+    return res.status(400).json({ error: `unknown pipeline: ${pipelineName}. Available: ${available.join(', ')}` });
+  }
+
   fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
 
   let runSh;
-  let program;
-  if (template === 'simple') {
-    runSh = `#!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-PROGRAM="$DIR/program.md"
-RESULTS="$DIR/results.tsv"
-LOGDIR="$DIR/logs"
-TIMEOUT=600
-SLEEP_BETWEEN=15
-[ -f /home/user/.env ] && . /home/user/.env
-[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && unset ANTHROPIC_API_KEY
-mkdir -p "$LOGDIR"
-[ ! -f "$RESULTS" ] && printf "timestamp\\tstatus\\tdescription\\n" > "$RESULTS"
-ITER=0
-while true; do
-  ITER=$((ITER+1))
-  TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  LOG="$LOGDIR/iter-$(printf '%04d' $ITER)-$(date +%s).log"
-  echo "iter $ITER at $(date -u +'%H:%M UTC')" > "$DIR/current.txt"
-  echo "$(($(date +%s) + TIMEOUT))" > "$DIR/deadline"
-  PROMPT="AUTO_WORKER=TRUE — autoweb iteration for ${name}.
-Read $PROGRAM. Do one iteration. Log result to $RESULTS as: printf '%s\\tkeep\\tDESCRIPTION\\n' \\"\\$(date -u +%Y-%m-%dT%H:%M:%SZ)\\" >> $RESULTS"
-  timeout "$TIMEOUT" claude --print --dangerously-skip-permissions -p "$PROMPT" < /dev/null > "$LOG" 2>&1
-  EC=$?
-  [ $EC -eq 124 ] && printf "%s\\tcrash\\ttimeout\\n" "$TS" >> "$RESULTS"
-  [ $EC -ne 0 ] && [ $EC -ne 124 ] && printf "%s\\tcrash\\texit %d\\n" "$TS" "$EC" >> "$RESULTS"
-  sleep "$SLEEP_BETWEEN"
-done
-`;
-    program = [
-      `# autoweb — ${name}`,
-      '',
-      '## Goal',
-      goal || target || '(set me)',
-      '',
-      '## CURRENT FOCUS',
-      'general',
-      '',
-      '## Known issues',
-      '(none)',
-      '',
-      '## How to log',
-      `Append a row to ${dir}/results.tsv with: printf '%s\\tkeep\\tDESCRIPTION\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ${dir}/results.tsv`,
-      '',
-    ].join('\n');
-  } else {
-    if (!fs.existsSync(AUTO_TEMPLATE)) return res.status(500).json({ error: 'template missing: ' + AUTO_TEMPLATE });
-    runSh = readSafe(path.join(AUTO_TEMPLATE, 'run.sh'));
-    runSh = runSh.replace(/autoweb-marketdata/g, `autoweb-${name}`);
-    if (repo) runSh = runSh.replace(/-C \/home\/user\/hft\/crypto-trading/g, `-C ${repo}`);
-    program = `# autoweb — ${name}\n\n## Target\n- File: ${target || '(set me)'}\n- URL: ${url || '(set me)'}\n${repo ? `- Repo: ${repo}\n` : ''}\n## CURRENT FOCUS\ngeneral\n\n## Known issues\n(none)\n\n## CAN\n- (list)\n\n## CANNOT\n- Break the page\n\n## How to verify\nScreenshot the URL with agent-browser, sanity check.\n`;
+  try {
+    runSh = generateRunSh({
+      pipelineName,
+      instanceName: name,
+      instanceDir: dir,
+      repo,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
+
+  const programParts = [
+    `# auto — ${name}`,
+    `Pipeline: ${pipelineName}`,
+    '',
+    '## Goal',
+    goal || target || '(set me)',
+    '',
+  ];
+  if (target) programParts.push('## Target file', target, '');
+  if (url) programParts.push('## Target URL', url, '');
+  if (repo) programParts.push('## Repo', repo, '');
+  programParts.push(
+    '## CURRENT FOCUS',
+    'general',
+    '',
+    '## Known issues',
+    '(none)',
+    '',
+    '## CAN',
+    '- (list)',
+    '',
+    '## CANNOT',
+    '- Break the page',
+    '',
+    '## How to verify',
+    url ? 'Screenshot the URL, sanity check.' : 'Run tests, check sanity conditions.',
+    '',
+  );
+
   fs.writeFileSync(path.join(dir, 'run.sh'), runSh, { mode: 0o755 });
-  fs.writeFileSync(path.join(dir, 'program.md'), program);
+  fs.writeFileSync(path.join(dir, 'program.md'), programParts.join('\n'));
   fs.writeFileSync(path.join(dir, 'results.tsv'), 'timestamp\tstatus\tdescription\n');
   res.json({ ok: true, instance: summarizeInstance(name) });
 });

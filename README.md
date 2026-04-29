@@ -60,7 +60,17 @@ Feather reads Claude's raw JSONL session files, streams updates via SSE, and con
 
 ## /auto — autonomous improvement loops
 
-Feather has a built-in dashboard for **autoweb** instances — long-running self-improvement loops that iterate on a goal in the background. Each instance is a directory at `~/autoweb-NAME/` with a `run.sh` (the loop), a `program.md` (the spec), and a `results.tsv` (the keep/revert/crash log). The Feather UI lets you start, stop, retarget, and inspect each loop without ever touching a terminal.
+Feather has a built-in dashboard for **auto instances** — long-running self-improvement loops that iterate on a goal in the background. Each instance is a directory at `~/auto-NAME/` with a `run.sh` (the loop), a `program.md` (the spec), and a `results.tsv` (the keep/revert/crash log). The Feather UI lets you start, stop, retarget, and inspect each loop without ever touching a terminal.
+
+Loops are driven by **pipelines** — JSON definitions in [`templates/auto/`](templates/auto/) that list the phases (designer / worker / verifier / simplifier / …) and which engine runs each one. Three ship by default:
+
+| Pipeline | Phases | Engine |
+|----------|--------|--------|
+| `simple` | 1 | claude only — for trivial goals |
+| `all-claude` | 5 + 1/10 reviewer | claude only — full design / impl / verify / simplify cycle |
+| `claude-codex` | 6 + 1/10 reviewer | claude design + reviewer, codex for impl/verify/simplify |
+
+Drop a new `<name>.json` into `templates/auto/` and it becomes selectable via `pipeline: "<name>"` on `POST /api/auto/instances`.
 
 Click the **Auto** tab in the sidebar to see all your loops, sorted by recent activity:
 
@@ -74,7 +84,7 @@ Scroll down for the worker session list (each iteration's worker chat is one cli
 
 ![Auto detail — bottom](docs/screenshots/auto-detail-bottom.png)
 
-Workers tag themselves with `AUTO_WORKER=TRUE` so they're filtered out of the main session list — you reach them through the Auto tab instead. **+ New auto** spins up a fresh `~/autoweb-NAME/` directory and a linked main-chat session in one click.
+Workers tag themselves with `AUTO_WORKER=TRUE` so they're filtered out of the main session list — you reach them through the Auto tab instead. **+ New auto** spins up a fresh `~/auto-NAME/` directory and a linked main-chat session in one click.
 
 The companion `/auto` slash command (CLI control via `curl`) lives at [`skills/auto/SKILL.md`](skills/auto/SKILL.md). Symlink it into your Claude skills dir to use it from any chat:
 

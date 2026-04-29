@@ -1,9 +1,9 @@
 ---
 name: auto
-description: Manage autoweb autonomous improvement instances via Feather's /api/auto endpoints. Use when user says /auto, asks about autoweb, or wants to start/stop/inspect a self-improving loop. Each instance lives in ~/autoweb-NAME/ with run.sh + program.md + results.tsv.
+description: Manage autonomous improvement instances via Feather's /api/auto endpoints. Use when user says /auto or wants to start/stop/inspect a self-improving loop. Each instance lives in ~/auto-NAME/ with run.sh + program.md + results.tsv. Pipeline definitions live in feather-test/templates/auto/*.json.
 ---
 
-# /auto — autoweb control
+# /auto — autonomous loop control
 
 ## Install
 
@@ -16,6 +16,20 @@ ln -sf "$(pwd)/skills/auto" ~/.claude/skills/auto
 (Run from the feather repo root.) The skill talks to a running Feather server's `/api/auto/*` endpoints.
 
 All commands hit `localhost:3310/api/auto/*` (Feather dev). For prod, swap to 3300.
+
+## Pipelines
+
+A pipeline is a JSON file in `feather-test/templates/auto/`. It lists the phases (designer / worker / verifier / simplifier / …) and which engine runs each. Three ship by default:
+
+| Pipeline | Phases | Engine | Use for |
+|----------|--------|--------|---------|
+| `simple` | 1 | claude | trivial goals, harness tests |
+| `all-claude` | 5 + 1/10 reviewer | claude | full cycle without codex |
+| `claude-codex` | 6 + 1/10 reviewer | claude+codex | real codebase work |
+
+Add your own by dropping `<name>.json` into `templates/auto/` (see existing files for the schema). `GET /api/auto/pipelines` lists what's available.
+
+Legacy `template:"simple"` and `template:"full"` still work; `full` maps to `claude-codex`.
 
 ## Commands
 
@@ -30,25 +44,36 @@ for i in json.load(sys.stdin)['instances']:
 "
 ```
 
-### `/auto new <name> [args]`
+### `/auto pipelines`
 
-Two templates:
+```bash
+curl -s localhost:3310/api/auto/pipelines | python3 -m json.tool
+```
+
+### `/auto new <name> [args]`
 
 **simple** (claude-only, ~30s/iter — for quick goals like "what is 1+1"):
 ```bash
 curl -s -X POST localhost:3310/api/auto/instances \
   -H "Content-Type: application/json" \
-  -d '{"name":"NAME","template":"simple","goal":"GOAL TEXT"}'
+  -d '{"name":"NAME","pipeline":"simple","goal":"GOAL TEXT"}'
 ```
 
-**full** (default, 6-phase claude+codex pipeline — for real codebases):
+**all-claude** (5-phase, claude-only, real codebase work without codex):
 ```bash
 curl -s -X POST localhost:3310/api/auto/instances \
   -H "Content-Type: application/json" \
-  -d '{"name":"NAME","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
+  -d '{"name":"NAME","pipeline":"all-claude","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
 ```
 
-After create, edit `~/autoweb-NAME/program.md` to flesh out CAN/CANNOT/verify, then start.
+**claude-codex** (default, 6-phase claude+codex):
+```bash
+curl -s -X POST localhost:3310/api/auto/instances \
+  -H "Content-Type: application/json" \
+  -d '{"name":"NAME","pipeline":"claude-codex","target":"/path/to/file","url":"https://...","repo":"/path/to/repo"}'
+```
+
+After create, edit `~/auto-NAME/program.md` to flesh out CAN/CANNOT/verify, then start.
 
 ### `/auto start <name>` / `/auto stop <name>`
 
@@ -90,31 +115,31 @@ curl -s localhost:3310/api/auto/instances/NAME | python3 -m json.tool
 ### `/auto tail <name>`
 
 ```bash
-tail -f ~/autoweb-NAME/auto.log    # supervisor stdout
-ls -t ~/autoweb-NAME/logs/ | head -3  # per-iteration claude/codex output
+tail -f ~/auto-NAME/auto.log    # supervisor stdout
+ls -t ~/auto-NAME/logs/ | head -3  # per-iteration claude/codex output
 ```
 
 ### `/auto deploy <name>`
 
-Instance-specific. For feather: merge dev branch + npm deploy. Read `~/autoweb-NAME/deploy.sh` if present, else ask user.
+Instance-specific. For feather: merge dev branch + npm deploy. Read `~/auto-NAME/deploy.sh` if present, else ask user.
 
 ## Files per instance
 
 | Path | Purpose |
 |------|---------|
-| `~/autoweb-NAME/run.sh` | Loop harness |
-| `~/autoweb-NAME/program.md` | Goal + focus + bugs + constraints |
-| `~/autoweb-NAME/results.tsv` | timestamp \t status \t description |
-| `~/autoweb-NAME/current.txt` | One-line live status |
-| `~/autoweb-NAME/auto.pid` | Running pid (used by /api/auto) |
-| `~/autoweb-NAME/auto.log` | Stdout from harness |
-| `~/autoweb-NAME/logs/` | Per-iteration claude/codex output |
-| `~/autoweb-NAME/main_chat.txt` | Bound Feather session id (optional) |
-| `~/autoweb-NAME/deadline` | Epoch deadline for current iter |
+| `~/auto-NAME/run.sh` | Loop harness (generated from pipeline JSON) |
+| `~/auto-NAME/program.md` | Goal + focus + bugs + constraints |
+| `~/auto-NAME/results.tsv` | timestamp \t status \t description |
+| `~/auto-NAME/current.txt` | One-line live status |
+| `~/auto-NAME/auto.pid` | Running pid (used by /api/auto) |
+| `~/auto-NAME/auto.log` | Stdout from harness |
+| `~/auto-NAME/logs/` | Per-iteration claude/codex output |
+| `~/auto-NAME/main_chat.txt` | Bound Feather session id (optional) |
+| `~/auto-NAME/deadline` | Epoch deadline for current iter |
 
 ## Notes
 
 - Names: lowercase alphanumeric + dashes, max 30 chars.
-- The full template currently inherits codex `-C` working dir from the `repo` field; pass any existing dir if you don't have a real repo.
-- `simple` template is claude-only, 10-min timeout, no codex calls. Use for harness tests or trivial goals.
-- Old skill at `~/.claude/skills/autoweb/` superseded by this. Backups at `~/.backups/autoweb-skill-*.tar.gz`.
+- `claude-codex` and `all-claude` honor the `repo` field for the codex `-C` working dir; pass any existing dir if you don't have a real repo.
+- `simple` is claude-only, 10-min timeout, no codex calls. Use for harness tests or trivial goals.
+- Pre-rename instances at `~/autoweb-NAME/` are still readable and controllable (the server resolves both prefixes). New instances always get created at `~/auto-NAME/`.
