@@ -1,6 +1,6 @@
 ---
 name: feather
-description: Manage a running Feather Claude session viewer — health, logs, quick links, deploy. Use when the user says /feather.
+description: Manage a running Feather Claude session viewer — health, logs, quick links, projects, deploy, refeather (pull + rebase + redeploy). Use when the user says /feather.
 ---
 
 # /feather — server ops
@@ -57,6 +57,32 @@ npm run deploy
 `npm run deploy` stamps `version.json`, rebuilds the frontend, then runs `supervisorctl restart feather`. If you don't use supervisord, run `npm run build` and restart however you usually do.
 
 After deploy, both `/api/health` and the frontend tab bar should show the same fresh version timestamp.
+
+## Refeather (pull upstream + redeploy)
+
+Pull the latest from origin and redeploy. Uses **rebase**, not merge — local
+commits stay on top of upstream changes, no merge commits. **Power through
+conflicts**: don't abort on the first conflict, resolve them in place and
+continue. Most conflicts in this codebase are small (a server.js endpoint or
+an App.tsx state hunk).
+
+```bash
+cd path/to/feather
+git fetch origin
+git rebase origin/main
+# If a conflict pauses the rebase:
+#   1. git status                      → see conflicted files
+#   2. open each, resolve <<<<<<< markers (keep both intents where possible)
+#   3. git add <file>
+#   4. git rebase --continue
+#   5. repeat until rebase finishes
+# Only `git rebase --abort` if integration is genuinely impossible.
+npm run deploy
+```
+
+After deploy, sanity-check `/api/health` and click through any feature you
+just integrated to confirm it still works (a passing build doesn't prove
+runtime behavior).
 
 ## Quick links
 
@@ -122,6 +148,7 @@ curl -s -X DELETE "localhost:$PORT/api/projects/$id"
 | `/feather logs` | Tail logs (best-effort detect supervisord/systemd) |
 | `/feather restart` | Restart the server |
 | `/feather deploy` | `cd <repo> && npm run deploy` |
+| `/feather refeather` | Pull origin, rebase (resolve conflicts in place), redeploy |
 | `/feather links` | List quick links |
 | `/feather add link LABEL URL` | Append a quick link |
 | `/feather remove link LABEL` | Remove a quick link by label |
