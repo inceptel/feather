@@ -312,6 +312,7 @@ function extractOmpTitle(buf) {
 function discoverSessions(limit = 50) {
   const candidates = [];
   const meta = readMeta();
+  const labels = readProjectLabels();
 
   // Claude sessions
   if (fs.existsSync(CLAUDE_PROJECTS)) {
@@ -325,7 +326,7 @@ function discoverSessions(limit = 50) {
             const stat = fs.statSync(fpath);
             if (stat.size < 50) continue;
             if (/-home-user-(?:auto|autoweb)-|feather-aw/.test(dir)) continue;
-            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude' });
+            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude', projectId: dir });
           } catch {}
         }
       } catch {}
@@ -365,7 +366,7 @@ function discoverSessions(limit = 50) {
   const active = getActiveTmuxSessions();
 
   const sessions = [];
-  for (const { id, fpath, mtime, agent } of candidates) {
+  for (const { id, fpath, mtime, agent, projectId } of candidates) {
     if (sessions.length >= limit) break;
     try {
       const fd = fs.openSync(fpath, 'r');
@@ -387,11 +388,16 @@ function discoverSessions(limit = 50) {
       else if (agent === 'codex') title = extractCodexTitle(buf);
       else title = extractClaudeTitle(buf);
 
+      // Project label is shown only for allowlisted projects (key present in labels);
+      // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
+      const isAllowlisted = projectId && (projectId in labels);
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
         isActive: active.has(id.slice(0, 8)),
         agent,
+        projectId: projectId || null,
+        projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
       });
     } catch {}
   }
@@ -907,6 +913,49 @@ app.post('/api/upload', async (req, res) => {
     fs.writeFileSync(fpath, Buffer.concat(chunks));
     res.json({ path: fpath });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Project labels ──────────────────────────────────────────────────────────
+
+const PROJECT_LABELS_FILE = path.resolve(import.meta.dirname, 'project-labels.json');
+
+function readProjectLabels() {
+  try { return JSON.parse(fs.readFileSync(PROJECT_LABELS_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+// "-home-user-feather" → "feather"; "-home-lena" → "lena"
+function cleanProjectLabel(dir) {
+  const segments = dir.replace(/^-/, '').split('-');
+  return (segments.length > 2 ? segments.slice(2).join('-') : segments[segments.length - 1]) || dir;
+}
+
+// Allowlist: only IDs present as keys in project-labels.json show up. Value
+// is the display label (string), or null/empty to use the auto-derived basename.
+app.get('/api/projects', (_req, res) => {
+  const labels = readProjectLabels();
+  const projects = Object.keys(labels)
+    .filter(id => fs.existsSync(path.join(CLAUDE_PROJECTS, id)))
+    .map(id => ({ id, label: labels[id] || cleanProjectLabel(id) }));
+  res.json({ projects });
+});
+
+app.post('/api/projects/:id/label', (req, res) => {
+  const id = req.params.id;
+  if (!fs.existsSync(path.join(CLAUDE_PROJECTS, id))) {
+    return res.status(404).json({ error: `no such claude project dir: ${id}` });
+  }
+  const labels = readProjectLabels();
+  labels[id] = req.body.label != null ? String(req.body.label) : null;
+  fs.writeFileSync(PROJECT_LABELS_FILE, JSON.stringify(labels, null, 2));
+  res.json({ ok: true });
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  const labels = readProjectLabels();
+  delete labels[req.params.id];
+  fs.writeFileSync(PROJECT_LABELS_FILE, JSON.stringify(labels, null, 2));
+  res.json({ ok: true });
 });
 
 // ── Quick Links ─────────────────────────────────────────────────────────────

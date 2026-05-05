@@ -7,6 +7,13 @@ export interface SessionMeta {
   isActive: boolean
   agent?: string
   isWorker?: boolean
+  projectId?: string | null
+  projectLabel?: string | null
+}
+
+export interface Project {
+  id: string
+  label: string
 }
 
 export interface AgentInfo {
@@ -43,6 +50,12 @@ export async function fetchSessions(): Promise<SessionMeta[]> {
   const r = await fetch(`${BASE}/api/sessions`)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return (await r.json()).sessions
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const r = await fetch(`${BASE}/api/projects`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).projects
 }
 
 export async function fetchMessages(id: string, before = 0): Promise<{ messages: Message[], hasMore: boolean }> {
