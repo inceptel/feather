@@ -97,6 +97,10 @@ function fixLinks(el: HTMLElement) {
 const PATH_RE = /(?<![\w/:])\/[\w.\-]+(?:\/[\w.\-]+)+(?::\d+)?/g
 const TRAILING_PUNCT_RE = /[.,;:!?)\]}]+$/
 
+// Defer to next microtask so innerHTML / text children are populated first
+// (Solid's ref fires before innerHTML is set or text children mounted).
+const linkifyRef = (el: HTMLElement) => queueMicrotask(() => linkifyPaths(el))
+
 function linkifyPaths(el: HTMLElement) {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -303,7 +307,7 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
           <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
         </div>
       ))}
-      {rawContent && <div style={{ padding: '6px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} />}
+      {rawContent && <div style={{ padding: '6px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} ref={linkifyRef} />}
     </div>
   )
 }
@@ -356,16 +360,16 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
             </For>
           </div>
         )}
-        {name === 'Bash' && commandText(inp) && <pre style={`${pre}color:var(--tool-bash);`}>{commandText(inp)}</pre>}
-        {name === 'Patch' && patchText(inp) && <pre style={`${pre}color:var(--tool-edit);`}>{patchText(inp).slice(0, 2000)}{patchText(inp).length > 2000 ? '\n…' : ''}</pre>}
-        {name === 'Input' && <pre style={`${pre}color:var(--tool-read);`}>{stdinText(inp).replace(/\u0003/g, '^C') || '(empty stdin)'}{inp.session_id != null ? `\n\nsession: ${inp.session_id}` : ''}</pre>}
-        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        {name === 'Bash' && commandText(inp) && <pre style={`${pre}color:var(--tool-bash);`} ref={linkifyRef}>{commandText(inp)}</pre>}
+        {name === 'Patch' && patchText(inp) && <pre style={`${pre}color:var(--tool-edit);`} ref={linkifyRef}>{patchText(inp).slice(0, 2000)}{patchText(inp).length > 2000 ? '\n…' : ''}</pre>}
+        {name === 'Input' && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{stdinText(inp).replace(/\u0003/g, '^C') || '(empty stdin)'}{inp.session_id != null ? `\n\nsession: ${inp.session_id}` : ''}</pre>}
+        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`} ref={linkifyRef}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
           {inp.subagent_type && <div style={{ padding: '6px 12px', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
-          {inp.prompt && <pre style={`${pre}color:var(--tool-agent);`}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
+          {inp.prompt && <pre style={`${pre}color:var(--tool-agent);`} ref={linkifyRef}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
         </>}
         {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
-        {name === 'Read' && (inp.file_path || inp.path) && <pre style={`${pre}color:var(--tool-read);`}>{(inp.file_path || inp.path) as string}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {name === 'Read' && (inp.file_path || inp.path) && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{(inp.file_path || inp.path) as string}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
         {result && renderToolResultInner(result, setLightbox)}
         </div>
       </details>
@@ -395,7 +399,7 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
             <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
           </div>
         ))}
-        {rawContent && <div style={{ padding: '8px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} />}
+        {rawContent && <div style={{ padding: '8px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} ref={linkifyRef} />}
         </div>
       </details>
     )
