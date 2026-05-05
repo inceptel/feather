@@ -310,7 +310,7 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
 
 function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void, getResult?: (toolUseId: string) => ContentBlock | undefined) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -899,7 +899,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 }}</For>
                 {(() => {
                   const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} /> : null
                 })()}
                 {metadataRow}
               </div>
@@ -941,7 +941,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                         )
                       }}</For>
                       {bText.trim() && (
-                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} />
+                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} />
                       )}
                     </div>
                   )
