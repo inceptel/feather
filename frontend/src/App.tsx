@@ -4,7 +4,7 @@ import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, openInEditor, fetchAgents, fetchFiles, fetchProjects, BASE } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, BASE } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -93,15 +93,30 @@ export default function App() {
     finally { setBrowseLoading(false) }
   }
   const [files, setFiles] = createSignal<PendingFile[]>([])
-  const [viewingFile, setViewingFile] = createSignal<{ path: string; content: string; error?: string } | null>(null)
+  type FileKind = 'image' | 'pdf' | 'md' | 'text'
+  function fileKind(p: string): FileKind {
+    const ext = p.toLowerCase().split('.').pop() || ''
+    if (['png','jpg','jpeg','gif','webp','svg','bmp','ico','avif'].includes(ext)) return 'image'
+    if (ext === 'pdf') return 'pdf'
+    if (ext === 'md' || ext === 'markdown') return 'md'
+    return 'text'
+  }
+  const [viewingFile, setViewingFile] = createSignal<{ path: string; kind: FileKind; content: string; error?: string } | null>(null)
   async function openFile(path: string) {
-    setViewingFile({ path, content: '' })
+    const kind = fileKind(path)
+    // Binary types (image/pdf) are rendered directly from the URL by the browser
+    // — no need to fetch text content. The 'Open' button also points to the same URL.
+    if (kind === 'image' || kind === 'pdf') {
+      setViewingFile({ path, kind, content: '' })
+      return
+    }
+    setViewingFile({ path, kind, content: '' })
     try {
       const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`)
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-      setViewingFile({ path, content: await r.text() })
+      setViewingFile({ path, kind, content: await r.text() })
     } catch (e: any) {
-      setViewingFile({ path, content: '', error: e.message || 'failed to load' })
+      setViewingFile({ path, kind, content: '', error: e.message || 'failed to load' })
     }
   }
   const [uploading, setUploading] = createSignal(false)
@@ -1085,27 +1100,35 @@ export default function App() {
         <Show when={viewingFile()}>
           {(() => {
             const v = viewingFile()!
-            const isMd = v.path.toLowerCase().endsWith('.md')
+            const fileUrl = `${BASE}/api/file?path=${encodeURIComponent(v.path)}`
             return (
               <div onClick={() => setViewingFile(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.6)', 'z-index': '200', display: 'flex', 'align-items': 'stretch', 'justify-content': 'center', padding: 'max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))' }}>
                 <div onClick={(e) => e.stopPropagation()} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'max-width': '900px', width: '100%', display: 'flex', 'flex-direction': 'column', 'overflow': 'hidden' }}>
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '10px 14px', 'border-bottom': '1px solid #1e1e1e', background: '#0a0e14', 'flex-shrink': '0' }}>
                     <span style={{ color: '#888', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={v.path}>{v.path}</span>
-                    <button onClick={() => openInEditor(v.path)} style={{ background: 'transparent', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '3px 8px', 'border-radius': '6px', cursor: 'pointer' }}>Open</button>
+                    <a href={fileUrl} target="_blank" rel="noopener" style={{ background: 'transparent', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '3px 8px', 'border-radius': '6px', cursor: 'pointer', 'text-decoration': 'none' }}>Open</a>
                     <button onClick={() => setViewingFile(null)} style={{ background: 'transparent', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '0 4px', 'line-height': '1' }}>&times;</button>
                   </div>
-                  <div style={{ 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', flex: '1' }}>
+                  <div style={{ 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', flex: '1', display: 'flex', 'flex-direction': 'column' }}>
                     <Show when={v.error}>
                       <div style={{ padding: '20px', color: '#c44', 'font-size': '13px' }}>{v.error}</div>
                     </Show>
-                    <Show when={!v.error && !v.content}>
-                      <div style={{ padding: '20px', color: '#666', 'font-size': '13px' }}>Loading…</div>
+                    <Show when={v.kind === 'image'}>
+                      <div style={{ padding: '12px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', flex: '1', background: '#000' }}>
+                        <img src={fileUrl} style={{ 'max-width': '100%', 'max-height': '80vh', 'object-fit': 'contain' }} />
+                      </div>
                     </Show>
-                    <Show when={!v.error && v.content && isMd}>
+                    <Show when={v.kind === 'pdf'}>
+                      <iframe src={fileUrl} style={{ width: '100%', height: '80vh', border: 'none', background: '#fff' }} />
+                    </Show>
+                    <Show when={v.kind === 'md' && !v.error && v.content}>
                       <div class="prose" style={{ padding: '4px 24px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={marked.parse(v.content) as string} />
                     </Show>
-                    <Show when={!v.error && v.content && !isMd}>
+                    <Show when={v.kind === 'text' && !v.error && v.content}>
                       <pre style={{ margin: '0', padding: '16px 20px', color: '#d0d0d0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{v.content}</pre>
+                    </Show>
+                    <Show when={!v.error && !v.content && (v.kind === 'md' || v.kind === 'text')}>
+                      <div style={{ padding: '20px', color: '#666', 'font-size': '13px' }}>Loading…</div>
                     </Show>
                   </div>
                 </div>
