@@ -125,6 +125,15 @@ export async function fetchFiles(dir?: string, hidden = false): Promise<FileList
   return r.json()
 }
 
+export async function deletePath(path: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`
+    try { msg = (await r.json()).error || msg } catch {}
+    throw new Error(msg)
+  }
+}
+
 export function subscribeMessages(
   id: string,
   onMessage: (msg: Message) => void,

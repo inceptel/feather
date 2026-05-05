@@ -1075,6 +1075,18 @@ app.get('/api/files', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.delete('/api/file', (req, res) => {
+  const fpath = req.query.path;
+  if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+  if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
+  try {
+    const stat = fs.statSync(fpath);
+    if (stat.isDirectory()) fs.rmSync(fpath, { recursive: true });
+    else fs.unlinkSync(fpath);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/open-in-editor', (req, res) => {
   try {
     const fpath = req.body?.path;

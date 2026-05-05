@@ -4,7 +4,7 @@ import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, BASE } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, BASE } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -86,11 +86,39 @@ export default function App() {
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
+  const [browseSort, setBrowseSort] = createSignal<'name' | 'mtime'>(
+    (localStorage.getItem('feather-browse-sort') as 'name' | 'mtime') || 'name'
+  )
+  function setSort(s: 'name' | 'mtime') {
+    setBrowseSort(s)
+    localStorage.setItem('feather-browse-sort', s)
+  }
+  const sortedBrowseEntries = () => {
+    const b = browse()
+    if (!b) return []
+    const s = browseSort()
+    return [...b.entries].sort((a, c) => {
+      if (a.type !== c.type) return a.type === 'dir' ? -1 : 1
+      if (s === 'mtime') return c.mtime - a.mtime
+      return a.name.localeCompare(c.name)
+    })
+  }
   async function loadBrowse(dir?: string) {
     setBrowseLoading(true)
     try { setBrowse(await fetchFiles(dir)) }
     catch (e) { console.error(e) }
     finally { setBrowseLoading(false) }
+  }
+  async function deleteBrowseEntry(full: string, name: string, isDir: boolean) {
+    const what = isDir ? `directory "${name}" and ALL its contents` : `"${name}"`
+    if (!confirm(`Delete ${what}?\n\n${full}\n\nThis cannot be undone.`)) return
+    try {
+      await deletePath(full)
+      const b = browse()
+      if (b) setBrowse({ ...b, entries: b.entries.filter(e => e.name !== name) })
+    } catch (e: any) {
+      alert(`Delete failed: ${e.message || e}`)
+    }
   }
   const [files, setFiles] = createSignal<PendingFile[]>([])
   type FileKind = 'image' | 'pdf' | 'md' | 'text'
@@ -117,6 +145,21 @@ export default function App() {
       setViewingFile({ path, kind, content: await r.text() })
     } catch (e: any) {
       setViewingFile({ path, kind, content: '', error: e.message || 'failed to load' })
+    }
+  }
+  async function goToPath(rawPath: string) {
+    const path = rawPath.replace(/:\d+$/, '')
+    setTab('files')
+    setBrowseLoading(true)
+    try {
+      const listing = await fetchFiles(path)
+      setBrowse(listing)
+      setFilesMode('all')
+      setViewingFile(null)
+    } catch {
+      openFile(path)
+    } finally {
+      setBrowseLoading(false)
     }
   }
   const [uploading, setUploading] = createSignal(false)
@@ -281,6 +324,10 @@ export default function App() {
     }
   }
 
+  function onOpenPath(e: Event) {
+    const detail = (e as CustomEvent).detail
+    if (detail && typeof detail.path === 'string') goToPath(detail.path)
+  }
   onMount(async () => {
     document.addEventListener('keydown', onGlobalKeyDown)
     setSessions(await fetchSessions())
@@ -293,6 +340,7 @@ export default function App() {
     if (hash) select(hash)
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('feather:open-path', onOpenPath)
     // Prefetch Terminal chunk during idle so the tab click feels instant
     const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 2000))
     idle(() => { import('./components/Terminal').catch(() => {}) })
@@ -300,7 +348,7 @@ export default function App() {
   function onVisibility() {
     if (document.visibilityState === 'visible') fetchSessions().then(s => setSessions(s)).catch(() => {})
   }
-  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility) })
+  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('feather:open-path', onOpenPath) })
 
   async function select(id: string) {
     const prev = currentId()
@@ -570,6 +618,16 @@ export default function App() {
     if (n < 1024 * 1024) return (n / 1024).toFixed(0) + 'K'
     if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + 'M'
     return (n / (1024 * 1024 * 1024)).toFixed(2) + 'G'
+  }
+
+  function formatRelTime(ms: number): string {
+    const diff = (Date.now() - ms) / 1000
+    if (diff < 60) return 'now'
+    if (diff < 3600) return Math.floor(diff / 60) + 'm'
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h'
+    if (diff < 86400 * 30) return Math.floor(diff / 86400) + 'd'
+    if (diff < 86400 * 365) return Math.floor(diff / (86400 * 30)) + 'mo'
+    return Math.floor(diff / (86400 * 365)) + 'y'
   }
 
   const touchedFiles = () => {
@@ -1035,22 +1093,32 @@ export default function App() {
               {/* All files view */}
               <Show when={filesMode() === 'all'}>
                 <Show when={browse()}>
-                  <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #1e1e1e', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'flex-shrink': '0', 'overflow-x': 'auto', 'white-space': 'nowrap' }}>
-                    {(() => {
-                      const p = browse()!.path
-                      const parts = p === '/' ? [''] : p.split('/')
-                      return <For each={parts}>{(part, i) => {
-                        const isLast = i() === parts.length - 1
-                        const segment = parts.slice(0, i() + 1).join('/') || '/'
-                        return <>
-                          <span onClick={() => !isLast && loadBrowse(segment)}
-                            style={{ color: isLast ? '#e5e5e5' : '#73b8ff', cursor: isLast ? 'default' : 'pointer' }}>
-                            {i() === 0 ? '/' : part}
-                          </span>
-                          {i() > 0 && !isLast && <span style={{ color: '#444' }}>/</span>}
-                        </>
-                      }}</For>
-                    })()}
+                  <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #1e1e1e', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'flex-shrink': '0', display: 'flex', 'align-items': 'center', gap: '8px' }}>
+                    <div style={{ flex: '1', 'overflow-x': 'auto', 'white-space': 'nowrap' }}>
+                      {(() => {
+                        const p = browse()!.path
+                        const parts = p === '/' ? [''] : p.split('/')
+                        return <For each={parts}>{(part, i) => {
+                          const isLast = i() === parts.length - 1
+                          const segment = parts.slice(0, i() + 1).join('/') || '/'
+                          return <>
+                            <span onClick={() => !isLast && loadBrowse(segment)}
+                              style={{ color: isLast ? '#e5e5e5' : '#73b8ff', cursor: isLast ? 'default' : 'pointer' }}>
+                              {i() === 0 ? '/' : part}
+                            </span>
+                            {i() > 0 && !isLast && <span style={{ color: '#444' }}>/</span>}
+                          </>
+                        }}</For>
+                      })()}
+                    </div>
+                    <div style={{ display: 'flex', gap: '4px', 'flex-shrink': '0' }}>
+                      <button onClick={() => setSort('name')}
+                        title="Sort by name"
+                        style={{ background: browseSort() === 'name' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: browseSort() === 'name' ? '#e5e5e5' : '#888', 'font-size': '11px', padding: '2px 8px', 'border-radius': '4px', cursor: 'pointer' }}>Name</button>
+                      <button onClick={() => setSort('mtime')}
+                        title="Sort by recently modified"
+                        style={{ background: browseSort() === 'mtime' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: browseSort() === 'mtime' ? '#e5e5e5' : '#888', 'font-size': '11px', padding: '2px 8px', 'border-radius': '4px', cursor: 'pointer' }}>Recent</button>
+                    </div>
                   </div>
                 </Show>
                 <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
@@ -1064,18 +1132,32 @@ export default function App() {
                         ../
                       </div>
                     </Show>
-                    <For each={browse()!.entries}>{(e) => {
+                    <For each={sortedBrowseEntries()}>{(e) => {
                       const full = browse()!.path === '/' ? '/' + e.name : browse()!.path + '/' + e.name
-                      return e.type === 'dir' ? (
+                      const isDir = e.type === 'dir'
+                      const delBtn = (
+                        <button onClick={(ev) => { ev.stopPropagation(); deleteBrowseEntry(full, e.name, isDir) }}
+                          title={`Delete ${e.name}`}
+                          class="browse-del-btn"
+                          style={{ background: 'transparent', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '2px 6px', 'border-radius': '4px', cursor: 'pointer', 'flex-shrink': '0' }}>
+                          ✕
+                        </button>
+                      )
+                      return isDir ? (
                         <div onClick={() => loadBrowse(full)}
+                          class="browse-row"
                           style={{ padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '8px', 'font-family': "'SF Mono', Menlo, monospace" }}>
-                          <span style={{ color: '#73b8ff' }}>{e.name}/</span>
+                          <span style={{ color: '#73b8ff', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{e.name}/</span>
+                          {browseSort() === 'mtime' && e.mtime > 0 && <span style={{ color: '#444', 'font-size': '11px' }}>{formatRelTime(e.mtime)}</span>}
+                          {delBtn}
                         </div>
                       ) : (
                         <div onClick={() => openFile(full)}
+                          class="browse-row"
                           style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '8px 16px', 'border-bottom': '1px solid #111', 'font-size': '13px', color: '#e5e5e5', cursor: 'pointer', 'font-family': "'SF Mono', Menlo, monospace" }}>
                           <span style={{ flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{e.name}</span>
-                          <span style={{ color: '#444', 'font-size': '11px' }}>{formatSize(e.size)}</span>
+                          <span style={{ color: '#444', 'font-size': '11px' }}>{browseSort() === 'mtime' && e.mtime > 0 ? formatRelTime(e.mtime) : formatSize(e.size)}</span>
+                          {delBtn}
                         </div>
                       )
                     }}</For>

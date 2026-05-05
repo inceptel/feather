@@ -91,6 +91,65 @@ function fixLinks(el: HTMLElement) {
   }
 }
 
+// Wrap absolute filesystem paths in clickable links that dispatch to App.
+// Skips paths inside <a> (already linked) and <pre> (code blocks). Inline
+// <code> is fine — paths in backticks should still be clickable.
+const PATH_RE = /(?<![\w/:])\/[\w.\-]+(?:\/[\w.\-]+)+(?::\d+)?/g
+const TRAILING_PUNCT_RE = /[.,;:!?)\]}]+$/
+
+function linkifyPaths(el: HTMLElement) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p: HTMLElement | null = (node as Text).parentElement
+      while (p && p !== el) {
+        const t = p.tagName
+        if (t === 'A' || t === 'PRE') return NodeFilter.FILTER_REJECT
+        p = p.parentElement
+      }
+      return (node.nodeValue && node.nodeValue.indexOf('/') !== -1)
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT
+    }
+  })
+  const targets: Text[] = []
+  let n: Node | null
+  while ((n = walker.nextNode())) targets.push(n as Text)
+  for (const t of targets) {
+    const text = t.nodeValue || ''
+    PATH_RE.lastIndex = 0
+    if (!PATH_RE.test(text)) continue
+    PATH_RE.lastIndex = 0
+    const frag = document.createDocumentFragment()
+    let last = 0
+    let m: RegExpExecArray | null
+    let any = false
+    while ((m = PATH_RE.exec(text))) {
+      let raw = m[0]
+      const trim = raw.match(TRAILING_PUNCT_RE)
+      if (trim) raw = raw.slice(0, raw.length - trim[0].length)
+      if (raw.length < 4) continue
+      const start = m.index
+      const end = start + raw.length
+      if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)))
+      const a = document.createElement('a')
+      a.className = 'feather-path'
+      a.href = '#'
+      a.textContent = raw
+      a.dataset.path = raw
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault()
+        window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: raw } }))
+      })
+      frag.appendChild(a)
+      last = end
+      any = true
+    }
+    if (!any) continue
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)))
+    t.parentNode?.replaceChild(frag, t)
+  }
+}
+
 // Inject copy buttons into rendered HTML pre blocks
 function injectCopyButtons(el: HTMLElement) {
   for (const pre of el.querySelectorAll('pre')) {
@@ -251,7 +310,7 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
 
 function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void, getResult?: (toolUseId: string) => ContentBlock | undefined) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -458,6 +517,8 @@ const markdownCSS = `
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
 .markdown a { color: var(--link); text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
+.feather-path { color: var(--link); text-decoration: none; cursor: pointer; }
+.feather-path:hover { text-decoration: underline; }
 .markdown img { max-width: 100%; border-radius: 6px; }
 .markdown hr { border: none; border-top: 1px solid var(--border-medium); margin: 12px 0; }
 .markdown strong { font-weight: 600; }
@@ -838,7 +899,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 }}</For>
                 {(() => {
                   const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} /> : null
                 })()}
                 {metadataRow}
               </div>
@@ -880,7 +941,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                         )
                       }}</For>
                       {bText.trim() && (
-                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => { injectCopyButtons(el); fixLinks(el) }} />
+                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) }} />
                       )}
                     </div>
                   )
