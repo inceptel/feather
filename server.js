@@ -261,6 +261,16 @@ function extractCodexCwd(buf) {
   return null;
 }
 
+function extractClaudeCwd(buf) {
+  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
+    try {
+      const d = JSON.parse(line);
+      if (d.cwd) return d.cwd;
+    } catch {}
+  }
+  return null;
+}
+
 function extractCodexUuid(filename) {
   // rollout-2026-04-25T18-27-29-019d9cb2-afd3-7d30-aabb-d0b6f3f0f3e6.jsonl
   const m = filename.match(/-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/);
@@ -517,7 +527,22 @@ function resumeSession(id, cwd) {
     const resumeArg = codexUuid ? `resume ${codexUuid}` : 'resume --last';
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex ${resumeArg} --cd ${sessionCwd} --dangerously-bypass-approvals-and-sandbox'`, cwd || sessionCwd);
   } else {
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
+    // Claude resolves resumable sessions by project dir (cwd → ~/.claude/projects/<encoded>),
+    // so launching from the wrong cwd makes --resume fail and the tmux session exits.
+    let sessionCwd = cwd;
+    if (!sessionCwd) {
+      const fpath = findClaudeJsonlPath(id);
+      if (fpath) {
+        try {
+          const fd = fs.openSync(fpath, 'r');
+          const buf = Buffer.alloc(Math.min(8192, fs.fstatSync(fd).size));
+          fs.readSync(fd, buf, 0, buf.length, 0);
+          fs.closeSync(fd);
+          sessionCwd = extractClaudeCwd(buf);
+        } catch {}
+      }
+    }
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, sessionCwd);
   }
 }
 
