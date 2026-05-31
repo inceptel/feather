@@ -180,7 +180,7 @@ export default function App() {
   const [renameText, setRenameText] = createSignal('')
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
-  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto'>('sessions')
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos'>('sessions')
   const [projects, setProjects] = createSignal<Project[]>([])
   const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-project'))
   const [projectsExpanded, setProjectsExpanded] = createSignal(false)
@@ -200,6 +200,7 @@ export default function App() {
     keeps: number; reverts: number; crashes: number; skips: number; iterations: number;
     last: { timestamp: string; status: string; description: string } | null;
     mainChat: string | null;
+    mtime?: number;
   }
   interface WorkerSession { id: string; agent: string; mtime: string }
   const [autoInstances, setAutoInstances] = createSignal<AutoInstance[]>([])
@@ -209,8 +210,23 @@ export default function App() {
   const [autoNewGoal, setAutoNewGoal] = createSignal('')
   const [autoCreating, setAutoCreating] = createSignal(false)
   const [autoBusy, setAutoBusy] = createSignal<string | null>(null)
+  interface CosWorkstream {
+    id: string; name: string; goal: string; launcher: 'session' | 'auto' | 'goal'; status: string;
+    agent?: string; repo?: string; sessionId?: string; autoName?: string; goalPath?: string; goalCommand?: string;
+    createdAt: string; updatedAt: string; lastCheckedAt?: string | null; lastReceipt?: string | null;
+  }
+  interface CosState { chiefSessionId: string | null; workstreams: CosWorkstream[]; msgvault?: boolean; tgIn?: boolean }
+  const [cosState, setCosState] = createSignal<CosState>({ chiefSessionId: null, workstreams: [] })
+  const [currentCos, setCurrentCos] = createSignal<string | null>(null)
+  const [cosNewName, setCosNewName] = createSignal('')
+  const [cosNewGoal, setCosNewGoal] = createSignal('')
+  const [cosLauncher, setCosLauncher] = createSignal<'session' | 'auto' | 'goal'>('goal')
+  const [cosRepo, setCosRepo] = createSignal('/home/user/feather')
+  const [cosCreating, setCosCreating] = createSignal(false)
+  const [cosBusy, setCosBusy] = createSignal<string | null>(null)
   function autoLastTs(i: AutoInstance): number {
-    return i.last ? new Date(i.last.timestamp).getTime() : 0
+    const lastTs = i.last ? new Date(i.last.timestamp).getTime() : 0
+    return Math.max(lastTs, i.mtime || 0)
   }
   const sortedAutos = () => [...autoInstances()].sort((a, b) => autoLastTs(b) - autoLastTs(a))
   async function loadAutoInstances() {
@@ -261,8 +277,56 @@ export default function App() {
       setAutoNewName(''); setAutoNewGoal('')
       await loadAutoInstances()
       setCurrentAuto(name)
+      setCurrentCos(null)
       setSidebar(false)
     } finally { setAutoCreating(false) }
+  }
+  async function loadCos() {
+    try {
+      const r = await fetch(`${BASE}/api/cos`)
+      if (r.ok) setCosState(await r.json())
+    } catch {}
+  }
+  async function startChief() {
+    setCosBusy('chief')
+    try {
+      const r = await fetch(`${BASE}/api/cos/chief`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent: 'codex' }) })
+      const d = await r.json()
+      await loadCos()
+      if (d.sessionId) select(d.sessionId)
+    } finally { setCosBusy(null) }
+  }
+  async function cosCreate() {
+    const name = cosNewName().trim()
+    const goal = cosNewGoal().trim()
+    if (!name || !goal) return
+    setCosCreating(true)
+    try {
+      const r = await fetch(`${BASE}/api/cos/workstreams`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, goal, launcher: cosLauncher(), repo: cosRepo(), agent: 'codex', start: true }),
+      })
+      if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Launch failed: ' + (e.error || r.status)); return }
+      const d = await r.json()
+      setCosNewName(''); setCosNewGoal('')
+      await loadCos()
+      setCurrentCos(d.workstream?.id || null)
+      setCurrentAuto(null)
+      setSidebar(false)
+    } finally { setCosCreating(false) }
+  }
+  async function cosCheck(id: string) {
+    setCosBusy(id)
+    try {
+      await fetch(`${BASE}/api/cos/workstreams/${id}/check`, { method: 'POST' })
+      await loadCos()
+    } finally { setCosBusy(null) }
+  }
+  function openCos(w: CosWorkstream) {
+    setCurrentCos(w.id)
+    setCurrentAuto(null)
+    setSidebar(false)
   }
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
@@ -354,6 +418,7 @@ export default function App() {
     const prev = currentId()
     if (prev) saveDraft(prev, text())
     setCurrentAuto(null)
+    setCurrentCos(null)
     setCurrentId(id)
     location.hash = id
     setSidebar(false)
@@ -602,6 +667,14 @@ export default function App() {
   })
 
   createEffect(() => {
+    const needList = (sidebarTab() === 'cos' && sidebar()) || currentCos() !== null
+    if (!needList) return
+    loadCos()
+    const id = setInterval(loadCos, 5000)
+    onCleanup(() => clearInterval(id))
+  })
+
+  createEffect(() => {
     const name = currentAuto()
     if (!name) { setAutoDetail(null); return }
     loadAutoDetail(name)
@@ -692,6 +765,7 @@ export default function App() {
           {/* Sidebar tabs */}
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
             <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
+            <button onClick={() => setSidebarTab('cos')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'cos' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'cos' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>CoS</button>
             <button onClick={() => setSidebarTab('auto')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'auto' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'auto' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Auto</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
           </div>
@@ -857,6 +931,39 @@ export default function App() {
               </Show>
             </div>
           </Show>
+          {/* CoS tab */}
+          <Show when={sidebarTab() === 'cos'}>
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
+              <div style={{ padding: '12px 16px', 'border-bottom': '1px solid #1e1e1e' }}>
+                <button onClick={startChief} disabled={cosBusy() === 'chief'} style={{ width: '100%', padding: '7px', background: cosBusy() === 'chief' ? '#1a1a2e' : '#4aba6a', color: cosBusy() === 'chief' ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: cosBusy() === 'chief' ? 'wait' : 'pointer', 'margin-bottom': '8px' }}>{cosState().chiefSessionId ? 'Open Chief' : 'Start Chief'}</button>
+                <input value={cosNewName()} onInput={(e) => setCosNewName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="workstream" style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', 'margin-bottom': '6px', outline: 'none' }} />
+                <textarea value={cosNewGoal()} onInput={(e) => setCosNewGoal(e.target.value)} placeholder="goal" rows={3} style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', resize: 'vertical', 'font-family': 'inherit', outline: 'none', 'margin-bottom': '6px' }} />
+                <div style={{ display: 'flex', gap: '6px', 'margin-bottom': '6px' }}>
+                  <select value={cosLauncher()} onChange={(e) => setCosLauncher(e.currentTarget.value as 'session' | 'auto' | 'goal')} style={{ flex: '0 0 86px', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', outline: 'none' }}>
+                    <option value="goal">goal</option>
+                    <option value="auto">auto</option>
+                    <option value="session">session</option>
+                  </select>
+                  <input value={cosRepo()} onInput={(e) => setCosRepo(e.target.value)} placeholder="/home/user/feather" style={{ flex: '1', 'min-width': '0', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', outline: 'none' }} />
+                </div>
+                <button onClick={cosCreate} disabled={cosCreating() || !cosNewName() || !cosNewGoal()} style={{ width: '100%', padding: '7px', background: cosCreating() ? '#1a1a2e' : '#4aba6a', color: cosCreating() ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: cosCreating() ? 'wait' : 'pointer' }}>{cosCreating() ? 'Launching...' : '+ Workstream'}</button>
+              </div>
+              <Show when={cosState().workstreams.length === 0}>
+                <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No workstreams.</div>
+              </Show>
+              <For each={cosState().workstreams}>{(w) => (
+                <div onClick={() => openCos(w)}
+                  style={{ padding: '10px 16px', cursor: 'pointer', 'border-bottom': '1px solid #111', 'border-left': currentCos() === w.id ? '3px solid #4aba6a' : '3px solid transparent', background: currentCos() === w.id ? '#1a1a2e' : 'transparent', '-webkit-tap-highlight-color': 'transparent' }}>
+                  <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: w.status === 'running' ? '#4aba6a' : w.status === 'idle' ? '#73b8ff' : '#555', 'flex-shrink': '0' }} />
+                    <span style={{ 'font-size': '13px', 'font-weight': '600', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{w.name}</span>
+                    <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#1e1e1e', color: '#888', 'flex-shrink': '0', 'font-weight': '600' }}>{w.launcher}</span>
+                  </div>
+                  <div style={{ 'font-size': '10px', color: '#555', 'margin-top': '2px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{w.lastReceipt || w.status}</div>
+                </div>
+              )}</For>
+            </div>
+          </Show>
           {/* Auto tab */}
           <Show when={sidebarTab() === 'auto'}>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
@@ -869,7 +976,7 @@ export default function App() {
                 <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No autos yet.</div>
               </Show>
               <For each={sortedAutos()}>{(inst) => (
-                <div onClick={() => { setCurrentAuto(inst.name); setSidebar(false) }}
+                <div onClick={() => { setCurrentAuto(inst.name); setCurrentCos(null); setSidebar(false) }}
                   style={{ padding: '10px 16px', cursor: 'pointer', 'border-bottom': '1px solid #111', 'border-left': currentAuto() === inst.name ? '3px solid #4aba6a' : '3px solid transparent', background: currentAuto() === inst.name ? '#1a1a2e' : 'transparent', '-webkit-tap-highlight-color': 'transparent' }}>
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
                     <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: inst.running ? '#4aba6a' : '#555', 'flex-shrink': '0' }} />
@@ -985,7 +1092,65 @@ export default function App() {
             </div>
           )
         }}</Show>
-        <Show when={!currentAuto()}>
+        <Show when={currentCos()}>{(id) => {
+          const w = () => cosState().workstreams.find(x => x.id === id())
+          return (
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
+              <div style={{ padding: '12px 24px 12px 56px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
+                <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: w()?.status === 'running' ? '#4aba6a' : w()?.status === 'idle' ? '#73b8ff' : '#555' }} />
+                <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{w()?.name || 'workstream'}</span>
+                <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{w()?.status || 'unknown'}</span>
+                <div style={{ flex: '1' }} />
+                <button onClick={() => setCurrentCos(null)} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '4px 8px' }}>×</button>
+              </div>
+              <div style={{ padding: '20px 24px 20px 56px', 'max-width': '900px' }}>
+                <Show when={w()} fallback={<div style={{ color: '#555', 'font-size': '13px' }}>Missing workstream.</div>}>{(ws) => (
+                  <>
+                    <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', 'margin-bottom': '20px' }}>
+                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Launcher</div>
+                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{ws().launcher}</div>
+                      </div>
+                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Agent</div>
+                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{ws().agent || 'auto'}</div>
+                      </div>
+                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
+                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Updated</div>
+                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{timeAgo(ws().updatedAt)}</div>
+                      </div>
+                    </div>
+                    <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa', 'line-height': '1.45' }}>
+                      <div style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>Goal</div>
+                      {ws().goal}
+                    </div>
+                    <Show when={ws().lastReceipt}>
+                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa' }}>
+                        <span style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-right': '8px' }}>Receipt</span>
+                        {ws().lastReceipt}
+                      </div>
+                    </Show>
+                    <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px', 'flex-wrap': 'wrap' }}>
+                      <button onClick={() => cosCheck(ws().id)} disabled={cosBusy() !== null} style={{ padding: '10px 16px', background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: cosBusy() ? 'wait' : 'pointer' }}>{cosBusy() === ws().id ? '...' : 'Check'}</button>
+                      <Show when={ws().sessionId}>
+                        <button onClick={() => select(ws().sessionId!)} style={{ padding: '10px 16px', background: 'none', border: '1px solid #2a3a55', 'border-radius': '8px', color: '#73b8ff', 'font-size': '13px', cursor: 'pointer' }}>Open session</button>
+                      </Show>
+                      <Show when={ws().autoName}>
+                        <button onClick={() => { setCurrentAuto(ws().autoName!); setCurrentCos(null) }} style={{ padding: '10px 16px', background: 'none', border: '1px solid #2a3a55', 'border-radius': '8px', color: '#73b8ff', 'font-size': '13px', cursor: 'pointer' }}>Open auto</button>
+                      </Show>
+                    </div>
+                    <Show when={ws().goalCommand}>
+                      <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '8px' }}>Goal command</div>
+                      <pre style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px', color: '#d0d0d0', 'font-size': '12px', overflow: 'auto' }}>{ws().goalCommand}</pre>
+                    </Show>
+                    <div style={{ 'font-size': '11px', color: '#555', 'font-family': "'SF Mono', Menlo, monospace", 'margin-top': '16px', 'word-break': 'break-all' }}>{ws().repo}</div>
+                  </>
+                )}</Show>
+              </div>
+            </div>
+          )
+        }}</Show>
+        <Show when={!currentAuto() && !currentCos()}>
         {/* Header */}
         <div style={{ padding: '8px 16px 0 56px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>

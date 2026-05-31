@@ -94,7 +94,8 @@ function fixLinks(el: HTMLElement) {
 // Wrap absolute filesystem paths in clickable links that dispatch to App.
 // Skips paths inside <a> (already linked) and <pre> (code blocks). Inline
 // <code> is fine — paths in backticks should still be clickable.
-const PATH_RE = /(?<![\w/:])\/[\w.\-]+(?:\/[\w.\-]+)+(?::\d+)?/g
+// Matches absolute (/a/b), home-relative (~/a/b), and file:// URLs.
+const PATH_RE = /(?<![\w/:~])(?:file:\/\/)?(?:~|\/[\w.\-]+)(?:\/[\w.\-]+)+(?::\d+)?/g
 const TRAILING_PUNCT_RE = /[.,;:!?)\]}]+$/
 
 // Defer to next microtask so innerHTML / text children are populated first
@@ -139,10 +140,11 @@ function linkifyPaths(el: HTMLElement) {
       a.className = 'feather-path'
       a.href = '#'
       a.textContent = raw
-      a.dataset.path = raw
+      const targetPath = raw.startsWith('file://') ? raw.slice(7) : raw
+      a.dataset.path = targetPath
       a.addEventListener('click', (ev) => {
         ev.preventDefault()
-        window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: raw } }))
+        window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
       })
       frag.appendChild(a)
       last = end
@@ -516,8 +518,8 @@ const markdownCSS = `
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--text-faint); color: var(--text-secondary);
 }
-.markdown table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.markdown th, .markdown td { border: 1px solid var(--border-medium); padding: 5px 10px; text-align: left; white-space: nowrap; }
+.markdown table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; max-width: 100%; table-layout: auto; overflow-wrap: anywhere; }
+.markdown th, .markdown td { border: 1px solid var(--border-medium); padding: 5px 10px; text-align: left; vertical-align: top; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
 .markdown a { color: var(--link); text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
@@ -914,8 +916,8 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         // Assistant message: single wide bubble containing all blocks (text, tool_use, thinking) + metadata inside.
         return (
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
-            <div style={{
-              'max-width': '78%', padding: '10px 14px 8px',
+            <div class="asst-bubble" style={{
+              'max-width': '100%', padding: '10px 14px 8px',
               'border-radius': '12px',
               background: '#1e1e1e',
               border: '1px solid rgba(255,255,255,0.06)',
