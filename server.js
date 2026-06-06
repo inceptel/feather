@@ -161,7 +161,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function getAgentForSession(sessionId) {
   const meta = readMeta();
   if (meta[sessionId]?.agent) return meta[sessionId].agent;
-  // Auto-detect codex sessions discovered from disk (id is the codex UUID itself).
+  // Auto-detect sessions discovered from disk but not tracked in this instance's
+  // meta (session-meta.json is per-instance; ~/.feather/omp-sessions is shared
+  // across all feather instances/worktrees). Without this, an omp session spawned
+  // by another instance is misread with the Claude parser — getMessages returns
+  // nothing and live broadcasts are dropped.
+  if (findOmpJsonlPath(sessionId)) return 'omp';
   if (UUID_RE.test(sessionId) && findCodexJsonlPath(sessionId)) return 'codex';
   return 'claude';
 }
@@ -743,6 +748,20 @@ if (fs.existsSync(OMP_SESSIONS)) {
       }
     } catch {}
   }
+
+  // Watch for omp session dirs created after startup (mirrors the CLAUDE_PROJECTS
+  // parent watcher below). Without this, an omp session whose dir appears later —
+  // e.g. spawned by another feather instance/worktree sharing ~/.feather, by an
+  // omp subagent, or by any path other than this process's spawnSession — is
+  // discovered on disk (so it shows up in the list) but never registers a file
+  // watcher, so its messages never stream live and the user must refresh.
+  fs.watch(OMP_SESSIONS, (_event, filename) => {
+    if (!filename) return;
+    const dirPath = path.join(OMP_SESSIONS, filename);
+    try {
+      if (fs.statSync(dirPath).isDirectory()) watchOmpSessionDir(dirPath, filename);
+    } catch {}
+  });
 }
 
 // Watch each project subdirectory with fs.watch

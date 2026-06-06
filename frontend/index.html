@@ -51,12 +51,24 @@
       var vv = window.visualViewport;
       // Skip if user is pinch-zoomed — don't resize layout during zoom
       if (vv && vv.scale > 1.01) return;
-      var h = vv ? vv.height : window.innerHeight;
+      var layoutH = window.innerHeight;
+      var visualH = vv ? vv.height : layoutH;
+      // How much the visual viewport claims is obscured (software keyboard, etc.)
+      var inset = layoutH - visualH;
+      var ae = document.activeElement;
+      var editing = !!ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT' || ae.isContentEditable);
+      // iPad/hardware keyboard: while an input is focused, iPadOS shows only a small
+      // floating accessory bar yet reports a large inset, leaving dead space below
+      // the app. Ignore that lie. Gated on `editing` so the no-keyboard steady state
+      // (incl. iPhone Safari's own toolbar chrome) keeps the original visual-viewport
+      // behavior, and a real on-screen keyboard (inset >= 150) still lifts the composer.
+      var floatingBar = editing && inset > 0 && inset < 150;
+      var h = floatingBar ? layoutH : visualH;
       var root = document.getElementById('root');
       document.documentElement.style.setProperty('--vh', h * 0.01 + 'px');
       if (root) {
         root.style.height = h + 'px';
-        root.style.top = (vv ? vv.offsetTop : 0) + 'px';
+        root.style.top = (floatingBar ? 0 : (vv ? vv.offsetTop : 0)) + 'px';
       }
       // Prevent iOS from scrolling the body
       window.scrollTo(0, 0);

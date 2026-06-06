@@ -5,10 +5,14 @@ import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, BASE } from './api'
+import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 
 interface QuickLink { label: string; url: string }
 
 interface PendingFile { name: string; blob: Blob; dataUrl: string; isImage: boolean }
+
+type SpinGestureState = 'off' | 'requesting' | 'calibrating' | 'ready' | 'triggered' | 'denied' | 'unsupported'
+type DeviceMotionPermissionApi = typeof DeviceMotionEvent & { requestPermission?: () => Promise<PermissionState> }
 
 function resizeImage(blob: Blob, maxDim = 1600): Promise<Blob> {
   return new Promise((resolve) => {
@@ -174,6 +178,7 @@ export default function App() {
   const [recordingTime, setRecordingTime] = createSignal(0)
   const [transcribing, setTranscribing] = createSignal(false)
   const [audioLevel, setAudioLevel] = createSignal(0)
+  const [spinGestureState, setSpinGestureState] = createSignal<SpinGestureState>('off')
   const [hasMore, setHasMore] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
@@ -341,6 +346,9 @@ export default function App() {
   let recordingTimer: ReturnType<typeof setInterval> | null = null
   let levelTimer: ReturnType<typeof requestAnimationFrame> | null = null
   let analyser: AnalyserNode | null = null
+  const spinDetector = createSpinGestureDetector()
+  let motionListener: ((event: DeviceMotionEvent) => void) | null = null
+  let spinSendAfterStop = false
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
@@ -362,7 +370,7 @@ export default function App() {
     const dx = t.clientX - touchStartX
     const dy = Math.abs(t.clientY - touchStartY)
     if (dy > Math.abs(dx)) return
-    if (!sidebar() && dx > 60) setSidebar(true)
+    if (!sidebar() && dx > 60) openSidebar()
     if (sidebar() && dx < -60) setSidebar(false)
     touchTracking = false
   }
@@ -385,6 +393,22 @@ export default function App() {
     if (e.key === 'Escape') {
       const s = cur()
       if (s?.isActive) handleInterrupt(s.id)
+    }
+    // After Send the composer is blurred (dismissing the keyboard/iPad floating bar).
+    // The first printable keystroke on a hardware keyboard re-focuses it and captures
+    // the character, so typing resumes seamlessly without tapping the field again.
+    if (tab() === 'chat' && currentId() && textareaRef &&
+        document.activeElement !== textareaRef &&
+        e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
+      const ae = document.activeElement as HTMLElement | null
+      const editable = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
+      if (!editable) {
+        e.preventDefault()
+        textareaRef.focus()
+        setText(text() + e.key)
+        textareaRef.style.height = 'auto'
+        textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px'
+      }
     }
   }
 
@@ -499,6 +523,12 @@ export default function App() {
     setSessions(await fetchSessions())
   }
 
+  function openSidebar() {
+    setSidebar(true)
+    // Refresh the session list so sessions created since page load appear without a reload
+    fetchSessions().then(s => setSessions(s)).catch(() => {})
+  }
+
   async function handleSidebarRename(id: string) {
     const title = sidebarRenameText().trim()
     if (!title) { setSidebarRenaming(null); return }
@@ -531,13 +561,62 @@ export default function App() {
     saveStarred(s).catch(() => {})
   }
 
+  async function requestMotionAccess(): Promise<'granted' | 'denied' | 'unsupported'> {
+    if (!window.isSecureContext || !('DeviceMotionEvent' in window)) return 'unsupported'
+    const MotionEventCtor = window.DeviceMotionEvent as DeviceMotionPermissionApi
+    if (typeof MotionEventCtor.requestPermission !== 'function') return 'granted'
+    try {
+      return await MotionEventCtor.requestPermission() === 'granted' ? 'granted' : 'denied'
+    } catch {
+      return 'denied'
+    }
+  }
 
+  function stopSpinGesture(nextState: SpinGestureState = 'off') {
+    if (motionListener) {
+      window.removeEventListener('devicemotion', motionListener)
+      motionListener = null
+    }
+    spinDetector.reset()
+    setSpinGestureState(nextState)
+  }
+
+  function stopVoiceForSpinSend() {
+    if (!listening() || spinSendAfterStop) return
+    spinSendAfterStop = true
+    setSpinGestureState('triggered')
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop()
+    else stopVoice()
+  }
+
+  function startSpinGesture() {
+    stopSpinGesture('calibrating')
+    motionListener = (event: DeviceMotionEvent) => {
+      const result = spinDetector.sample(motionEventToSpinSample(event, performance.now()))
+      if (result.status === 'calibrating') setSpinGestureState('calibrating')
+      else if (result.status === 'armed') setSpinGestureState('ready')
+      if (result.triggered) stopVoiceForSpinSend()
+    }
+    window.addEventListener('devicemotion', motionListener, { passive: true })
+  }
+
+  function voiceTitle() {
+    if (transcribing()) return 'Transcribing...'
+    if (!listening()) return 'Record voice memo'
+    if (spinGestureState() === 'calibrating') return 'Stop & transcribe (motion calibrating)'
+    if (spinGestureState() === 'ready') return 'Stop & transcribe (motion armed)'
+    if (spinGestureState() === 'triggered') return 'Stopping & sending...'
+    if (spinGestureState() === 'denied') return 'Stop & transcribe (motion denied)'
+    return 'Stop & transcribe'
+  }
 
   function stopVoice() {
     setListening(false)
     setRecordingTime(0)
     setAudioLevel(0)
     setInterimText('')
+    stopSpinGesture()
+    spinSendAfterStop = false
     if (recordingTimer) { clearInterval(recordingTimer); recordingTimer = null }
     if (levelTimer) { cancelAnimationFrame(levelTimer); levelTimer = null }
     if (audioContext) { audioContext.close(); audioContext = null }
@@ -550,6 +629,7 @@ export default function App() {
   async function toggleVoice() {
     if (listening()) {
       // Stop recording and transcribe
+      spinSendAfterStop = false
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         mediaRecorder.stop()
       } else {
@@ -558,13 +638,20 @@ export default function App() {
       return
     }
 
+    setSpinGestureState('requesting')
+    const motionAccess = await requestMotionAccess()
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
-    } catch { return }
+    } catch {
+      setSpinGestureState('off')
+      return
+    }
 
     audioChunks = []
     setListening(true)
     setRecordingTime(0)
+    if (motionAccess === 'granted') startSpinGesture()
+    else setSpinGestureState(motionAccess)
 
     // Timer
     const start = Date.now()
@@ -591,7 +678,7 @@ export default function App() {
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data) }
     mediaRecorder.onstop = async () => {
       const blob = new Blob(audioChunks, { type: mediaRecorder!.mimeType })
-      const wasListening = listening()
+      const sendAfterTranscription = spinSendAfterStop
       stopVoice()
       if (blob.size < 1000) return // too short, ignore
 
@@ -600,8 +687,11 @@ export default function App() {
         const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob })
         const data = await res.json()
         if (data.transcript) {
+          const transcript = String(data.transcript).trim()
+          if (!transcript) return
           const prev = text().trim()
-          setText(prev ? prev + ' ' + data.transcript : data.transcript)
+          if (sendAfterTranscription) await sendSessionText(transcript)
+          else setText(prev ? prev + ' ' + transcript : transcript)
         } else if (data.error) {
           console.error('Transcription error:', data.error)
         }
@@ -619,25 +709,11 @@ export default function App() {
     mediaRecorder.start(1000) // collect chunks every second
   }
 
-  async function handleSend() {
-    const val = text().trim()
-    const pending = files()
-    if ((!val && !pending.length) || !currentId()) return
-    setUploading(true)
-    setText('')
-    setFiles([])
-    if (textareaRef) textareaRef.style.height = 'auto'
-
-    const parts: string[] = val ? [val] : []
-    for (const f of pending) {
-      try {
-        const uploadPath = await uploadFile(f.blob, f.name)
-        parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
-      } catch { parts.push(`[Upload failed: ${f.name}]`) }
-    }
-    const fullText = parts.join('\n')
+  async function sendSessionText(rawText: string, clearDraft = false) {
+    const fullText = rawText.trim()
+    if (!fullText || !currentId()) return
     pushHistory(fullText)
-    saveDraft(currentId()!, '')
+    if (clearDraft) saveDraft(currentId()!, '')
 
     const tempId = `optimistic-${Date.now()}`
     setMessages(prev => [...prev, {
@@ -645,8 +721,29 @@ export default function App() {
       content: [{ type: 'text', text: fullText }], delivery: 'sent',
     }])
     sendInput(currentId()!, fullText)
-    setUploading(false)
     setWorking(true)
+  }
+
+  async function sendComposedMessage(rawText: string, pending: PendingFile[] = files()) {
+    const val = rawText.trim()
+    if ((!val && !pending.length) || !currentId()) return
+    setUploading(true)
+    setText('')
+    setFiles([])
+    if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.blur() }
+    const parts: string[] = val ? [val] : []
+    for (const f of pending) {
+      try {
+        const uploadPath = await uploadFile(f.blob, f.name)
+        parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
+      } catch { parts.push(`[Upload failed: ${f.name}]`) }
+    }
+    await sendSessionText(parts.join('\n'), true)
+    setUploading(false)
+  }
+
+  async function handleSend() {
+    await sendComposedMessage(text(), files())
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
@@ -740,7 +837,7 @@ export default function App() {
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button onClick={() => setSidebar(true)} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
+        <button onClick={openSidebar} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
       </Show>
 
       {/* Sidebar backdrop */}
@@ -1421,7 +1518,7 @@ export default function App() {
             <Show when={!expanded()}>
               <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
               <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
-              <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={transcribing() ? 'Transcribing...' : listening() ? 'Stop & transcribe' : 'Record voice memo'}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
+              <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={voiceTitle()} aria-label={voiceTitle()}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
               <button onClick={() => { setExpanded(true); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.focus() } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Expand editor">{'\u2922'}</button>
             </Show>
             <textarea ref={textareaRef} value={text()}
@@ -1450,7 +1547,7 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '8px', 'align-items': 'center' }}>
                   <button onClick={() => fileInputRef?.click()} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', padding: '8px 4px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '32px', 'min-height': '42px' }} title="Attach file">+</button>
                   <button onClick={() => setHistoryOpen(!historyOpen())} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '16px', cursor: 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px' }} title="Message history">{'\u2191'}</button>
-                  <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={transcribing() ? 'Transcribing...' : listening() ? 'Stop & transcribe' : 'Record voice memo'}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
+                  <button onClick={toggleVoice} disabled={transcribing()} style={{ background: listening() ? `rgba(212, 85, 85, ${0.15 + audioLevel() * 0.35})` : 'none', border: listening() ? '1px solid #d45555' : 'none', 'border-radius': '8px', color: transcribing() ? '#c9a227' : listening() ? '#d45555' : '#666', 'font-size': '16px', cursor: transcribing() ? 'wait' : 'pointer', padding: '8px 2px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-width': '24px', 'min-height': '42px', transition: 'all 0.15s' }} title={voiceTitle()} aria-label={voiceTitle()}>{transcribing() ? '\u23F3' : listening() ? '\u23F9' : '\uD83C\uDF99'}</button>
                   <button onClick={() => { setExpanded(false); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px' } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 6px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-height': '42px' }} title="Collapse">{'\u2193'} Collapse</button>
                 </div>
               </Show>
