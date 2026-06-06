@@ -13,6 +13,7 @@ interface PendingFile { name: string; blob: Blob; dataUrl: string; isImage: bool
 
 type SpinGestureState = 'off' | 'requesting' | 'calibrating' | 'ready' | 'triggered' | 'denied' | 'unsupported'
 type DeviceMotionPermissionApi = typeof DeviceMotionEvent & { requestPermission?: () => Promise<PermissionState> }
+type DeviceOrientationPermissionApi = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<PermissionState> }
 
 function resizeImage(blob: Blob, maxDim = 1600): Promise<Blob> {
   return new Promise((resolve) => {
@@ -179,6 +180,9 @@ export default function App() {
   const [transcribing, setTranscribing] = createSignal(false)
   const [audioLevel, setAudioLevel] = createSignal(0)
   const [spinGestureState, setSpinGestureState] = createSignal<SpinGestureState>('off')
+  const [motionSamples, setMotionSamples] = createSignal(0)
+  const [motionPeakDps, setMotionPeakDps] = createSignal(0)
+  const [motionDegrees, setMotionDegrees] = createSignal(0)
   const [hasMore, setHasMore] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
@@ -564,9 +568,15 @@ export default function App() {
   async function requestMotionAccess(): Promise<'granted' | 'denied' | 'unsupported'> {
     if (!window.isSecureContext || !('DeviceMotionEvent' in window)) return 'unsupported'
     const MotionEventCtor = window.DeviceMotionEvent as DeviceMotionPermissionApi
-    if (typeof MotionEventCtor.requestPermission !== 'function') return 'granted'
+    const OrientationEventCtor = (window as any).DeviceOrientationEvent as DeviceOrientationPermissionApi | undefined
     try {
-      return await MotionEventCtor.requestPermission() === 'granted' ? 'granted' : 'denied'
+      if (typeof MotionEventCtor.requestPermission === 'function') {
+        return await MotionEventCtor.requestPermission() === 'granted' ? 'granted' : 'denied'
+      }
+      if (OrientationEventCtor && typeof OrientationEventCtor.requestPermission === 'function') {
+        return await OrientationEventCtor.requestPermission() === 'granted' ? 'granted' : 'denied'
+      }
+      return 'granted'
     } catch {
       return 'denied'
     }
@@ -578,6 +588,9 @@ export default function App() {
       motionListener = null
     }
     spinDetector.reset()
+    setMotionSamples(0)
+    setMotionPeakDps(0)
+    setMotionDegrees(0)
     setSpinGestureState(nextState)
   }
 
@@ -593,6 +606,9 @@ export default function App() {
     stopSpinGesture('calibrating')
     motionListener = (event: DeviceMotionEvent) => {
       const result = spinDetector.sample(motionEventToSpinSample(event, performance.now()))
+      setMotionSamples(n => n + 1)
+      setMotionPeakDps(Math.round(result.peakDps))
+      setMotionDegrees(Math.round(result.integratedDegrees))
       if (result.status === 'calibrating') setSpinGestureState('calibrating')
       else if (result.status === 'armed') setSpinGestureState('ready')
       if (result.triggered) stopVoiceForSpinSend()
@@ -608,6 +624,19 @@ export default function App() {
     if (spinGestureState() === 'triggered') return 'Stopping & sending...'
     if (spinGestureState() === 'denied') return 'Stop & transcribe (motion denied)'
     return 'Stop & transcribe'
+  }
+
+  function recordingPlaceholder() {
+    if (transcribing()) return 'Transcribing...'
+    if (!listening()) return 'Send a message...'
+    const elapsed = `${Math.floor(recordingTime() / 60)}:${(recordingTime() % 60).toString().padStart(2, '0')}`
+    if (spinGestureState() === 'unsupported') return `Recording ${elapsed} · motion unsupported`
+    if (spinGestureState() === 'denied') return `Recording ${elapsed} · motion denied`
+    if (spinGestureState() === 'requesting') return `Recording ${elapsed} · motion requesting`
+    if (spinGestureState() === 'calibrating') return `Recording ${elapsed} · motion calibrating · ${motionSamples()}`
+    if (spinGestureState() === 'ready') return `Recording ${elapsed} · motion ready · p${motionPeakDps()} d${motionDegrees()}`
+    if (spinGestureState() === 'triggered') return `Recording ${elapsed} · motion triggered`
+    return `Recording ${elapsed}`
   }
 
   function stopVoice() {
@@ -1540,7 +1569,7 @@ export default function App() {
               }}
               onPaste={(e) => { const items = e.clipboardData?.items; if (!items) return; const imgs = [...items].filter(i => i.type.startsWith('image/')); if (imgs.length) { e.preventDefault(); addFiles(imgs.map(i => new File([i.getAsFile()!], 'pasted-image.png', { type: i.type }))) } }}
               enterkeyhint="send"
-              placeholder={transcribing() ? 'Transcribing...' : listening() ? `Recording ${Math.floor(recordingTime() / 60)}:${(recordingTime() % 60).toString().padStart(2, '0')}` : "Send a message..."} rows={expanded() ? undefined : 1}
+              placeholder={recordingPlaceholder()} rows={expanded() ? undefined : 1}
               style={{ flex: expanded() ? '1' : undefined, width: expanded() ? '100%' : undefined, 'flex-grow': expanded() ? '1' : undefined, background: '#1a1a2e', border: expanded() ? 'none' : '1px solid #333', 'border-radius': expanded() ? '0' : '12px', padding: expanded() ? '14px 16px' : '10px 14px', color: '#e5e5e5', 'font-size': expanded() ? '18px' : '16px', 'font-family': 'inherit', resize: 'none', outline: 'none', 'line-height': '1.5', 'max-height': expanded() ? 'none' : '120px', '-webkit-appearance': 'none', ...(listening() ? { '::placeholder': { color: '#73b8ff' } } : {}), ...(expanded() ? { 'min-height': '0', 'overflow-y': 'auto' } : { flex: '1' }) }} />
             <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', padding: expanded() ? '8px 12px' : '0', 'padding-bottom': expanded() ? 'max(8px, env(safe-area-inset-bottom))' : '0', background: expanded() ? '#0a0e14' : 'transparent', 'border-top': expanded() ? '1px solid #1e1e1e' : 'none', 'justify-content': expanded() ? 'space-between' : 'flex-start' }}>
               <Show when={expanded()}>
