@@ -14,6 +14,9 @@ interface PendingFile { name: string; blob: Blob; dataUrl: string; isImage: bool
 type SpinGestureState = 'off' | 'requesting' | 'calibrating' | 'ready' | 'triggered' | 'denied' | 'unsupported'
 type DeviceMotionPermissionApi = typeof DeviceMotionEvent & { requestPermission?: () => Promise<PermissionState> }
 type DeviceOrientationPermissionApi = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<PermissionState> }
+type MotionChartPoint = { peakDps: number; degrees: number }
+
+const MAX_MOTION_CHART_POINTS = 120
 
 function resizeImage(blob: Blob, maxDim = 1600): Promise<Blob> {
   return new Promise((resolve) => {
@@ -183,6 +186,7 @@ export default function App() {
   const [motionSamples, setMotionSamples] = createSignal(0)
   const [motionPeakDps, setMotionPeakDps] = createSignal(0)
   const [motionDegrees, setMotionDegrees] = createSignal(0)
+  const [motionSeries, setMotionSeries] = createSignal<MotionChartPoint[]>([])
   const [hasMore, setHasMore] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
@@ -609,6 +613,7 @@ export default function App() {
       setMotionSamples(n => n + 1)
       setMotionPeakDps(Math.round(result.peakDps))
       setMotionDegrees(Math.round(result.integratedDegrees))
+      setMotionSeries(points => [...points, { peakDps: result.peakDps, degrees: result.integratedDegrees }].slice(-MAX_MOTION_CHART_POINTS))
       if (result.status === 'calibrating') setSpinGestureState('calibrating')
       else if (result.status === 'armed') setSpinGestureState('ready')
       if (result.triggered) stopVoiceForSpinSend()
@@ -637,6 +642,23 @@ export default function App() {
     if (spinGestureState() === 'ready') return `Recording ${elapsed} · motion ready · p${motionPeakDps()} d${motionDegrees()}`
     if (spinGestureState() === 'triggered') return `Recording ${elapsed} · motion triggered`
     return `Recording ${elapsed}`
+  }
+
+  function motionChartPoints(key: keyof MotionChartPoint, maxValue: number) {
+    const points = motionSeries()
+    if (points.length === 0) return ''
+    const width = 100
+    const height = 32
+    const denom = Math.max(1, points.length - 1)
+    return points.map((point, index) => {
+      const x = (index / denom) * width
+      const y = height - Math.min(1, point[key] / maxValue) * (height - 3) - 1
+      return `${x.toFixed(2)},${y.toFixed(2)}`
+    }).join(' ')
+  }
+
+  function showMotionChart() {
+    return (listening() || transcribing()) && motionSeries().length > 0
   }
 
   function stopVoice() {
@@ -668,6 +690,7 @@ export default function App() {
     }
 
     setSpinGestureState('requesting')
+    setMotionSeries([])
     const motionAccess = await requestMotionAccess()
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
@@ -1532,6 +1555,20 @@ export default function App() {
                   <button onClick={() => removeFile(i())} style={{ position: 'absolute', top: '-6px', right: '-6px', width: '22px', height: '22px', 'border-radius': '50%', background: '#d45555', color: '#fff', border: 'none', 'font-size': '12px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'line-height': '1' }}>&times;</button>
                 </div>
               )}</For>
+            </div>
+          </Show>
+          <Show when={showMotionChart()}>
+            <div style={{ height: '42px', width: '100%', background: '#05070b', 'border-top': '1px solid #1e1e1e', position: 'relative', overflow: 'hidden', 'flex-shrink': '0' }}>
+              <svg viewBox="0 0 100 32" preserveAspectRatio="none" style={{ position: 'absolute', inset: '0', width: '100%', height: '100%' }} aria-hidden="true">
+                <line x1="0" y1="10.5" x2="100" y2="10.5" stroke="rgba(255,255,255,0.06)" stroke-width="0.35" />
+                <line x1="0" y1="21.5" x2="100" y2="21.5" stroke="rgba(255,255,255,0.06)" stroke-width="0.35" />
+                <polyline points={motionChartPoints('peakDps', 900)} fill="none" stroke="#4aba6a" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+                <polyline points={motionChartPoints('degrees', 900)} fill="none" stroke="#c9a227" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+              </svg>
+              <div style={{ position: 'absolute', left: '10px', top: '5px', display: 'flex', gap: '10px', 'font-size': '10px', 'font-weight': '700', 'font-family': "'SF Mono', Menlo, monospace", 'pointer-events': 'none' }}>
+                <span style={{ color: '#4aba6a' }}>p {motionPeakDps()}</span>
+                <span style={{ color: '#c9a227' }}>d {motionDegrees()}</span>
+              </div>
             </div>
           </Show>
           <div style={{ padding: expanded() ? '0' : '8px 12px', 'padding-bottom': expanded() ? '0' : 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', 'flex-direction': expanded() ? 'column' : 'row', gap: expanded() ? '0' : '8px', 'align-items': expanded() ? 'stretch' : 'flex-end', 'flex-shrink': '0', 'flex-grow': expanded() ? '1' : '0', position: 'relative', ...(expanded() ? { 'min-height': '0' } : {}) }}>
