@@ -76,7 +76,8 @@ export function createSpinGestureDetector(options = {}) {
     samples = []
   }
 
-  function sample(reading) {
+  function sample(reading, options = {}) {
+    const commitTrigger = options.commitTrigger !== false
     const now = typeof reading?.timestamp === 'number' && Number.isFinite(reading.timestamp)
       ? reading.timestamp
       : Date.now()
@@ -112,12 +113,13 @@ export function createSpinGestureDetector(options = {}) {
     samples = samples.filter(sample => sample.timestamp >= cutoff)
 
     const summary = summarize(samples, baselineDps)
-    triggered =
+    const wouldTrigger =
       summary.integratedDegrees >= config.minIntegratedDegrees &&
       summary.peakDps >= config.minPeakDps &&
       summary.activeSamples >= config.minActiveSamples
+    if (wouldTrigger && commitTrigger) triggered = true
 
-    return result(summary)
+    return result({ ...summary, triggered: triggered || wouldTrigger })
   }
 
   return {

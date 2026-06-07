@@ -48,6 +48,23 @@ test('triggers on repeated high rotation inside the rolling window', () => {
   assert.ok(result.peakDps >= 520)
 })
 
+test('can report a trigger without committing it', () => {
+  const detector = createSpinGestureDetector()
+  calibrate(detector)
+
+  let result = detector.getState()
+  for (let t = 900; t < 2300 && !result.triggered; t += 16) {
+    result = detector.sample({ timestamp: t, alpha: 850, beta: 120, gamma: 0 }, { commitTrigger: false })
+  }
+
+  assert.equal(result.status, 'armed')
+  assert.equal(result.triggered, true)
+
+  result = detector.sample({ timestamp: 2300, alpha: 900, beta: 0, gamma: 0 }, { commitTrigger: false })
+  assert.equal(result.status, 'armed')
+  assert.equal(result.triggered, true)
+})
+
 test('reset clears a fired detector', () => {
   const detector = createSpinGestureDetector({ minIntegratedDegrees: 180, minPeakDps: 300 })
   calibrate(detector)

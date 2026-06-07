@@ -15,6 +15,7 @@ type SpinGestureState = 'off' | 'requesting' | 'calibrating' | 'ready' | 'trigge
 type DeviceMotionPermissionApi = typeof DeviceMotionEvent & { requestPermission?: () => Promise<PermissionState> }
 type DeviceOrientationPermissionApi = typeof DeviceOrientationEvent & { requestPermission?: () => Promise<PermissionState> }
 type MotionChartPoint = { peakDps: number; degrees: number }
+type TossCalibrationStats = { maxPeakDps: number; maxDegrees: number; hits: number }
 
 const MAX_MOTION_CHART_POINTS = 120
 
@@ -187,6 +188,8 @@ export default function App() {
   const [motionPeakDps, setMotionPeakDps] = createSignal(0)
   const [motionDegrees, setMotionDegrees] = createSignal(0)
   const [motionSeries, setMotionSeries] = createSignal<MotionChartPoint[]>([])
+  const [tossCalibration, setTossCalibration] = createSignal(false)
+  const [tossCalibrationStats, setTossCalibrationStats] = createSignal<TossCalibrationStats>({ maxPeakDps: 0, maxDegrees: 0, hits: 0 })
   const [hasMore, setHasMore] = createSignal(false)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
@@ -357,6 +360,7 @@ export default function App() {
   const spinDetector = createSpinGestureDetector()
   let motionListener: ((event: DeviceMotionEvent) => void) | null = null
   let spinSendAfterStop = false
+  let tossCalibrationHitActive = false
   let textareaRef: HTMLTextAreaElement | undefined
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
@@ -598,6 +602,37 @@ export default function App() {
     setSpinGestureState(nextState)
   }
 
+  function resetTossCalibrationStats() {
+    tossCalibrationHitActive = false
+    setTossCalibrationStats({ maxPeakDps: 0, maxDegrees: 0, hits: 0 })
+  }
+
+  function toggleTossCalibration() {
+    const next = !tossCalibration()
+    setTossCalibration(next)
+    if (next) resetTossCalibrationStats()
+    else {
+      tossCalibrationHitActive = false
+      spinDetector.reset()
+      setSpinGestureState(listening() ? 'calibrating' : 'off')
+    }
+  }
+
+  function updateTossCalibration(result: { peakDps: number; integratedDegrees: number }, hit = false) {
+    const peakDps = Math.round(result.peakDps)
+    const degrees = Math.round(result.integratedDegrees)
+    setTossCalibrationStats(stats => ({
+      maxPeakDps: Math.max(stats.maxPeakDps, peakDps),
+      maxDegrees: Math.max(stats.maxDegrees, degrees),
+      hits: stats.hits + (hit ? 1 : 0),
+    }))
+  }
+
+  function tossCalibrationSummary() {
+    const stats = tossCalibrationStats()
+    return `max p${stats.maxPeakDps} d${stats.maxDegrees}${stats.hits ? ` · hit ${stats.hits}` : ''}`
+  }
+
   function stopVoiceForSpinSend() {
     if (!listening() || spinSendAfterStop) return
     spinSendAfterStop = true
@@ -609,14 +644,23 @@ export default function App() {
   function startSpinGesture() {
     stopSpinGesture('calibrating')
     motionListener = (event: DeviceMotionEvent) => {
-      const result = spinDetector.sample(motionEventToSpinSample(event, performance.now()))
+      const calibratingToss = tossCalibration()
+      const result = spinDetector.sample(motionEventToSpinSample(event, performance.now()), { commitTrigger: !calibratingToss })
       setMotionSamples(n => n + 1)
       setMotionPeakDps(Math.round(result.peakDps))
       setMotionDegrees(Math.round(result.integratedDegrees))
       setMotionSeries(points => [...points, { peakDps: result.peakDps, degrees: result.integratedDegrees }].slice(-MAX_MOTION_CHART_POINTS))
+      if (calibratingToss) {
+        const hit = result.triggered && !tossCalibrationHitActive
+        updateTossCalibration(result, hit)
+        tossCalibrationHitActive = result.triggered
+      }
       if (result.status === 'calibrating') setSpinGestureState('calibrating')
       else if (result.status === 'armed') setSpinGestureState('ready')
-      if (result.triggered) stopVoiceForSpinSend()
+      if (result.triggered) {
+        if (calibratingToss) return
+        stopVoiceForSpinSend()
+      }
     }
     window.addEventListener('devicemotion', motionListener, { passive: true })
   }
@@ -638,6 +682,7 @@ export default function App() {
     if (spinGestureState() === 'unsupported') return `Recording ${elapsed} · motion unsupported`
     if (spinGestureState() === 'denied') return `Recording ${elapsed} · motion denied`
     if (spinGestureState() === 'requesting') return `Recording ${elapsed} · motion requesting`
+    if (tossCalibration()) return `Recording ${elapsed} · toss cal · p${motionPeakDps()} d${motionDegrees()} · ${tossCalibrationSummary()}`
     if (spinGestureState() === 'calibrating') return `Recording ${elapsed} · motion calibrating · ${motionSamples()}`
     if (spinGestureState() === 'ready') return `Recording ${elapsed} · motion ready · p${motionPeakDps()} d${motionDegrees()}`
     if (spinGestureState() === 'triggered') return `Recording ${elapsed} · motion triggered`
@@ -666,6 +711,8 @@ export default function App() {
     setRecordingTime(0)
     setAudioLevel(0)
     setInterimText('')
+    setTossCalibration(false)
+    resetTossCalibrationStats()
     stopSpinGesture()
     spinSendAfterStop = false
     if (recordingTimer) { clearInterval(recordingTimer); recordingTimer = null }
@@ -691,6 +738,8 @@ export default function App() {
 
     setSpinGestureState('requesting')
     setMotionSeries([])
+    setTossCalibration(false)
+    resetTossCalibrationStats()
     const motionAccess = await requestMotionAccess()
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
@@ -1559,7 +1608,7 @@ export default function App() {
           </Show>
           <Show when={showMotionChart()}>
             <div style={{ height: '42px', width: '100%', background: '#05070b', 'border-top': '1px solid #1e1e1e', position: 'relative', overflow: 'hidden', 'flex-shrink': '0' }}>
-              <svg viewBox="0 0 100 32" preserveAspectRatio="none" style={{ position: 'absolute', inset: '0', width: '100%', height: '100%' }} aria-hidden="true">
+              <svg viewBox="0 0 100 32" preserveAspectRatio="none" style={{ position: 'absolute', inset: '0', width: '100%', height: '100%', 'pointer-events': 'none' }} aria-hidden="true">
                 <line x1="0" y1="10.5" x2="100" y2="10.5" stroke="rgba(255,255,255,0.06)" stroke-width="0.35" />
                 <line x1="0" y1="21.5" x2="100" y2="21.5" stroke="rgba(255,255,255,0.06)" stroke-width="0.35" />
                 <polyline points={motionChartPoints('peakDps', 900)} fill="none" stroke="#4aba6a" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
@@ -1569,6 +1618,10 @@ export default function App() {
                 <span style={{ color: '#4aba6a' }}>p {motionPeakDps()}</span>
                 <span style={{ color: '#c9a227' }}>d {motionDegrees()}</span>
               </div>
+              <Show when={tossCalibration()}>
+                <div style={{ position: 'absolute', left: '10px', bottom: '4px', color: '#d0d0d0', 'font-size': '10px', 'font-weight': '700', 'font-family': "'SF Mono', Menlo, monospace", 'pointer-events': 'none' }}>{tossCalibrationSummary()}</div>
+              </Show>
+              <button onClick={toggleTossCalibration} title={tossCalibration() ? 'Turn off toss calibration' : 'Calibrate toss'} aria-pressed={tossCalibration()} style={{ position: 'absolute', right: '10px', top: '7px', height: '26px', padding: '0 9px', background: tossCalibration() ? '#c9a227' : 'rgba(255,255,255,0.06)', border: tossCalibration() ? '1px solid #c9a227' : '1px solid #333', 'border-radius': '6px', color: tossCalibration() ? '#05070b' : '#d0d0d0', 'font-size': '11px', 'font-weight': '800', 'font-family': 'inherit', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', 'z-index': '1' }}>Cal</button>
             </div>
           </Show>
           <div style={{ padding: expanded() ? '0' : '8px 12px', 'padding-bottom': expanded() ? '0' : 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', 'flex-direction': expanded() ? 'column' : 'row', gap: expanded() ? '0' : '8px', 'align-items': expanded() ? 'stretch' : 'flex-end', 'flex-shrink': '0', 'flex-grow': expanded() ? '1' : '0', position: 'relative', ...(expanded() ? { 'min-height': '0' } : {}) }}>
