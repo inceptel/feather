@@ -1,5 +1,11 @@
 export const BASE = location.pathname.replace(/\/+$/, '')
 
+// Append ?box= so the server proxies the call to a remote/peer box
+function bq(url: string, box?: string | null) {
+  if (!box || box === 'local') return url
+  return url + (url.includes('?') ? '&' : '?') + `box=${encodeURIComponent(box)}`
+}
+
 export interface SessionMeta {
   id: string
   title: string
@@ -9,6 +15,20 @@ export interface SessionMeta {
   isWorker?: boolean
   projectId?: string | null
   projectLabel?: string | null
+  share?: string[]
+}
+
+export interface BoxInfo {
+  id: string
+  label: string
+  available: boolean
+  peer?: boolean
+}
+
+export interface PeerInfo {
+  id: string
+  policy: 'all' | 'selected'
+  control: boolean
 }
 
 export interface Project {
@@ -46,10 +66,26 @@ export async function fetchAgents(): Promise<AgentInfo[]> {
   return (await r.json()).agents
 }
 
-export async function fetchSessions(): Promise<SessionMeta[]> {
-  const r = await fetch(`${BASE}/api/sessions`)
+export async function fetchBoxes(): Promise<BoxInfo[]> {
+  const r = await fetch(`${BASE}/api/boxes`)
+  if (!r.ok) return [{ id: 'local', label: 'Local', available: true }]
+  return (await r.json()).boxes
+}
+
+export async function fetchSharingPeers(): Promise<{ owner: string | null, peers: PeerInfo[] }> {
+  const r = await fetch(`${BASE}/api/sharing/peers`)
+  if (!r.ok) return { owner: null, peers: [] }
+  return await r.json()
+}
+
+export const setSessionShare = (id: string, peers: string[]) =>
+  fetch(`${BASE}/api/sessions/${id}/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ peers }) }).then(r => r.json())
+
+// On a peer box the response also carries `control` (whether we may send)
+export async function fetchSessions(box?: string | null): Promise<{ sessions: SessionMeta[], control?: boolean }> {
+  const r = await fetch(bq(`${BASE}/api/sessions`, box))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return (await r.json()).sessions
+  return await r.json()
 }
 
 export async function fetchProjects(): Promise<Project[]> {
@@ -58,17 +94,17 @@ export async function fetchProjects(): Promise<Project[]> {
   return (await r.json()).projects
 }
 
-export async function fetchMessages(id: string, before = 0): Promise<{ messages: Message[], hasMore: boolean }> {
+export async function fetchMessages(id: string, before = 0, box?: string | null): Promise<{ messages: Message[], hasMore: boolean }> {
   const url = before > 0
     ? `${BASE}/api/sessions/${id}/messages?before=${before}`
     : `${BASE}/api/sessions/${id}/messages`
-  const r = await fetch(url)
+  const r = await fetch(bq(url, box))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return await r.json()
 }
 
-export const sendInput = (id: string, text: string): Promise<{ ok: boolean, sentAt: string }> =>
-  fetch(`${BASE}/api/sessions/${id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+export const sendInput = (id: string, text: string, box?: string | null): Promise<{ ok: boolean, sentAt: string }> =>
+  fetch(bq(`${BASE}/api/sessions/${id}/send`, box), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
     .then(r => r.json())
 
 export async function createSession(cwd?: string, agent?: string): Promise<string> {
@@ -80,8 +116,8 @@ export async function createSession(cwd?: string, agent?: string): Promise<strin
 export const resumeSession = (id: string, cwd?: string) =>
   fetch(`${BASE}/api/sessions/${id}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd }) })
 
-export const interruptSession = (id: string) =>
-  fetch(`${BASE}/api/sessions/${id}/interrupt`, { method: 'POST' })
+export const interruptSession = (id: string, box?: string | null) =>
+  fetch(bq(`${BASE}/api/sessions/${id}/interrupt`, box), { method: 'POST' })
 
 export async function uploadFile(blob: Blob, name: string): Promise<string> {
   const r = await fetch(`${BASE}/api/upload`, {
@@ -108,7 +144,7 @@ export const fetchStarred = (): Promise<Record<string, string[]>> =>
 export const saveStarred = (data: Record<string, string[]>) =>
   fetch(`${BASE}/api/starred`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
 
-export const exportUrl = (id: string) => `${BASE}/api/sessions/${id}/export`
+export const exportUrl = (id: string, box?: string | null) => bq(`${BASE}/api/sessions/${id}/export`, box)
 
 export const openInEditor = (path: string) =>
   fetch(`${BASE}/api/open-in-editor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).then(r => r.json())
@@ -138,6 +174,7 @@ export function subscribeMessages(
   id: string,
   onMessage: (msg: Message) => void,
   onStatus?: (status: 'connected' | 'reconnecting') => void,
+  box?: string | null,
 ): () => void {
   let es: EventSource | null = null
   let closed = false
@@ -146,9 +183,9 @@ export function subscribeMessages(
 
   function connect() {
     if (closed) return
-    const url = lastEventId
+    const url = bq(lastEventId
       ? `${BASE}/api/sessions/${id}/stream?lastEventId=${lastEventId}`
-      : `${BASE}/api/sessions/${id}/stream`
+      : `${BASE}/api/sessions/${id}/stream`, box)
     es = new EventSource(url)
 
     es.addEventListener('connected', () => { retries = 0; onStatus?.('connected') })

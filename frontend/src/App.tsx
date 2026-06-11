@@ -4,7 +4,8 @@ import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, BASE } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, BASE } from './api'
+import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 
 interface QuickLink { label: string; url: string }
@@ -86,6 +87,10 @@ function setFavicon(color: string) {
 export default function App() {
   const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
+  const [boxes, setBoxes] = createSignal<BoxInfo[]>([{ id: 'local', label: 'Local', available: true }])
+  const [currentBox, setCurrentBox] = createSignal('local')
+  const [peerControl, setPeerControl] = createSignal(false)
+  const [sharingPeers, setSharingPeers] = createSignal<PeerInfo[]>([])
   const [messages, setMessages] = createSignal<Message[]>([])
   const [sidebar, setSidebar] = createSignal(false)
   const [loading, setLoading] = createSignal(false)
@@ -288,7 +293,7 @@ export default function App() {
       try {
         const sessionId = await createSession(undefined, 'claude')
         await fetch(`${BASE}/api/auto/instances/${name}/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) })
-        fetchSessions().then(s => setSessions(s)).catch(() => {})
+        refreshSessions()
       } catch {}
       setAutoNewName(''); setAutoNewGoal('')
       await loadAutoInstances()
@@ -430,14 +435,20 @@ export default function App() {
   }
   onMount(async () => {
     document.addEventListener('keydown', onGlobalKeyDown)
-    setSessions(await fetchSessions())
+    fetchBoxes().then(setBoxes).catch(() => {})
+    fetchSharingPeers().then(r => setSharingPeers(r.peers)).catch(() => {})
+    // Hash may carry a box prefix: #boxid:sessionid
+    const hash = location.hash.slice(1)
+    const boxMatch = hash.match(/^([a-z0-9_-]+):(.+)$/i)
+    if (boxMatch) setCurrentBox(boxMatch[1])
+    await refreshSessions()
     fetchAgents().then(setAgents).catch(() => {})
     fetchProjects().then(setProjects).catch(() => {})
     const base = location.pathname.replace(/\/+$/, '')
     fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
-    const hash = location.hash.slice(1)
-    if (hash) select(hash)
+    if (boxMatch) select(boxMatch[2])
+    else if (hash) select(hash)
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('feather:open-path', onOpenPath)
@@ -446,9 +457,35 @@ export default function App() {
     idle(() => { import('./components/Terminal').catch(() => {}) })
   })
   function onVisibility() {
-    if (document.visibilityState === 'visible') fetchSessions().then(s => setSessions(s)).catch(() => {})
+    if (document.visibilityState === 'visible') refreshSessions()
   }
   onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('feather:open-path', onOpenPath) })
+
+  const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
+  const isRemoteBox = () => currentBox() !== 'local'
+  // On a peer box we can only type if the peer granted us control
+  const canSend = () => !isPeerBox() || peerControl()
+
+  async function refreshSessions() {
+    try {
+      const r = await fetchSessions(currentBox())
+      setSessions(r.sessions)
+      if (isPeerBox()) setPeerControl(!!r.control)
+    } catch {}
+  }
+
+  function selectBox(id: string) {
+    if (id === currentBox()) return
+    setCurrentBox(id)
+    setPeerControl(false)
+    setCurrentId(null)
+    cleanupSSE?.()
+    setMessages([])
+    setTab('chat')
+    location.hash = ''
+    setSessions([])
+    refreshSessions()
+  }
 
   async function select(id: string) {
     const prev = currentId()
@@ -456,7 +493,7 @@ export default function App() {
     setCurrentAuto(null)
     setCurrentCos(null)
     setCurrentId(id)
-    location.hash = id
+    location.hash = currentBox() === 'local' ? id : `${currentBox()}:${id}`
     setSidebar(false)
     setLoading(true)
     setMessages([])
@@ -466,7 +503,7 @@ export default function App() {
     setHistoryOpen(false)
     cleanupSSE?.()
     try {
-      const result = await fetchMessages(id)
+      const result = await fetchMessages(id, 0, currentBox())
       setMessages(result.messages)
       setHasMore(result.hasMore)
     } catch {}
@@ -491,7 +528,7 @@ export default function App() {
         }
         return [...prev, msg]
       })
-    }, setSSEStatus)
+    }, setSSEStatus, currentBox())
   }
 
   async function handleNew(agent?: string) {
@@ -500,19 +537,19 @@ export default function App() {
     try {
       const id = await createSession(undefined, agent)
       select(id)
-      fetchSessions().then(s => setSessions(s)).catch(() => {})
+      refreshSessions()
     } catch (e) { console.error(e) }
     finally { setCreating(false) }
   }
 
   async function handleResume(id: string) {
     await resumeSession(id)
-    setSessions(await fetchSessions())
+    await refreshSessions()
     select(id)
   }
 
   async function handleInterrupt(id: string) {
-    await interruptSession(id)
+    await interruptSession(id, currentBox())
   }
 
   async function handleDelete(id: string) {
@@ -523,7 +560,7 @@ export default function App() {
     location.hash = ''
     cleanupSSE?.()
     setMessages([])
-    setSessions(await fetchSessions())
+    await refreshSessions()
   }
 
   async function handleRename(id: string) {
@@ -532,13 +569,26 @@ export default function App() {
     await renameSession(id, title)
     setRenaming(false)
     setMenuOpen(false)
-    setSessions(await fetchSessions())
+    await refreshSessions()
+  }
+
+  async function handleShare(id: string) {
+    setMenuOpen(false)
+    const current = sessions().find(s => s.id === id)?.share || []
+    const available = sharingPeers().map(p => p.id)
+    const input = prompt(`Share this session with which peers?\nAvailable: ${available.join(', ')} (comma-separated, empty to unshare)`, current.join(', '))
+    if (input === null) return
+    const peers = input.split(',').map(s => s.trim()).filter(Boolean)
+    const unknown = peers.filter(p => !available.includes(p))
+    if (unknown.length) { alert(`Unknown peer(s): ${unknown.join(', ')}`); return }
+    await setSessionShare(id, peers)
+    await refreshSessions()
   }
 
   function openSidebar() {
     setSidebar(true)
     // Refresh the session list so sessions created since page load appear without a reload
-    fetchSessions().then(s => setSessions(s)).catch(() => {})
+    refreshSessions()
   }
 
   async function handleSidebarRename(id: string) {
@@ -546,7 +596,7 @@ export default function App() {
     if (!title) { setSidebarRenaming(null); return }
     await renameSession(id, title)
     setSidebarRenaming(null)
-    setSessions(await fetchSessions())
+    await refreshSessions()
   }
 
   async function loadEarlier() {
@@ -554,7 +604,7 @@ export default function App() {
     if (!id || loadingMore()) return
     setLoadingMore(true)
     try {
-      const result = await fetchMessages(id, messages().length)
+      const result = await fetchMessages(id, messages().length, currentBox())
       setMessages(prev => [...result.messages, ...prev])
       setHasMore(result.hasMore)
     } catch {}
@@ -816,12 +866,16 @@ export default function App() {
     pushHistory(fullText)
     if (clearDraft) saveDraft(currentId()!, '')
 
-    const tempId = `optimistic-${Date.now()}`
-    setMessages(prev => [...prev, {
-      uuid: tempId, role: 'user', timestamp: new Date().toISOString(),
-      content: [{ type: 'text', text: fullText }], delivery: 'sent',
-    }])
-    sendInput(currentId()!, fullText)
+    // No optimistic echo on peer boxes: the owner's server prefixes our name
+    // ([allan] …), so the streamed-back text wouldn't match and we'd show a dupe
+    if (!isPeerBox()) {
+      const tempId = `optimistic-${Date.now()}`
+      setMessages(prev => [...prev, {
+        uuid: tempId, role: 'user', timestamp: new Date().toISOString(),
+        content: [{ type: 'text', text: fullText }], delivery: 'sent',
+      }])
+    }
+    sendInput(currentId()!, fullText, currentBox())
     setWorking(true)
   }
 
@@ -969,6 +1023,26 @@ export default function App() {
           </div>
           {/* Sessions tab */}
           <Show when={sidebarTab() === 'sessions'}>
+            {/* Box / peer selector */}
+            <Show when={boxes().length > 1}>
+              <div style={{ display: 'flex', gap: '6px', padding: '10px 16px 0', 'flex-wrap': 'wrap' }}>
+                <For each={[...boxes()].sort((a, b) => (a.peer === b.peer ? 0 : a.peer ? 1 : -1))}>{(b) => (
+                  <button onClick={() => selectBox(b.id)} disabled={!b.available}
+                    style={{
+                      display: 'flex', 'align-items': 'center', gap: '5px', padding: '4px 10px',
+                      background: currentBox() === b.id ? '#1a1a2e' : 'transparent',
+                      border: currentBox() === b.id ? '1px solid #4aba6a' : '1px solid #2a2a2a',
+                      'border-radius': '12px', color: b.available ? (currentBox() === b.id ? '#e5e5e5' : '#999') : '#444',
+                      'font-size': '11px', 'font-weight': '600', cursor: b.available ? 'pointer' : 'default',
+                      '-webkit-tap-highlight-color': 'transparent',
+                    }}>
+                    <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: b.available ? '#4aba6a' : '#555', 'flex-shrink': '0' }} />
+                    {b.peer ? `@${b.label}` : b.label}
+                  </button>
+                )}</For>
+              </div>
+            </Show>
+            <Show when={!isRemoteBox()}>
             <div style={{ padding: '12px 16px', position: 'relative' }}>
               <div style={{ display: 'flex', 'border-radius': '8px', overflow: 'hidden' }}>
                 <button onClick={() => handleNew('claude')} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
@@ -1056,6 +1130,7 @@ export default function App() {
                 </div>
               </Show>
             </div>
+            </Show>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
               {(() => {
                 const all = sessions().filter(s => !s.isWorker && (!currentProject() || s.projectId === currentProject()))
@@ -1080,8 +1155,8 @@ export default function App() {
                   <div style={{ padding: '6px 16px 2px', 'font-size': '10px', 'font-weight': '600', color: '#555', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{group.label}</div>
                   <For each={group.items}>{(s) => (
                     <div onClick={() => { if (sidebarRenaming() !== s.id) select(s.id) }}
-                      onDblClick={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
-                      onContextMenu={(e) => { e.preventDefault(); setSidebarRenameText(s.title); setSidebarRenaming(s.id) }}
+                      onDblClick={(e) => { e.preventDefault(); if (!isRemoteBox()) { setSidebarRenameText(s.title); setSidebarRenaming(s.id) } }}
+                      onContextMenu={(e) => { e.preventDefault(); if (!isRemoteBox()) { setSidebarRenameText(s.title); setSidebarRenaming(s.id) } }}
                       style={{ padding: '10px 16px', cursor: 'pointer', 'border-left': s.id === currentId() ? '3px solid #4aba6a' : '3px solid transparent', background: s.id === currentId() ? '#1a1a2e' : 'transparent', 'border-bottom': '1px solid #111', '-webkit-tap-highlight-color': 'transparent' }}>
                       <Show when={sidebarRenaming() === s.id} fallback={
                         <>
@@ -1367,10 +1442,15 @@ export default function App() {
                 />
               </Show>
               <div style={{ flex: '1' }} />
-              <Show when={s().isActive}>
+              <Show when={isPeerBox()}>
+                <span style={{ 'font-size': '11px', color: '#888', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '10px', padding: '2px 8px', 'flex-shrink': '0' }}>
+                  @{boxes().find(b => b.id === currentBox())?.label || currentBox()}{peerControl() ? '' : ' \u00B7 view only'}
+                </span>
+              </Show>
+              <Show when={s().isActive && canSend()}>
                 <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Stop</button>
               </Show>
-              <Show when={!s().isActive}>
+              <Show when={!s().isActive && !isRemoteBox()}>
                 <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
               <div style={{ position: 'relative' }}>
@@ -1378,11 +1458,21 @@ export default function App() {
                 <Show when={menuOpen()}>
                   <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '99' }} />
                   <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
-                    <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
-                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
-                    <a href={exportUrl(s().id)} download style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
-                    <button onClick={() => handleDelete(s().id)}
-                      style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Delete</button>
+                    <Show when={!isRemoteBox()}>
+                      <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
+                        style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
+                    </Show>
+                    <Show when={!isRemoteBox() && sharingPeers().length > 0}>
+                      <button onClick={() => handleShare(s().id)}
+                        style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>
+                        Share\u2026{s().share?.length ? ` (${s().share!.join(', ')})` : ''}
+                      </button>
+                    </Show>
+                    <a href={exportUrl(s().id, currentBox())} download style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
+                    <Show when={!isRemoteBox()}>
+                      <button onClick={() => handleDelete(s().id)}
+                        style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Delete</button>
+                    </Show>
                   </div>
                 </Show>
               </div>
@@ -1394,8 +1484,10 @@ export default function App() {
         <Show when={currentId()}>
           <div style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
-            <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
-            <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+            <Show when={!isRemoteBox()}>
+              <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
+              <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+            </Show>
             <span style={{ 'margin-left': 'auto', 'padding-right': '12px', 'font-size': '10px', color: '#333' }}>{__BUILD_TIME__}</span>
           </div>
         </Show>
@@ -1416,7 +1508,7 @@ export default function App() {
             </div>
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId()) sendInput(currentId()!, t) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId() && canSend()) sendInput(currentId()!, t, currentBox()) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
             </div>
             <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
               {/* Mode toggle */}
@@ -1589,8 +1681,15 @@ export default function App() {
           </div>
         </Show>
 
+        {/* View-only notice (peer session without control) */}
+        <Show when={currentId() && tab() === 'chat' && !canSend()}>
+          <div style={{ padding: '10px 16px', 'border-top': '1px solid #1e1e1e', background: '#0a0e14', color: '#666', 'font-size': '12px', 'text-align': 'center', 'padding-bottom': 'max(10px, env(safe-area-inset-bottom))' }}>
+            View only — {boxes().find(b => b.id === currentBox())?.label || 'this peer'} hasn't granted you send access
+          </div>
+        </Show>
+
         {/* Input (chat tab only) */}
-        <Show when={currentId() && tab() === 'chat'}>
+        <Show when={currentId() && tab() === 'chat' && canSend()}>
           <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
           {/* File previews */}
           <Show when={files().length > 0}>
