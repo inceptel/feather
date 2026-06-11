@@ -5,7 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync, execSync, spawn } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
@@ -31,6 +31,8 @@ const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
 const BOXES_FILE = path.resolve(import.meta.dirname, 'boxes.json');
+const SHARING_FILE = path.resolve(import.meta.dirname, 'sharing.json');
+const SHARE_LOG = path.join(HOME, '.feather/share-access.log');
 const COS_DIR = path.join(HOME, '.feather/cos');
 const COS_FILE = path.join(COS_DIR, 'workstreams.json');
 
@@ -44,6 +46,81 @@ function readBoxes() {
   catch { return {}; }
 }
 
+// ── Sharing (peers: other users' feather instances) ───────────────────────
+// sharing.json (gitignored, 0600): { owner, peers: { id: { token, policy:
+// 'all'|'selected', control: bool } }, grants: [{ peer, box, session|project }] }
+// See docs/sharing-design.md.
+
+function readSharing() {
+  try { return JSON.parse(fs.readFileSync(SHARING_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+function writeSharing(sharing) {
+  fs.writeFileSync(SHARING_FILE, JSON.stringify(sharing, null, 2), { mode: 0o600 });
+}
+
+// CLI: node server.js --add-peer NAME [--all] [--control] — prints the token
+// to hand to the peer, then exits without starting the server.
+if (process.argv.includes('--add-peer')) {
+  const name = process.argv[process.argv.indexOf('--add-peer') + 1];
+  if (!name || !/^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) {
+    console.error('usage: node server.js --add-peer <name> [--all] [--control]');
+    process.exit(1);
+  }
+  const sharing = readSharing();
+  sharing.peers = sharing.peers || {};
+  const existing = sharing.peers[name] || {};
+  const token = existing.token || randomBytes(32).toString('hex');
+  sharing.peers[name] = {
+    ...existing,
+    token,
+    policy: process.argv.includes('--all') ? 'all' : (existing.policy || 'selected'),
+    control: process.argv.includes('--control') || !!existing.control,
+  };
+  writeSharing(sharing);
+  const p = sharing.peers[name];
+  console.log(`peer "${name}": policy=${p.policy} control=${p.control}`);
+  console.log(`token (give to ${name} for their boxes.json entry pointing at this instance):`);
+  console.log(token);
+  console.log(`\nexample entry for ${name}'s boxes.json:`);
+  console.log(JSON.stringify({ [sharing.owner || 'friend']: { url: 'http://<this-host>:4870', label: sharing.owner || 'Friend', peer: true, token } }, null, 2));
+  process.exit(0);
+}
+
+function findPeerByToken(token) {
+  if (!token) return null;
+  const peers = readSharing().peers || {};
+  const given = createHash('sha256').update(token).digest();
+  for (const [id, cfg] of Object.entries(peers)) {
+    if (!cfg?.token) continue;
+    const expected = createHash('sha256').update(cfg.token).digest();
+    if (timingSafeEqual(given, expected)) return { id, policy: cfg.policy || 'selected', control: !!cfg.control };
+  }
+  return null;
+}
+
+// Can `peer` see this session? policy 'all' → everything; 'selected' →
+// only session-meta share lists and sharing.json grants. Default deny.
+function peerCanAccessSession(peer, sessionId, projectId = undefined) {
+  if (peer.policy === 'all') return true;
+  const meta = readMeta();
+  if (Array.isArray(meta[sessionId]?.share) && meta[sessionId].share.includes(peer.id)) return true;
+  const grants = (readSharing().grants || [])
+    .filter(g => g?.peer === peer.id && (!g.box || g.box === 'local' || g.box === '*'));
+  if (grants.length === 0) return false;
+  if (grants.some(g => g.session === sessionId)) return true;
+  if (projectId === undefined) {
+    const fpath = findClaudeJsonlPath(sessionId);
+    projectId = fpath ? path.basename(path.dirname(fpath)) : null;
+  }
+  return projectId ? grants.some(g => g.project === projectId) : false;
+}
+
+function shareLog(entry) {
+  try { fs.appendFileSync(SHARE_LOG, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n'); } catch {}
+}
+
 async function proxyToBox(boxId, req, res) {
   const boxes = readBoxes();
   const box = boxes[boxId];
@@ -52,7 +129,25 @@ async function proxyToBox(boxId, req, res) {
   // Build target URL: strip ?box= param, forward everything else
   const url = new URL(req.originalUrl, 'http://localhost');
   url.searchParams.delete('box');
-  const target = `${box.url}${url.pathname}${url.search}`;
+  let pathname = url.pathname;
+  const headers = { 'Content-Type': req.headers['content-type'] || 'application/json' };
+  // Forward Accept so the remote's compression filter exempts SSE streams
+  if (req.headers.accept) headers.Accept = req.headers.accept;
+
+  // Peer boxes (another user's instance): only the share surface is ever
+  // forwarded — rewritten onto their token-gated /api/share namespace. The
+  // remote enforces its own grants; this allowlist just refuses to even ask
+  // for anything outside view + send/interrupt.
+  if (box.peer) {
+    const allowed =
+      (req.method === 'GET' && (pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/.test(pathname))) ||
+      (req.method === 'POST' && /^\/api\/sessions\/[^/]+\/(send|interrupt)$/.test(pathname));
+    if (!allowed) return res.status(403).json({ error: `peer box ${boxId}: only viewing shared sessions (and send/interrupt if granted) is supported` });
+    pathname = pathname.replace(/^\/api\/sessions/, '/api/share/sessions');
+    if (box.token) headers.Authorization = `Bearer ${box.token}`;
+  }
+
+  const target = `${box.url}${pathname}${url.search}`;
 
   const ac = new AbortController();
   const connectTimeout = setTimeout(() => ac.abort(new Error('Connect timeout')), 15000);
@@ -60,7 +155,7 @@ async function proxyToBox(boxId, req, res) {
   try {
     const opts = {
       method: req.method,
-      headers: { 'Content-Type': req.headers['content-type'] || 'application/json' },
+      headers,
       signal: ac.signal,
     };
     if (req.method === 'POST' && req.body) opts.body = JSON.stringify(req.body);
@@ -429,6 +524,7 @@ function discoverSessions(limit = 50) {
         agent,
         projectId: projectId || null,
         projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
+        share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
       });
     } catch {}
   }
@@ -805,8 +901,11 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
 const app = express();
 app.use(compression({
   filter(req, res) {
-    // Don't compress SSE streams — buffering breaks real-time delivery
+    // Don't compress SSE streams — buffering breaks real-time delivery.
+    // Check the response type too: server-to-server clients (box proxy,
+    // peers) don't always send Accept: text/event-stream.
     if (req.headers.accept === 'text/event-stream') return false;
+    if (String(res.getHeader('Content-Type') || '').includes('text/event-stream')) return false;
     return compression.filter(req, res);
   },
 }));
@@ -826,7 +925,7 @@ app.get('/api/boxes', async (_req, res) => {
   for (const [id, box] of Object.entries(boxes)) {
     const cached = boxStatusCache.get(id);
     if (cached && now - cached.ts < BOX_CACHE_TTL) {
-      result.push({ id, label: box.label || id, available: cached.available });
+      result.push({ id, label: box.label || id, available: cached.available, peer: !!box.peer });
       continue;
     }
     let available = false;
@@ -835,7 +934,7 @@ app.get('/api/boxes', async (_req, res) => {
       available = r.ok;
     } catch {}
     boxStatusCache.set(id, { available, ts: now });
-    result.push({ id, label: box.label || id, available });
+    result.push({ id, label: box.label || id, available, peer: !!box.peer });
   }
   res.json({ boxes: result });
 });
@@ -858,7 +957,7 @@ app.get('/api/sessions/:id/messages', (req, res) => {
   res.json({ messages, hasMore });
 });
 
-app.get('/api/sessions/:id/stream', (req, res) => {
+function sessionStreamHandler(req, res) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('event: connected\ndata: {}\n\n');
   const sid = req.params.id;
@@ -891,7 +990,9 @@ app.get('/api/sessions/:id/stream', (req, res) => {
   sseClients.get(sid).add(res);
   const hb = setInterval(() => { try { res.write('event: heartbeat\ndata: {}\n\n'); } catch { clearInterval(hb); } }, 15000);
   res.on('close', () => { clearInterval(hb); sseClients.get(sid)?.delete(res); });
-});
+}
+
+app.get('/api/sessions/:id/stream', sessionStreamHandler);
 
 app.post('/api/sessions', (req, res) => {
   try {
@@ -960,6 +1061,79 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
     }
     res.json({ ok: true, tmux: forkName });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Share API: the only surface peers can reach (docs/sharing-design.md) ───
+
+function requirePeer(req, res, next) {
+  const m = (req.headers.authorization || '').match(/^Bearer (.+)$/);
+  const peer = findPeerByToken(m?.[1]);
+  if (!peer) return res.status(401).json({ error: 'invalid peer token' });
+  req.peer = peer;
+  shareLog({ peer: peer.id, method: req.method, path: req.path, ...(typeof req.body?.text === 'string' ? { text: req.body.text } : {}) });
+  next();
+}
+
+function requireShareAccess(req, res, next) {
+  // 404 (not 403) so a non-granted peer can't probe which session ids exist
+  if (!peerCanAccessSession(req.peer, req.params.id)) return res.status(404).json({ error: 'not found' });
+  next();
+}
+
+app.use('/api/share', requirePeer);
+
+app.get('/api/share/sessions', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const sessions = discoverSessions(limit)
+      .filter(s => peerCanAccessSession(req.peer, s.id, s.projectId))
+      .map(({ share, ...s }) => s); // don't leak who else a session is shared with
+    res.json({ sessions, control: !!req.peer.control, owner: readSharing().owner || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/share/sessions/:id/messages', requireShareAccess, (req, res) => {
+  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
+  res.json({ messages, hasMore });
+});
+
+app.get('/api/share/sessions/:id/stream', requireShareAccess, sessionStreamHandler);
+
+app.get('/api/share/sessions/:id/export', requireShareAccess, sessionExportHandler);
+
+// Talk together: control peers can send into a shared session. The peer's
+// name is prefixed into the text so the agent and both UIs know who spoke.
+app.post('/api/share/sessions/:id/send', requireShareAccess, async (req, res) => {
+  if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!text) return res.status(400).json({ error: 'empty message' });
+  try { await sendInput(req.params.id, `[${req.peer.id}] ${text}`); res.json({ ok: true, sentAt: new Date().toISOString() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/share/sessions/:id/interrupt', requireShareAccess, (req, res) => {
+  if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });
+  try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Owner-side helpers: list configured peers (no tokens) + set a session's share list
+app.get('/api/sharing/peers', (_req, res) => {
+  const sharing = readSharing();
+  res.json({
+    owner: sharing.owner || null,
+    peers: Object.entries(sharing.peers || {}).map(([id, p]) => ({ id, policy: p?.policy || 'selected', control: !!p?.control })),
+  });
+});
+
+app.post('/api/sessions/:id/share', (req, res) => {
+  try {
+    const peers = Array.isArray(req.body?.peers) ? req.body.peers.map(String).filter(Boolean) : [];
+    const meta = readMeta();
+    meta[req.params.id] = { ...(meta[req.params.id] || {}), share: peers };
+    writeMeta(meta);
+    res.json({ ok: true, share: peers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1057,7 +1231,7 @@ app.post('/api/starred', (req, res) => {
 
 // ── Export ──────────────────────────────────────────────────────────────────
 
-app.get('/api/sessions/:id/export', (req, res) => {
+function sessionExportHandler(req, res) {
   try {
     const { messages } = getMessages(req.params.id, 10000);
     const lines = [];
@@ -1075,7 +1249,9 @@ app.get('/api/sessions/:id/export', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="session-${req.params.id.slice(0, 8)}.md"`);
     res.send(md);
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
+}
+
+app.get('/api/sessions/:id/export', sessionExportHandler);
 
 // ── File serving (for attached files by absolute path) ─────────────────────
 
