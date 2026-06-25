@@ -355,6 +355,7 @@ export default function App() {
   const [agents, setAgents] = createSignal<AgentInfo[]>([])
   const [agentDropdown, setAgentDropdown] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
+  let sessionPoll: ReturnType<typeof setInterval> | undefined
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
   let audioContext: AudioContext | null = null
@@ -452,6 +453,9 @@ export default function App() {
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('feather:open-path', onOpenPath)
+    // Poll the session list so active/idle (green dot) status stays fresh
+    // without needing a manual action. Skip while the tab is hidden.
+    sessionPoll = setInterval(() => { if (document.visibilityState === 'visible') refreshSessions() }, 15000)
     // Prefetch Terminal chunk during idle so the tab click feels instant
     const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 2000))
     idle(() => { import('./components/Terminal').catch(() => {}) })
@@ -459,7 +463,7 @@ export default function App() {
   function onVisibility() {
     if (document.visibilityState === 'visible') refreshSessions()
   }
-  onCleanup(() => { cleanupSSE?.(); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('feather:open-path', onOpenPath) })
+  onCleanup(() => { cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('feather:open-path', onOpenPath) })
 
   const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
   const isRemoteBox = () => currentBox() !== 'local'
