@@ -1121,23 +1121,34 @@ function sidecarBroadcast(groupId, msg) {
   }
 }
 
-// Resolve a group from the request: explicit group id, or the sender's tmux prefix.
-function sidecarResolveGroup({ group, fromPrefix }) {
-  if (group) return sidecar.getGroup(group);
-  if (fromPrefix) return sidecar.groupForSessionPrefix(fromPrefix);
-  return null;
+// Core broker: record the message, broadcast to the GUI, inject into the recipient.
+// Garbage-collect a group whose driver (the non-spawned member) tmux is gone:
+// tear it down and kill its orphaned spawned peers. Returns true if it GC'd.
+function sidecarGcIfDriverGone(group) {
+  const driver = group.members.find(m => !m.spawned);
+  if (!driver || tmuxIsActive(driver.sessionId)) return false;
+  for (const m of group.members) {
+    if (m.spawned) { try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {} }
+  }
+  sidecar.teardownGroup(group.id);
+  sidecarClients.delete(group.id);
+  console.log(`[sidecar] GC'd group ${group.id} — driver gone`);
+  return true;
 }
 
-// Core broker: record the message, broadcast to the GUI, inject into the recipient.
-function sidecarDeliver(group, fromRole, toRole, text) {
-  const toSession = sidecar.resolveRecipient(group, toRole);
-  if (!toSession) return { error: `unknown recipient role: ${toRole}` };
-  const msg = sidecar.appendMessage(group.id, { from: fromRole, to: toRole, text });
+function sidecarDeliver(group, fromRole, to, text) {
+  const { targets, missing } = sidecar.resolveRecipients(group, to, fromRole);
+  if (missing.length) return { error: `unknown recipient role(s): ${missing.join(', ')}` };
+  if (!targets.length) return { error: `no recipients for "${to}"` };
+  const msg = sidecar.appendMessage(group.id, { from: fromRole, to, text });
   sidecarBroadcast(group.id, msg);
-  // Push into the recipient's tmux (locked sendInput); fire-and-forget so the
-  // HTTP caller isn't blocked on the ~6s resume-if-dormant path.
-  sendInput(toSession, sidecar.formatInbound(fromRole, text))
-    .catch(e => console.warn('[sidecar] route failed:', e.message));
+  // Push into each recipient's tmux (locked sendInput); fire-and-forget so the
+  // HTTP caller isn't blocked on the ~6s resume-if-dormant path. The per-session
+  // lock serializes concurrent fan-in into any one session.
+  for (const t of targets) {
+    sendInput(t.sessionId, sidecar.formatInbound(fromRole, text))
+      .catch(e => console.warn('[sidecar] route failed:', e.message));
+  }
   return { ok: true, message: msg };
 }
 
@@ -1164,30 +1175,35 @@ app.get('/api/sidecar/:id/stream', (req, res) => {
   res.on('close', () => { clearInterval(hb); sidecarClients.get(id)?.delete(res); });
 });
 
-// Create a sidecar: spawn a peer session, register the group, prime the peer.
+// Create a sidecar: spawn N peer sessions, register the group, prime each.
+// Back-compat: with no `peers`, spawns a single `peer` (v1 shape).
 app.post('/api/sidecar', (req, res) => {
+  const b = req.body || {};
+  const { driverSessionId, driverRole = 'driver', agent = 'claude', cwd, task = '' } = b;
+  if (!driverSessionId) return res.status(400).json({ error: 'driverSessionId required' });
+  const peerSpecs = (Array.isArray(b.peers) && b.peers.length)
+    ? b.peers
+    : [{ role: b.peerRole || 'peer', task, agent }];
+  const peers = peerSpecs.map(p => ({ id: randomUUID(), role: p.role || 'peer', task: p.task || task || '', agent: p.agent || agent }));
+  const members = [
+    { sessionId: driverSessionId, role: driverRole, spawned: false },
+    ...peers.map(p => ({ sessionId: p.id, role: p.role, spawned: true })),
+  ];
+  let group;
   try {
-    const { driverSessionId, driverRole = 'driver', peerRole = 'peer', agent = 'claude', cwd, task = '' } = req.body || {};
-    if (!driverSessionId) return res.status(400).json({ error: 'driverSessionId required' });
-    const peerId = randomUUID();
-    const group = sidecar.createGroup({
-      id: randomUUID(),
-      members: [
-        { sessionId: driverSessionId, role: driverRole, spawned: false },
-        { sessionId: peerId, role: peerRole, spawned: true },
-      ],
-      agent, task,
-    });
-    spawnSession(peerId, cwd, agent);
-    // The tmux session is active immediately but the agent needs a few seconds to
-    // boot, so delay the priming send (sendInput's resume-wait only fires when the
-    // session is inactive, which it isn't here).
-    const priming = sidecar.priming({ selfRole: peerRole, otherRole: driverRole, task });
-    setTimeout(() => {
-      sendInput(peerId, priming).catch(e => console.warn('[sidecar] prime failed:', e.message));
-    }, 7000);
-    res.json({ group, peerSessionId: peerId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    group = sidecar.createGroup({ id: randomUUID(), members, agent, task });
+  } catch (e) {
+    return res.status(400).json({ error: e.message }); // role validation (duplicate/invalid)
+  }
+  const roster = members.map(m => m.role);
+  // tmux is active immediately but the agent needs a few seconds to boot, so
+  // delay each prime (sendInput's resume-wait only fires when inactive).
+  for (const p of peers) {
+    try { spawnSession(p.id, cwd, p.agent); } catch (e) { console.warn('[sidecar] spawn failed:', e.message); }
+    const prime = sidecar.priming({ selfRole: p.role, roster, task: p.task });
+    setTimeout(() => { sendInput(p.id, prime).catch(e => console.warn('[sidecar] prime failed:', e.message)); }, 7000);
+  }
+  res.json({ group, peers: peers.map(p => ({ role: p.role, sessionId: p.id })) });
 });
 
 // Post a message. Sender identified by tmux prefix (CLI) or explicit group+from (GUI).
@@ -1195,12 +1211,16 @@ app.post('/api/sidecar/post', (req, res) => {
   try {
     const { group: groupId, fromPrefix, from, to, text } = req.body || {};
     if (!to || !text) return res.status(400).json({ error: 'to and text required' });
-    const group = sidecarResolveGroup({ group: groupId, fromPrefix });
-    if (!group || group.status !== 'active') return res.status(404).json({ error: 'no active sidecar group for sender' });
+    const group = groupId ? sidecar.getGroup(groupId)
+      : (fromPrefix ? sidecar.groupForSenderAndRole(fromPrefix, to) : null);
+    if (!group || group.status !== 'active') {
+      return res.status(404).json({ error: 'no active sidecar group for sender (you may be in several — pass --group)' });
+    }
+    if (sidecarGcIfDriverGone(group)) return res.status(410).json({ error: 'driver gone; group torn down' });
     const fromRole = from || (fromPrefix ? sidecar.roleForPrefix(group, fromPrefix) : null) || 'unknown';
     const out = sidecarDeliver(group, fromRole, to, text);
     if (out.error) return res.status(400).json(out);
-    res.json({ ok: true, group: group.id });
+    res.json({ ok: true, group: group.id, seq: out.message.seq });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1211,9 +1231,39 @@ app.post('/api/sidecar/:id/post', (req, res) => {
     if (!to || !text) return res.status(400).json({ error: 'to and text required' });
     const group = sidecar.getGroup(req.params.id);
     if (!group || group.status !== 'active') return res.status(404).json({ error: 'no active sidecar group' });
+    if (sidecarGcIfDriverGone(group)) return res.status(410).json({ error: 'driver gone; group torn down' });
     const out = sidecarDeliver(group, from || 'driver', to, text);
     if (out.error) return res.status(400).json(out);
-    res.json({ ok: true, group: group.id });
+    res.json({ ok: true, group: group.id, seq: out.message.seq });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Add a peer to an existing group (spawn + roster-aware prime).
+app.post('/api/sidecar/:id/peers', (req, res) => {
+  try {
+    const g = sidecar.getGroup(req.params.id);
+    if (!g || g.status !== 'active') return res.status(404).json({ error: 'no active group' });
+    const { role = 'peer', agent = g.agent || 'claude', cwd, task = '' } = req.body || {};
+    const pid = randomUUID();
+    sidecar.addMember(g.id, { sessionId: pid, role, spawned: true });
+    spawnSession(pid, cwd, agent);
+    const roster = sidecar.getGroup(g.id).members.map(m => m.role);
+    setTimeout(() => { sendInput(pid, sidecar.priming({ selfRole: role, roster, task })).catch(e => console.warn('[sidecar] prime failed:', e.message)); }, 7000);
+    res.json({ ok: true, role, sessionId: pid });
+  } catch (e) { res.status(/role/.test(e.message) ? 400 : 500).json({ error: e.message }); }
+});
+
+// Remove one peer (kill its session) without tearing down the whole group.
+app.post('/api/sidecar/:id/peers/:role/delete', (req, res) => {
+  try {
+    const g = sidecar.getGroup(req.params.id);
+    if (!g) return res.status(404).json({ error: 'not found' });
+    const m = g.members.find(x => x.role === req.params.role);
+    if (!m) return res.status(404).json({ error: `no member with role ${req.params.role}` });
+    if (!m.spawned) return res.status(400).json({ error: 'not a removable peer (the driver is not spawned)' });
+    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {}
+    sidecar.removeMember(g.id, req.params.role);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
