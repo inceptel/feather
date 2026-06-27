@@ -212,6 +212,12 @@ export const postSidecar = (id: string, to: string, text: string, from = 'driver
 export const deleteSidecar = (id: string) =>
   fetch(`${BASE}/api/sidecar/${id}/delete`, { method: 'POST' }).then(r => r.json())
 
+export const addSidecarPeer = (id: string, role: string, opts: { agent?: string; task?: string } = {}) =>
+  fetch(`${BASE}/api/sidecar/${id}/peers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, ...opts }) }).then(r => r.json())
+
+export const removeSidecarPeer = (id: string, role: string) =>
+  fetch(`${BASE}/api/sidecar/${id}/peers/${encodeURIComponent(role)}/delete`, { method: 'POST' }).then(r => r.json())
+
 export function subscribeSidecar(id: string, onMessage: (m: SidecarMessage) => void): () => void {
   let es: EventSource | null = new EventSource(`${BASE}/api/sidecar/${id}/stream`)
   es.addEventListener('message', (e) => { try { onMessage(JSON.parse(e.data)) } catch {} })

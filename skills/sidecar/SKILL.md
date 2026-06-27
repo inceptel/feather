@@ -86,6 +86,40 @@ Kills the spawned peer session and marks the group done; `chat.jsonl` persists.
 curl -s -X POST "$FEATHER_URL/api/sidecar/<id>/delete"
 ```
 
+## Multiple peers (fan-out / judge panel)
+
+A group can hold **N peers**, addressed by role name — the substrate for a generator + many critics.
+
+```bash
+# spawn a panel: one driver + three differentiated critics
+DRIVER=$(tmux display-message -p '#S'); DRIVER=${DRIVER#feather-}
+curl -s -X POST "$FEATHER_URL/api/sidecar" -H 'Content-Type: application/json' -d "$(jq -nc --arg d "$DRIVER" '{
+  driverSessionId:$d, driverRole:"generator", agent:"claude",
+  peers:[ {role:"critic-security",task:"Review only for security."},
+          {role:"critic-perf",task:"Review only for performance."},
+          {role:"critic-correctness",task:"Review only for correctness."} ]}')"
+
+# add or drop a peer later
+curl -s -X POST "$FEATHER_URL/api/sidecar/<id>/peers" -H 'Content-Type: application/json' -d '{"role":"critic-ux","task":"..."}'
+curl -s -X POST "$FEATHER_URL/api/sidecar/<id>/peers/critic-ux/delete"
+```
+
+Addressing and collecting from the CLI:
+
+```bash
+sidecar post --to all "candidate ready — review it"     # broadcast to every other member
+sidecar post --to critic-perf,critic-security "..."     # comma-list to a subset
+sidecar wait --from all --count 3 --timeout 120         # block until 3 distinct peers reply
+sidecar read --since 12 --from critic-perf              # filter the thread by seq / sender
+```
+
+Roles are unique per group and shell-safe. Each message carries a monotonic `seq` so fan-in
+ordering survives millisecond ties. If this session is in **several** groups, pass `--group <id>`
+(or export `SIDECAR_GROUP`) — otherwise addressing is by most-recent group.
+
+The **aggregation policy** (majority / weighted / veto) lives in the generator's prompt, not the
+broker — the broker only addresses and collects. See `docs/plans/2026-06-27-002-feat-sidecar-multipeer-plan.md`.
+
 ## State files
 
 - `~/.feather/sidecars/groups.json` — the group registry (`{id, members:[{sessionId, role, spawned}], agent, task, status, createdAt}`).
