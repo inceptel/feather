@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { sessionIsActive, ACTIVE_MS } from '../../lib/sessions.js'
+import { sessionIsActive, ACTIVE_MS, messageTimestampMs, lastMessageMs } from '../../lib/sessions.js'
 
 // Regression: finished sessions kept showing the green "active" dot because
 // isActive was true whenever a feather-* tmux session existed, which lingers up
@@ -30,5 +30,55 @@ describe('sessionIsActive', () => {
     const active = new Set([prefix])
     assert.equal(sessionIsActive(active, id, now - ACTIVE_MS, now), false)
     assert.equal(sessionIsActive(active, id, now - (ACTIVE_MS - 1), now), true)
+  })
+})
+
+// Regression: the green dot / sort time must come from the last real message,
+// NOT the file mtime. A resumed agent appends system/permission-mode lines to
+// the JSONL while idle; those bump mtime but must not count as activity (a
+// session idle since 1am was showing a green dot and "1m").
+describe('messageTimestampMs', () => {
+  const T = '2026-06-27T01:00:00.000Z'
+  const ms = Date.parse(T)
+
+  it('counts a real claude user/assistant message', () => {
+    assert.equal(messageTimestampMs({ type: 'assistant', timestamp: T, message: {} }, 'claude'), ms)
+    assert.equal(messageTimestampMs({ type: 'user', timestamp: T, message: {} }, 'claude'), ms)
+  })
+
+  it('ignores claude system / permission-mode / meta lines', () => {
+    assert.equal(messageTimestampMs({ type: 'system', timestamp: T }, 'claude'), null)
+    assert.equal(messageTimestampMs({ type: 'permission-mode', timestamp: T }, 'claude'), null)
+    assert.equal(messageTimestampMs({ type: 'user', isMeta: true, timestamp: T }, 'claude'), null)
+  })
+
+  it('counts a real codex message and ignores other event types', () => {
+    assert.equal(messageTimestampMs({ type: 'response_item', timestamp: T, payload: { type: 'message', role: 'assistant' } }, 'codex'), ms)
+    assert.equal(messageTimestampMs({ type: 'response_item', timestamp: T, payload: { type: 'reasoning' } }, 'codex'), null)
+  })
+})
+
+describe('lastMessageMs', () => {
+  const real = '2026-06-27T01:00:00.000Z'  // ~1am, the actual last message
+  const late = '2026-06-27T15:30:00.000Z'  // bookkeeping writes hours later
+  const lines = [
+    JSON.stringify({ type: 'user', timestamp: real, message: {} }),
+    JSON.stringify({ type: 'assistant', timestamp: real, message: {} }),
+    JSON.stringify({ type: 'system', timestamp: late }),
+    JSON.stringify({ type: 'permission-mode', timestamp: late }),
+  ].join('\n')
+
+  it('returns the last REAL message time, ignoring trailing system writes', () => {
+    assert.equal(lastMessageMs(lines, 'claude'), Date.parse(real))
+  })
+
+  it('skips a truncated leading line when reading a mid-file tail', () => {
+    const tail = '{"type":"assist' + '\n' + lines
+    assert.equal(lastMessageMs(tail, 'claude', true), Date.parse(real))
+  })
+
+  it('returns null when there is no real message', () => {
+    const onlySystem = [JSON.stringify({ type: 'system', timestamp: late })].join('\n')
+    assert.equal(lastMessageMs(onlySystem, 'claude'), null)
   })
 })
