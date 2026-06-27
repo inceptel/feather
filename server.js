@@ -10,7 +10,7 @@ import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
 import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
-import { sessionIsActive } from './lib/sessions.js';
+import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
 
 // Load ~/.env if present
 try {
@@ -493,8 +493,11 @@ function discoverSessions(limit = 50) {
   candidates.sort((a, b) => b.mtime - a.mtime);
 
   const active = getActiveTmuxSessions();
-  // Green "active" dot = live tmux session AND a recent JSONL write. See
-  // sessionIsActive() in lib/sessions.js for why tmux-alive alone is not enough.
+  // Green "active" dot = live tmux session AND a recent real message. We use the
+  // last real message time (lastActivityMs), NOT the file mtime: a resumed agent
+  // keeps appending system/permission lines to the JSONL while idle, which bump
+  // mtime and lit the dot (and floated the row to the top) on sessions that had
+  // no actual message in hours. See lib/sessions.js.
   const now = Date.now();
 
   const sessions = [];
@@ -521,10 +524,11 @@ function discoverSessions(limit = 50) {
       // Project label is shown only for allowlisted projects (key present in labels);
       // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
       const isAllowlisted = projectId && (projectId in labels);
+      const activityMs = lastActivityMs(fpath, agent, mtime.getTime());
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
-        updatedAt: mtime.toISOString(),
-        isActive: sessionIsActive(active, id, mtime.getTime(), now),
+        updatedAt: new Date(activityMs).toISOString(),
+        isActive: sessionIsActive(active, id, activityMs, now),
         agent,
         projectId: projectId || null,
         projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
@@ -533,7 +537,29 @@ function discoverSessions(limit = 50) {
     } catch {}
   }
 
+  // Re-sort by real activity. Candidates were ordered by file mtime, which is
+  // bumped by idle bookkeeping writes; ordering by last real message keeps the
+  // list "sorted by last message time" as users expect.
+  sessions.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+
   return sessions;
+}
+
+// Epoch-ms of the last real user/assistant message in a session's JSONL — the
+// true "last activity". Reads only the file tail (messages are appended), and
+// falls back to `fallbackMs` (the file mtime) if no real message is found.
+function lastActivityMs(fpath, agent, fallbackMs) {
+  try {
+    const size = fs.statSync(fpath).size;
+    const TAIL = 512 * 1024;
+    const readLen = Math.min(size, TAIL);
+    const fd = fs.openSync(fpath, 'r');
+    const buf = Buffer.alloc(readLen);
+    fs.readSync(fd, buf, 0, readLen, size - readLen);
+    fs.closeSync(fd);
+    const ts = lastMessageMs(buf.toString('utf8'), agent, size > readLen);
+    return ts ?? fallbackMs;
+  } catch { return fallbackMs; }
 }
 
 // ── Tmux management ─────────────────────────────────────────────────────────
