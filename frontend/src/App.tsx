@@ -4,7 +4,7 @@ import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, BASE } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, BASE } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 
@@ -356,6 +356,8 @@ export default function App() {
   const [agentDropdown, setAgentDropdown] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
   let sessionPoll: ReturnType<typeof setInterval> | undefined
+  let versionPoll: ReturnType<typeof setInterval> | undefined
+  let bootVersion: string | null = null
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
   let audioContext: AudioContext | null = null
@@ -456,6 +458,14 @@ export default function App() {
     // Poll the session list so active/idle (green dot) status stays fresh
     // without needing a manual action. Skip while the tab is hidden.
     sessionPoll = setInterval(() => { if (document.visibilityState === 'visible') refreshSessions() }, 15000)
+    // Auto-reload when a newer build is deployed. A resident client (esp. an
+    // installed iOS PWA) keeps the old JS in memory across suspend/resume and
+    // never re-fetches index.html, so a stale bundle — e.g. one without the
+    // session poll above — silently shows stale green dots and ordering. Poll
+    // the server's build version and reload once when it changes.
+    fetchBuildVersion().then(v => { bootVersion = v })
+    versionPoll = setInterval(checkVersion, 60000)
+    document.addEventListener('visibilitychange', checkVersion)
     // Prefetch Terminal chunk during idle so the tab click feels instant
     const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 2000))
     idle(() => { import('./components/Terminal').catch(() => {}) })
@@ -463,7 +473,16 @@ export default function App() {
   function onVisibility() {
     if (document.visibilityState === 'visible') refreshSessions()
   }
-  onCleanup(() => { cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('feather:open-path', onOpenPath) })
+  async function checkVersion() {
+    if (document.visibilityState !== 'visible') return
+    const v = await fetchBuildVersion()
+    if (!v) return
+    if (bootVersion === null) { bootVersion = v; return }
+    // A newer build is live. Reload to pull the latest bundle so this client
+    // stops running stale JS.
+    if (v !== bootVersion) location.reload()
+  }
+  onCleanup(() => { cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('feather:open-path', onOpenPath) })
 
   const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
   const isRemoteBox = () => currentBox() !== 'local'

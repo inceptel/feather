@@ -66,6 +66,17 @@ export async function fetchAgents(): Promise<AgentInfo[]> {
   return (await r.json()).agents
 }
 
+// Build version of the server that served this page. Used to auto-reload a
+// stale client (e.g. a resident iOS PWA) when a newer build is deployed — see
+// the version poll in App. cache:'no-store' so we don't read a stale copy.
+export async function fetchBuildVersion(): Promise<string | null> {
+  try {
+    const r = await fetch(`${BASE}/api/health`, { cache: 'no-store' })
+    if (!r.ok) return null
+    return (await r.json()).version ?? null
+  } catch { return null }
+}
+
 export async function fetchBoxes(): Promise<BoxInfo[]> {
   const r = await fetch(`${BASE}/api/boxes`)
   if (!r.ok) return [{ id: 'local', label: 'Local', available: true }]

@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
 import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
+import { sessionIsActive } from './lib/sessions.js';
 
 // Load ~/.env if present
 try {
@@ -492,11 +493,9 @@ function discoverSessions(limit = 50) {
   candidates.sort((a, b) => b.mtime - a.mtime);
 
   const active = getActiveTmuxSessions();
-  // "Active" (green dot) means the tmux session is alive AND the JSONL was
-  // written recently. tmux-alive alone lingers up to the reaper window (1h),
-  // which made finished sessions show green long after they went idle.
+  // Green "active" dot = live tmux session AND a recent JSONL write. See
+  // sessionIsActive() in lib/sessions.js for why tmux-alive alone is not enough.
   const now = Date.now();
-  const ACTIVE_MS = 10 * 60 * 1000; // 10 min since last write
 
   const sessions = [];
   for (const { id, fpath, mtime, agent, projectId } of candidates) {
@@ -525,7 +524,7 @@ function discoverSessions(limit = 50) {
       sessions.push({
         id, title: meta[id]?.title || title || id.slice(0, 8),
         updatedAt: mtime.toISOString(),
-        isActive: active.has(id.slice(0, 8)) && (now - mtime.getTime()) < ACTIVE_MS,
+        isActive: sessionIsActive(active, id, mtime.getTime(), now),
         agent,
         projectId: projectId || null,
         projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
