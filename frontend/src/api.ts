@@ -181,6 +181,43 @@ export async function deletePath(path: string): Promise<void> {
   }
 }
 
+// ── Sidecar: paired agent threads ───────────────────────────────────────────
+
+export interface SidecarMessage { ts: number; from: string; to: string; text: string }
+export interface SidecarMember { sessionId: string; role: string; spawned?: boolean }
+export interface SidecarGroup {
+  id: string
+  members: SidecarMember[]
+  agent: string
+  task: string
+  status: string
+  createdAt: number
+}
+
+export const fetchSidecars = (): Promise<{ groups: SidecarGroup[] }> =>
+  fetch(`${BASE}/api/sidecar`).then(r => r.json())
+
+export const fetchSidecar = (id: string): Promise<{ group: SidecarGroup; thread: SidecarMessage[] }> =>
+  fetch(`${BASE}/api/sidecar/${id}`).then(r => r.json())
+
+export const createSidecar = (
+  driverSessionId: string,
+  opts: { agent?: string; task?: string; cwd?: string; driverRole?: string; peerRole?: string } = {},
+): Promise<{ group: SidecarGroup; peerSessionId: string }> =>
+  fetch(`${BASE}/api/sidecar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ driverSessionId, ...opts }) }).then(r => r.json())
+
+export const postSidecar = (id: string, to: string, text: string, from = 'driver') =>
+  fetch(`${BASE}/api/sidecar/${id}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, text }) }).then(r => r.json())
+
+export const deleteSidecar = (id: string) =>
+  fetch(`${BASE}/api/sidecar/${id}/delete`, { method: 'POST' }).then(r => r.json())
+
+export function subscribeSidecar(id: string, onMessage: (m: SidecarMessage) => void): () => void {
+  let es: EventSource | null = new EventSource(`${BASE}/api/sidecar/${id}/stream`)
+  es.addEventListener('message', (e) => { try { onMessage(JSON.parse(e.data)) } catch {} })
+  return () => { es?.close(); es = null }
+}
+
 export function subscribeMessages(
   id: string,
   onMessage: (msg: Message) => void,

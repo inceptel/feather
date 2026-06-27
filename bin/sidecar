@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# sidecar — talk to your Feather sidecar peer from inside an agent session.
+# Self-identifies via the tmux session name (feather-<id8>); the Feather backend
+# resolves which sidecar group this session belongs to.
+#
+#   sidecar post --to <role> <text...>   send a message to the paired peer
+#   sidecar read                         print the chat thread
+#   sidecar whoami                       show this session's group(s)
+#
+# Install: symlink onto PATH, e.g.  ln -s <feather>/bin/sidecar ~/.local/bin/sidecar
+# Override the backend with FEATHER_URL (default http://127.0.0.1:4870).
+set -euo pipefail
+
+die() { echo "sidecar: $*" >&2; exit 1; }
+command -v jq   >/dev/null || die "jq is required"
+command -v curl >/dev/null || die "curl is required"
+
+# Resolve the Feather backend URL. FEATHER_URL wins; otherwise probe the common
+# ports ($PORT, then 3300 prod, then 4870 code-default) and use the first that
+# answers /api/health. This avoids the "wrong default port" footgun.
+resolve_base() {
+  if [ -n "${FEATHER_URL:-}" ]; then printf '%s' "$FEATHER_URL"; return; fi
+  local p
+  for p in "${PORT:-}" 3300 4870; do
+    [ -n "$p" ] || continue
+    if curl -fsS -o /dev/null "http://127.0.0.1:$p/api/health" 2>/dev/null; then
+      printf '%s' "http://127.0.0.1:$p"; return
+    fi
+  done
+  printf '%s' "http://127.0.0.1:3300"
+}
+BASE="$(resolve_base)"
+
+self_prefix() {
+  local s
+  s=$(tmux display-message -p '#S' 2>/dev/null) || die "not inside a tmux session"
+  case "$s" in
+    feather-*) printf '%s' "${s#feather-}" ;;
+    *) die "not a feather session (tmux session: $s)" ;;
+  esac
+}
+
+active_group_id() {
+  local prefix="$1" gid
+  gid=$(curl -fsS "$BASE/api/sidecar" \
+    | jq -r --arg p "$prefix" \
+      '.groups[] | select(.status=="active") | select(any(.members[]; .sessionId[0:8]==$p)) | .id' \
+    | head -1)
+  [ -n "$gid" ] || die "no active sidecar group for this session"
+  printf '%s' "$gid"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  post)
+    to=""; text=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --to) to="${2:-}"; shift 2 ;;
+        *) text="${text:+$text }$1"; shift ;;
+      esac
+    done
+    [ -n "$to" ] && [ -n "$text" ] || die "usage: sidecar post --to <role> <text>"
+    prefix=$(self_prefix)
+    # No -f: we want the JSON body on a 4xx so the server's error surfaces.
+    resp=$(curl -sS -X POST "$BASE/api/sidecar/post" \
+      -H 'Content-Type: application/json' \
+      -d "$(jq -nc --arg p "$prefix" --arg to "$to" --arg t "$text" \
+            '{fromPrefix:$p, to:$to, text:$t}')") \
+      || die "could not reach Feather at $BASE"
+    err=$(printf '%s' "$resp" | jq -r '.error // empty' 2>/dev/null)
+    [ -z "$err" ] || die "$err"
+    echo "sent → $to"
+    ;;
+  read|log)
+    prefix=$(self_prefix)
+    gid=$(active_group_id "$prefix")
+    curl -fsS "$BASE/api/sidecar/$gid" | jq -r '.thread[] | "[\(.from) → \(.to)] \(.text)"'
+    ;;
+  whoami)
+    prefix=$(self_prefix)
+    echo "session prefix: $prefix"
+    curl -fsS "$BASE/api/sidecar" \
+      | jq -r --arg p "$prefix" \
+        '.groups[] | select(any(.members[]; .sessionId[0:8]==$p)) | "group \(.id) [\(.status)] roles: \([.members[].role] | join(", "))"'
+    ;;
+  ""|-h|--help|help)
+    echo "usage: sidecar {post --to <role> <text> | read | whoami}"
+    ;;
+  *)
+    die "unknown command: $cmd (try: sidecar help)"
+    ;;
+esac
