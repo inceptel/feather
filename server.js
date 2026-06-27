@@ -11,6 +11,8 @@ import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
 import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
 import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
+import * as sidecar from './lib/sidecar.js';
+import { createKeyedLock } from './lib/sendlock.js';
 
 // Load ~/.env if present
 try {
@@ -708,7 +710,18 @@ function getOmpSessionId(featherId) {
   return null;
 }
 
+// Per-session send lock (U1): serialize the tmux send-keys/paste-buffer
+// sequence so two concurrent senders can't interleave bytes into the same pane.
+// Keyed by session id, so different sessions still send in parallel. The lock is
+// held through the Enter submission (sendInputUnlocked awaits it). See
+// lib/sendlock.js for the keyed-lock semantics and its tests.
+const sendLock = createKeyedLock();
+
 async function sendInput(id, text) {
+  return sendLock(id, () => sendInputUnlocked(id, text));
+}
+
+async function sendInputUnlocked(id, text) {
   if (!tmuxIsActive(id)) {
     resumeSession(id);
     // Wait for Claude CLI to fully load before sending input
@@ -727,9 +740,9 @@ async function sendInput(id, text) {
       execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
       execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
     } finally { try { fs.unlinkSync(tmp); } catch {} }
-    setTimeout(() => {
-      try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
-    }, 300);
+    // Await (not fire-and-forget) so the lock is held until Enter submits.
+    await new Promise(r => setTimeout(r, 300));
+    try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
     return;
   }
   if (text.length > 500) {
@@ -739,10 +752,10 @@ async function sendInput(id, text) {
       execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
       execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
     } finally { try { fs.unlinkSync(tmp); } catch {} }
-    // Give Claude CLI a moment to process the paste, then submit
-    setTimeout(() => {
-      try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
-    }, 500);
+    // Give Claude CLI a moment to process the paste, then submit (awaited so the
+    // lock covers the Enter).
+    await new Promise(r => setTimeout(r, 500));
+    try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
   } else {
     execFileSync('tmux', ['send-keys', '-t', target, '-l', text], { stdio: 'ignore' });
     execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' });
@@ -1091,6 +1104,129 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
     }
     res.json({ ok: true, tmux: forkName });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Sidecar API: paired agent threads with a chat channel ──────────────────
+// See docs/plans/2026-06-27-001-feature-sidecar-plan.md
+
+const sidecarClients = new Map(); // groupId -> Set<res>
+
+function sidecarBroadcast(groupId, msg) {
+  const clients = sidecarClients.get(groupId);
+  if (!clients || clients.size === 0) return;
+  const chunk = `event: message\ndata: ${JSON.stringify(msg)}\n\n`;
+  for (const res of clients) {
+    try { res.write(chunk); } catch { clients.delete(res); }
+  }
+}
+
+// Resolve a group from the request: explicit group id, or the sender's tmux prefix.
+function sidecarResolveGroup({ group, fromPrefix }) {
+  if (group) return sidecar.getGroup(group);
+  if (fromPrefix) return sidecar.groupForSessionPrefix(fromPrefix);
+  return null;
+}
+
+// Core broker: record the message, broadcast to the GUI, inject into the recipient.
+function sidecarDeliver(group, fromRole, toRole, text) {
+  const toSession = sidecar.resolveRecipient(group, toRole);
+  if (!toSession) return { error: `unknown recipient role: ${toRole}` };
+  const msg = sidecar.appendMessage(group.id, { from: fromRole, to: toRole, text });
+  sidecarBroadcast(group.id, msg);
+  // Push into the recipient's tmux (locked sendInput); fire-and-forget so the
+  // HTTP caller isn't blocked on the ~6s resume-if-dormant path.
+  sendInput(toSession, sidecar.formatInbound(fromRole, text))
+    .catch(e => console.warn('[sidecar] route failed:', e.message));
+  return { ok: true, message: msg };
+}
+
+app.get('/api/sidecar', (_req, res) => {
+  res.json({ groups: sidecar.listGroups() });
+});
+
+app.get('/api/sidecar/:id', (req, res) => {
+  const g = sidecar.getGroup(req.params.id);
+  if (!g) return res.status(404).json({ error: 'not found' });
+  res.json({ group: g, thread: sidecar.readThread(g.id) });
+});
+
+app.get('/api/sidecar/:id/stream', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.write('event: connected\ndata: {}\n\n');
+  const id = req.params.id;
+  for (const m of sidecar.readThread(id)) {
+    res.write(`event: message\ndata: ${JSON.stringify(m)}\n\n`);
+  }
+  if (!sidecarClients.has(id)) sidecarClients.set(id, new Set());
+  sidecarClients.get(id).add(res);
+  const hb = setInterval(() => { try { res.write('event: heartbeat\ndata: {}\n\n'); } catch { clearInterval(hb); } }, 15000);
+  res.on('close', () => { clearInterval(hb); sidecarClients.get(id)?.delete(res); });
+});
+
+// Create a sidecar: spawn a peer session, register the group, prime the peer.
+app.post('/api/sidecar', (req, res) => {
+  try {
+    const { driverSessionId, driverRole = 'driver', peerRole = 'peer', agent = 'claude', cwd, task = '' } = req.body || {};
+    if (!driverSessionId) return res.status(400).json({ error: 'driverSessionId required' });
+    const peerId = randomUUID();
+    const group = sidecar.createGroup({
+      id: randomUUID(),
+      members: [
+        { sessionId: driverSessionId, role: driverRole, spawned: false },
+        { sessionId: peerId, role: peerRole, spawned: true },
+      ],
+      agent, task,
+    });
+    spawnSession(peerId, cwd, agent);
+    // The tmux session is active immediately but the agent needs a few seconds to
+    // boot, so delay the priming send (sendInput's resume-wait only fires when the
+    // session is inactive, which it isn't here).
+    const priming = sidecar.priming({ selfRole: peerRole, otherRole: driverRole, task });
+    setTimeout(() => {
+      sendInput(peerId, priming).catch(e => console.warn('[sidecar] prime failed:', e.message));
+    }, 7000);
+    res.json({ group, peerSessionId: peerId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Post a message. Sender identified by tmux prefix (CLI) or explicit group+from (GUI).
+app.post('/api/sidecar/post', (req, res) => {
+  try {
+    const { group: groupId, fromPrefix, from, to, text } = req.body || {};
+    if (!to || !text) return res.status(400).json({ error: 'to and text required' });
+    const group = sidecarResolveGroup({ group: groupId, fromPrefix });
+    if (!group || group.status !== 'active') return res.status(404).json({ error: 'no active sidecar group for sender' });
+    const fromRole = from || (fromPrefix ? sidecar.roleForPrefix(group, fromPrefix) : null) || 'unknown';
+    const out = sidecarDeliver(group, fromRole, to, text);
+    if (out.error) return res.status(400).json(out);
+    res.json({ ok: true, group: group.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Post addressed by explicit group id (used by the GUI).
+app.post('/api/sidecar/:id/post', (req, res) => {
+  try {
+    const { from, to, text } = req.body || {};
+    if (!to || !text) return res.status(400).json({ error: 'to and text required' });
+    const group = sidecar.getGroup(req.params.id);
+    if (!group || group.status !== 'active') return res.status(404).json({ error: 'no active sidecar group' });
+    const out = sidecarDeliver(group, from || 'driver', to, text);
+    if (out.error) return res.status(400).json(out);
+    res.json({ ok: true, group: group.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sidecar/:id/delete', (req, res) => {
+  try {
+    const g = sidecar.getGroup(req.params.id);
+    if (!g) return res.status(404).json({ error: 'not found' });
+    for (const m of g.members) {
+      if (m.spawned) { try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {} }
+    }
+    sidecar.teardownGroup(g.id);
+    sidecarClients.delete(g.id);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

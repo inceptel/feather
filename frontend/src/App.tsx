@@ -2,6 +2,7 @@ declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
+import { Sidecar } from './components/Sidecar'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, BASE } from './api'
@@ -201,7 +202,7 @@ export default function App() {
   const [renameText, setRenameText] = createSignal('')
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
-  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos'>('sessions')
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos' | 'sidecar'>('sessions')
   const [projects, setProjects] = createSignal<Project[]>([])
   const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-project'))
   const [projectsExpanded, setProjectsExpanded] = createSignal(false)
@@ -1043,6 +1044,7 @@ export default function App() {
             <button onClick={() => setSidebarTab('cos')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'cos' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'cos' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>CoS</button>
             <button onClick={() => setSidebarTab('auto')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'auto' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'auto' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Auto</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
+            <button onClick={() => setSidebarTab('sidecar')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sidecar' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sidecar' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sidecar</button>
           </div>
           {/* Sessions tab */}
           <Show when={sidebarTab() === 'sessions'}>
@@ -1284,6 +1286,12 @@ export default function App() {
                   </Show>
                 </div>
               )}</For>
+            </div>
+          </Show>
+          {/* Sidecar tab */}
+          <Show when={sidebarTab() === 'sidecar'}>
+            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+              <Sidecar currentId={currentId} onOpenSession={select} />
             </div>
           </Show>
         </div>
