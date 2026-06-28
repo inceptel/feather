@@ -1,113 +1,70 @@
 import { createSignal, createEffect, onCleanup, For, Show } from 'solid-js'
-import { fetchSidecars, fetchSidecar, createSidecar, postSidecar, deleteSidecar, addSidecarPeer, removeSidecarPeer, subscribeSidecar } from '../api'
+import { fetchSidecar, postSidecar, addSidecarPeer, removeSidecarPeer, subscribeSidecar } from '../api'
 import type { SidecarGroup, SidecarMessage } from '../api'
 
-// Sidecar panel: a paired/grouped peer thread layered over ordinary Feather
-// sessions. Supports N peers per group with broadcast addressing.
-// See docs/plans/2026-06-27-001 (v1) and -002 (multi-peer).
-export function Sidecar(props: { currentId: () => string | null; onOpenSession: (id: string) => void }) {
-  const [groups, setGroups] = createSignal<SidecarGroup[]>([])
-  const [openId, setOpenId] = createSignal<string | null>(null)
+// SidecarThread: the live thread view for one sidecar group, rendered in an
+// overlay opened from the session that owns it. The group list is no longer a
+// standalone tab — sidecars are nested under their driver session in App.
+export function SidecarThread(props: {
+  id: () => string | null
+  onClose: () => void
+  onOpenSession: (id: string) => void
+  onChange?: () => void
+}) {
+  const [group, setGroup] = createSignal<SidecarGroup | null>(null)
   const [thread, setThread] = createSignal<SidecarMessage[]>([])
   const [draft, setDraft] = createSignal('')
   const [recipient, setRecipient] = createSignal('')
 
-  async function refresh() {
-    try { setGroups((await fetchSidecars()).groups || []) } catch {}
-  }
-  refresh()
-  const poll = setInterval(refresh, 5000)
-  onCleanup(() => clearInterval(poll))
-
   createEffect(() => {
-    const id = openId()
-    setThread([])
+    const id = props.id()
+    setGroup(null); setThread([]); setRecipient('')
     if (!id) return
-    fetchSidecar(id).then(r => setThread(r.thread || [])).catch(() => {})
+    fetchSidecar(id).then(r => { setGroup(r.group); setThread(r.thread || []) }).catch(() => {})
     const unsub = subscribeSidecar(id, (m) => setThread(prev => [...prev, m]))
     onCleanup(unsub)
   })
 
-  const openGroup = () => groups().find(g => g.id === openId()) || null
-  const driverRole = () => openGroup()?.members.find(m => !m.spawned)?.role || 'driver'
-  const peerRoles = () => (openGroup()?.members.filter(m => m.spawned) || []).map(m => m.role)
-  // recipient options: broadcast (when 2+ peers) + each peer role
-  const recipientOptions = () => {
-    const peers = peerRoles()
-    return (peers.length > 1 ? ['all', ...peers] : peers)
-  }
+  const driverRole = () => group()?.members.find(m => !m.spawned)?.role || 'driver'
+  const peerRoles = () => (group()?.members.filter(m => m.spawned) || []).map(m => m.role)
+  const recipientOptions = () => { const p = peerRoles(); return p.length > 1 ? ['all', ...p] : p }
   const currentRecipient = () => recipient() || recipientOptions()[0] || 'peer'
 
-  async function spawn() {
-    const driver = props.currentId()
-    if (!driver) { alert('Open a session first — it becomes the sidecar driver.'); return }
-    const task = prompt('Task / opening message for the sidecar (optional):') ?? ''
-    const agent = (prompt('Agent for the peer (claude / codex):', 'claude') || 'claude').trim()
-    try {
-      const r = await createSidecar(driver, { task, agent })
-      await refresh()
-      setOpenId(r.group.id)
-    } catch (e: any) { alert('Failed to spawn sidecar: ' + (e?.message || e)) }
+  async function reload() {
+    const id = props.id()
+    if (id) { try { setGroup((await fetchSidecar(id)).group) } catch {} }
+    props.onChange?.()
   }
-
-  async function addPeer() {
-    const id = openId(); if (!id) return
-    const role = (prompt('Role for the new peer (e.g. critic-perf):') || '').trim()
-    if (!role) return
-    const agent = (prompt('Agent (claude / codex):', 'claude') || 'claude').trim()
-    const task = prompt('Task / rubric for this peer (optional):') ?? ''
-    try { await addSidecarPeer(id, role, { agent, task }); await refresh() }
-    catch (e: any) { alert('Add peer failed: ' + (e?.message || e)) }
-  }
-
-  async function removePeer(role: string) {
-    const id = openId(); if (!id) return
-    if (!confirm(`Remove peer "${role}"? (kills its session)`)) return
-    try { await removeSidecarPeer(id, role); await refresh() } catch {}
-  }
-
   async function send() {
-    const id = openId(); const text = draft().trim()
+    const id = props.id(); const text = draft().trim()
     if (!id || !text) return
     setDraft('')
     try { await postSidecar(id, currentRecipient(), text, driverRole()) }
     catch (e: any) { alert('Send failed: ' + (e?.message || e)) }
   }
-
-  async function kill(id: string) {
-    if (!confirm('Tear down this sidecar? (kills all spawned peers)')) return
-    try { await deleteSidecar(id); if (openId() === id) setOpenId(null); await refresh() } catch {}
+  async function addPeer() {
+    const id = props.id(); if (!id) return
+    const role = (prompt('Role for the new peer (e.g. critic-perf):') || '').trim(); if (!role) return
+    const agent = (prompt('Agent (claude / codex):', 'claude') || 'claude').trim()
+    const task = prompt('Task / rubric for this peer (optional):') ?? ''
+    try { await addSidecarPeer(id, role, { agent, task }); await reload() }
+    catch (e: any) { alert('Add peer failed: ' + (e?.message || e)) }
+  }
+  async function removePeer(role: string) {
+    const id = props.id(); if (!id) return
+    if (!confirm(`Remove peer "${role}"? (kills its session)`)) return
+    try { await removeSidecarPeer(id, role); await reload() } catch {}
   }
 
   const btn = { padding: '4px 8px', 'font-size': '11px', border: '1px solid #333', background: '#1a1a1a', color: '#bbb', cursor: 'pointer', 'border-radius': '4px' } as const
 
   return (
-    <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', color: '#e5e5e5', 'font-size': '13px' }}>
-      <Show when={!openId()}>
-        <div style={{ padding: '8px', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
-          <span style={{ color: '#888', 'font-size': '12px' }}>Sidecars</span>
-          <button style={btn} onClick={spawn}>+ New sidecar</button>
-        </div>
-        <Show when={groups().length === 0}>
-          <div style={{ padding: '12px', color: '#666', 'font-size': '12px' }}>
-            No sidecars. Open a session, then “+ New sidecar” to spawn a peer thread you can chat with.
-          </div>
-        </Show>
-        <For each={groups()}>{(g) => (
-          <div onClick={() => setOpenId(g.id)} style={{ padding: '8px 10px', 'border-bottom': '1px solid #222', cursor: 'pointer', display: 'flex', 'justify-content': 'space-between', 'align-items': 'center' }}>
-            <div>
-              <div style={{ color: g.status === 'active' ? '#e5e5e5' : '#777' }}>{g.members.map(m => m.role).join(' ↔ ')}</div>
-              <div style={{ color: '#666', 'font-size': '11px' }}>{g.agent} · {g.status} · {g.members.length} members</div>
-            </div>
-            <button style={btn} onClick={(e) => { e.stopPropagation(); kill(g.id) }}>✕</button>
-          </div>
-        )}</For>
-      </Show>
-
-      <Show when={openId()}>
+    <Show when={group()}>
+      <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%', color: '#e5e5e5', 'font-size': '13px' }}>
         <div style={{ padding: '8px', 'border-bottom': '1px solid #222', display: 'flex', 'align-items': 'center', gap: '6px', 'flex-wrap': 'wrap' }}>
-          <button style={btn} onClick={() => setOpenId(null)}>‹ Back</button>
-          <For each={openGroup()?.members || []}>{(m) => (
+          <button style={btn} onClick={() => props.onClose()}>✕ close</button>
+          <span style={{ flex: '1', color: '#888', 'font-size': '12px' }}>{group()!.members.map(m => m.role).join(' ↔ ')}</span>
+          <For each={group()!.members}>{(m) => (
             <span style={{ display: 'inline-flex', 'align-items': 'center', gap: '2px' }}>
               <button style={btn} onClick={() => props.onOpenSession(m.sessionId)}>open {m.role}</button>
               <Show when={m.spawned}>
@@ -138,7 +95,7 @@ export function Sidecar(props: { currentId: () => string | null; onOpenSession: 
           />
           <button style={btn} onClick={send}>Send</button>
         </div>
-      </Show>
-    </div>
+      </div>
+    </Show>
   )
 }

@@ -2,10 +2,10 @@ declare const __BUILD_TIME__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
-import { Sidecar } from './components/Sidecar'
+import { SidecarThread } from './components/Sidecar'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo, FileListing, Project } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, BASE } from './api'
+import type { SessionMeta, Message, AgentInfo, FileListing, Project, SidecarGroup } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, BASE } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 
@@ -202,7 +202,22 @@ export default function App() {
   const [renameText, setRenameText] = createSignal('')
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
-  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos' | 'sidecar'>('sessions')
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos'>('sessions')
+  // Sidecars are surfaced nested under their driver session (not a separate tab).
+  const [sidecars, setSidecars] = createSignal<SidecarGroup[]>([])
+  const [openSidecarId, setOpenSidecarId] = createSignal<string | null>(null)
+  const refreshSidecars = async () => { try { setSidecars((await fetchSidecars()).groups || []) } catch {} }
+  onMount(() => { refreshSidecars(); const t = setInterval(refreshSidecars, 5000); onCleanup(() => clearInterval(t)) })
+  // A group belongs to the session that drives it (the non-spawned member),
+  // matched by 8-char tmux prefix so CLI- and GUI-created groups both attach.
+  const sidecarsForSession = (sid: string) =>
+    sidecars().filter(g => g.status === 'active' && g.members.some(m => !m.spawned && m.sessionId.slice(0, 8) === sid.slice(0, 8)))
+  async function spawnSidecarFor(sid: string) {
+    const task = prompt('Task / opening message for the sidecar (optional):') ?? ''
+    const agent = (prompt('Agent for the peer (claude / codex):', 'claude') || 'claude').trim()
+    try { const r = await createSidecar(sid, { task, agent }); await refreshSidecars(); setOpenSidecarId(r.group.id) }
+    catch (e: any) { alert('Failed to spawn sidecar: ' + (e?.message || e)) }
+  }
   const [projects, setProjects] = createSignal<Project[]>([])
   const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-project'))
   const [projectsExpanded, setProjectsExpanded] = createSignal(false)
@@ -1044,7 +1059,6 @@ export default function App() {
             <button onClick={() => setSidebarTab('cos')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'cos' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'cos' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>CoS</button>
             <button onClick={() => setSidebarTab('auto')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'auto' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'auto' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Auto</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
-            <button onClick={() => setSidebarTab('sidecar')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sidecar' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sidecar' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sidecar</button>
           </div>
           {/* Sessions tab */}
           <Show when={sidebarTab() === 'sessions'}>
@@ -1207,6 +1221,26 @@ export default function App() {
                           style={{ width: '100%', background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '4px', padding: '2px 6px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }}
                         />
                       </Show>
+                      <Show when={sidecarsForSession(s.id).length > 0 || s.id === currentId()}>
+                        <div style={{ 'margin-top': '6px', 'padding-left': '14px', display: 'flex', 'flex-direction': 'column', gap: '3px' }}>
+                          <For each={sidecarsForSession(s.id)}>{(g) => (
+                            <div onClick={(e) => { e.stopPropagation(); setOpenSidecarId(g.id) }}
+                              style={{ 'font-size': '11px', color: '#9a9ab0', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '5px', '-webkit-tap-highlight-color': 'transparent' }}
+                              onMouseOver={(e) => (e.currentTarget.style.color = '#cccccc')}
+                              onMouseOut={(e) => (e.currentTarget.style.color = '#9a9ab0')}>
+                              <span style={{ color: '#4aba6a' }}>↳</span>
+                              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{g.members.filter(m => m.spawned).map(m => m.role).join(', ')}</span>
+                              <span style={{ color: '#555' }}>{g.members.length}p</span>
+                            </div>
+                          )}</For>
+                          <Show when={s.id === currentId() && !isRemoteBox()}>
+                            <div onClick={(e) => { e.stopPropagation(); spawnSidecarFor(s.id) }}
+                              style={{ 'font-size': '11px', color: '#555', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}
+                              onMouseOver={(e) => (e.currentTarget.style.color = '#6aa6e5')}
+                              onMouseOut={(e) => (e.currentTarget.style.color = '#555')}>+ sidecar</div>
+                          </Show>
+                        </div>
+                      </Show>
                     </div>
                   )}</For>
                 </>}</For>
@@ -1288,14 +1322,19 @@ export default function App() {
               )}</For>
             </div>
           </Show>
-          {/* Sidecar tab */}
-          <Show when={sidebarTab() === 'sidecar'}>
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
-              <Sidecar currentId={currentId} onOpenSession={select} />
-            </div>
-          </Show>
         </div>
       </div>
+
+      {/* Sidecar thread overlay (opened from a session's nested list) */}
+      <Show when={openSidecarId()}>
+        <div style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.55)', 'z-index': '200', display: 'flex', 'justify-content': 'flex-end' }}
+          onClick={() => setOpenSidecarId(null)}>
+          <div style={{ width: 'min(460px, 100%)', height: '100%', background: '#0d0d12', 'border-left': '1px solid #222' }}
+            onClick={(e) => e.stopPropagation()}>
+            <SidecarThread id={openSidecarId} onClose={() => setOpenSidecarId(null)} onOpenSession={(id) => { setOpenSidecarId(null); select(id) }} onChange={refreshSidecars} />
+          </div>
+        </div>
+      </Show>
 
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
