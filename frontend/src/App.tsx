@@ -203,6 +203,38 @@ export default function App() {
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
   const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos'>('sessions')
+  // Session search: non-empty query switches the sidebar list to server-side
+  // search results (all sessions, title + content), not just the recent 50.
+  const [searchQuery, setSearchQuery] = createSignal('')
+  const [searchResults, setSearchResults] = createSignal<SessionMeta[] | null>(null)
+  const [searching, setSearching] = createSignal(false)
+  let searchDebounce: ReturnType<typeof setTimeout> | undefined
+  let searchSeq = 0
+  function onSearchInput(q: string) {
+    setSearchQuery(q)
+    if (searchDebounce) clearTimeout(searchDebounce)
+    const trimmed = q.trim()
+    if (!trimmed) { setSearchResults(null); setSearching(false); return }
+    setSearching(true)
+    searchDebounce = setTimeout(async () => {
+      const seq = ++searchSeq
+      try {
+        const r = await fetchSessions(currentBox(), trimmed)
+        if (seq === searchSeq) setSearchResults(r.sessions)
+      } catch {
+        if (seq === searchSeq) setSearchResults([])
+      } finally {
+        if (seq === searchSeq) setSearching(false)
+      }
+    }, 350)
+  }
+  function clearSearch() {
+    if (searchDebounce) clearTimeout(searchDebounce)
+    searchSeq++
+    setSearchQuery('')
+    setSearchResults(null)
+    setSearching(false)
+  }
   // Sidecars are surfaced nested under their driver session (not a separate tab).
   const [sidecars, setSidecars] = createSignal<SidecarGroup[]>([])
   const [openSidecarId, setOpenSidecarId] = createSignal<string | null>(null)
@@ -517,6 +549,7 @@ export default function App() {
     if (id === currentBox()) return
     setCurrentBox(id)
     setPeerControl(false)
+    clearSearch()
     setCurrentId(null)
     cleanupSSE?.()
     setMessages([])
@@ -1170,9 +1203,31 @@ export default function App() {
               </Show>
             </div>
             </Show>
+            {/* Search — hits the server so it covers ALL sessions, not just the loaded 50 */}
+            <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #1e1e1e', position: 'relative' }}>
+              <input
+                value={searchQuery()}
+                onInput={(e) => onSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { clearSearch(); (e.target as HTMLInputElement).blur() } }}
+                placeholder="Search all sessions..."
+                style={{ width: '100%', background: '#141420', border: '1px solid #2a2a2a', 'border-radius': '8px', padding: '7px 28px 7px 10px', color: '#e5e5e5', 'font-size': '13px', outline: 'none', 'box-sizing': 'border-box' }}
+              />
+              <Show when={searchQuery()}>
+                <span onClick={clearSearch}
+                  style={{ position: 'absolute', right: '24px', top: '50%', transform: 'translateY(-50%)', color: '#666', cursor: 'pointer', 'font-size': '14px', padding: '2px 4px', '-webkit-tap-highlight-color': 'transparent' }}>&times;</span>
+              </Show>
+            </div>
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
+              <Show when={searchQuery().trim() && searching() && searchResults() === null}>
+                <div style={{ padding: '14px 16px', 'font-size': '12px', color: '#666' }}>Searching...</div>
+              </Show>
+              <Show when={searchQuery().trim() && searchResults() !== null && searchResults()!.length === 0 && !searching()}>
+                <div style={{ padding: '14px 16px', 'font-size': '12px', color: '#666' }}>No sessions match "{searchQuery().trim()}"</div>
+              </Show>
               {(() => {
-                const all = sessions().filter(s => !s.isWorker && (!currentProject() || s.projectId === currentProject()))
+                const isSearch = !!searchQuery().trim() && searchResults() !== null
+                const source = isSearch ? searchResults()! : sessions()
+                const all = source.filter(s => !s.isWorker && (!currentProject() || s.projectId === currentProject()))
                 const now = new Date()
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
                 const yesterdayStart = todayStart - 86400000
@@ -1190,7 +1245,10 @@ export default function App() {
                   else if (t >= weekStart) groups[2].items.push(s)
                   else groups[3].items.push(s)
                 }
-                return <For each={groups.filter(g => g.items.length > 0)}>{(group) => <>
+                return <><Show when={isSearch && all.length > 0}>
+                  <div style={{ padding: '6px 16px 2px', 'font-size': '10px', 'font-weight': '600', color: '#4aba6a', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{all.length} result{all.length === 1 ? '' : 's'}</div>
+                </Show>
+                <For each={groups.filter(g => g.items.length > 0)}>{(group) => <>
                   <div style={{ padding: '6px 16px 2px', 'font-size': '10px', 'font-weight': '600', color: '#555', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{group.label}</div>
                   <For each={group.items}>{(s) => (
                     <div onClick={() => { if (sidebarRenaming() !== s.id) select(s.id) }}
@@ -1243,7 +1301,7 @@ export default function App() {
                       </Show>
                     </div>
                   )}</For>
-                </>}</For>
+                </>}</For></>
               })()}
             </div>
           </Show>

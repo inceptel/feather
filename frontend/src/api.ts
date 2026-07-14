@@ -92,9 +92,12 @@ export async function fetchSharingPeers(): Promise<{ owner: string | null, peers
 export const setSessionShare = (id: string, peers: string[]) =>
   fetch(`${BASE}/api/sessions/${id}/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ peers }) }).then(r => r.json())
 
-// On a peer box the response also carries `control` (whether we may send)
-export async function fetchSessions(box?: string | null): Promise<{ sessions: SessionMeta[], control?: boolean }> {
-  const r = await fetch(bq(`${BASE}/api/sessions`, box))
+// On a peer box the response also carries `control` (whether we may send).
+// `q` searches ALL sessions (titles + full content, server-side) instead of
+// just the most-recent-50 the plain listing returns.
+export async function fetchSessions(box?: string | null, q?: string): Promise<{ sessions: SessionMeta[], control?: boolean }> {
+  const url = q ? `${BASE}/api/sessions?q=${encodeURIComponent(q)}` : `${BASE}/api/sessions`
+  const r = await fetch(bq(url, box))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return await r.json()
 }
