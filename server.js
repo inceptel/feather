@@ -436,7 +436,31 @@ function isAutoWorkerSession(buf, agent, projectId) {
   return /^\/home\/user\/(?:auto|autoweb)-/.test(cwd);
 }
 
-function discoverSessions(limit = 50) {
+// Full-content search across session JSONL files. Shells out to grep (fixed
+// string, case-insensitive) because session files can be >100MB and node-side
+// scanning would be slow. Returns the Set of file paths that contain `q`.
+function grepSessionFiles(q, files) {
+  const matches = new Set();
+  const CHUNK = 200; // stay well under ARG_MAX
+  for (let i = 0; i < files.length; i += CHUNK) {
+    const batch = files.slice(i, i + CHUNK);
+    let out = '';
+    try {
+      out = execFileSync('grep', ['-lisF', '--', q, ...batch], { maxBuffer: 16 * 1024 * 1024, timeout: 30000 }).toString();
+    } catch (e) {
+      // grep exits 1 when some files have no match; partial matches are still on stdout
+      out = e.stdout ? e.stdout.toString() : '';
+    }
+    for (const line of out.split('\n')) if (line) matches.add(line);
+  }
+  return matches;
+}
+
+// `query`, when set, filters to sessions whose title OR full JSONL content
+// contains it (case-insensitive). Search ignores the mtime-ranked candidate
+// cutoff that the plain listing has: every candidate is considered, so old
+// threads that fell off the sidebar are still findable.
+function discoverSessions(limit = 50, query = null) {
   const candidates = [];
   const meta = readMeta();
   const labels = readProjectLabels();
@@ -494,6 +518,11 @@ function discoverSessions(limit = 50) {
   // Content-based worker detection requires reading the file, so we can't pre-filter.
   candidates.sort((a, b) => b.mtime - a.mtime);
 
+  // Content matches are computed up front in one grep pass over all candidate
+  // files; title matches are checked per-candidate inside the loop below.
+  const contentMatches = query ? grepSessionFiles(query, candidates.map(c => c.fpath)) : null;
+  const queryLc = query ? query.toLowerCase() : null;
+
   const active = getActiveTmuxSessions();
   // Green "active" dot = live tmux session AND a recent real message. We use the
   // last real message time (lastActivityMs), NOT the file mtime: a resumed agent
@@ -523,12 +552,15 @@ function discoverSessions(limit = 50) {
       else if (agent === 'codex') title = extractCodexTitle(buf);
       else title = extractClaudeTitle(buf);
 
+      const effectiveTitle = meta[id]?.title || title || id.slice(0, 8);
+      if (queryLc && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
+
       // Project label is shown only for allowlisted projects (key present in labels);
       // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
       const isAllowlisted = projectId && (projectId in labels);
       const activityMs = lastActivityMs(fpath, agent, mtime.getTime());
       sessions.push({
-        id, title: meta[id]?.title || title || id.slice(0, 8),
+        id, title: effectiveTitle,
         updatedAt: new Date(activityMs).toISOString(),
         isActive: sessionIsActive(active, id, activityMs, now),
         agent,
@@ -991,7 +1023,7 @@ app.use('/api/sessions', (req, res, next) => {
 });
 
 app.get('/api/sessions', (req, res) => {
-  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50) }); }
+  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50, (req.query.q || '').trim() || null) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
