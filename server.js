@@ -11,6 +11,7 @@ import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
 import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
 import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
+import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
 
@@ -331,26 +332,6 @@ function extractClaudeTitle(buf) {
         }
         if (text && !text.startsWith('<')) return text.slice(0, 80);
       }
-    } catch {}
-  }
-  return null;
-}
-
-function extractCodexTitle(buf) {
-  for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
-    try {
-      const d = JSON.parse(line);
-      if (d.type !== 'response_item') continue;
-      const p = d.payload;
-      if (p?.type !== 'message' || p.role !== 'user') continue;
-      const text = (p.content || [])
-        .filter(b => b.type === 'input_text' && b.text)
-        .map(b => b.text)
-        .join(' ')
-        .trim();
-      if (!text) continue;
-      if (text.startsWith('<environment_context>') || text.startsWith('<permissions instructions>') || text.startsWith('<skills_instructions>') || text.startsWith('<user_instructions>')) continue;
-      return text.slice(0, 80);
     } catch {}
   }
   return null;
