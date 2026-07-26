@@ -14,6 +14,7 @@ import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
+import { resolveCodexWatchId } from './lib/codex-watch.js';
 
 // Load ~/.env if present
 try {
@@ -876,10 +877,12 @@ function watchCodexFile(fpath, featherId) {
 // Watch existing codex session files on startup (only recent ones to avoid huge fs.watch fanout)
 {
   const recent = listCodexJsonlFiles().sort((a, b) => b.mtime - a.mtime).slice(0, 100);
+  const meta = readMeta();
   for (const { uuid, fpath } of recent) {
     try {
-      fileOffsets.set(uuid, fs.statSync(fpath).size);
-      watchCodexFile(fpath, uuid);
+      const sessionId = resolveCodexWatchId(uuid, meta);
+      fileOffsets.set(sessionId, fs.statSync(fpath).size);
+      watchCodexFile(fpath, sessionId);
     } catch {}
   }
 }
