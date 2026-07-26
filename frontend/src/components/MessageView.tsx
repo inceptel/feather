@@ -19,6 +19,14 @@ import diff from 'highlight.js/lib/languages/diff'
 import sql from 'highlight.js/lib/languages/sql'
 import yaml from 'highlight.js/lib/languages/yaml'
 import markdown from 'highlight.js/lib/languages/markdown'
+import {
+  commandText,
+  patchText,
+  stdinText,
+  toolImagePath,
+  toolInputText,
+  toolPresentation,
+} from '../lib/toolPresentation.js'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -208,89 +216,17 @@ function diffLineStyle(kind: DiffKind): Record<string, string> {
 const TOOL_ICONS: Record<string, string> = {
   Read: '📄', Write: '✏️', Edit: '✂️', Bash: '⚡', Grep: '🔍', Glob: '🗂️',
   WebFetch: '🌐', WebSearch: '🔎', Agent: '🤖', Skill: '⚡',
-  Patch: '✂️', Input: '↵',
+  Web: '🌐', Patch: '✂️', Input: '↵',
 }
 
 const TOOL_COLORS: Record<string, string> = {
   Bash: 'var(--tool-bash)', Read: 'var(--tool-read)', Write: 'var(--tool-write)', Edit: 'var(--tool-edit)',
   Grep: 'var(--tool-grep)', Glob: 'var(--tool-glob)', WebFetch: 'var(--tool-glob)', WebSearch: 'var(--tool-grep)',
   Agent: 'var(--tool-agent)', Skill: 'var(--tool-skill)',
-  Patch: 'var(--tool-edit)', Input: 'var(--tool-read)',
+  Web: 'var(--tool-glob)', Patch: 'var(--tool-edit)', Input: 'var(--tool-read)',
 }
 
-// Normalize raw tool name (Anthropic 'Bash', MCP 'mcp__oc__bash', oc 'bash') to a
-// canonical PascalCase key used for icon/color/summary/detail lookups.
-const TOOL_ALIASES: Record<string, string> = {
-  bash: 'Bash', read: 'Read', write: 'Write', edit: 'Edit',
-  exec: 'Bash', exec_command: 'Bash', exec_comman: 'Bash',
-  apply_patch: 'Patch', write_stdin: 'Input',
-  grep: 'Grep', glob: 'Glob', find: 'Glob',
-  task: 'Agent', agent: 'Agent',
-  webfetch: 'WebFetch', fetch: 'WebFetch',
-  websearch: 'WebSearch', web_search: 'WebSearch',
-}
-
-function canonicalName(raw: string): string {
-  if (!raw) return 'tool'
-  const stripped = raw.replace(/^mcp__.+?__/, '').split('.').pop() || raw
-  return TOOL_ALIASES[stripped.toLowerCase()] || stripped.charAt(0).toUpperCase() + stripped.slice(1)
-}
-
-function commandText(input: any): string {
-  return ((input?.command || input?.cmd) as string || '').trim()
-}
-
-function patchText(input: any): string {
-  return ((input?.raw || input?.input || input?.patch) as string || '').trim()
-}
-
-function stdinText(input: any): string {
-  return ((input?.chars || input?.input) as string || '')
-}
-
-function patchSummary(input: any): string {
-  const text = patchText(input)
-  if (!text) return ''
-  const firstFile = text.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m)?.[1]
-  const changeCount = (text.match(/^\*\*\* (?:Update|Add|Delete) File: /gm) || []).length
-  if (firstFile) {
-    const short = firstFile.split('/').slice(-2).join('/')
-    return changeCount > 1 ? `${short} +${changeCount - 1}` : short
-  }
-  const firstLine = text.split('\n').find(Boolean) || ''
-  return firstLine.length > 80 ? firstLine.slice(0, 80) + '…' : firstLine
-}
-
-function stdinSummary(input: any): string {
-  const chars = stdinText(input)
-  if (!chars) return input?.session_id != null ? `session ${input.session_id}` : ''
-  const visible = chars
-    .replace(/\u0003/g, '^C')
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n')
-  const prefix = input?.session_id != null ? `session ${input.session_id}: ` : ''
-  return prefix + (visible.length > 60 ? visible.slice(0, 60) + '…' : visible)
-}
-
-function toolSummary(name: string, input: any): string {
-  if (!input) return ''
-  const fp = ((input.file_path || input.path) as string) || ''
-  const short = fp.split('/').slice(-2).join('/')
-  switch (name) {
-    case 'Read': return short + (input.offset ? ` L${input.offset}` : '')
-    case 'Write': return short
-    case 'Edit': return short + (input.replace_all ? ' ×all' : '')
-    case 'Bash': { const c = commandText(input).split('\n')[0]; return c.length > 80 ? c.slice(0, 80) + '…' : c }
-    case 'Patch': return patchSummary(input)
-    case 'Input': return stdinSummary(input)
-    case 'Grep': return `${input.pattern || ''}${input.path ? ' in ' + input.path : ''}`
-    case 'Glob': return input.pattern || ''
-    case 'Agent': { const d = input.description || (input.prompt as string || '').split('\n')[0]; return d ? (d.length > 80 ? d.slice(0, 80) + '…' : d) : '' }
-    case 'WebFetch': return input.url || ''
-    case 'WebSearch': return input.query || ''
-    default: return ''
-  }
-}
+const SPECIAL_TOOL_DETAILS = new Set(['Edit', 'Bash', 'Patch', 'Input', 'Write', 'Agent', 'Grep', 'Read'])
 
 // ── Block renderers ─────────────────────────────────────────────────────────
 
@@ -333,13 +269,15 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
     )
   }
   if (block.type === 'tool_use') {
-    const name = canonicalName(block.name || '')
+    const inp = block.input || {}
+    const { name, summary } = toolPresentation(block.name || '', inp)
     const color = TOOL_COLORS[name] || 'var(--info)'
     const icon = TOOL_ICONS[name] || '⚙'
-    const summary = toolSummary(name, block.input)
-    const inp = block.input || {}
     const result = block.id && getResult ? getResult(block.id) : undefined
-    const hasDetail = name === 'Edit' || name === 'Bash' || name === 'Patch' || name === 'Input' || name === 'Write' || name === 'Agent' || name === 'Grep' || name === 'Read' || !!result
+    const imagePath = toolImagePath(block.name || '', inp)
+    const imageUrl = imagePath ? `/api/file?path=${encodeURIComponent(imagePath)}` : ''
+    const genericInput = SPECIAL_TOOL_DETAILS.has(name) ? '' : toolInputText(inp)
+    const hasDetail = SPECIAL_TOOL_DETAILS.has(name) || !!genericInput || !!imagePath || !!result
     const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:8px 12px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
     const isErr = result?.is_error
     const statusColor = isErr ? 'var(--error)' : result ? 'var(--success)' : 'var(--warning)'
@@ -372,6 +310,24 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
         </>}
         {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
         {name === 'Read' && (inp.file_path || inp.path) && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{(inp.file_path || inp.path) as string}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {imagePath && (
+          <button
+            type="button"
+            aria-label={`Open ${imagePath.split('/').pop() || 'image'} full screen`}
+            onClick={() => setLightbox?.(imageUrl)}
+            style={{
+              display: 'block', width: '100%', padding: '8px', background: 'var(--bg-base)',
+              border: 'none', cursor: setLightbox ? 'zoom-in' : 'default', 'text-align': 'left',
+            }}
+          >
+            <img
+              src={imageUrl}
+              alt={imagePath.split('/').pop() || 'Tool image'}
+              style={{ display: 'block', 'max-width': '100%', 'max-height': '240px', 'border-radius': '6px', 'object-fit': 'contain' }}
+            />
+          </button>
+        )}
+        {genericInput && <pre style={`${pre}color:var(--text-secondary);`} ref={linkifyRef}>{genericInput}</pre>}
         {result && renderToolResultInner(result, setLightbox)}
         </div>
       </details>
@@ -782,8 +738,8 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   if (seg.kind === 'group') {
                     const [expanded, setExpanded] = createSignal(false)
                     const firstInput = (seg.messages[0].content || []).find(b => b.type === 'tool_use') as any
-                    const segName = canonicalName(seg.name || '')
-                    const sumText = toolSummary(segName, firstInput?.input) || segName
+                    const { name: segName, summary } = toolPresentation(seg.name || '', firstInput?.input)
+                    const sumText = summary || segName
                     const color = TOOL_COLORS[segName] || 'var(--info)'
                     const icon = TOOL_ICONS[segName] || '⚙'
                     return (
