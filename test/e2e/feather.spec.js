@@ -69,6 +69,14 @@ test.beforeAll(() => {
     isSidechain: false, isMeta: false,
     message: { role: 'user', content: 'Thanks, that makes sense!' },
   })
+  writeLine({
+    type: 'assistant', uuid: 'e2e-msg-007', timestamp: '2025-06-15T14:01:05Z',
+    isSidechain: false, isMeta: false,
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: `[Open local session file](${testSessionPath})` }],
+    },
+  })
 })
 
 test.afterAll(() => {
@@ -230,6 +238,13 @@ test.describe('Message rendering', () => {
     const code = await pre.first().innerText()
     expect(code).toContain('marked.parse')
     expect(code).toContain('DOMPurify.sanitize')
+  })
+
+  test('markdown absolute filesystem link opens Feather file viewer', async ({ page }) => {
+    const chatUrl = page.url()
+    await page.getByRole('link', { name: 'Open local session file' }).click()
+    await expect(page.getByTitle(testSessionPath)).toBeVisible()
+    expect(page.url()).toBe(chatUrl)
   })
 
   test('thinking block renders as collapsible details', async ({ page }) => {

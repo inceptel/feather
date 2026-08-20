@@ -44,6 +44,8 @@ export interface AgentInfo {
 
 export interface ContentBlock {
   type: string
+  id?: string
+  tool_use_id?: string
   text?: string
   thinking?: string
   name?: string
@@ -123,7 +125,11 @@ export const sendInput = (id: string, text: string, box?: string | null): Promis
 
 export async function createSession(cwd?: string, agent?: string): Promise<string> {
   const id = crypto.randomUUID()
-  await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cwd, agent }) })
+  const r = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cwd, agent }) })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.error || `HTTP ${r.status}`)
+  }
   return id
 }
 

@@ -91,9 +91,35 @@ function handleCopyClick(e: MouseEvent) {
   })
 }
 
-// Make all links open in new tab
+function wirePathLink(a: HTMLAnchorElement, targetPath: string) {
+  a.classList.add('feather-path')
+  a.href = '#'
+  a.removeAttribute('target')
+  a.removeAttribute('rel')
+  a.dataset.path = targetPath
+  a.addEventListener('click', (ev) => {
+    ev.preventDefault()
+    window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
+  })
+}
+
+function filesystemPathFromHref(a: HTMLAnchorElement): string | null {
+  const href = a.getAttribute('href')
+  if (!href) return null
+  const raw = href.startsWith('file://') ? href.slice(7) : href
+  if (!raw.startsWith('/') && !raw.startsWith('~/')) return null
+  try { return decodeURIComponent(raw) } catch { return raw }
+}
+
+// Make web links open in a new tab and route Markdown filesystem links through
+// Feather's file viewer, just like bare paths linkified below.
 function fixLinks(el: HTMLElement) {
   for (const a of el.querySelectorAll('a')) {
+    const targetPath = filesystemPathFromHref(a)
+    if (targetPath) {
+      wirePathLink(a, targetPath)
+      continue
+    }
     a.setAttribute('target', '_blank')
     a.setAttribute('rel', 'noopener')
   }
@@ -145,15 +171,9 @@ function linkifyPaths(el: HTMLElement) {
       const end = start + raw.length
       if (start > last) frag.appendChild(document.createTextNode(text.slice(last, start)))
       const a = document.createElement('a')
-      a.className = 'feather-path'
-      a.href = '#'
       a.textContent = raw
       const targetPath = raw.startsWith('file://') ? raw.slice(7) : raw
-      a.dataset.path = targetPath
-      a.addEventListener('click', (ev) => {
-        ev.preventDefault()
-        window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
-      })
+      wirePathLink(a, targetPath)
       frag.appendChild(a)
       last = end
       any = true

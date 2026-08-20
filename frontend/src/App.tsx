@@ -913,8 +913,10 @@ export default function App() {
           const transcript = String(data.transcript).trim()
           if (!transcript) return
           const prev = text().trim()
-          if (sendAfterTranscription) await sendSessionText(transcript)
-          else setText(prev ? prev + ' ' + transcript : transcript)
+          if (sendAfterTranscription) {
+            setText('')
+            await sendSessionText(prev ? prev + ' ' + transcript : transcript, true)
+          } else setText(prev ? prev + ' ' + transcript : transcript)
         } else if (data.error) {
           console.error('Transcription error:', data.error)
         }
@@ -970,6 +972,7 @@ export default function App() {
   }
 
   async function handleSend() {
+    if (listening()) { stopVoiceForSpinSend(); return }
     await sendComposedMessage(text(), files())
   }
 
@@ -1596,7 +1599,7 @@ export default function App() {
                         Share\u2026{s().share?.length ? ` (${s().share!.join(', ')})` : ''}
                       </button>
                     </Show>
-                    <a href={exportUrl(s().id, currentBox())} download style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
+                    <a href={exportUrl(s().id, currentBox())} download="" style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer', 'text-decoration': 'none' }} onClick={() => setMenuOpen(false)}>Export MD</a>
                     <Show when={!isRemoteBox()}>
                       <button onClick={() => handleDelete(s().id)}
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', color: '#d45555', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Delete</button>
@@ -1897,7 +1900,7 @@ export default function App() {
                   <button onClick={() => { setExpanded(false); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px' } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 6px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-height': '42px' }} title="Collapse">{'\u2193'} Collapse</button>
                 </div>
               </Show>
-              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading()} style={{ background: (text().trim() || files().length) ? '#4aba6a' : '#333', color: (text().trim() || files().length) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() ? '...' : 'Send'}</button>
+              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
             </div>
           </div>
         </Show>
