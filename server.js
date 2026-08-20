@@ -524,7 +524,8 @@ function discoverSessions(limit = 50, query = null) {
   const now = Date.now();
 
   const sessions = [];
-  for (const { id, fpath, mtime, agent, projectId } of candidates) {
+  for (const { id, fpath, mtime, agent, projectId: candidateProjectId } of candidates) {
+    let projectId = candidateProjectId;
     if (sessions.length >= limit) break;
     try {
       const fd = fs.openSync(fpath, 'r');
@@ -534,6 +535,12 @@ function discoverSessions(limit = 50, query = null) {
       fs.closeSync(fd);
 
       const sessionCwd = extractSessionCwd(buf, agent);
+
+      // Codex/omp transcripts don't live under ~/.claude/projects, so they
+      // carry no directory-derived projectId. Derive one from the session cwd
+      // (same encoding Claude uses: separators → dashes) so cwd-based grouping
+      // — e.g. the rooms view — works for every agent.
+      if (!projectId && sessionCwd) projectId = sessionCwd.replace(/[/.]/g, '-');
 
       // Worker detection: use explicit canary or actual worker cwd/project.
       // Broad path mentions in prompt/context are too noisy for Codex sessions.
@@ -651,20 +658,35 @@ function spawnSession(id, cwd, agent = 'claude') {
     ensureCodexTrust(cwd);
     const before = new Set(listCodexJsonlFiles().map(f => f.uuid));
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex --dangerously-bypass-approvals-and-sandbox'`, cwd);
-    adoptNewCodexUuid(id, before);
+    adoptNewCodexUuid(id, before, cwd);
   } else {
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
   }
 }
 
-function adoptNewCodexUuid(featherId, beforeUuids, attempts = 30) {
+function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 320) {
   // Poll ~/.codex/sessions for a rollout file that didn't exist before spawn.
-  // Codex usually writes the session_meta line within ~1s of launch.
+  // Newer codex builds only write the rollout on the FIRST user message, which
+  // can be minutes after launch — so poll fast for ~10s, then back off to 2s
+  // for ~10 minutes total. When spawnCwd is given, only rollouts whose
+  // session_meta cwd matches are considered, so two sessions spawned close
+  // together can't adopt each other's file.
   let n = 0;
   const tick = () => {
     n++;
     const after = listCodexJsonlFiles();
-    const fresh = after.filter(f => !beforeUuids.has(f.uuid));
+    let fresh = after.filter(f => !beforeUuids.has(f.uuid));
+    if (spawnCwd && fresh.length > 0) {
+      fresh = fresh.filter(f => {
+        try {
+          const fd = fs.openSync(f.fpath, 'r');
+          const buf = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, fs.fstatSync(fd).size));
+          fs.readSync(fd, buf, 0, buf.length, 0);
+          fs.closeSync(fd);
+          return extractCodexCwd(buf) === spawnCwd;
+        } catch { return false; }
+      });
+    }
     if (fresh.length > 0) {
       // Pick the newest fresh file
       fresh.sort((a, b) => b.mtime - a.mtime);
@@ -678,7 +700,7 @@ function adoptNewCodexUuid(featherId, beforeUuids, attempts = 30) {
       console.log(`[codex] adopted UUID ${uuid} for feather session ${featherId}`);
       return;
     }
-    if (n < attempts) setTimeout(tick, 500);
+    if (n < attempts) setTimeout(tick, n < 20 ? 500 : 2000);
     else console.warn(`[codex] failed to adopt UUID for ${featherId} after ${attempts} attempts`);
   };
   setTimeout(tick, 500);
