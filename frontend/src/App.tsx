@@ -3,6 +3,7 @@ import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspen
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
+import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, Project, SidecarGroup } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, BASE } from './api'
@@ -1086,7 +1087,8 @@ export default function App() {
       }}>
         <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
           <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
-            <span style={{ 'font-weight': '700', 'font-size': '16px' }}>Feather</span>
+            <span onClick={() => { setCurrentId(null); setCurrentAuto(null); setCurrentCos(null); location.hash = ''; setSidebar(false); cleanupSSE?.(); setMessages([]) }}
+              style={{ 'font-weight': '700', 'font-size': '16px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Feather</span>
             <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
           </div>
           {/* Sidebar tabs */}
@@ -1631,12 +1633,7 @@ export default function App() {
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden', display: expanded() ? 'none' : 'block' }}>
           <Show when={currentId()} fallback={
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'center', height: '100%', color: '#444' }}>
-              <div style={{ 'text-align': 'center' }}>
-                <div style={{ 'font-size': '32px', 'margin-bottom': '12px', opacity: '0.3' }}>~</div>
-                <div>Open a session or create a new one</div>
-              </div>
-            </div>
+            <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId() && canSend()) sendInput(currentId()!, t, currentBox()) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
