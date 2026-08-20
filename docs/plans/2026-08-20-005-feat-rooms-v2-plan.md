@@ -1,6 +1,6 @@
 # Rooms v2 — rooms as conventions on existing primitives
 
-Status: BUILDING — CLI + room folders shipped 2026-08-20; UI remaining
+Status: SHIPPED 2026-08-20 — CLI, room folders, and rooms-home UI live
 Date: 2026-08-20
 Supersedes: the Buzz/Centaur multiplayer-room direction (2026-08-12). The
 Buzz-backed Rooms tab was removed from main and archived on branch
@@ -49,13 +49,17 @@ full doctrine. Claude chiefs may use native Agent/Workflow as a fast path.
 inherit AGENTS.md (both harnesses walk ancestor dirs) — and every worker
 prompt starts with WORKER:, which the doctrine's first line honors.
 
-## UI (remaining work)
+## UI (shipped 2026-08-20)
 
 Default view = full-screen rooms home (iMessage model, phone-first): one
-row per room from `~/rooms/*/` — title, latest (chief message or notes.md
-tail), timestamp, status dot. Tap → existing session view; children listed
-by cwd match. Sidebar untouched (Seats feedback stands). Server side:
-folder-scan API only — no registry, no relay.
+card per room from `~/rooms/*/` (a dir with AGENTS.md) — status dot,
+latest-message snippet (notes.md tail as fallback), expandable chat list,
+new-chat buttons. Tap card → newest chat in the existing session view.
+Sidebar untouched (Seats feedback stands); its "Feather" title returns to
+the rooms home. Server: `GET /api/rooms` folder scan (sessions grouped by
+cwd-derived projectId or `~/.feather/room-sessions.json` assignments),
+`POST /api/rooms` scaffold, `POST /api/rooms/:name/assign` to pull an
+existing session into a room. No registry, no relay.
 
 ## Pilot
 

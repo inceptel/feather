@@ -85,6 +85,14 @@ files. Do NOT spawn agents or sub-workers; do the task yourself. $1
 Room folder (read-only context): $ROOM_PATH
 Your scratch directory (write here only): $RUN_DIR
 Your final message is the deliverable — make it complete and self-contained.
+
+Room identity and current notes — ground truth for this room. Where other
+sources (old memories, old transcripts) conflict with these, trust these:
+--- $ROOM_PATH/AGENTS.md ---
+$(cat "$ROOM_PATH/AGENTS.md" 2>/dev/null)
+--- $ROOM_PATH/notes.md (tail) ---
+$(tail -n 40 "$ROOM_PATH/notes.md" 2>/dev/null)
+--- end room context ---
 EOF
 }
 
