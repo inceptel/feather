@@ -137,8 +137,8 @@ on the owner's switchboard, one file to manage, one place to revoke.
 
 Explicitly **excluded** from the share surface, permanently (even for
 control peers): `resume`, `delete`, `fork`, `rename`, `/api/file`,
-`/api/files`, `/api/terminal`, `/api/shell`, `/api/upload`, `/api/auto`,
-`/api/cos`. Send/interrupt exist only in the gated form above. A shared
+`/api/files`, `/api/terminal`, `/api/shell`, `/api/upload`. Send/interrupt
+exist only in the gated form above. A shared
 transcript's linkified file paths must not resolve for a peer (the viewer
 routes file links through the *viewer's own* `/api/file`, which will
 404 — acceptable; do not proxy file reads).

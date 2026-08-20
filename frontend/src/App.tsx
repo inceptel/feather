@@ -203,7 +203,7 @@ export default function App() {
   const [renameText, setRenameText] = createSignal('')
   const [sidebarRenaming, setSidebarRenaming] = createSignal<string | null>(null)
   const [sidebarRenameText, setSidebarRenameText] = createSignal('')
-  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links' | 'auto' | 'cos'>('sessions')
+  const [sidebarTab, setSidebarTab] = createSignal<'sessions' | 'links'>('sessions')
   // Session search: non-empty query switches the sidebar list to server-side
   // search results (all sessions, title + content), not just the recent 50.
   const [searchQuery, setSearchQuery] = createSignal('')
@@ -250,139 +250,6 @@ export default function App() {
     const agent = (prompt('Agent for the peer (claude / codex):', 'claude') || 'claude').trim()
     try { const r = await createSidecar(sid, { task, agent }); await refreshSidecars(); setOpenSidecarId(r.group.id) }
     catch (e: any) { alert('Failed to spawn sidecar: ' + (e?.message || e)) }
-  }
-  interface AutoInstance {
-    name: string; dir: string; running: boolean; current: string;
-    keeps: number; reverts: number; crashes: number; skips: number; iterations: number;
-    last: { timestamp: string; status: string; description: string } | null;
-    mainChat: string | null;
-    mtime?: number;
-  }
-  interface WorkerSession { id: string; agent: string; mtime: string }
-  const [autoInstances, setAutoInstances] = createSignal<AutoInstance[]>([])
-  const [currentAuto, setCurrentAuto] = createSignal<string | null>(null)
-  const [autoDetail, setAutoDetail] = createSignal<(AutoInstance & { program?: string; results?: string; workerSessions?: WorkerSession[] }) | null>(null)
-  const [autoNewName, setAutoNewName] = createSignal('')
-  const [autoNewGoal, setAutoNewGoal] = createSignal('')
-  const [autoCreating, setAutoCreating] = createSignal(false)
-  const [autoBusy, setAutoBusy] = createSignal<string | null>(null)
-  interface CosWorkstream {
-    id: string; name: string; goal: string; launcher: 'session' | 'auto' | 'goal'; status: string;
-    agent?: string; repo?: string; sessionId?: string; autoName?: string; goalPath?: string; goalCommand?: string;
-    createdAt: string; updatedAt: string; lastCheckedAt?: string | null; lastReceipt?: string | null;
-  }
-  interface CosState { chiefSessionId: string | null; workstreams: CosWorkstream[]; msgvault?: boolean; tgIn?: boolean }
-  const [cosState, setCosState] = createSignal<CosState>({ chiefSessionId: null, workstreams: [] })
-  const [currentCos, setCurrentCos] = createSignal<string | null>(null)
-  const [cosNewName, setCosNewName] = createSignal('')
-  const [cosNewGoal, setCosNewGoal] = createSignal('')
-  const [cosLauncher, setCosLauncher] = createSignal<'session' | 'auto' | 'goal'>('goal')
-  const [cosRepo, setCosRepo] = createSignal('/home/user/feather')
-  const [cosCreating, setCosCreating] = createSignal(false)
-  const [cosBusy, setCosBusy] = createSignal<string | null>(null)
-  function autoLastTs(i: AutoInstance): number {
-    const lastTs = i.last ? new Date(i.last.timestamp).getTime() : 0
-    return Math.max(lastTs, i.mtime || 0)
-  }
-  const sortedAutos = () => [...autoInstances()].sort((a, b) => autoLastTs(b) - autoLastTs(a))
-  async function loadAutoInstances() {
-    try {
-      const r = await fetch(`${BASE}/api/auto/instances`)
-      const d = await r.json()
-      setAutoInstances(d.instances || [])
-    } catch {}
-  }
-  async function loadAutoDetail(name: string) {
-    try {
-      const r = await fetch(`${BASE}/api/auto/instances/${name}`)
-      if (r.ok) setAutoDetail(await r.json())
-    } catch {}
-  }
-  async function autoAction(name: string, action: 'start' | 'stop') {
-    setAutoBusy(name + ':' + action)
-    try { await fetch(`${BASE}/api/auto/instances/${name}/${action}`, { method: 'POST' }); await loadAutoInstances() }
-    finally { setAutoBusy(null) }
-  }
-  async function autoFocus(name: string, focus: string) {
-    if (!focus.trim()) return
-    await fetch(`${BASE}/api/auto/instances/${name}/focus`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ focus }) })
-    await loadAutoInstances()
-  }
-  async function autoBtw(name: string, note: string) {
-    if (!note.trim()) return
-    await fetch(`${BASE}/api/auto/instances/${name}/btw`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) })
-    await loadAutoInstances()
-  }
-  async function autoLink(name: string, sessionId: string) {
-    await fetch(`${BASE}/api/auto/instances/${name}/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) })
-    await loadAutoInstances()
-  }
-  async function autoCreate() {
-    const name = autoNewName().trim()
-    const goal = autoNewGoal().trim()
-    if (!name || !goal) return
-    setAutoCreating(true)
-    try {
-      const r = await fetch(`${BASE}/api/auto/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, template: 'simple', goal }) })
-      if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Create failed: ' + (e.error || r.status)); return }
-      try {
-        const sessionId = await createSession(undefined, 'claude')
-        await fetch(`${BASE}/api/auto/instances/${name}/link`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) })
-        refreshSessions()
-      } catch {}
-      setAutoNewName(''); setAutoNewGoal('')
-      await loadAutoInstances()
-      setCurrentAuto(name)
-      setCurrentCos(null)
-      setSidebar(false)
-    } finally { setAutoCreating(false) }
-  }
-  async function loadCos() {
-    try {
-      const r = await fetch(`${BASE}/api/cos`)
-      if (r.ok) setCosState(await r.json())
-    } catch {}
-  }
-  async function startChief() {
-    setCosBusy('chief')
-    try {
-      const r = await fetch(`${BASE}/api/cos/chief`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent: 'codex' }) })
-      const d = await r.json()
-      await loadCos()
-      if (d.sessionId) select(d.sessionId)
-    } finally { setCosBusy(null) }
-  }
-  async function cosCreate() {
-    const name = cosNewName().trim()
-    const goal = cosNewGoal().trim()
-    if (!name || !goal) return
-    setCosCreating(true)
-    try {
-      const r = await fetch(`${BASE}/api/cos/workstreams`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, goal, launcher: cosLauncher(), repo: cosRepo(), agent: 'codex', start: true }),
-      })
-      if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Launch failed: ' + (e.error || r.status)); return }
-      const d = await r.json()
-      setCosNewName(''); setCosNewGoal('')
-      await loadCos()
-      setCurrentCos(d.workstream?.id || null)
-      setCurrentAuto(null)
-      setSidebar(false)
-    } finally { setCosCreating(false) }
-  }
-  async function cosCheck(id: string) {
-    setCosBusy(id)
-    try {
-      await fetch(`${BASE}/api/cos/workstreams/${id}/check`, { method: 'POST' })
-      await loadCos()
-    } finally { setCosBusy(null) }
-  }
-  function openCos(w: CosWorkstream) {
-    setCurrentCos(w.id)
-    setCurrentAuto(null)
-    setSidebar(false)
   }
   const [links, setLinks] = createSignal<QuickLink[]>([])
   const [starred, setStarred] = createSignal<Record<string, string[]>>({})
@@ -548,8 +415,6 @@ export default function App() {
   async function select(id: string) {
     const prev = currentId()
     if (prev) saveDraft(prev, text())
-    setCurrentAuto(null)
-    setCurrentCos(null)
     setCurrentId(id)
     location.hash = currentBox() === 'local' ? id : `${currentBox()}:${id}`
     setSidebar(false)
@@ -645,8 +510,6 @@ export default function App() {
 
   function goHome() {
     setCurrentId(null)
-    setCurrentAuto(null)
-    setCurrentCos(null)
     location.hash = ''
     setSidebar(false)
     cleanupSSE?.()
@@ -982,30 +845,6 @@ export default function App() {
   })
 
   createEffect(() => {
-    const needList = (sidebarTab() === 'auto' && sidebar()) || currentAuto() !== null
-    if (!needList) return
-    loadAutoInstances()
-    const id = setInterval(loadAutoInstances, 5000)
-    onCleanup(() => clearInterval(id))
-  })
-
-  createEffect(() => {
-    const needList = (sidebarTab() === 'cos' && sidebar()) || currentCos() !== null
-    if (!needList) return
-    loadCos()
-    const id = setInterval(loadCos, 5000)
-    onCleanup(() => clearInterval(id))
-  })
-
-  createEffect(() => {
-    const name = currentAuto()
-    if (!name) { setAutoDetail(null); return }
-    loadAutoDetail(name)
-    const id = setInterval(() => loadAutoDetail(name), 4000)
-    onCleanup(() => clearInterval(id))
-  })
-
-  createEffect(() => {
     if (tab() === 'files' && filesMode() === 'all' && !browse() && !browseLoading()) loadBrowse()
   })
 
@@ -1064,8 +903,8 @@ export default function App() {
       {/* Hamburger */}
       <Show when={!sidebar()}>
         <button onClick={openSidebar} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
-        {/* Back to the rooms home — shown whenever a session/auto/cos view is open */}
-        <Show when={currentId() || currentAuto() || currentCos()}>
+        {/* Back to the rooms home — shown whenever a session view is open */}
+        <Show when={currentId()}>
           <button onClick={goHome} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'calc(max(12px, env(safe-area-inset-left)) + 44px)', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '20px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#8249;</button>
         </Show>
       </Show>
@@ -1093,8 +932,6 @@ export default function App() {
           {/* Sidebar tabs */}
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
             <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
-            <button onClick={() => setSidebarTab('cos')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'cos' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'cos' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>CoS</button>
-            <button onClick={() => setSidebarTab('auto')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'auto' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'auto' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Auto</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
           </div>
           {/* Sessions tab */}
@@ -1263,65 +1100,6 @@ export default function App() {
               </Show>
             </div>
           </Show>
-          {/* CoS tab */}
-          <Show when={sidebarTab() === 'cos'}>
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
-              <div style={{ padding: '12px 16px', 'border-bottom': '1px solid #1e1e1e' }}>
-                <button onClick={startChief} disabled={cosBusy() === 'chief'} style={{ width: '100%', padding: '7px', background: cosBusy() === 'chief' ? '#1a1a2e' : '#4aba6a', color: cosBusy() === 'chief' ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: cosBusy() === 'chief' ? 'wait' : 'pointer', 'margin-bottom': '8px' }}>{cosState().chiefSessionId ? 'Open Chief' : 'Start Chief'}</button>
-                <input value={cosNewName()} onInput={(e) => setCosNewName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="workstream" style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', 'margin-bottom': '6px', outline: 'none' }} />
-                <textarea value={cosNewGoal()} onInput={(e) => setCosNewGoal(e.target.value)} placeholder="goal" rows={3} style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', resize: 'vertical', 'font-family': 'inherit', outline: 'none', 'margin-bottom': '6px' }} />
-                <div style={{ display: 'flex', gap: '6px', 'margin-bottom': '6px' }}>
-                  <select value={cosLauncher()} onChange={(e) => setCosLauncher(e.currentTarget.value as 'session' | 'auto' | 'goal')} style={{ flex: '0 0 86px', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', outline: 'none' }}>
-                    <option value="goal">goal</option>
-                    <option value="auto">auto</option>
-                    <option value="session">session</option>
-                  </select>
-                  <input value={cosRepo()} onInput={(e) => setCosRepo(e.target.value)} placeholder="/home/user/feather" style={{ flex: '1', 'min-width': '0', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', outline: 'none' }} />
-                </div>
-                <button onClick={cosCreate} disabled={cosCreating() || !cosNewName() || !cosNewGoal()} style={{ width: '100%', padding: '7px', background: cosCreating() ? '#1a1a2e' : '#4aba6a', color: cosCreating() ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: cosCreating() ? 'wait' : 'pointer' }}>{cosCreating() ? 'Launching...' : '+ Workstream'}</button>
-              </div>
-              <Show when={cosState().workstreams.length === 0}>
-                <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No workstreams.</div>
-              </Show>
-              <For each={cosState().workstreams}>{(w) => (
-                <div onClick={() => openCos(w)}
-                  style={{ padding: '10px 16px', cursor: 'pointer', 'border-bottom': '1px solid #111', 'border-left': currentCos() === w.id ? '3px solid #4aba6a' : '3px solid transparent', background: currentCos() === w.id ? '#1a1a2e' : 'transparent', '-webkit-tap-highlight-color': 'transparent' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: w.status === 'running' ? '#4aba6a' : w.status === 'idle' ? '#73b8ff' : '#555', 'flex-shrink': '0' }} />
-                    <span style={{ 'font-size': '13px', 'font-weight': '600', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{w.name}</span>
-                    <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#1e1e1e', color: '#888', 'flex-shrink': '0', 'font-weight': '600' }}>{w.launcher}</span>
-                  </div>
-                  <div style={{ 'font-size': '10px', color: '#555', 'margin-top': '2px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{w.lastReceipt || w.status}</div>
-                </div>
-              )}</For>
-            </div>
-          </Show>
-          {/* Auto tab */}
-          <Show when={sidebarTab() === 'auto'}>
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', 'padding-bottom': 'env(safe-area-inset-bottom)' }}>
-              <div style={{ padding: '12px 16px', 'border-bottom': '1px solid #1e1e1e' }}>
-                <input value={autoNewName()} onInput={(e) => setAutoNewName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="name (lowercase)" style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', 'margin-bottom': '6px', outline: 'none' }} />
-                <textarea value={autoNewGoal()} onInput={(e) => setAutoNewGoal(e.target.value)} placeholder="goal (what should it loop on?)" rows={2} style={{ width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '6px', color: '#e5e5e5', 'font-size': '12px', resize: 'vertical', 'font-family': 'inherit', outline: 'none' }} />
-                <button onClick={autoCreate} disabled={autoCreating() || !autoNewName() || !autoNewGoal()} style={{ width: '100%', 'margin-top': '6px', padding: '6px', background: autoCreating() ? '#1a1a2e' : '#4aba6a', color: autoCreating() ? '#666' : '#000', border: 'none', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: autoCreating() ? 'wait' : 'pointer' }}>{autoCreating() ? 'Creating...' : '+ New auto'}</button>
-              </div>
-              <Show when={autoInstances().length === 0}>
-                <div style={{ padding: '20px 16px', color: '#555', 'font-size': '13px' }}>No autos yet.</div>
-              </Show>
-              <For each={sortedAutos()}>{(inst) => (
-                <div onClick={() => { setCurrentAuto(inst.name); setCurrentCos(null); setSidebar(false) }}
-                  style={{ padding: '10px 16px', cursor: 'pointer', 'border-bottom': '1px solid #111', 'border-left': currentAuto() === inst.name ? '3px solid #4aba6a' : '3px solid transparent', background: currentAuto() === inst.name ? '#1a1a2e' : 'transparent', '-webkit-tap-highlight-color': 'transparent' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>
-                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: inst.running ? '#4aba6a' : '#555', 'flex-shrink': '0' }} />
-                    <span style={{ 'font-size': '13px', 'font-weight': '600', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{inst.name}</span>
-                    <span style={{ 'font-size': '10px', color: '#888', 'flex-shrink': '0' }}>k{inst.keeps}/r{inst.reverts}/c{inst.crashes}</span>
-                  </div>
-                  <Show when={inst.last}>
-                    <div style={{ 'font-size': '10px', color: '#555', 'margin-top': '2px' }}>{timeAgo(inst.last!.timestamp)} ago — {inst.last!.status}</div>
-                  </Show>
-                </div>
-              )}</For>
-            </div>
-          </Show>
         </div>
       </div>
 
@@ -1338,162 +1116,6 @@ export default function App() {
 
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
-        <Show when={currentAuto()}>{(name) => {
-          const inst = () => autoDetail() || autoInstances().find(i => i.name === name())
-          const recent = () => {
-            const r = autoDetail()?.results
-            if (!r) return [] as { ts: string; status: string; desc: string }[]
-            return r.split('\n').slice(1).filter(Boolean).slice(-15).reverse().map(line => {
-              const [ts, status, ...rest] = line.split('\t')
-              return { ts, status, desc: rest.join('\t') }
-            })
-          }
-          return (
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
-              <div style={{ padding: '12px 24px 12px 100px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
-                <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: inst()?.running ? '#4aba6a' : '#555' }} />
-                <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{name()}</span>
-                <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{inst()?.running ? 'RUNNING' : 'STOPPED'}</span>
-                <div style={{ flex: '1' }} />
-                <Show when={inst()?.mainChat}>
-                  <button onClick={(e) => { e.preventDefault(); select(inst()!.mainChat!) }} style={{ background: 'none', border: '1px solid #2a3a55', color: '#73b8ff', padding: '4px 10px', 'border-radius': '6px', 'font-size': '13px', cursor: 'pointer' }}>→ main chat</button>
-                </Show>
-                <button onClick={() => setCurrentAuto(null)} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '4px 8px' }}>×</button>
-              </div>
-              <div style={{ padding: '20px 24px 20px 56px', 'max-width': '900px' }}>
-                <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', 'margin-bottom': '20px' }}>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Iterations</div>
-                    <div style={{ 'font-size': '24px', 'font-weight': '700', 'margin-top': '4px' }}>{inst()?.iterations ?? 0}</div>
-                  </div>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Keeps</div>
-                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#4aba6a', 'margin-top': '4px' }}>{inst()?.keeps ?? 0}</div>
-                  </div>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Reverts</div>
-                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#d4a050', 'margin-top': '4px' }}>{inst()?.reverts ?? 0}</div>
-                  </div>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                    <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Crashes</div>
-                    <div style={{ 'font-size': '24px', 'font-weight': '700', color: '#d45555', 'margin-top': '4px' }}>{inst()?.crashes ?? 0}</div>
-                  </div>
-                </div>
-                <Show when={inst()?.current}>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa' }}>
-                    <span style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-right': '8px' }}>Now</span>
-                    {inst()!.current}
-                  </div>
-                </Show>
-                <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px' }}>
-                  <Show when={!inst()?.running} fallback={
-                    <button onClick={() => autoAction(name(), 'stop')} disabled={autoBusy() !== null} style={{ padding: '10px 20px', background: '#d45555', color: '#fff', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: 'pointer' }}>{autoBusy() === name() + ':stop' ? '...' : 'Stop'}</button>
-                  }>
-                    <button onClick={() => autoAction(name(), 'start')} disabled={autoBusy() !== null} style={{ padding: '10px 20px', background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: 'pointer' }}>{autoBusy() === name() + ':start' ? '...' : 'Start'}</button>
-                  </Show>
-                  <Show when={!inst()?.mainChat}>
-                    <button onClick={() => { const id = currentId(); if (id) autoLink(name(), id); else alert('Open a chat first to link.') }} style={{ padding: '10px 16px', background: 'none', border: '1px solid #333', 'border-radius': '8px', color: '#888', 'font-size': '13px', cursor: 'pointer' }}>Link current chat</button>
-                  </Show>
-                </div>
-                <div style={{ 'margin-bottom': '16px' }}>
-                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>Set focus</div>
-                  <input placeholder="What should it work on next?" onKeyDown={async (e) => { if (e.key === 'Enter') { await autoFocus(name(), e.currentTarget.value); e.currentTarget.value = '' } }} style={{ width: '100%', padding: '10px 12px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }} />
-                </div>
-                <div style={{ 'margin-bottom': '24px' }}>
-                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>BTW (heads-up to the worker)</div>
-                  <input placeholder="Add a note for the next iteration..." onKeyDown={async (e) => { if (e.key === 'Enter') { await autoBtw(name(), e.currentTarget.value); e.currentTarget.value = ''; loadAutoDetail(name()) } }} style={{ width: '100%', padding: '10px 12px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', color: '#e5e5e5', 'font-size': '13px', outline: 'none' }} />
-                </div>
-                <Show when={recent().length > 0}>
-                  <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '8px' }}>Recent activity</div>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', overflow: 'hidden' }}>
-                    <For each={recent()}>{(r) => (
-                      <div style={{ padding: '8px 12px', 'border-bottom': '1px solid #1a1a2e', 'font-size': '12px', display: 'flex', gap: '8px', 'align-items': 'flex-start' }}>
-                        <span style={{ color: '#555', 'flex-shrink': '0', 'font-family': 'monospace' }}>{timeAgo(r.ts)}</span>
-                        <span style={{ color: r.status === 'keep' ? '#4aba6a' : r.status === 'revert' ? '#d4a050' : '#d45555', 'font-weight': '600', 'flex-shrink': '0', 'min-width': '50px' }}>{r.status}</span>
-                        <span style={{ color: '#aaa', flex: '1', 'word-break': 'break-word' }}>{r.desc}</span>
-                      </div>
-                    )}</For>
-                  </div>
-                </Show>
-                <Show when={autoDetail()?.workerSessions && autoDetail()!.workerSessions!.length > 0}>
-                  <div style={{ 'margin-top': '24px', 'margin-bottom': '8px', 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Worker sessions</div>
-                  <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', overflow: 'hidden' }}>
-                    <For each={autoDetail()!.workerSessions!}>{(w) => (
-                      <div onClick={() => select(w.id)} style={{ padding: '8px 12px', 'border-bottom': '1px solid #1a1a2e', 'font-size': '12px', display: 'flex', gap: '8px', 'align-items': 'center', cursor: 'pointer' }}>
-                        <span style={{ color: '#555', 'flex-shrink': '0', 'font-family': 'monospace', 'min-width': '34px' }}>{timeAgo(w.mtime)}</span>
-                        <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: w.agent === 'codex' ? '#2a1e3a' : '#1e2a3a', color: w.agent === 'codex' ? '#c084fc' : '#73b8ff', 'flex-shrink': '0', 'font-weight': '600' }}>{w.agent}</span>
-                        <span style={{ color: '#888', 'font-family': 'monospace', 'font-size': '11px' }}>{w.id.slice(0, 8)}</span>
-                      </div>
-                    )}</For>
-                  </div>
-                </Show>
-                <Show when={autoDetail()?.program}>
-                  <div style={{ 'margin-top': '24px', 'margin-bottom': '8px', 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Program</div>
-                  <div class="prose" style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '4px 20px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={marked.parse(autoDetail()!.program!) as string} />
-                </Show>
-              </div>
-            </div>
-          )
-        }}</Show>
-        <Show when={currentCos()}>{(id) => {
-          const w = () => cosState().workstreams.find(x => x.id === id())
-          return (
-            <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
-              <div style={{ padding: '12px 24px 12px 100px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
-                <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: w()?.status === 'running' ? '#4aba6a' : w()?.status === 'idle' ? '#73b8ff' : '#555' }} />
-                <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{w()?.name || 'workstream'}</span>
-                <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{w()?.status || 'unknown'}</span>
-                <div style={{ flex: '1' }} />
-                <button onClick={() => setCurrentCos(null)} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '4px 8px' }}>×</button>
-              </div>
-              <div style={{ padding: '20px 24px 20px 56px', 'max-width': '900px' }}>
-                <Show when={w()} fallback={<div style={{ color: '#555', 'font-size': '13px' }}>Missing workstream.</div>}>{(ws) => (
-                  <>
-                    <div style={{ display: 'grid', 'grid-template-columns': 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px', 'margin-bottom': '20px' }}>
-                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Launcher</div>
-                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{ws().launcher}</div>
-                      </div>
-                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Agent</div>
-                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{ws().agent || 'auto'}</div>
-                      </div>
-                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px' }}>
-                        <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Updated</div>
-                        <div style={{ 'font-size': '18px', 'font-weight': '700', 'margin-top': '4px' }}>{timeAgo(ws().updatedAt)}</div>
-                      </div>
-                    </div>
-                    <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa', 'line-height': '1.45' }}>
-                      <div style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '6px' }}>Goal</div>
-                      {ws().goal}
-                    </div>
-                    <Show when={ws().lastReceipt}>
-                      <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px 16px', 'margin-bottom': '16px', 'font-size': '13px', color: '#aaa' }}>
-                        <span style={{ color: '#666', 'font-size': '11px', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-right': '8px' }}>Receipt</span>
-                        {ws().lastReceipt}
-                      </div>
-                    </Show>
-                    <div style={{ display: 'flex', gap: '8px', 'margin-bottom': '16px', 'flex-wrap': 'wrap' }}>
-                      <button onClick={() => cosCheck(ws().id)} disabled={cosBusy() !== null} style={{ padding: '10px 16px', background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '8px', 'font-size': '14px', 'font-weight': '600', cursor: cosBusy() ? 'wait' : 'pointer' }}>{cosBusy() === ws().id ? '...' : 'Check'}</button>
-                      <Show when={ws().sessionId}>
-                        <button onClick={() => select(ws().sessionId!)} style={{ padding: '10px 16px', background: 'none', border: '1px solid #2a3a55', 'border-radius': '8px', color: '#73b8ff', 'font-size': '13px', cursor: 'pointer' }}>Open session</button>
-                      </Show>
-                      <Show when={ws().autoName}>
-                        <button onClick={() => { setCurrentAuto(ws().autoName!); setCurrentCos(null) }} style={{ padding: '10px 16px', background: 'none', border: '1px solid #2a3a55', 'border-radius': '8px', color: '#73b8ff', 'font-size': '13px', cursor: 'pointer' }}>Open auto</button>
-                      </Show>
-                    </div>
-                    <Show when={ws().goalCommand}>
-                      <div style={{ 'font-size': '11px', color: '#666', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', 'margin-bottom': '8px' }}>Goal command</div>
-                      <pre style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '8px', padding: '12px', color: '#d0d0d0', 'font-size': '12px', overflow: 'auto' }}>{ws().goalCommand}</pre>
-                    </Show>
-                    <div style={{ 'font-size': '11px', color: '#555', 'font-family': "'SF Mono', Menlo, monospace", 'margin-top': '16px', 'word-break': 'break-all' }}>{ws().repo}</div>
-                  </>
-                )}</Show>
-              </div>
-            </div>
-          )
-        }}</Show>
-        <Show when={!currentAuto() && !currentCos()}>
         {/* Header */}
         <div style={{ padding: '8px 16px 0 100px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
@@ -1837,7 +1459,6 @@ export default function App() {
               <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
             </div>
           </div>
-        </Show>
         </Show>
       </div>
     </div>

@@ -9,27 +9,28 @@ Buzz-backed Rooms tab was removed from main and archived on branch
 ## The model
 
 Rooms v1 failed because it made agents room *members* (multiplayer). The
-correct model is 1 user, 1 chief per room, N disposable-or-resumable
-workers — and it needs almost no new machinery:
+correct model is one user's durable workspace with any number of
+disposable-or-resumable sessions — and it needs almost no new machinery:
 
 1. **A room is a folder**: `~/rooms/<name>/` with
    - `AGENTS.md` — two-line room identity + "follow ~/rooms/_doctrine.md".
-     `CLAUDE.md` is a symlink to it, so claude, codex, and omp chiefs all
-     read the same priming (swapping brains = restarting the pinned chat
-     with a different agent; no migration feature).
+     `CLAUDE.md` is a symlink to it, so Claude, Codex, and other harnesses
+     all read the same room guidance. Switching harnesses means starting
+     or resuming a chat in the same room; no migration feature is needed.
    - `notes.md` — the room's memory. Write-as-you-go; the chat is not the
      memory. Handoff/brain-swap/new-day are the same operation: distill to
      notes, start a fresh chat in the same cwd.
-2. **The chief is a pinned Feather chat** whose cwd is the room folder.
-   Child sessions group under the room by cwd — for free.
-3. **`~/rooms/_doctrine.md`** — shared chief-of-staff doctrine (delegate,
-   never grind, write as you go, verify mechanically). First line is a
-   WORKER: guard so workers who ever see it defuse it.
+2. **Room chats use the room folder as their cwd.** Sessions group under
+   the room by cwd — for free — and any session can be resumed or replaced.
+3. **`~/rooms/_doctrine.md`** — shared workspace guidance: preserve durable
+   context in notes, verify mechanically, and use delegation when useful.
+   It does not assign a mandatory persona. WORKER-prefixed prompts keep
+   focused hands from recursively delegating.
 
 ## The `room` CLI (feather/bin/room)
 
-Harness-neutral delegation floor — any brain that can run bash gets the
-full doctrine. Claude chiefs may use native Agent/Workflow as a fast path.
+Optional, harness-neutral room and delegation tools. Any agent that can run
+bash can use them; native harness tools remain available as a fast path.
 
 - `room new <name>` / `room list`
 - `room note "<text>"` — timestamped append to notes.md
@@ -38,7 +39,7 @@ full doctrine. Claude chiefs may use native Agent/Workflow as a fast path.
   claude/codex (`claude -p` / `codex exec`), then ONE judge (concurrent
   judges have produced garbage before). Journaled run dir; roll call names
   failures; empty output = FAILED, never "no findings".
-- `room second-opinion "<q>"` — the non-brain harness, prompted skeptical
+- `room second-opinion "<q>"` — the other harness, prompted skeptically
 - `room spawn "<task>"` — real Feather session in the room cwd (visible,
   resumable), demoted by a WORKER: prefix
 - `room handoff` — distiller appends a validated `## Handoff` section to

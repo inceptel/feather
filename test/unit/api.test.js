@@ -103,6 +103,33 @@ suite('GET /api/health', () => {
   })
 })
 
+// ── Retired surfaces ───────────────────────────────────────────────────────
+
+suite('retired Auto and CoS APIs', () => {
+  it('returns a JSON 404 for the exact API root', async () => {
+    const r = await fetch(`${BASE}/api`)
+    assert.equal(r.status, 404)
+    assert.ok(r.headers.get('content-type').includes('application/json'))
+    assert.deepEqual(await r.json(), { error: 'not found' })
+  })
+
+  for (const endpoint of ['/api/auto/instances', '/api/cos/workstreams']) {
+    it(`returns a JSON 404 for GET ${endpoint}`, async () => {
+      const r = await fetch(`${BASE}${endpoint}`)
+      assert.equal(r.status, 404)
+      assert.ok(r.headers.get('content-type').includes('application/json'))
+      assert.deepEqual(await r.json(), { error: 'not found' })
+    })
+
+    it(`returns a JSON 404 for POST ${endpoint}`, async () => {
+      const r = await fetch(`${BASE}${endpoint}`, { method: 'POST' })
+      assert.equal(r.status, 404)
+      assert.ok(r.headers.get('content-type').includes('application/json'))
+      assert.deepEqual(await r.json(), { error: 'not found' })
+    })
+  }
+})
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 suite('GET /api/sessions', () => {

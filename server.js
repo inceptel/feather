@@ -4,12 +4,11 @@ import http from 'http';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
-import { generateRunSh, listPipelines } from './lib/auto-runsh.js';
 import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
@@ -43,8 +42,6 @@ const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
 const BOXES_FILE = path.resolve(import.meta.dirname, 'boxes.json');
 const SHARING_FILE = path.resolve(import.meta.dirname, 'sharing.json');
 const SHARE_LOG = path.join(HOME, '.feather/share-access.log');
-const COS_DIR = path.join(HOME, '.feather/cos');
-const COS_FILE = path.join(COS_DIR, 'workstreams.json');
 
 // Ensure omp session directory exists
 try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
@@ -1678,83 +1675,10 @@ app.get('/api/agents', (_req, res) => {
   res.json({ agents });
 });
 
-// ── /api/auto: instances ────────────────────────────────────────────────────
-
-// New instances live at ~/auto-NAME/. Legacy instances (created before the
-// rename) live at ~/autoweb-NAME/ and are still resolved for back-compat.
-const AUTO_PREFIX = 'auto-';
-const LEGACY_PREFIX = 'autoweb-';
-
-function autoDir(name) {
-  const fresh = path.join(HOME, AUTO_PREFIX + name);
-  if (fs.existsSync(fresh)) return fresh;
-  const legacy = path.join(HOME, LEGACY_PREFIX + name);
-  if (fs.existsSync(legacy)) return legacy;
-  return fresh; // default for not-yet-created
-}
-
-const safeName = (n) => /^[a-z0-9][a-z0-9-]{0,30}$/.test(n);
-
-function readSafe(p, fallback = '') {
-  try { return fs.readFileSync(p, 'utf8'); } catch { return fallback; }
-}
-
-function isRunning(pidPath) {
-  const pid = parseInt(readSafe(pidPath).trim());
-  if (!pid) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-function summarizeInstance(name) {
-  const dir = autoDir(name);
-  if (!fs.existsSync(path.join(dir, 'run.sh'))) return null;
-  const tsv = readSafe(path.join(dir, 'results.tsv'));
-  const rows = tsv.split('\n').slice(1).filter(Boolean);
-  let keeps = 0, reverts = 0, crashes = 0, skips = 0;
-  for (const r of rows) {
-    const status = r.split('\t')[1];
-    if (status === 'keep') keeps++;
-    else if (status === 'revert') reverts++;
-    else if (status === 'crash') crashes++;
-    else if (status === 'skip') skips++;
-  }
-  const last = rows.slice(-1)[0]?.split('\t') || [];
-  const mainChat = readSafe(path.join(dir, 'main_chat.txt')).trim() || null;
-  const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } };
-  const mtime = Math.max(
-    mtimeOf(path.join(dir, 'current.txt')),
-    mtimeOf(path.join(dir, 'results.tsv')),
-    mtimeOf(path.join(dir, 'findings.md')),
-    mtimeOf(path.join(dir, 'auto.pid')),
-    mtimeOf(dir)
-  );
-  return {
-    name,
-    dir,
-    running: isRunning(path.join(dir, 'auto.pid')),
-    current: readSafe(path.join(dir, 'current.txt')).trim(),
-    keeps, reverts, crashes, skips,
-    iterations: rows.length,
-    last: last.length ? { timestamp: last[0], status: last[1], description: last[2] } : null,
-    mainChat,
-    mtime,
-  };
-}
-
-function listInstances() {
-  const out = [];
-  const seen = new Set();
-  for (const entry of fs.readdirSync(HOME)) {
-    let name;
-    if (entry.startsWith(AUTO_PREFIX)) name = entry.slice(AUTO_PREFIX.length);
-    else if (entry.startsWith(LEGACY_PREFIX)) name = entry.slice(LEGACY_PREFIX.length);
-    else continue;
-    if (!safeName(name) || seen.has(name)) continue;
-    seen.add(name);
-    const s = summarizeInstance(name);
-    if (s) out.push(s);
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+function httpError(status, message) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
 }
 
 // ── Rooms v2 ───────────────────────────────────────────────────────────────
@@ -1880,7 +1804,7 @@ app.post('/api/rooms', (req, res) => {
     ].join('\n'));
     fs.symlinkSync('AGENTS.md', path.join(dir, 'CLAUDE.md'));
     fs.writeFileSync(path.join(dir, 'notes.md'),
-      `# #${name} — notes\n\nWorking memory for this room. The chief appends decisions and open\nthreads as they happen (\`room note "..."\`). Newest at the bottom.\n`);
+      `# #${name} — notes\n\nWorking memory for this room. Sessions append decisions and open\nthreads as they happen (\`room note "..."\`). Newest at the bottom.\n`);
     res.json({ name, cwd: dir });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1899,559 +1823,6 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     fs.writeFileSync(ROOM_ASSIGN_FILE, JSON.stringify(assignments, null, 2));
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.get('/api/auto/instances', (_req, res) => {
-  res.json({ instances: listInstances() });
-});
-
-app.get('/api/auto/instances/:name', (req, res) => {
-  const { name } = req.params;
-  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
-  const s = summarizeInstance(name);
-  if (!s) return res.status(404).json({ error: 'not found' });
-  s.program = readSafe(path.join(s.dir, 'program.md'));
-  s.results = readSafe(path.join(s.dir, 'results.tsv'));
-  s.workerSessions = listWorkerSessions(name);
-  res.json(s);
-});
-
-function listWorkerSessions(name, limit = 20) {
-  const out = [];
-  // Claude project dir convention: leading dash + path with slashes → dashes.
-  // Check the new path first, then the legacy autoweb- path.
-  const projDirs = [
-    path.join(CLAUDE_PROJECTS, `-home-user-${AUTO_PREFIX}${name}`),
-    path.join(CLAUDE_PROJECTS, `-home-user-${LEGACY_PREFIX}${name}`),
-  ];
-  for (const projDir of projDirs) {
-    if (!fs.existsSync(projDir)) continue;
-    try {
-      for (const f of fs.readdirSync(projDir)) {
-        if (!f.endsWith('.jsonl')) continue;
-        const fp = path.join(projDir, f);
-        const st = fs.statSync(fp);
-        if (st.size < 50) continue;
-        out.push({ id: f.replace('.jsonl', ''), agent: 'claude', mtime: st.mtime.toISOString() });
-      }
-    } catch {}
-  }
-  // Codex: scan recent files for the instance dir path in their buffers.
-  for (const { uuid, fpath, mtime } of listCodexJsonlFiles().slice(0, 200)) {
-    try {
-      const fd = fs.openSync(fpath, 'r');
-      const buf = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, fs.fstatSync(fd).size));
-      fs.readSync(fd, buf, 0, buf.length, 0);
-      fs.closeSync(fd);
-      if (buf.includes(`${AUTO_PREFIX}${name}`) || buf.includes(`${LEGACY_PREFIX}${name}`)) {
-        out.push({ id: uuid, agent: 'codex', mtime: mtime.toISOString() });
-      }
-    } catch {}
-  }
-  out.sort((a, b) => b.mtime.localeCompare(a.mtime));
-  return out.slice(0, limit);
-}
-
-app.get('/api/auto/pipelines', (_req, res) => {
-  res.json({ pipelines: listPipelines() });
-});
-
-// Map legacy `template` values onto pipeline names.
-function resolvePipelineName({ pipeline, template }) {
-  if (pipeline) return pipeline;
-  if (!template || template === 'full') return 'claude-codex';
-  if (template === 'simple') return 'simple';
-  return template;
-}
-
-function httpError(status, message) {
-  const e = new Error(message);
-  e.status = status;
-  return e;
-}
-
-function createAutoInstance({ name, target, url, repo, template, pipeline, goal }) {
-  if (!safeName(name)) throw httpError(400, 'bad name (lowercase, digits, dashes)');
-  // Refuse if either the new path or a legacy autoweb- path already exists.
-  const dir = path.join(HOME, AUTO_PREFIX + name);
-  const legacyDir = path.join(HOME, LEGACY_PREFIX + name);
-  if (fs.existsSync(dir) || fs.existsSync(legacyDir)) {
-    throw httpError(409, 'already exists');
-  }
-
-  const pipelineName = resolvePipelineName({ pipeline, template });
-  const available = listPipelines();
-  if (!available.includes(pipelineName)) {
-    throw httpError(400, `unknown pipeline: ${pipelineName}. Available: ${available.join(', ')}`);
-  }
-
-  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
-
-  const runSh = generateRunSh({
-    pipelineName,
-    instanceName: name,
-    instanceDir: dir,
-    repo,
-  });
-
-  const programParts = [
-    `# auto — ${name}`,
-    `Pipeline: ${pipelineName}`,
-    '',
-    '## Goal',
-    goal || target || '(set me)',
-    '',
-  ];
-  if (target) programParts.push('## Target file', target, '');
-  if (url) programParts.push('## Target URL', url, '');
-  if (repo) programParts.push('## Repo', repo, '');
-  programParts.push(
-    '## CURRENT FOCUS',
-    'general',
-    '',
-    '## Known issues',
-    '(none)',
-    '',
-    '## CAN',
-    '- (list)',
-    '',
-    '## CANNOT',
-    '- Break the page',
-    '',
-    '## How to verify',
-    url ? 'Screenshot the URL, sanity check.' : 'Run tests, check sanity conditions.',
-    '',
-  );
-
-  fs.writeFileSync(path.join(dir, 'run.sh'), runSh, { mode: 0o755 });
-  fs.writeFileSync(path.join(dir, 'program.md'), programParts.join('\n'));
-  fs.writeFileSync(path.join(dir, 'results.tsv'), 'timestamp\tstatus\tdescription\n');
-  return summarizeInstance(name);
-}
-
-function startAutoInstance(name) {
-  if (!safeName(name)) throw httpError(400, 'bad name');
-  const dir = autoDir(name);
-  if (!fs.existsSync(path.join(dir, 'run.sh'))) throw httpError(404, 'not found');
-  const pidPath = path.join(dir, 'auto.pid');
-  if (isRunning(pidPath)) return { ok: true, alreadyRunning: true };
-  const out = fs.openSync(path.join(dir, 'auto.log'), 'a');
-  const child = spawn('bash', [path.join(dir, 'run.sh')], {
-    detached: true,
-    stdio: ['ignore', out, out],
-    cwd: dir,
-  });
-  fs.writeFileSync(pidPath, String(child.pid));
-  child.unref();
-  return { ok: true, pid: child.pid };
-}
-
-app.post('/api/auto/instances', express.json(), (req, res) => {
-  try {
-    res.json({ ok: true, instance: createAutoInstance(req.body || {}) });
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.post('/api/auto/instances/:name/start', (req, res) => {
-  try {
-    res.json(startAutoInstance(req.params.name));
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.post('/api/auto/instances/:name/stop', (req, res) => {
-  const { name } = req.params;
-  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
-  const pidPath = path.join(autoDir(name), 'auto.pid');
-  const pid = parseInt(readSafe(pidPath).trim());
-  if (!pid) return res.json({ ok: true, alreadyStopped: true });
-  try { process.kill(-pid, 'SIGTERM'); } catch {}
-  try { process.kill(pid, 'SIGTERM'); } catch {}
-  fs.unlinkSync(pidPath);
-  res.json({ ok: true });
-});
-
-app.post('/api/auto/instances/:name/focus', express.json(), (req, res) => {
-  const { name } = req.params;
-  const { focus } = req.body || {};
-  if (!safeName(name) || !focus) return res.status(400).json({ error: 'bad input' });
-  const programPath = path.join(autoDir(name), 'program.md');
-  let p = readSafe(programPath);
-  if (!p) return res.status(404).json({ error: 'not found' });
-  if (/^## CURRENT FOCUS\n.*$/m.test(p)) {
-    p = p.replace(/^## CURRENT FOCUS\n.*$/m, `## CURRENT FOCUS\n${focus}`);
-  } else {
-    p += `\n## CURRENT FOCUS\n${focus}\n`;
-  }
-  fs.writeFileSync(programPath, p);
-  res.json({ ok: true });
-});
-
-app.post('/api/auto/instances/:name/btw', express.json(), (req, res) => {
-  const { name } = req.params;
-  const { note } = req.body || {};
-  if (!safeName(name) || !note) return res.status(400).json({ error: 'bad input' });
-  const programPath = path.join(autoDir(name), 'program.md');
-  let p = readSafe(programPath);
-  if (!p) return res.status(404).json({ error: 'not found' });
-  const stamp = new Date().toISOString();
-  const line = `- (${stamp}) ${note}`;
-  if (/^## Known issues\n/m.test(p)) {
-    p = p.replace(/^## Known issues\n(\(none\)\n)?/m, `## Known issues\n${line}\n`);
-  } else {
-    p += `\n## Known issues\n${line}\n`;
-  }
-  fs.writeFileSync(programPath, p);
-  res.json({ ok: true });
-});
-
-app.post('/api/auto/instances/:name/link', express.json(), (req, res) => {
-  const { name } = req.params;
-  const { sessionId } = req.body || {};
-  if (!safeName(name) || !sessionId) return res.status(400).json({ error: 'bad input' });
-  const dir = autoDir(name);
-  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'not found' });
-  fs.writeFileSync(path.join(dir, 'main_chat.txt'), sessionId);
-  res.json({ ok: true });
-});
-
-app.delete('/api/auto/instances/:name', (req, res) => {
-  const { name } = req.params;
-  if (!safeName(name)) return res.status(400).json({ error: 'bad name' });
-  const dir = autoDir(name);
-  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'not found' });
-  if (isRunning(path.join(dir, 'auto.pid'))) return res.status(409).json({ error: 'still running, stop first' });
-  res.json({ ok: true, hint: 'rm -rf ' + dir + ' to remove on disk (server does not delete)' });
-});
-
-// ── /api/cos: chief-of-staff workstreams ─────────────────────────────────────
-
-function readCosState() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(COS_FILE, 'utf8'));
-    return {
-      chiefSessionId: parsed.chiefSessionId || null,
-      workstreams: Array.isArray(parsed.workstreams) ? parsed.workstreams : [],
-    };
-  } catch {
-    return { chiefSessionId: null, workstreams: [] };
-  }
-}
-
-function writeCosState(state) {
-  fs.mkdirSync(COS_DIR, { recursive: true });
-  fs.writeFileSync(COS_FILE, JSON.stringify(state, null, 2));
-}
-
-function titleSession(id, title) {
-  const meta = readMeta();
-  meta[id] = { ...(meta[id] || {}), title };
-  writeMeta(meta);
-}
-
-function slugifyWorkstreamName(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 30);
-}
-
-function yamlQuote(value) {
-  return JSON.stringify(String(value ?? ''));
-}
-
-function createGoalFiles({ repo, slug, title, goal }) {
-  const root = path.join(repo, 'docs/goals', slug);
-  fs.mkdirSync(path.join(root, 'notes'), { recursive: true });
-  const goalMd = `# ${title}
-
-## Objective
-
-${goal}
-
-## Original Request
-
-${JSON.stringify(goal)}
-
-## Intake Summary
-
-- Input shape: \`specific\`
-- Audience: operator
-- Authority: \`approved\`
-- Proof type: \`artifact\`
-- Completion proof: The child agent records a receipt with changed files, verification, blockers, and next recommendation.
-- Likely misfire: The workstream produces planning notes but no executable next step or proof.
-- Blind spots considered:
-  - Scope may need decomposition after first scout pass.
-  - External credentials or destructive actions require explicit approval.
-
-## Goal Kind
-
-\`specific\`
-
-## Current Tranche
-
-Produce the smallest useful result for this workstream, then leave a durable receipt.
-
-## Non-Negotiable Constraints
-
-- Keep work scoped to the named workstream.
-- Do not perform destructive actions or spend money without explicit approval.
-- Record verification or a concrete blocker before stopping.
-
-## Stop Rule
-
-Stop only when the workstream has a receipt that the CoS can summarize.
-
-## Canonical Board
-
-\`docs/goals/${slug}/state.yaml\`
-
-## Run Command
-
-\`\`\`text
-/goal Follow docs/goals/${slug}/goal.md.
-\`\`\`
-`;
-  const stateYaml = `version: 2
-
-goal:
-  title: ${yamlQuote(title)}
-  slug: ${yamlQuote(slug)}
-  kind: specific
-  tranche: ${yamlQuote('Produce the first useful workstream result and receipt.')}
-  status: active
-  intake:
-    original_request: ${yamlQuote(goal)}
-    interpreted_outcome: ${yamlQuote(goal)}
-    input_shape: specific
-    audience: operator
-    authority: approved
-    proof_type: artifact
-    completion_proof: ${yamlQuote('Child agent records a receipt with verification, blockers, and next recommendation.')}
-    likely_misfire: ${yamlQuote('Planning without a useful result or receipt.')}
-    blind_spots_considered:
-      - ${yamlQuote('Scope may need decomposition after first scout pass.')}
-      - ${yamlQuote('External credentials or destructive actions require approval.')}
-    existing_plan_facts: []
-
-rules:
-  pm_owns_state: true
-  one_active_task: true
-  max_write_workers: 1
-  no_implementation_without_worker_or_pm_task: true
-  no_completion_without_judge_or_pm_audit: true
-  planning_is_not_completion: true
-  continuous_until_full_outcome: true
-
-agents:
-  scout: unknown
-  worker: unknown
-  judge: unknown
-
-visual_board:
-  selected: none
-
-active_task: T001
-
-tasks:
-  - id: T001
-    type: worker
-    assignee: Worker
-    status: active
-    reasoning_hint: default
-    objective: ${yamlQuote(goal)}
-    constraints:
-      - ${yamlQuote('Keep the slice narrow and leave a receipt.')}
-      - ${yamlQuote('Stop before destructive operations, credentials, purchases, or production writes that need approval.')}
-    expected_output:
-      - ${yamlQuote('Useful result or concrete blocker.')}
-      - ${yamlQuote('Verification command or reason verification was not possible.')}
-      - ${yamlQuote('Next recommendation for the CoS.')}
-    receipt: null
-
-checks:
-  dirty_fingerprint: unknown
-  last_verification:
-    result: unknown
-    task: null
-    commands: []
-`;
-  fs.writeFileSync(path.join(root, 'goal.md'), goalMd);
-  fs.writeFileSync(path.join(root, 'state.yaml'), stateYaml);
-  return {
-    goalPath: path.join(root, 'goal.md'),
-    goalCommand: `/goal Follow docs/goals/${slug}/goal.md.`,
-  };
-}
-
-function chiefPrompt() {
-  return `You are Allan's Chief of Staff inside Feather.
-
-Operating model:
-- Keep a short list of active workstreams and ask for clarification only when a decision changes scope, money, credentials, or risk.
-- Prefer launching bounded child workstreams through Feather CoS, /goal, or /auto instead of doing every task in the parent thread.
-- Every child needs a receipt: current status, proof, blockers, and next recommendation.
-- msgvault and tg-in already work; treat them as available intake channels once this CoS thread is wired to a heartbeat.
-- Default to read-only discovery before writes. Do not spend money, send external messages, or change production state without explicit approval.
-
-First action: summarize the current CoS operating model in 5 bullets and ask Allan for the first workstream to launch.`;
-}
-
-function workstreamPrompt(w) {
-  return `You are a child workstream launched by Allan's Chief of Staff.
-
-Name: ${w.name}
-Goal: ${w.goal}
-
-Rules:
-- Work only on this workstream.
-- Prefer a small useful result over a broad plan.
-- Do not spend money, send external messages, or perform destructive operations without explicit approval.
-- Before stopping, leave a receipt with: status, files/artifacts touched, verification, blockers, and next recommendation.
-
-Start now.`;
-}
-
-function refreshCosWorkstream(w) {
-  const next = { ...w };
-  if (next.autoName) {
-    const auto = summarizeInstance(next.autoName);
-    if (auto) {
-      next.status = auto.running ? 'running' : 'stopped';
-      next.lastReceipt = auto.current || auto.last?.description || `${auto.iterations} iterations`;
-      next.updatedAt = new Date(Math.max(auto.mtime || 0, Date.parse(next.updatedAt || '') || 0)).toISOString();
-    }
-  } else if (next.sessionId) {
-    const fpath = findJsonlPath(next.sessionId, next.agent);
-    next.status = tmuxIsActive(next.sessionId) ? 'running' : (fpath ? 'idle' : 'starting');
-    if (fpath) {
-      try {
-        const stat = fs.statSync(fpath);
-        next.updatedAt = stat.mtime.toISOString();
-        next.lastReceipt = `${next.status}; session updated ${stat.mtime.toISOString()}`;
-      } catch {}
-    }
-  }
-  if (next.goalPath && fs.existsSync(next.goalPath)) {
-    try {
-      const stat = fs.statSync(next.goalPath);
-      if (!next.updatedAt || stat.mtime > new Date(next.updatedAt)) next.updatedAt = stat.mtime.toISOString();
-    } catch {}
-  }
-  return next;
-}
-
-function refreshCosState(state, persist = false) {
-  const next = { ...state, workstreams: state.workstreams.map(refreshCosWorkstream) };
-  if (persist) writeCosState(next);
-  return next;
-}
-
-app.get('/api/cos', (_req, res) => {
-  const state = refreshCosState(readCosState(), true);
-  res.json({
-    ...state,
-    msgvault: fs.existsSync(path.join(HOME, '.msgvault/msgvault.db')) || fs.existsSync(path.join(HOME, '.local/bin/msgvault')),
-    tgIn: fs.existsSync(path.join(HOME, 'telegram-bot')) || fs.existsSync(path.join(HOME, '.telegram-bot')),
-  });
-});
-
-app.post('/api/cos/chief', (req, res) => {
-  try {
-    const state = readCosState();
-    if (state.chiefSessionId) return res.json({ ok: true, sessionId: state.chiefSessionId, reused: true });
-    const sessionId = randomUUID();
-    const agent = req.body?.agent || 'codex';
-    spawnSession(sessionId, HOME, agent);
-    titleSession(sessionId, 'Chief of Staff');
-    state.chiefSessionId = sessionId;
-    writeCosState(state);
-    setTimeout(() => sendInput(sessionId, chiefPrompt()).catch(e => console.warn('[cos] chief prompt failed:', e.message)), 7000);
-    res.json({ ok: true, sessionId });
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.post('/api/cos/workstreams', (req, res) => {
-  try {
-    const body = req.body || {};
-    const name = slugifyWorkstreamName(body.name);
-    const goal = String(body.goal || '').trim();
-    if (!safeName(name) || !goal) throw httpError(400, 'name and goal required');
-
-    const state = readCosState();
-    if (state.workstreams.some(w => w.name === name)) throw httpError(409, 'workstream already exists');
-
-    const now = new Date().toISOString();
-    const launcher = ['session', 'auto', 'goal'].includes(body.launcher) ? body.launcher : 'session';
-    const repo = body.repo && path.isAbsolute(body.repo) ? body.repo : path.resolve(import.meta.dirname);
-    const agent = body.agent || 'codex';
-    const workstream = {
-      id: randomUUID(),
-      name,
-      goal,
-      launcher,
-      agent,
-      repo,
-      status: 'starting',
-      createdAt: now,
-      updatedAt: now,
-      lastCheckedAt: null,
-      lastReceipt: `launched via ${launcher}`,
-    };
-
-    if (launcher === 'auto') {
-      const pipeline = body.pipeline || 'claude-codex';
-      createAutoInstance({ name, goal, repo, pipeline });
-      if (body.start !== false) startAutoInstance(name);
-      workstream.autoName = name;
-      workstream.status = body.start === false ? 'stopped' : 'running';
-    } else {
-      const sessionId = randomUUID();
-      if (launcher === 'goal') {
-        const created = createGoalFiles({ repo, slug: name, title: name, goal });
-        workstream.goalPath = created.goalPath;
-        workstream.goalCommand = created.goalCommand;
-      }
-      spawnSession(sessionId, repo, agent);
-      titleSession(sessionId, `CoS: ${name}`);
-      workstream.sessionId = sessionId;
-      const prompt = launcher === 'goal' ? `/goal Follow docs/goals/${name}/goal.md.` : workstreamPrompt(workstream);
-      setTimeout(() => sendInput(sessionId, prompt).catch(e => console.warn(`[cos] workstream prompt failed for ${name}:`, e.message)), 7000);
-    }
-
-    state.workstreams.unshift(workstream);
-    writeCosState(state);
-    res.json({ ok: true, workstream: refreshCosWorkstream(workstream) });
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.post('/api/cos/workstreams/:id/check', (req, res) => {
-  try {
-    const state = readCosState();
-    const idx = state.workstreams.findIndex(w => w.id === req.params.id || w.name === req.params.id);
-    if (idx < 0) throw httpError(404, 'not found');
-    const checked = refreshCosWorkstream({ ...state.workstreams[idx], lastCheckedAt: new Date().toISOString() });
-    state.workstreams[idx] = checked;
-    writeCosState(state);
-    res.json({ ok: true, workstream: checked });
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
-app.use(express.static(STATIC_DIR, {
-  maxAge: '0',
-  setHeaders(res, filePath) {
-    if (filePath.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-    }
-  },
-}));
-app.get('/{*path}', (_req, res) => {
-  const index = path.join(STATIC_DIR, 'index.html');
-  if (fs.existsSync(index)) res.sendFile(index);
-  else res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
 });
 
 const server = http.createServer(app);
@@ -2490,6 +1861,26 @@ app.post('/api/transcribe', async (req, res) => {
     const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
     res.json({ transcript });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Register fallbacks after every API route. API misses stay JSON instead of
+// being mistaken for successful SPA navigation.
+app.all(['/api', '/api/{*path}'], (_req, res) => res.status(404).json({ error: 'not found' }));
+
+app.use(express.static(STATIC_DIR, {
+  maxAge: '0',
+  setHeaders(res, filePath) {
+    if (filePath.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
+  },
+}));
+app.get('/{*path}', (_req, res) => {
+  const index = path.join(STATIC_DIR, 'index.html');
+  if (fs.existsSync(index)) res.sendFile(index);
+  else res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
 });
 
 wss.on('connection', (ws, req) => {

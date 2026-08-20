@@ -104,7 +104,7 @@ async function selectTestSession(page) {
 test.describe('App shell', () => {
   test('shows empty state when no session selected', async ({ page }) => {
     await page.goto(BASE)
-    await expect(page.locator('text=Open a session or create a new one')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Rooms', { exact: true })).toBeVisible({ timeout: 10000 })
     // No tabs should be visible
     await expect(page.locator('button:has-text("Chat")')).not.toBeVisible()
     await expect(page.locator('button:has-text("Terminal")')).not.toBeVisible()
@@ -115,7 +115,9 @@ test.describe('App shell', () => {
     await page.waitForLoadState('networkidle')
     await openSidebar(page)
     await expect(page.getByText('Feather', { exact: true })).toBeVisible()
-    await expect(page.locator('button:has-text("+ New Claude")')).toBeVisible()
+    await expect(page.getByRole('button', { name: '+ New Session', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Auto', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'CoS', exact: true })).toHaveCount(0)
   })
 
   test('sidebar closes when X is clicked', async ({ page }) => {
@@ -126,8 +128,8 @@ test.describe('App shell', () => {
     // Click close button
     await page.locator('button:has-text("×")').click()
     await page.waitForTimeout(300)
-    // Sidebar title should be hidden
-    await expect(page.getByText('Feather', { exact: true })).not.toBeVisible()
+    // Closed state restores the hamburger control.
+    await expect(page.locator('button:has-text("☰")')).toBeVisible()
   })
 
   test('sidebar shows our test session', async ({ page }) => {
@@ -463,7 +465,7 @@ test.describe('Mobile viewport', () => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
     await openSidebar(page)
-    await expect(page.locator('button:has-text("+ New Claude")')).toBeVisible()
+    await expect(page.getByRole('button', { name: '+ New Session', exact: true })).toBeVisible()
   })
 
   test('messages are readable on mobile', async ({ page }) => {

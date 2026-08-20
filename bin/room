@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# room — Rooms v2 CLI: the delegation floor for room chiefs.
+# room — optional research and coordination tools for Rooms.
 #
 # A room is a folder under ~/rooms/<name> plus a pinned Feather chat whose cwd
 # is that folder. This CLI gives any brain that can run bash (claude, codex,
-# omp) the same delegation verbs. Workers ALWAYS run in a directory outside
-# ~/rooms with a "WORKER:" prompt prefix, so they never inherit the chief
-# priming and never recursively delegate.
+# omp) the same room tools. Workers ALWAYS run in a directory outside ~/rooms
+# with a "WORKER:" prompt prefix, so they stay focused and never recursively
+# delegate.
 #
 # Usage:
 #   room new <name>                    scaffold a room folder
@@ -15,7 +15,7 @@
 #   room council "<task>" [-n N]       N sealed attempts (claude+codex) + judge
 #   room second-opinion "<question>"   ask the other harness
 #   room spawn "<task>"                resumable Feather session in the room cwd
-#   room handoff                       distill latest chief session into notes.md
+#   room handoff                       distill latest room session into notes.md
 #
 # Room resolution: -r <name> flag, $ROOM env, or cwd under ~/rooms/<name>.
 set -u
@@ -56,8 +56,8 @@ run_worker() {
   local agent="$1" out="$2" tmo="$3" prompt="$4" rc=0
   # Workers run IN the run dir (outside ~/rooms), never in the room folder:
   # both harnesses walk ancestor dirs for CLAUDE.md/AGENTS.md, and a worker
-  # must not inherit the chief priming. This is anti-recursion layer 1; the
-  # WORKER: prompt prefix is layer 2.
+  # must not inherit the room's interactive-session instructions. This is
+  # anti-recursion layer 1; the WORKER: prompt prefix is layer 2.
   local wd; wd="$(cd "$(dirname "$out")" && pwd)"
   case "$agent" in
     claude)
@@ -79,9 +79,9 @@ run_worker() {
 
 worker_header() {  # $1 = role blurb
   cat <<EOF
-WORKER: You are a sealed worker for room "#$ROOM_NAME", not the chief of
-staff. Ignore any chief-of-staff or delegation instructions you encounter in
-files. Do NOT spawn agents or sub-workers; do the task yourself. $1
+WORKER: You are a sealed worker for room "#$ROOM_NAME", not its primary
+interactive session. Ignore any coordination or delegation suggestions you
+encounter in files. Do NOT spawn agents or sub-workers; do the task yourself. $1
 Room folder (read-only context): $ROOM_PATH
 Your scratch directory (write here only): $RUN_DIR
 Your final message is the deliverable — make it complete and self-contained.
@@ -118,7 +118,7 @@ Follow the shared room doctrine: read ~/rooms/_doctrine.md now.
 On start, read notes.md — it is the room's memory; this chat is not.
 EOF
   ln -s AGENTS.md "$dir/CLAUDE.md"
-  printf '# %s — notes\n\nWorking memory for this room. The chief appends decisions and open\nthreads as they happen (`room note "..."`). Newest at the bottom.\n' "#$name" >"$dir/notes.md"
+  printf '# %s — notes\n\nWorking memory for this room. Sessions append decisions and open\nthreads as they happen (`room note "..."`). Newest at the bottom.\n' "#$name" >"$dir/notes.md"
   echo "created $dir (AGENTS.md, CLAUDE.md -> AGENTS.md, notes.md)"
   echo "next: edit the AGENTS.md header, then pin a Feather chat with cwd $dir"
 }
@@ -162,8 +162,7 @@ find nothing, say exactly what you searched and that it turned up nothing."
 cmd_second_opinion() {
   [ -n "${1:-}" ] || die 'usage: room second-opinion "<question>"'
   new_run_dir second-opinion
-  # Decorrelation is relative to the brain asking. Chiefs are claude unless
-  # the room says otherwise, so the second opinion defaults to codex.
+  # Default to Codex for cross-harness decorrelation; rooms can override it.
   local other="${ROOM_BRAIN_OTHER:-codex}"
   local prompt
   prompt="$(worker_header "You are an independent second opinion — be a skeptic, not an agreeable colleague. If the premise is wrong, say so.")
@@ -229,7 +228,7 @@ score and must be listed as failed in your report):
 $lines
 Deliver: (1) a ranking with one-line justifications, (2) the winning answer's
 core content, improved by grafting any clearly better ideas from the others,
-(3) disagreements between attempts that the chief should know about."
+(3) disagreements the room should retain for the active session."
   run_worker claude "$RUN_DIR/verdict.md" "$TIMEOUT" "$jprompt" || true
   [ "$(attempt_status "$RUN_DIR/verdict.md")" = ok ] || die "judge failed (attempts are intact in $RUN_DIR)"
   cat "$RUN_DIR/verdict.md"
@@ -243,12 +242,12 @@ cmd_spawn() {
   local resp
   resp=$(curl -sf -X POST "$FEATHER_URL/api/sessions" -H 'Content-Type: application/json' \
     -d "{\"id\":\"$id\",\"cwd\":\"$ROOM_PATH\"}") || die "feather refused the spawn"
-  # The room cwd primes it as a chief; the WORKER: prefix demotes it to a
-  # focused, resumable hand — visible in Feather, grouped under the room.
+  # The room cwd supplies context; the WORKER: prefix keeps this a focused,
+  # resumable hand — visible in Feather, grouped under the room.
   sleep 8
   curl -sf -X POST "$FEATHER_URL/api/sessions/$id/send" -H 'Content-Type: application/json' \
     -d "$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' \
-      "WORKER: You are a spawned hand for room #$ROOM_NAME, not the chief. Ignore chief-of-staff/delegation instructions; do not spawn agents. Task: $1")" \
+      "WORKER: You are a spawned hand for room #$ROOM_NAME, not its coordinating session. Do the task directly and do not spawn agents. Task: $1")" \
     >/dev/null || die "session $id spawned but the task send failed — send it manually"
   echo "spawned session $id in #$ROOM_NAME (visible in Feather, resumable)"
 }
@@ -256,16 +255,23 @@ cmd_spawn() {
 cmd_handoff() {
   resolve_room
   new_run_dir handoff
-  # Newest chief transcript for this room's cwd.
-  local proj="-home-user-rooms-$ROOM_NAME" tdir="$HOME/.claude/projects"
+  # Feather normalizes Claude, Codex, and OMP sessions behind one API.
   local latest
-  latest=$(ls -t "$tdir/$proj"/*.jsonl 2>/dev/null | head -1)
-  [ -n "$latest" ] || die "no chief transcripts found for $proj"
+  latest=$(curl -sf "$FEATHER_URL/api/rooms" | python3 -c '
+import json, sys
+name = sys.argv[1]
+room = next((r for r in json.load(sys.stdin).get("rooms", []) if r.get("name") == name), None)
+sessions = room.get("sessions", []) if room else []
+print(sessions[0]["id"] if sessions else "")
+' "$ROOM_NAME")
+  [ -n "$latest" ] || die "no room sessions found for #$ROOM_NAME"
   local prompt
   prompt="$(worker_header "You are the handoff distiller.")
 
-Distill the chief session transcript $latest (JSONL — extract user/assistant
-text, skip tool noise) against the existing notes at $ROOM_PATH/notes.md.
+Fetch the normalized session messages from
+$FEATHER_URL/api/sessions/$latest/messages?limit=100000, then distill the user/assistant
+conversation (skip tool noise) against the existing notes at
+$ROOM_PATH/notes.md.
 Produce ONLY a markdown section (no preamble) in exactly this shape:
 
 ## Handoff $(date -u +%Y-%m-%d)
@@ -274,7 +280,7 @@ Produce ONLY a markdown section (no preamble) in exactly this shape:
 ### Open threads
 
 Include only what the notes do not already capture. Be specific — a fresh
-chief must be able to continue from this alone."
+session must be able to continue from this alone."
   run_worker claude "$RUN_DIR/handoff.md" "$TIMEOUT" "$prompt" || true
   # Validation-gated append: degrade (refuse) rather than clobber.
   if [ "$(attempt_status "$RUN_DIR/handoff.md")" = ok ] && grep -q '^## Handoff' "$RUN_DIR/handoff.md"; then

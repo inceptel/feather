@@ -81,36 +81,23 @@ You're running Claude Code on a remote machine. You want to check on it from you
 
 Feather reads Claude's raw JSONL session files, streams updates via SSE, and connects to tmux sessions via WebSocket terminals. No database. No build pipeline beyond Vite. Just `node server.js`.
 
-## /auto (legacy) — autonomous improvement loops
+## Rooms — durable workspaces
 
-> The older, fire-and-forget loop. For interactive, human-in-the-loop iteration, prefer **[/sidecar & /looper](#sidecars--loops--multi-agent-built-in)** above — persistent agents you can watch and steer, rather than a background `run.sh`.
+A Room is a folder under `~/rooms/` that gives related Feather chats a shared
+working directory and durable notes. Rooms do not impose a special agent persona:
+start or resume whichever Claude or Codex session is useful, and keep the context
+that should survive any one chat in the room's `notes.md`.
 
-Feather has a built-in dashboard for **auto instances** — long-running self-improvement loops that iterate on a goal in the background. Each instance is a directory at `~/auto-NAME/` with a `run.sh` (the loop), a `program.md` (the spec), and a `results.tsv` (the keep/revert/crash log). The Feather UI lets you start, stop, retarget, and inspect each loop without ever touching a terminal.
+The `room` CLI also provides optional delegation tools. Use `room council` when a
+decision benefits from several sealed attempts and a judge; use `room lookup`,
+`room second-opinion`, or `room spawn` when those workflows fit. None of them is
+required to use a Room.
 
-Loops are driven by **pipelines** — JSON definitions in [`templates/auto/`](templates/auto/) that list the phases (designer / worker / verifier / simplifier / …) and which engine runs each one. Several ship by default:
-
-| Pipeline | Phases | Engine |
-|----------|--------|--------|
-| `simple` | 1 | claude only — for trivial goals |
-| `all-claude` | 5 + 1/10 reviewer | claude only — full design / impl / verify / simplify cycle |
-| `claude-codex` | 6 + 1/10 reviewer | claude design + reviewer, codex for impl/verify/simplify |
-| `claude-codex-tmux` | 6 + 1/10 reviewer | same as `claude-codex`, workers run in tmux |
-
-Drop a new `<name>.json` into `templates/auto/` and it becomes selectable via `pipeline: "<name>"` on `POST /api/auto/instances`.
-
-Click the **Auto** tab in the sidebar to see all your loops, sorted by recent activity:
-
-![Auto sidebar](docs/screenshots/auto-sidebar.png)
-
-Click one to open a full detail view — stats, current iteration, controls, recent log:
-
-![Auto detail — top](docs/screenshots/auto-detail-top.png)
-
-Scroll down for the worker session list (each iteration's worker chat is one click away) and the rendered program spec:
-
-![Auto detail — bottom](docs/screenshots/auto-detail-bottom.png)
-
-Workers tag themselves with `AUTO_WORKER=TRUE` so they're filtered out of the main session list — you reach them through the Auto tab instead. **+ New auto** spins up a fresh `~/auto-NAME/` directory and a linked main-chat session in one click.
+For finite autonomous work in Codex, the recommended path is `$goal-prep` followed
+by `/goal`: prepare a bounded, verifiable goal, then let the Codex goal session run
+it. This is not a cross-harness replacement for detached, indefinite loops.
+Feather's former Auto surface has been retired, and existing `~/auto-*` directories
+are left untouched.
 
 ## Slash commands
 
@@ -120,14 +107,13 @@ Feather ships Claude Code skills under [`skills/`](skills/). Symlink them into y
 ln -sf "$(pwd)/skills/sidecar" ~/.claude/skills/sidecar
 ln -sf "$(pwd)/skills/looper"  ~/.claude/skills/looper
 ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
-ln -sf "$(pwd)/skills/auto"    ~/.claude/skills/auto
 ln -sf "$(pwd)/bin/sidecar"    ~/.local/bin/sidecar   # the sidecar CLI — must be on PATH
+ln -sf "$(pwd)/bin/room"       ~/.local/bin/room      # optional Rooms CLI
 ```
 
 - [`/sidecar`](skills/sidecar/SKILL.md) — spawn a paired peer agent thread and chat both ways.
 - [`/looper`](skills/looper/SKILL.md) — run a generator-evaluator loop until `[APPROVED]`.
 - [`/feather`](skills/feather/SKILL.md) — manage the running Feather server (status, logs, quick links, deploy).
-- [`/auto`](skills/auto/SKILL.md) — *(legacy)* start, stop, and inspect autonomous improvement loops.
 
 ## Quick start
 
