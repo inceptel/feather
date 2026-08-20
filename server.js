@@ -32,6 +32,11 @@ const HOME = process.env.HOME || '/home/user';
 const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
 const OMP_SESSIONS = path.join(HOME, '.feather/omp-sessions');
 const CODEX_SESSIONS_ROOT = path.join(HOME, '.codex/sessions');
+// Head bytes to read when looking for a codex session's first real user
+// message (title, worker detection). The session_meta line plus permissions/
+// context blocks before it now total ~66-88KB, so 64KB missed it; 256KB
+// leaves headroom for further preamble growth.
+const CODEX_HEAD_BYTES = 256 * 1024;
 const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
@@ -328,10 +333,10 @@ function extractClaudeTitle(buf) {
         if (text.startsWith('<command-message>')) {
           const argsMatch = text.match(/<command-args>([\s\S]*?)<\/command-args>/);
           const nameMatch = text.match(/<command-name>([\s\S]*?)<\/command-name>/);
-          if (argsMatch?.[1]?.trim()) return `${nameMatch?.[1] || '/cmd'} ${argsMatch[1].trim()}`.slice(0, 80);
+          if (argsMatch?.[1]?.trim()) return `${nameMatch?.[1] || '/cmd'} ${argsMatch[1].trim()}`.slice(0, 240);
           continue;
         }
-        if (text && !text.startsWith('<')) return text.slice(0, 80);
+        if (text && !text.startsWith('<')) return text.slice(0, 240);
       }
     } catch {}
   }
@@ -392,7 +397,7 @@ function extractOmpTitle(buf) {
     try {
       const d = JSON.parse(line);
       // omp session header has title
-      if (d.type === 'session' && d.title) return d.title.slice(0, 80);
+      if (d.type === 'session' && d.title) return d.title.slice(0, 240);
       // Fall back to first user message
       if (d.type === 'message' && d.message?.role === 'user') {
         const content = d.message.content;
@@ -400,21 +405,22 @@ function extractOmpTitle(buf) {
         if (typeof content === 'string') text = content;
         else if (Array.isArray(content)) text = content.filter(b => b.type === 'text' && b.text).map(b => b.text).join(' ');
         text = text.trim();
-        if (text) return text.slice(0, 80);
+        if (text) return text.slice(0, 240);
       }
     } catch {}
   }
   return null;
 }
 
-function isAutoWorkerSession(buf, agent, projectId) {
+function extractSessionCwd(buf, agent) {
+  if (agent === 'codex') return extractCodexCwd(buf) || '';
+  if (agent === 'claude') return extractClaudeCwd(buf) || '';
+  return '';
+}
+
+function isAutoWorkerSession(buf, agent, projectId, cwd) {
   if (buf.includes('AUTO_WORKER=TRUE')) return true;
   if (projectId && /-home-user-(?:auto|autoweb)-/.test(projectId)) return true;
-
-  let cwd = '';
-  if (agent === 'codex') cwd = extractCodexCwd(buf) || '';
-  else if (agent === 'claude') cwd = extractClaudeCwd(buf) || '';
-
   return /^\/home\/user\/(?:auto|autoweb)-/.test(cwd);
 }
 
@@ -518,16 +524,16 @@ function discoverSessions(limit = 50, query = null) {
     if (sessions.length >= limit) break;
     try {
       const fd = fs.openSync(fpath, 'r');
-      // Codex session_meta line alone can be ~15KB, plus a developer permissions
-      // block before the first user message — read more for codex.
-      const bufCap = agent === 'codex' ? 65536 : 16384;
+      const bufCap = agent === 'codex' ? CODEX_HEAD_BYTES : 16384;
       const buf = Buffer.alloc(Math.min(bufCap, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
 
+      const sessionCwd = extractSessionCwd(buf, agent);
+
       // Worker detection: use explicit canary or actual worker cwd/project.
       // Broad path mentions in prompt/context are too noisy for Codex sessions.
-      if (isAutoWorkerSession(buf, agent, projectId)) continue;
+      if (isAutoWorkerSession(buf, agent, projectId, sessionCwd)) continue;
 
       let title;
       if (agent === 'omp') title = extractOmpTitle(buf);
@@ -561,20 +567,31 @@ function discoverSessions(limit = 50, query = null) {
   return sessions;
 }
 
+// Tail sizes tried in order, growing only when the smaller read found no real
+// message. Some agents append bookkeeping lines (heartbeats, status) while
+// idle, so on a session left open for days the last real message can sit
+// megabytes back from EOF: a fixed 512KB tail found nothing, fell back to the
+// (always fresh) mtime, and lit the green dot on long-idle sessions.
+const ACTIVITY_TAILS = [512 * 1024, 4 * 1024 * 1024, 32 * 1024 * 1024];
+
 // Epoch-ms of the last real user/assistant message in a session's JSONL — the
 // true "last activity". Reads only the file tail (messages are appended), and
 // falls back to `fallbackMs` (the file mtime) if no real message is found.
 function lastActivityMs(fpath, agent, fallbackMs) {
   try {
     const size = fs.statSync(fpath).size;
-    const TAIL = 512 * 1024;
-    const readLen = Math.min(size, TAIL);
     const fd = fs.openSync(fpath, 'r');
-    const buf = Buffer.alloc(readLen);
-    fs.readSync(fd, buf, 0, readLen, size - readLen);
-    fs.closeSync(fd);
-    const ts = lastMessageMs(buf.toString('utf8'), agent, size > readLen);
-    return ts ?? fallbackMs;
+    try {
+      for (const tail of ACTIVITY_TAILS) {
+        const readLen = Math.min(size, tail);
+        const buf = Buffer.alloc(readLen);
+        fs.readSync(fd, buf, 0, readLen, size - readLen);
+        const ts = lastMessageMs(buf.toString('utf8'), agent, size > readLen);
+        if (ts) return ts;
+        if (readLen >= size) break; // whole file already scanned
+      }
+    } finally { fs.closeSync(fd); }
+    return fallbackMs;
   } catch { return fallbackMs; }
 }
 
@@ -683,7 +700,7 @@ function resumeSession(id, cwd) {
     // the recorded session cwd differs from the launch cwd.
     let sessionCwd = cwd;
     if (!sessionCwd && fpath) {
-      try { sessionCwd = extractCodexCwd(fs.readFileSync(fpath).slice(0, 65536)); } catch {}
+      try { sessionCwd = extractCodexCwd(fs.readFileSync(fpath).slice(0, CODEX_HEAD_BYTES)); } catch {}
     }
     sessionCwd = (sessionCwd || HOME).replace(/[^a-zA-Z0-9._\-/]/g, '');
     ensureCodexTrust(sessionCwd);
@@ -759,7 +776,10 @@ async function sendInputUnlocked(id, text) {
     try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
     return;
   }
-  if (text.length > 500) {
+  // Multi-line text must go through paste-buffer too: send-keys -l types the
+  // literal \n, which Claude CLI treats as Enter — submitting after the first
+  // line (e.g. only the first of several [Attached image: …] markers).
+  if (text.length > 500 || text.includes('\n')) {
     const tmp = `/tmp/feather-send-${Date.now()}.txt`;
     fs.writeFileSync(tmp, text);
     try {
@@ -1487,8 +1507,11 @@ app.get('/api/sessions/:id/export', sessionExportHandler);
 
 // ── File serving (for attached files by absolute path) ─────────────────────
 
+// Accept ~ and ~/... paths (linkified messages often use the tilde form)
+const expandTilde = (p) => p === '~' ? HOME : (p && p.startsWith('~/') ? path.join(HOME, p.slice(2)) : p);
+
 app.get('/api/file', (req, res) => {
-  const fpath = req.query.path;
+  const fpath = expandTilde(req.query.path);
   if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
   if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
   try {
@@ -1500,7 +1523,7 @@ app.get('/api/file', (req, res) => {
 });
 
 app.get('/api/files', (req, res) => {
-  const dir = req.query.path || HOME;
+  const dir = expandTilde(req.query.path) || HOME;
   if (!dir.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
   try {
     const stat = fs.statSync(dir);
@@ -1520,7 +1543,7 @@ app.get('/api/files', (req, res) => {
 });
 
 app.delete('/api/file', (req, res) => {
-  const fpath = req.query.path;
+  const fpath = expandTilde(req.query.path);
   if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
   if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
   try {
@@ -1533,7 +1556,7 @@ app.delete('/api/file', (req, res) => {
 
 app.post('/api/open-in-editor', (req, res) => {
   try {
-    const fpath = req.body?.path;
+    const fpath = expandTilde(req.body?.path);
     if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
     execFileSync('code-server', [fpath], { stdio: 'ignore', timeout: 3000 });
     res.json({ ok: true });
@@ -1542,6 +1565,10 @@ app.post('/api/open-in-editor', (req, res) => {
 
 // ── Idle session reaper (kill after 1 hour of inactivity) ──────────────────
 
+// Idleness is measured from the last real user/assistant message, NOT the file
+// mtime. Agents append bookkeeping while idle (heartbeats, status lines) which
+// keeps mtime fresh forever, so an mtime-based reaper never fired and left
+// tmux panes alive for days.
 const IDLE_MS = 60 * 60 * 1000; // 1 hour
 
 function reapIdleSessions() {
@@ -1559,11 +1586,12 @@ function reapIdleSessions() {
         if (!file.endsWith('.jsonl')) continue;
         const id = file.replace('.jsonl', '');
         if (!active.has(id.slice(0, 8))) continue;
-        const stat = fs.statSync(path.join(dirPath, file));
-        if (now - stat.mtimeMs > IDLE_MS) {
+        const fpath = path.join(dirPath, file);
+        const activity = lastActivityMs(fpath, 'claude', fs.statSync(fpath).mtimeMs);
+        if (now - activity > IDLE_MS) {
           const name = tmuxName(id);
           try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-          console.log(`[reaper] killed idle session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+          console.log(`[reaper] killed idle session ${name} (inactive ${Math.round((now - activity) / 60000)}m)`);
         }
       }
     } catch {}
@@ -1577,11 +1605,12 @@ function reapIdleSessions() {
       const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
       if (files.length === 0) continue;
       files.sort().reverse();
-      const stat = fs.statSync(path.join(dirPath, files[0]));
-      if (now - stat.mtimeMs > IDLE_MS) {
+      const fpath = path.join(dirPath, files[0]);
+      const activity = lastActivityMs(fpath, 'omp', fs.statSync(fpath).mtimeMs);
+      if (now - activity > IDLE_MS) {
         const name = tmuxName(dir);
         try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-        console.log(`[reaper] killed idle omp session ${name} (inactive ${Math.round((now - stat.mtimeMs) / 60000)}m)`);
+        console.log(`[reaper] killed idle omp session ${name} (inactive ${Math.round((now - activity) / 60000)}m)`);
       }
     }
   } catch {}
@@ -1590,10 +1619,11 @@ function reapIdleSessions() {
   try {
     for (const { uuid, fpath, mtime } of listCodexJsonlFiles()) {
       if (!active.has(uuid.slice(0, 8))) continue;
-      if (now - mtime.getTime() > IDLE_MS) {
+      const activity = lastActivityMs(fpath, 'codex', mtime.getTime());
+      if (now - activity > IDLE_MS) {
         const name = tmuxName(uuid);
         try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-        console.log(`[reaper] killed idle codex session ${name} (inactive ${Math.round((now - mtime.getTime()) / 60000)}m)`);
+        console.log(`[reaper] killed idle codex session ${name} (inactive ${Math.round((now - activity) / 60000)}m)`);
       }
     }
   } catch {}
@@ -1740,7 +1770,7 @@ function listWorkerSessions(name, limit = 20) {
   for (const { uuid, fpath, mtime } of listCodexJsonlFiles().slice(0, 200)) {
     try {
       const fd = fs.openSync(fpath, 'r');
-      const buf = Buffer.alloc(Math.min(65536, fs.fstatSync(fd).size));
+      const buf = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
       fs.closeSync(fd);
       if (buf.includes(`${AUTO_PREFIX}${name}`) || buf.includes(`${LEGACY_PREFIX}${name}`)) {

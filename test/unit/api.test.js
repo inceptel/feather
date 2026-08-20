@@ -20,17 +20,24 @@ function writeLine(obj) {
   fs.appendFileSync(testSessionPath, JSON.stringify(obj) + '\n')
 }
 
-before(async () => {
-  // Verify server is reachable
-  for (let i = 0; i < 10; i++) {
+// These are integration suites against a live feather server. When none is
+// running (headless test run), skip them instead of throwing from a root-level
+// before hook — a failed root hook cancels every suite sharing the process.
+async function serverReachable() {
+  for (let i = 0; i < 3; i++) {
     try {
-      const r = await fetch(`${BASE}/api/health`)
-      if (r.ok) break
+      const r = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(1000) })
+      if (r.ok) return true
     } catch {}
-    await new Promise(r => setTimeout(r, 500))
+    await new Promise(r => setTimeout(r, 300))
   }
-  const r = await fetch(`${BASE}/api/health`)
-  if (!r.ok) throw new Error(`Server not reachable at ${BASE}`)
+  return false
+}
+const SERVER_UP = await serverReachable()
+const suite = SERVER_UP ? describe : describe.skip
+
+before(async () => {
+  if (!SERVER_UP) return
 
   // Create a synthetic session JSONL in the first project directory
   const dirs = fs.readdirSync(CLAUDE_PROJECTS).filter(d =>
@@ -86,7 +93,7 @@ after(() => {
 
 // ── Health ───────────────────────────────────────────────────────────────────
 
-describe('GET /api/health', () => {
+suite('GET /api/health', () => {
   it('returns ok with numeric uptime', async () => {
     const r = await fetch(`${BASE}/api/health`)
     assert.equal(r.status, 200)
@@ -98,7 +105,7 @@ describe('GET /api/health', () => {
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 
-describe('GET /api/sessions', () => {
+suite('GET /api/sessions', () => {
   it('returns array of sessions', async () => {
     const r = await fetch(`${BASE}/api/sessions`)
     assert.equal(r.status, 200)
@@ -142,7 +149,7 @@ describe('GET /api/sessions', () => {
 
 // ── Messages ────────────────────────────────────────────────────────────────
 
-describe('GET /api/sessions/:id/messages', () => {
+suite('GET /api/sessions/:id/messages', () => {
   it('returns empty array for nonexistent session', async () => {
     const { messages } = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/messages`)).json()
     assert.deepEqual(messages, [])
@@ -190,7 +197,7 @@ describe('GET /api/sessions/:id/messages', () => {
 
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
-describe('GET /api/sessions/:id/stream (SSE)', () => {
+suite('GET /api/sessions/:id/stream (SSE)', () => {
   it('sends connected event on open', async () => {
     const ctrl = new AbortController()
     try {
@@ -389,7 +396,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
 
 // ── Error handling ──────────────────────────────────────────────────────────
 
-describe('POST /api/sessions/:id/interrupt', () => {
+suite('POST /api/sessions/:id/interrupt', () => {
   it('returns 500 for nonexistent tmux session', async () => {
     const r = await fetch(`${BASE}/api/sessions/no-such-session/interrupt`, { method: 'POST' })
     assert.equal(r.status, 500)
@@ -398,7 +405,7 @@ describe('POST /api/sessions/:id/interrupt', () => {
   })
 })
 
-describe('static files', () => {
+suite('static files', () => {
   it('serves index.html with correct content-type', async () => {
     const staticDir = path.join(__dirname, '..', '..', 'static')
     if (!fs.existsSync(path.join(staticDir, 'index.html'))) return

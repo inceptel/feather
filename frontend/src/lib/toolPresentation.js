@@ -4,6 +4,7 @@ const TOOL_ALIASES = {
   apply_patch: 'Patch', write_stdin: 'Input',
   grep: 'Grep', glob: 'Glob', find: 'Glob',
   task: 'Agent', agent: 'Agent',
+  ipython: 'IPython', rlm: 'Subagent',
   webfetch: 'WebFetch', fetch: 'WebFetch',
   websearch: 'WebSearch', web_search: 'WebSearch',
 }
