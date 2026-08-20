@@ -16,3 +16,6 @@ generate-pdf.mjs
 MISSING-FEATURES.md
 issues/
 .gstack/
+auto.pid
+*.bak
+test-results/
