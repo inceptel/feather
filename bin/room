@@ -54,17 +54,22 @@ new_run_dir() {  # $1 = command name
 # claim of having written a file). Exit code recorded next to the answer.
 run_worker() {
   local agent="$1" out="$2" tmo="$3" prompt="$4" rc=0
+  # Workers run IN the run dir (outside ~/rooms), never in the room folder:
+  # both harnesses walk ancestor dirs for CLAUDE.md/AGENTS.md, and a worker
+  # must not inherit the chief priming. This is anti-recursion layer 1; the
+  # WORKER: prompt prefix is layer 2.
+  local wd; wd="$(cd "$(dirname "$out")" && pwd)"
   case "$agent" in
     claude)
-      timeout "$tmo" claude -p "$prompt" \
+      timeout "$tmo" env -C "$wd" claude -p "$prompt" \
         --dangerously-skip-permissions --disallowed-tools AskUserQuestion \
         >"$out" 2>"$out.err" || rc=$? ;;
     haiku)
-      timeout "$tmo" claude -p "$prompt" --model haiku \
+      timeout "$tmo" env -C "$wd" claude -p "$prompt" --model haiku \
         --dangerously-skip-permissions --disallowed-tools AskUserQuestion \
         >"$out" 2>"$out.err" || rc=$? ;;
     codex)
-      timeout "$tmo" codex exec --skip-git-repo-check --sandbox danger-full-access \
+      timeout "$tmo" env -C "$wd" codex exec --skip-git-repo-check --sandbox danger-full-access \
         --output-last-message "$out" -- "$prompt" >"$out.log" 2>"$out.err" || rc=$? ;;
     *) die "unknown worker agent: $agent" ;;
   esac

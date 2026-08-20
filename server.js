@@ -421,6 +421,10 @@ function extractSessionCwd(buf, agent) {
 function isAutoWorkerSession(buf, agent, projectId, cwd) {
   if (buf.includes('AUTO_WORKER=TRUE')) return true;
   if (projectId && /-home-user-(?:auto|autoweb)-/.test(projectId)) return true;
+  // Sealed room workers (bin/room lookup/council/second-opinion) run headless
+  // in ~/.feather/room-runs/<room>/<run>/ — transcript noise, not sessions.
+  if (projectId && projectId.includes('-feather-room-runs-')) return true;
+  if (/^\/home\/user\/\.feather\/room-runs\//.test(cwd)) return true;
   return /^\/home\/user\/(?:auto|autoweb)-/.test(cwd);
 }
 
@@ -1730,6 +1734,150 @@ function listInstances() {
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// ── Rooms v2 ───────────────────────────────────────────────────────────────
+// A room is a folder under ~/rooms/ (AGENTS.md + notes.md) plus the sessions
+// whose cwd is that folder. No registry: this scans the filesystem. Sessions
+// created elsewhere can be pulled into a room via ~/.feather/room-sessions.json
+// ({ sessionId: roomName }), written by the assign endpoint below.
+// See docs/plans/2026-08-20-005-feat-rooms-v2-plan.md.
+
+const ROOMS_HOME_DIR = path.join(HOME, 'rooms');
+const ROOM_ASSIGN_FILE = path.join(HOME, '.feather', 'room-sessions.json');
+
+function readRoomAssignments() {
+  try { return JSON.parse(fs.readFileSync(ROOM_ASSIGN_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+// Only folders with an AGENTS.md count as rooms; `_doctrine.md` and Buzz-era
+// leftovers without one are skipped.
+function listRoomDirs() {
+  try {
+    return fs.readdirSync(ROOMS_HOME_DIR).filter((name) => {
+      if (name.startsWith('_') || name.startsWith('.')) return false;
+      try {
+        return fs.statSync(path.join(ROOMS_HOME_DIR, name)).isDirectory()
+          && fs.existsSync(path.join(ROOMS_HOME_DIR, name, 'AGENTS.md'));
+      } catch { return false; }
+    }).sort();
+  } catch { return []; }
+}
+
+// Last real user/assistant text in a session, read from the tail (growing
+// like ACTIVITY_TAILS so idle bookkeeping lines can't hide it). Rooms-home
+// snippet only — not a full parse.
+function lastMessageSnippet(sessionId, agent) {
+  const fpath = findJsonlPath(sessionId, agent);
+  if (!fpath) return null;
+  try {
+    const size = fs.statSync(fpath).size;
+    for (const tail of ACTIVITY_TAILS) {
+      const start = Math.max(0, size - tail);
+      const fd = fs.openSync(fpath, 'r');
+      const buf = Buffer.alloc(size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      fs.closeSync(fd);
+      let lines = buf.toString('utf8').split('\n').filter(Boolean);
+      if (start > 0) lines = lines.slice(1); // first line may be cut mid-record
+      for (let i = lines.length - 1; i >= 0; i--) {
+        let m;
+        try { m = parseMessageForAgent(lines[i], agent); } catch { continue; }
+        if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+        const text = (m.content || [])
+          .filter((b) => b && b.type === 'text' && b.text)
+          .map((b) => b.text).join(' ')
+          .replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        return { role: m.role, text: text.slice(0, 200) };
+      }
+      if (start === 0) break;
+    }
+  } catch {}
+  return null;
+}
+
+app.get('/api/rooms', (_req, res) => {
+  try {
+    const names = listRoomDirs();
+    const assignments = readRoomAssignments();
+    const all = discoverSessions(300);
+    const byRoom = new Map(names.map((n) => [n, []]));
+    for (const s of all) {
+      let room = assignments[s.id];
+      if (!room) {
+        const m = /^-home-user-rooms-(.+)$/.exec(s.projectId || '');
+        if (m) room = m[1];
+      }
+      if (room && byRoom.has(room)) byRoom.get(room).push(s);
+    }
+    const rooms = names.map((name) => {
+      const sessions = byRoom.get(name); // activity-sorted by discoverSessions
+      const newest = sessions[0] || null;
+      let latest = newest ? lastMessageSnippet(newest.id, newest.agent || 'claude') : null;
+      let updatedAt = newest?.updatedAt || null;
+      if (!latest) {
+        // Room with no visible chat yet: fall back to the last notes.md line.
+        try {
+          const notesPath = path.join(ROOMS_HOME_DIR, name, 'notes.md');
+          const noteLines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l) => l.trim());
+          if (noteLines.length > 1) latest = { role: 'notes', text: noteLines[noteLines.length - 1].slice(0, 200) };
+          if (!updatedAt) updatedAt = fs.statSync(notesPath).mtime.toISOString();
+        } catch {}
+      }
+      return {
+        name,
+        cwd: path.join(ROOMS_HOME_DIR, name),
+        sessions,
+        active: sessions.some((s) => s.isActive),
+        latest,
+        updatedAt,
+      };
+    });
+    rooms.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
+    res.json({ rooms });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Scaffold a new room folder — same shape as `room new` in bin/room.
+app.post('/api/rooms', (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) throw httpError(400, 'bad room name (lowercase, digits, dashes)');
+    const dir = path.join(ROOMS_HOME_DIR, name);
+    if (fs.existsSync(dir)) throw httpError(409, 'room exists');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), [
+      `# Room: #${name}`,
+      '',
+      '<!-- Two lines on what this room is about. Edit me. -->',
+      '',
+      'Follow the shared room doctrine: read ~/rooms/_doctrine.md now.',
+      'On start, read notes.md — it is the room\'s memory; this chat is not.',
+      '',
+    ].join('\n'));
+    fs.symlinkSync('AGENTS.md', path.join(dir, 'CLAUDE.md'));
+    fs.writeFileSync(path.join(dir, 'notes.md'),
+      `# #${name} — notes\n\nWorking memory for this room. The chief appends decisions and open\nthreads as they happen (\`room note "..."\`). Newest at the bottom.\n`);
+    res.json({ name, cwd: dir });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Pull an existing session (any cwd) into a room, or remove it again.
+app.post('/api/rooms/:name/assign', (req, res) => {
+  try {
+    const { name } = req.params;
+    const sid = String(req.body?.sessionId || '').trim();
+    if (!sid) throw httpError(400, 'sessionId required');
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const assignments = readRoomAssignments();
+    if (req.body?.remove) delete assignments[sid];
+    else assignments[sid] = name;
+    fs.mkdirSync(path.dirname(ROOM_ASSIGN_FILE), { recursive: true });
+    fs.writeFileSync(ROOM_ASSIGN_FILE, JSON.stringify(assignments, null, 2));
+    res.json({ ok: true, assignments });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 
 app.get('/api/auto/instances', (_req, res) => {
   res.json({ instances: listInstances() });

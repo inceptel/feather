@@ -62,6 +62,33 @@ export interface Message {
   delivery?: 'sent' | 'delivered'
 }
 
+export interface RoomInfo {
+  name: string
+  cwd: string
+  sessions: SessionMeta[]
+  active: boolean
+  latest: { role: string, text: string } | null
+  updatedAt: string | null
+}
+
+export async function fetchRooms(): Promise<RoomInfo[]> {
+  const r = await fetch(`${BASE}/api/rooms`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).rooms
+}
+
+export async function createRoom(name: string): Promise<{ name: string, cwd: string }> {
+  const r = await fetch(`${BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body.error || `HTTP ${r.status}`)
+  }
+  return await r.json()
+}
+
+export const assignSessionToRoom = (room: string, sessionId: string, remove = false) =>
+  fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, remove }) }).then(r => r.json())
+
 export async function fetchAgents(): Promise<AgentInfo[]> {
   const r = await fetch(`${BASE}/api/agents`)
   if (!r.ok) return [{ id: 'claude', label: 'Claude Code', available: true }]
