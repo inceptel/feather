@@ -5,8 +5,8 @@ import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo, FileListing, Project, SidecarGroup } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, fetchProjects, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, BASE } from './api'
+import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFile, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, BASE } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 
@@ -251,20 +251,6 @@ export default function App() {
     try { const r = await createSidecar(sid, { task, agent }); await refreshSidecars(); setOpenSidecarId(r.group.id) }
     catch (e: any) { alert('Failed to spawn sidecar: ' + (e?.message || e)) }
   }
-  const [projects, setProjects] = createSignal<Project[]>([])
-  const [currentProject, setCurrentProject] = createSignal<string | null>(localStorage.getItem('feather-project'))
-  const [projectsExpanded, setProjectsExpanded] = createSignal(false)
-  const [expandedGroups, setExpandedGroups] = createSignal<Record<string, boolean>>(JSON.parse(localStorage.getItem('feather-project-groups') || '{}'))
-  function toggleGroup(g: string) {
-    const next = { ...expandedGroups(), [g]: !expandedGroups()[g] }
-    setExpandedGroups(next)
-    localStorage.setItem('feather-project-groups', JSON.stringify(next))
-  }
-  function selectProject(id: string | null) {
-    setCurrentProject(id)
-    if (id) localStorage.setItem('feather-project', id)
-    else localStorage.removeItem('feather-project')
-  }
   interface AutoInstance {
     name: string; dir: string; running: boolean; current: string;
     keeps: number; reverts: number; crashes: number; skips: number; iterations: number;
@@ -495,7 +481,6 @@ export default function App() {
     if (boxMatch) setCurrentBox(boxMatch[1])
     await refreshSessions()
     fetchAgents().then(setAgents).catch(() => {})
-    fetchProjects().then(setProjects).catch(() => {})
     const base = location.pathname.replace(/\/+$/, '')
     fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
@@ -656,6 +641,16 @@ export default function App() {
     if (unknown.length) { alert(`Unknown peer(s): ${unknown.join(', ')}`); return }
     await setSessionShare(id, peers)
     await refreshSessions()
+  }
+
+  function goHome() {
+    setCurrentId(null)
+    setCurrentAuto(null)
+    setCurrentCos(null)
+    location.hash = ''
+    setSidebar(false)
+    cleanupSSE?.()
+    setMessages([])
   }
 
   function openSidebar() {
@@ -1069,6 +1064,10 @@ export default function App() {
       {/* Hamburger */}
       <Show when={!sidebar()}>
         <button onClick={openSidebar} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
+        {/* Back to the rooms home — shown whenever a session/auto/cos view is open */}
+        <Show when={currentId() || currentAuto() || currentCos()}>
+          <button onClick={goHome} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'calc(max(12px, env(safe-area-inset-left)) + 44px)', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '20px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#8249;</button>
+        </Show>
       </Show>
 
       {/* Sidebar backdrop */}
@@ -1087,7 +1086,7 @@ export default function App() {
       }}>
         <div style={{ display: 'flex', 'flex-direction': 'column', height: '100%' }}>
           <div style={{ padding: '12px 16px', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'border-bottom': '1px solid #1e1e1e' }}>
-            <span onClick={() => { setCurrentId(null); setCurrentAuto(null); setCurrentCos(null); location.hash = ''; setSidebar(false); cleanupSSE?.(); setMessages([]) }}
+            <span onClick={goHome}
               style={{ 'font-weight': '700', 'font-size': '16px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Feather</span>
             <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
           </div>
@@ -1145,68 +1144,6 @@ export default function App() {
                 </div>
               </Show>
             </div>
-            {/* Project tree (collapsed by default) */}
-            <div style={{ 'border-bottom': '1px solid #1e1e1e', padding: '4px 0' }}>
-              <div style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '4px 16px' }}>
-                <div onClick={() => setProjectsExpanded(!projectsExpanded())}
-                  style={{ cursor: 'pointer', 'font-size': '11px', 'font-weight': '600', color: '#777', 'text-transform': 'uppercase', 'letter-spacing': '0.05em', '-webkit-tap-highlight-color': 'transparent', display: 'flex', 'align-items': 'center', gap: '4px' }}>
-                  <span style={{ 'font-size': '8px', transition: 'transform 0.15s', transform: projectsExpanded() ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
-                  Projects
-                </div>
-                <Show when={currentProject()}>
-                  <span style={{ 'font-size': '11px', color: '#4aba6a', 'font-weight': '600' }}>
-                    {projects().find(p => p.id === currentProject())?.label || ''}
-                  </span>
-                  <span onClick={(e) => { e.stopPropagation(); selectProject(null) }}
-                    style={{ 'font-size': '10px', color: '#666', cursor: 'pointer', padding: '0 4px' }}>&times;</span>
-                </Show>
-              </div>
-              <Show when={projectsExpanded()}>
-                <div style={{ 'max-height': '35vh', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
-                  <div onClick={() => { selectProject(null); setProjectsExpanded(false) }}
-                    style={{ padding: '4px 16px', cursor: 'pointer', 'font-size': '11px', 'font-weight': '600', color: currentProject() === null ? '#4aba6a' : '#888', '-webkit-tap-highlight-color': 'transparent' }}>
-                    All
-                  </div>
-                  {(() => {
-                    const grouped: Record<string, Project[]> = {}
-                    const ungrouped: Project[] = []
-                    for (const p of projects()) {
-                      const idx = p.label.indexOf(' / ')
-                      if (idx >= 0) {
-                        const g = p.label.substring(0, idx)
-                        ;(grouped[g] ||= []).push(p)
-                      } else {
-                        ungrouped.push(p)
-                      }
-                    }
-                    return <>
-                      <For each={Object.keys(grouped).sort()}>{(group) => <>
-                        <div onClick={() => toggleGroup(group)}
-                          style={{ display: 'flex', 'align-items': 'center', gap: '4px', padding: '3px 16px', cursor: 'pointer', 'font-size': '11px', color: '#888', 'font-weight': '600', '-webkit-tap-highlight-color': 'transparent' }}>
-                          <span style={{ 'font-size': '7px', transition: 'transform 0.15s', transform: expandedGroups()[group] ? 'rotate(90deg)' : 'none' }}>&#9654;</span>
-                          {group}
-                          <span style={{ color: '#444', 'font-weight': '400' }}>({grouped[group].length})</span>
-                        </div>
-                        <Show when={expandedGroups()[group]}>
-                          <For each={grouped[group]}>{(p) => (
-                            <div onClick={() => selectProject(p.id)}
-                              style={{ padding: '3px 16px 3px 32px', cursor: 'pointer', 'font-size': '12px', color: currentProject() === p.id ? '#4aba6a' : '#aaa', 'font-weight': currentProject() === p.id ? '600' : '400', '-webkit-tap-highlight-color': 'transparent' }}>
-                              {p.label.substring(group.length + 3)}
-                            </div>
-                          )}</For>
-                        </Show>
-                      </>}</For>
-                      <For each={ungrouped}>{(p) => (
-                        <div onClick={() => selectProject(p.id)}
-                          style={{ padding: '3px 16px', cursor: 'pointer', 'font-size': '12px', color: currentProject() === p.id ? '#4aba6a' : '#aaa', 'font-weight': currentProject() === p.id ? '600' : '400', '-webkit-tap-highlight-color': 'transparent' }}>
-                          {p.label}
-                        </div>
-                      )}</For>
-                    </>
-                  })()}
-                </div>
-              </Show>
-            </div>
             </Show>
             {/* Search — hits the server so it covers ALL sessions, not just the loaded 50 */}
             <div style={{ padding: '8px 16px', 'border-bottom': '1px solid #1e1e1e', position: 'relative' }}>
@@ -1232,7 +1169,7 @@ export default function App() {
               {(() => {
                 const isSearch = !!searchQuery().trim() && searchResults() !== null
                 const source = isSearch ? searchResults()! : sessions()
-                const all = source.filter(s => !s.isWorker && (!currentProject() || s.projectId === currentProject()))
+                const all = source.filter(s => !s.isWorker)
                 const now = new Date()
                 const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
                 const yesterdayStart = todayStart - 86400000
@@ -1269,7 +1206,7 @@ export default function App() {
                           <Show when={s.agent === 'codex'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#2a1e3a', color: '#c084fc', 'flex-shrink': '0', 'font-weight': '600' }}>codex</span></Show>
                           <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                         </div>
-                        <Show when={!currentProject() && s.projectLabel}>
+                        <Show when={s.projectLabel}>
                           <div style={{ 'font-size': '10px', color: '#555', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'margin-top': '2px' }}>{s.projectLabel}</div>
                         </Show>
                         </>
@@ -1413,7 +1350,7 @@ export default function App() {
           }
           return (
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
-              <div style={{ padding: '12px 24px 12px 56px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
+              <div style={{ padding: '12px 24px 12px 100px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
                 <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: inst()?.running ? '#4aba6a' : '#555' }} />
                 <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{name()}</span>
                 <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{inst()?.running ? 'RUNNING' : 'STOPPED'}</span>
@@ -1502,7 +1439,7 @@ export default function App() {
           const w = () => cosState().workstreams.find(x => x.id === id())
           return (
             <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'padding-top': 'max(8px, env(safe-area-inset-top))' }}>
-              <div style={{ padding: '12px 24px 12px 56px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
+              <div style={{ padding: '12px 24px 12px 100px', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '12px', 'flex-wrap': 'wrap' }}>
                 <span style={{ width: '12px', height: '12px', 'border-radius': '50%', background: w()?.status === 'running' ? '#4aba6a' : w()?.status === 'idle' ? '#73b8ff' : '#555' }} />
                 <span style={{ 'font-size': '20px', 'font-weight': '700' }}>{w()?.name || 'workstream'}</span>
                 <span style={{ 'font-size': '12px', color: '#888', padding: '2px 8px', background: '#1a1a2e', 'border-radius': '4px' }}>{w()?.status || 'unknown'}</span>
@@ -1558,7 +1495,7 @@ export default function App() {
         }}</Show>
         <Show when={!currentAuto() && !currentCos()}>
         {/* Header */}
-        <div style={{ padding: '8px 16px 0 56px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
+        <div style={{ padding: '8px 16px 0 100px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>

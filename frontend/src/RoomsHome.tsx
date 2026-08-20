@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, createRoom, createSession, RoomInfo, SessionMeta } from './api'
+import { fetchRooms, createRoom, createSession, assignSessionToRoom, RoomInfo, SessionMeta } from './api'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -50,6 +50,9 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     setBusy(true)
     try {
       const id = await createSession(room.cwd, agent)
+      // Belt and braces: cwd-derived grouping covers claude immediately, but
+      // codex/omp transcripts appear later — pin the membership explicitly.
+      await assignSessionToRoom(room.name, id).catch(() => {})
       props.onSessionsChanged?.()
       props.onOpen(id)
     } catch (e: any) { alert(e.message) }
