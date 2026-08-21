@@ -14,6 +14,7 @@ import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId } from './lib/codex-watch.js';
+import { createSnapshotCache } from './lib/snapshot-cache.js';
 
 // Load ~/.env if present
 try {
@@ -654,7 +655,7 @@ function spawnSession(id, cwd, agent = 'claude') {
     // and adopt its UUID into session-meta.
     ensureCodexTrust(cwd);
     const before = new Set(listCodexJsonlFiles().map(f => f.uuid));
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex --dangerously-bypass-approvals-and-sandbox'`, cwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox'`, cwd);
     adoptNewCodexUuid(id, before, cwd);
   } else {
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
@@ -728,7 +729,7 @@ function resumeSession(id, cwd) {
     sessionCwd = (sessionCwd || HOME).replace(/[^a-zA-Z0-9._\-/]/g, '');
     ensureCodexTrust(sessionCwd);
     const resumeArg = codexUuid ? `resume ${codexUuid}` : 'resume --last';
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex ${resumeArg} --cd ${sessionCwd} --dangerously-bypass-approvals-and-sandbox'`, cwd || sessionCwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex -c check_for_update_on_startup=false ${resumeArg} --cd ${sessionCwd} --dangerously-bypass-approvals-and-sandbox'`, cwd || sessionCwd);
   } else {
     // Claude resolves resumable sessions by project dir (cwd → ~/.claude/projects/<encoded>),
     // so launching from the wrong cwd makes --resume fail and the tmux session exits.
@@ -1743,46 +1744,55 @@ function lastMessageSnippet(sessionId, agent) {
   return null;
 }
 
-app.get('/api/rooms', (_req, res) => {
-  try {
-    const names = listRoomDirs();
-    const assignments = readRoomAssignments();
-    const all = discoverSessions(300);
-    const byRoom = new Map(names.map((n) => [n, []]));
-    for (const s of all) {
-      let room = assignments[s.id];
-      if (!room) {
-        const m = /^-home-user-rooms-(.+)$/.exec(s.projectId || '');
-        if (m) room = m[1];
-      }
-      if (room && byRoom.has(room)) byRoom.get(room).push(s);
+function buildRoomsSnapshot() {
+  const names = listRoomDirs();
+  const assignments = readRoomAssignments();
+  const all = discoverSessions(300);
+  const byRoom = new Map(names.map((n) => [n, []]));
+  for (const s of all) {
+    let room = assignments[s.id];
+    if (!room) {
+      const m = /^-home-user-rooms-(.+)$/.exec(s.projectId || '');
+      if (m) room = m[1];
     }
-    const rooms = names.map((name) => {
-      const sessions = byRoom.get(name); // activity-sorted by discoverSessions
-      const newest = sessions[0] || null;
-      let latest = newest ? lastMessageSnippet(newest.id, newest.agent || 'claude') : null;
-      let updatedAt = newest?.updatedAt || null;
-      if (!latest) {
-        // Room with no visible chat yet: fall back to the last notes.md line.
-        try {
-          const notesPath = path.join(ROOMS_HOME_DIR, name, 'notes.md');
-          const noteLines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l) => l.trim());
-          if (noteLines.length > 1) latest = { role: 'notes', text: noteLines[noteLines.length - 1].slice(0, 200) };
-          if (!updatedAt) updatedAt = fs.statSync(notesPath).mtime.toISOString();
-        } catch {}
-      }
-      return {
-        name,
-        cwd: path.join(ROOMS_HOME_DIR, name),
-        sessions,
-        active: sessions.some((s) => s.isActive),
-        latest,
-        updatedAt,
-      };
-    });
-    rooms.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
-    res.json({ rooms });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    if (room && byRoom.has(room)) byRoom.get(room).push(s);
+  }
+  const rooms = names.map((name) => {
+    const sessions = byRoom.get(name); // activity-sorted by discoverSessions
+    const newest = sessions[0] || null;
+    let latest = newest ? lastMessageSnippet(newest.id, newest.agent || 'claude') : null;
+    let updatedAt = newest?.updatedAt || null;
+    if (!latest) {
+      // Room with no visible chat yet: fall back to the last notes.md line.
+      try {
+        const notesPath = path.join(ROOMS_HOME_DIR, name, 'notes.md');
+        const noteLines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l) => l.trim());
+        if (noteLines.length > 1) latest = { role: 'notes', text: noteLines[noteLines.length - 1].slice(0, 200) };
+        if (!updatedAt) updatedAt = fs.statSync(notesPath).mtime.toISOString();
+      } catch {}
+    }
+    return {
+      name,
+      cwd: path.join(ROOMS_HOME_DIR, name),
+      sessions,
+      active: sessions.some((s) => s.isActive),
+      latest,
+      updatedAt,
+    };
+  });
+  rooms.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
+  return rooms;
+}
+
+// Room discovery walks thousands of cross-harness transcripts. Keep the same
+// 10-second freshness as RoomsHome's poll, but never make a warm request wait
+// for that synchronous scan: stale readers get the last good snapshot while a
+// single deferred refresh rebuilds it.
+const roomSnapshotCache = createSnapshotCache(buildRoomsSnapshot, { ttlMs: 10_000 });
+
+app.get('/api/rooms', (_req, res) => {
+  try { res.json({ rooms: roomSnapshotCache.get() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Scaffold a new room folder — same shape as `room new` in bin/room.
@@ -1805,6 +1815,7 @@ app.post('/api/rooms', (req, res) => {
     fs.symlinkSync('AGENTS.md', path.join(dir, 'CLAUDE.md'));
     fs.writeFileSync(path.join(dir, 'notes.md'),
       `# #${name} — notes\n\nWorking memory for this room. Sessions append decisions and open\nthreads as they happen (\`room note "..."\`). Newest at the bottom.\n`);
+    roomSnapshotCache.refresh();
     res.json({ name, cwd: dir });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1821,6 +1832,7 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     else assignments[sid] = name;
     fs.mkdirSync(path.dirname(ROOM_ASSIGN_FILE), { recursive: true });
     fs.writeFileSync(ROOM_ASSIGN_FILE, JSON.stringify(assignments, null, 2));
+    roomSnapshotCache.refresh();
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1924,4 +1936,8 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => console.log(`Feather v2 on http://0.0.0.0:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Feather v2 on http://0.0.0.0:${PORT}`);
+  // Warm the expensive Rooms snapshot before the first interactive request.
+  setTimeout(() => { try { roomSnapshotCache.get(); } catch {} }, 0);
+});
