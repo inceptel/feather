@@ -9,7 +9,7 @@ import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
-import { sessionIsActive, lastMessageMs } from './lib/sessions.js';
+import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
@@ -27,6 +27,13 @@ try {
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
 } catch {}
+
+// A Feather-scoped OpenAI key is also the credential for Feather-launched
+// Codex sessions. Keep an explicit OPENAI_API_KEY authoritative when present,
+// but make the instance-owned key usable by the CLI without a second login.
+if (!process.env.OPENAI_API_KEY && process.env.FEATHER_OPENAI_API_KEY) {
+  process.env.OPENAI_API_KEY = process.env.FEATHER_OPENAI_API_KEY;
+}
 
 const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 const envEnabled = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
@@ -363,13 +370,16 @@ function getMessages(sessionId, limit = 100, before = 0) {
 
 function getActiveTmuxSessions() {
   try {
-    const out = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}'], { encoding: 'utf8' });
-    const active = new Set();
+    const out = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}|#{session_created}'], { encoding: 'utf8' });
+    const active = new Map();
     for (const line of out.split('\n')) {
-      if (line.startsWith('feather-')) active.add(line.slice(8)); // first 8 chars of session id
+      const [name, created] = line.split('|');
+      if (name?.startsWith('feather-')) {
+        active.set(name.slice(8), Number(created) * 1000 || 0); // first 8 chars of session id
+      }
     }
     return active;
-  } catch { return new Set(); }
+  } catch { return new Map(); }
 }
 
 function extractClaudeTitle(buf) {
@@ -1812,7 +1822,13 @@ function reapIdleSessions() {
         const id = file.replace('.jsonl', '');
         if (!active.has(id.slice(0, 8))) continue;
         const fpath = path.join(dirPath, file);
-        const activity = lastActivityMs(fpath, 'claude', fs.statSync(fpath).mtimeMs);
+        // A newly resumed old transcript must get a full idle window. Without
+        // considering the tmux creation time, the next five-minute sweep kills
+        // it immediately because its last real message may be hours old.
+        const activity = latestSessionActivityMs(
+          lastActivityMs(fpath, 'claude', fs.statSync(fpath).mtimeMs),
+          active.get(id.slice(0, 8)) || 0,
+        );
         if (now - activity > IDLE_MS) {
           const name = tmuxName(id);
           try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
@@ -1831,7 +1847,10 @@ function reapIdleSessions() {
       if (files.length === 0) continue;
       files.sort().reverse();
       const fpath = path.join(dirPath, files[0]);
-      const activity = lastActivityMs(fpath, 'omp', fs.statSync(fpath).mtimeMs);
+      const activity = latestSessionActivityMs(
+        lastActivityMs(fpath, 'omp', fs.statSync(fpath).mtimeMs),
+        active.get(dir.slice(0, 8)) || 0,
+      );
       if (now - activity > IDLE_MS) {
         const name = tmuxName(dir);
         try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
@@ -1844,7 +1863,10 @@ function reapIdleSessions() {
   try {
     for (const { uuid, fpath, mtime } of listCodexJsonlFiles()) {
       if (!active.has(uuid.slice(0, 8))) continue;
-      const activity = lastActivityMs(fpath, 'codex', mtime.getTime());
+      const activity = latestSessionActivityMs(
+        lastActivityMs(fpath, 'codex', mtime.getTime()),
+        active.get(uuid.slice(0, 8)) || 0,
+      );
       if (now - activity > IDLE_MS) {
         const name = tmuxName(uuid);
         try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
