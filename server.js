@@ -28,6 +28,10 @@ try {
 } catch {}
 
 const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
+const envEnabled = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
+const READ_ONLY_MODE = envEnabled(process.env.FEATHER_READ_ONLY);
+const READ_ONLY_ERROR = Object.freeze({ error: 'read-only canary', code: 'FEATHER_READ_ONLY' });
+const SESSION_READ_ROUTE = /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/;
 
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
@@ -47,7 +51,9 @@ const BOXES_FILE = STATE_PATHS.instance.boxesFile;
 const SHARING_FILE = STATE_PATHS.instance.sharingFile;
 const SHARE_LOG = STATE_PATHS.coordination.shareAccessLog;
 
-ensureStateLayout(STATE_PATHS);
+// A canary must be able to inspect a prepared copy without creating directories,
+// changing secret modes, or otherwise becoming a second state writer.
+if (!READ_ONLY_MODE) ensureStateLayout(STATE_PATHS);
 
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const BOXES_STATE = createJsonState({
@@ -60,7 +66,9 @@ const SHARING_STATE = createJsonState({
 });
 
 // Ensure omp session directory exists
-try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
+if (!READ_ONLY_MODE) {
+  try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
+}
 
 // ── Box proxy (remote machines) ────────────────────────────────────────────
 
@@ -80,6 +88,10 @@ function readSharing() {
 // CLI: node server.js --add-peer NAME [--all] [--control] — prints the token
 // to hand to the peer, then exits without starting the server.
 if (process.argv.includes('--add-peer')) {
+  if (READ_ONLY_MODE) {
+    console.error('cannot add a peer while FEATHER_READ_ONLY is enabled');
+    process.exit(1);
+  }
   const name = process.argv[process.argv.indexOf('--add-peer') + 1];
   if (!name || !/^[a-z0-9][a-z0-9-]{0,30}$/.test(name)) {
     console.error('usage: node server.js --add-peer <name> [--all] [--control]');
@@ -163,7 +175,7 @@ async function proxyToBox(boxId, req, res) {
   // for anything outside view + send/interrupt.
   if (box.peer) {
     const allowed =
-      (req.method === 'GET' && (pathname === '/api/sessions' || /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/.test(pathname))) ||
+      (req.method === 'GET' && (pathname === '/api/sessions' || SESSION_READ_ROUTE.test(pathname))) ||
       (req.method === 'POST' && /^\/api\/sessions\/[^/]+\/(send|interrupt)$/.test(pathname));
     if (!allowed) return res.status(403).json({ error: `peer box ${boxId}: only viewing shared sessions (and send/interrupt if granted) is supported` });
     pathname = pathname.replace(/^\/api\/sessions/, '/api/share/sessions');
@@ -1018,6 +1030,43 @@ const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
 const app = express();
+
+// This is deliberately an allowlist rather than a method-only check. It keeps
+// future GET handlers with side effects closed until they are explicitly
+// classified, while leaving static assets and existing non-API read surfaces
+// available for production-shaped canary inspection.
+const READ_ONLY_API_ROUTES = [
+  /^\/api\/health$/,
+  /^\/api\/boxes$/,
+  /^\/api\/sessions$/,
+  SESSION_READ_ROUTE,
+  /^\/api\/sidecar$/,
+  /^\/api\/sidecar\/[^/]+$/,
+  /^\/api\/sidecar\/[^/]+\/stream$/,
+  /^\/api\/share\/sessions$/,
+  /^\/api\/share\/sessions\/[^/]+\/(messages|stream|export)$/,
+  /^\/api\/sharing\/peers$/,
+  /^\/api\/projects$/,
+  /^\/api\/quick-links$/,
+  /^\/api\/starred$/,
+  /^\/api\/file$/,
+  /^\/api\/files$/,
+  /^\/api\/agents$/,
+  /^\/api\/rooms$/,
+];
+
+function readOnlyRequestAllowed(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  if (!req.path.startsWith('/api')) return true;
+  return READ_ONLY_API_ROUTES.some(pattern => pattern.test(req.path));
+}
+
+app.use((req, res, next) => {
+  if (!READ_ONLY_MODE || readOnlyRequestAllowed(req)) return next();
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(403).json(READ_ONLY_ERROR);
+});
+
 app.use(compression({
   filter(req, res) {
     // Don't compress SSE streams — buffering breaks real-time delivery.
@@ -1204,6 +1253,7 @@ function sidecarBroadcast(groupId, msg) {
 // Garbage-collect a group whose driver (the non-spawned member) tmux is gone:
 // tear it down and kill its orphaned spawned peers. Returns true if it GC'd.
 function sidecarGcIfDriverGone(group) {
+  if (READ_ONLY_MODE) return false;
   const driver = group.members.find(m => !m.spawned);
   if (!driver || tmuxIsActive(driver.sessionId)) return false;
   for (const m of group.members) {
@@ -1366,7 +1416,7 @@ function requirePeer(req, res, next) {
   const peer = findPeerByToken(m?.[1]);
   if (!peer) return res.status(401).json({ error: 'invalid peer token' });
   req.peer = peer;
-  shareLog({ peer: peer.id, method: req.method, path: req.path, ...(typeof req.body?.text === 'string' ? { text: req.body.text } : {}) });
+  if (!READ_ONLY_MODE) shareLog({ peer: peer.id, method: req.method, path: req.path, ...(typeof req.body?.text === 'string' ? { text: req.body.text } : {}) });
   next();
 }
 
@@ -1722,9 +1772,18 @@ function reapIdleSessions() {
   } catch {}
 }
 
-setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
+if (!READ_ONLY_MODE) setInterval(reapIdleSessions, 5 * 60 * 1000); // check every 5 minutes
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', version: VERSION, uptime: process.uptime() }));
+app.get('/api/health', (_req, res) => res.json({
+  status: 'ok', version: VERSION, uptime: process.uptime(),
+  capabilities: {
+    readOnly: READ_ONLY_MODE,
+    mutations: !READ_ONLY_MODE,
+    terminal: !READ_ONLY_MODE,
+    shell: !READ_ONLY_MODE,
+    backgroundControllers: !READ_ONLY_MODE,
+  },
+}));
 
 // ── Agent discovery ─────────────────────────────────────────────────────────
 
@@ -1929,6 +1988,21 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  if (READ_ONLY_MODE) {
+    const pathname = (() => { try { return new URL(req.url, 'http://localhost').pathname; } catch { return ''; } })();
+    if (/(?:^|\/)api\/(terminal|shell)$/.test(pathname)) {
+      const body = JSON.stringify(READ_ONLY_ERROR);
+      socket.end([
+        'HTTP/1.1 403 Forbidden',
+        'Content-Type: application/json',
+        'Cache-Control: no-store',
+        `Content-Length: ${Buffer.byteLength(body)}`,
+        'Connection: close',
+        '', body,
+      ].join('\r\n'));
+      return;
+    }
+  }
   if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else {
