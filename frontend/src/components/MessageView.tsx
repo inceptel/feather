@@ -106,11 +106,7 @@ function wirePathLink(a: HTMLAnchorElement, targetPath: string) {
 }
 
 function filesystemPathFromHref(a: HTMLAnchorElement): string | null {
-  const href = a.getAttribute('href')
-  if (!href) return null
-  const raw = href.startsWith('file://') ? href.slice(7) : href
-  if (!raw.startsWith('/') && !raw.startsWith('~/')) return null
-  try { return decodeURIComponent(raw) } catch { return raw }
+  return localFilePath(a.getAttribute('href'))
 }
 
 // Make web links open in a new tab and route Markdown filesystem links through
