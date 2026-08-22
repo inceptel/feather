@@ -13,7 +13,7 @@ import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/s
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
-import { resolveCodexWatchId } from './lib/codex-watch.js';
+import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
@@ -741,6 +741,9 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
   // together can't adopt each other's file.
   let n = 0;
   const tick = () => {
+    // Deleting a starting Codex session removes its metadata. Stop its delayed
+    // adopter too, or a later unrelated rollout can resurrect a ghost entry.
+    if (!codexAdoptionPending(readMeta(), featherId)) return;
     n++;
     const after = listCodexJsonlFiles();
     let fresh = after.filter(f => !beforeUuids.has(f.uuid));
@@ -1274,6 +1277,12 @@ app.post('/api/sessions/:id/delete', (req, res) => {
     }
     updateMeta((meta) => {
       const next = { ...meta };
+      delete next[id];
+      return next;
+    });
+    MESSAGE_RECEIPTS_STATE.update((receipts) => {
+      if (!(id in receipts)) return receipts;
+      const next = { ...receipts };
       delete next[id];
       return next;
     });
