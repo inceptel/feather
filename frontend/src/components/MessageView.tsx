@@ -28,6 +28,7 @@ import {
   toolPresentation,
 } from '../lib/toolPresentation.js'
 import { localFilePath } from '../lib/localMedia.js'
+import { extractImages } from '../lib/attachments.js'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -581,20 +582,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .hljs-property { color: var(--hljs-property); }
 `
 
-// ── Image extraction ─────────────────────────────────────────────────────────
-
-const imgPattern = /\[Attached image: (\/[^\]]+)\]/g
-
-const filePattern = /\[Attached file: (\/[^\]]+)\]\s*\(([^)]+)\)/g
-
-function extractImages(text: string): { cleanText: string; images: string[]; files: { path: string; name: string }[] } {
-  const images: string[] = []
-  const files: { path: string; name: string }[] = []
-  let cleaned = text.replace(imgPattern, (_, p) => { images.push(p); return '' })
-  cleaned = cleaned.replace(filePattern, (_, p, name) => { files.push({ path: p, name }); return '' }).trim()
-  return { cleanText: cleaned, images, files }
-}
-
 // ── Component ───────────────────────────────────────────────────────────────
 
 function fileUrl(absPath: string): string {
@@ -899,7 +886,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
               }}>
                 <For each={images}>{(src) => (
-                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => { const a = document.createElement('a'); a.textContent = src; wirePathLink(a, src); e.currentTarget.replaceWith(a) }} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                 )}</For>
                 <For each={files}>{(f) => {
                   const isPdf = f.name.toLowerCase().endsWith('.pdf')
@@ -942,7 +929,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   return (
                     <div>
                       <For each={bImgs}>{(src) => (
-                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => { const a = document.createElement('a'); a.textContent = src; wirePathLink(a, src); e.currentTarget.replaceWith(a) }} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                       )}</For>
                       <For each={bFiles}>{(f) => {
                         const isPdf = f.name.toLowerCase().endsWith('.pdf')

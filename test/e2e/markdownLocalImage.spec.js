@@ -29,6 +29,8 @@ test.beforeAll(() => {
     `Missing one: ![gone](/no/such/dir/missing-image.png)`,
     '',
     `Full chart: [open the PNG](${imagePath})`,
+    '',
+    'Quoted marker, not an attachment: `[Attached image: /abs/path]` stays inline code.',
   ].join('\n')
   const lines = [
     {
@@ -70,6 +72,16 @@ test('missing local image degrades to a clickable path link', async ({ page }) =
 
   const fallback = page.locator('.markdown a.feather-path', { hasText: '/no/such/dir/missing-image.png' })
   await expect(fallback).toBeVisible()
+})
+
+test('attachment markers quoted in code spans do not become previews', async ({ page }) => {
+  await page.goto(`/#${sessionId}`, { waitUntil: 'domcontentloaded' })
+
+  // The quoted marker renders as literal inline code...
+  const code = page.locator('.markdown code', { hasText: '[Attached image: /abs/path]' })
+  await expect(code).toBeVisible()
+  // ...and no attachment preview is hoisted for it.
+  await expect(page.locator('img[src*="%2Fabs%2Fpath"]')).toHaveCount(0)
 })
 
 test('local Markdown link is wired to the Feather file viewer', async ({ page }) => {
