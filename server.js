@@ -15,7 +15,8 @@ import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
-import { ensureOwnerOnlyFile, ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
+import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
+import { createJsonState } from './lib/json-state.js';
 
 // Load ~/.env if present
 try {
@@ -48,14 +49,23 @@ const SHARE_LOG = STATE_PATHS.coordination.shareAccessLog;
 
 ensureStateLayout(STATE_PATHS);
 
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const BOXES_STATE = createJsonState({
+  file: BOXES_FILE, root: STATE_PATHS.instance.root, document: 'boxes state',
+  defaultValue: {}, validate: isRecord, mode: 0o600,
+});
+const SHARING_STATE = createJsonState({
+  file: SHARING_FILE, root: STATE_PATHS.instance.root, document: 'sharing state',
+  defaultValue: {}, validate: isRecord, mode: 0o600,
+});
+
 // Ensure omp session directory exists
 try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
 
 // ── Box proxy (remote machines) ────────────────────────────────────────────
 
 function readBoxes() {
-  try { return JSON.parse(fs.readFileSync(BOXES_FILE, 'utf8')); }
-  catch { return {}; }
+  return BOXES_STATE.read();
 }
 
 // ── Sharing (peers: other users' feather instances) ───────────────────────
@@ -64,13 +74,7 @@ function readBoxes() {
 // See docs/sharing-design.md.
 
 function readSharing() {
-  try { return JSON.parse(fs.readFileSync(SHARING_FILE, 'utf8')); }
-  catch { return {}; }
-}
-
-function writeSharing(sharing) {
-  fs.writeFileSync(SHARING_FILE, JSON.stringify(sharing, null, 2), { mode: 0o600 });
-  ensureOwnerOnlyFile(SHARING_FILE);
+  return SHARING_STATE.read();
 }
 
 // CLI: node server.js --add-peer NAME [--all] [--control] — prints the token
@@ -81,23 +85,29 @@ if (process.argv.includes('--add-peer')) {
     console.error('usage: node server.js --add-peer <name> [--all] [--control]');
     process.exit(1);
   }
-  const sharing = readSharing();
-  sharing.peers = sharing.peers || {};
-  const existing = sharing.peers[name] || {};
-  const token = existing.token || randomBytes(32).toString('hex');
-  sharing.peers[name] = {
-    ...existing,
-    token,
-    policy: process.argv.includes('--all') ? 'all' : (existing.policy || 'selected'),
-    control: process.argv.includes('--control') || !!existing.control,
-  };
-  writeSharing(sharing);
+  const sharing = SHARING_STATE.update((current) => {
+    const peers = isRecord(current.peers) ? current.peers : {};
+    const existing = peers[name] || {};
+    const token = existing.token || randomBytes(32).toString('hex');
+    return {
+      ...current,
+      peers: {
+        ...peers,
+        [name]: {
+          ...existing,
+          token,
+          policy: process.argv.includes('--all') ? 'all' : (existing.policy || 'selected'),
+          control: process.argv.includes('--control') || !!existing.control,
+        },
+      },
+    };
+  });
   const p = sharing.peers[name];
   console.log(`peer "${name}": policy=${p.policy} control=${p.control}`);
   console.log(`token (give to ${name} for their boxes.json entry pointing at this instance):`);
-  console.log(token);
+  console.log(p.token);
   console.log(`\nexample entry for ${name}'s boxes.json:`);
-  console.log(JSON.stringify({ [sharing.owner || 'friend']: { url: 'http://<this-host>:4870', label: sharing.owner || 'Friend', peer: true, token } }, null, 2));
+  console.log(JSON.stringify({ [sharing.owner || 'friend']: { url: 'http://<this-host>:4870', label: sharing.owner || 'Friend', peer: true, token: p.token } }, null, 2));
   process.exit(0);
 }
 
@@ -282,15 +292,16 @@ function getAgentForSession(sessionId) {
 // ── Session metadata ───────────────────────────────────────────────────────
 
 const META_FILE = STATE_PATHS.instance.metaFile;
+const META_STATE = createJsonState({
+  file: META_FILE, root: STATE_PATHS.instance.root, document: 'session metadata',
+  defaultValue: {}, validate: isRecord,
+});
 
 function readMeta() {
-  try { return JSON.parse(fs.readFileSync(META_FILE, 'utf8')); }
-  catch { return {}; }
+  return META_STATE.read();
 }
 
-function writeMeta(meta) {
-  fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
-}
+function updateMeta(mutator) { return META_STATE.update(mutator); }
 
 function getMessages(sessionId, limit = 100, before = 0) {
   const agent = getAgentForSession(sessionId);
@@ -645,9 +656,7 @@ function ensureCodexTrust(cwd) {
 function spawnSession(id, cwd, agent = 'claude') {
   const name = tmuxName(id);
   // Persist agent type in metadata
-  const meta = readMeta();
-  meta[id] = { ...(meta[id] || {}), agent };
-  writeMeta(meta);
+  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent } }));
 
   if (agent === 'omp') {
     const sessionDir = path.join(OMP_SESSIONS, id);
@@ -694,9 +703,10 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
       // Pick the newest fresh file
       fresh.sort((a, b) => b.mtime - a.mtime);
       const uuid = fresh[0].uuid;
-      const meta = readMeta();
-      meta[featherId] = { ...(meta[featherId] || {}), agent: 'codex', codexUuid: uuid };
-      writeMeta(meta);
+      updateMeta((meta) => ({
+        ...meta,
+        [featherId]: { ...(meta[featherId] || {}), agent: 'codex', codexUuid: uuid },
+      }));
       // Start watching this file for SSE broadcasts
       fileOffsets.set(featherId, 0);
       watchCodexFile(fresh[0].fpath, featherId);
@@ -1138,9 +1148,11 @@ app.post('/api/sessions/:id/delete', (req, res) => {
       const fpath = findJsonlPath(id, agent);
       if (fpath) fs.unlinkSync(fpath);
     }
-    const meta = readMeta();
-    delete meta[id];
-    writeMeta(meta);
+    updateMeta((meta) => {
+      const next = { ...meta };
+      delete next[id];
+      return next;
+    });
     sseClients.delete(id);
     fileOffsets.delete(id);
     res.json({ ok: true });
@@ -1149,9 +1161,10 @@ app.post('/api/sessions/:id/delete', (req, res) => {
 
 app.post('/api/sessions/:id/rename', (req, res) => {
   try {
-    const meta = readMeta();
-    meta[req.params.id] = { ...(meta[req.params.id] || {}), title: req.body.title };
-    writeMeta(meta);
+    updateMeta((meta) => ({
+      ...meta,
+      [req.params.id]: { ...(meta[req.params.id] || {}), title: req.body.title },
+    }));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1412,9 +1425,10 @@ app.get('/api/sharing/peers', (_req, res) => {
 app.post('/api/sessions/:id/share', (req, res) => {
   try {
     const peers = Array.isArray(req.body?.peers) ? req.body.peers.map(String).filter(Boolean) : [];
-    const meta = readMeta();
-    meta[req.params.id] = { ...(meta[req.params.id] || {}), share: peers };
-    writeMeta(meta);
+    updateMeta((meta) => ({
+      ...meta,
+      [req.params.id]: { ...(meta[req.params.id] || {}), share: peers },
+    }));
     res.json({ ok: true, share: peers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1470,10 +1484,13 @@ app.post('/api/upload', async (req, res) => {
 // ── Project labels ──────────────────────────────────────────────────────────
 
 const PROJECT_LABELS_FILE = STATE_PATHS.instance.projectLabelsFile;
+const PROJECT_LABELS_STATE = createJsonState({
+  file: PROJECT_LABELS_FILE, root: STATE_PATHS.instance.root, document: 'project labels',
+  defaultValue: {}, validate: isRecord,
+});
 
 function readProjectLabels() {
-  try { return JSON.parse(fs.readFileSync(PROJECT_LABELS_FILE, 'utf8')); }
-  catch { return {}; }
+  return PROJECT_LABELS_STATE.read();
 }
 
 // "-home-user-feather" → "feather"; "-home-lena" → "lena"
@@ -1497,26 +1514,32 @@ app.post('/api/projects/:id/label', (req, res) => {
   if (!fs.existsSync(path.join(CLAUDE_PROJECTS, id))) {
     return res.status(404).json({ error: `no such claude project dir: ${id}` });
   }
-  const labels = readProjectLabels();
-  labels[id] = req.body.label != null ? String(req.body.label) : null;
-  fs.writeFileSync(PROJECT_LABELS_FILE, JSON.stringify(labels, null, 2));
+  PROJECT_LABELS_STATE.update((labels) => ({
+    ...labels,
+    [id]: req.body.label != null ? String(req.body.label) : null,
+  }));
   res.json({ ok: true });
 });
 
 app.delete('/api/projects/:id', (req, res) => {
-  const labels = readProjectLabels();
-  delete labels[req.params.id];
-  fs.writeFileSync(PROJECT_LABELS_FILE, JSON.stringify(labels, null, 2));
+  PROJECT_LABELS_STATE.update((labels) => {
+    const next = { ...labels };
+    delete next[req.params.id];
+    return next;
+  });
   res.json({ ok: true });
 });
 
 // ── Quick Links ─────────────────────────────────────────────────────────────
 
 const LINKS_FILE = STATE_PATHS.instance.quickLinksFile;
+const LINKS_STATE = createJsonState({
+  file: LINKS_FILE, root: STATE_PATHS.instance.root, document: 'quick links',
+  defaultValue: [], validate: Array.isArray,
+});
 
 function readLinks() {
-  try { return JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8')); }
-  catch { return []; }
+  return LINKS_STATE.read();
 }
 
 app.get('/api/quick-links', (_req, res) => res.json(readLinks()));
@@ -1524,24 +1547,27 @@ app.get('/api/quick-links', (_req, res) => res.json(readLinks()));
 app.post('/api/quick-links', (req, res) => {
   const links = req.body;
   if (!Array.isArray(links)) return res.status(400).json({ error: 'expected array' });
-  fs.writeFileSync(LINKS_FILE, JSON.stringify(links, null, 2));
+  LINKS_STATE.write(links);
   res.json({ ok: true });
 });
 
 // ── Starred messages ───────────────────────────────────────────────────────
 
 const STARRED_FILE = STATE_PATHS.instance.starredFile;
+const STARRED_STATE = createJsonState({
+  file: STARRED_FILE, root: STATE_PATHS.instance.root, document: 'starred messages',
+  defaultValue: {}, validate: isRecord,
+});
 
 function readStarred() {
-  try { return JSON.parse(fs.readFileSync(STARRED_FILE, 'utf8')); }
-  catch { return {}; }
+  return STARRED_STATE.read();
 }
 
 app.get('/api/starred', (_req, res) => res.json(readStarred()));
 
 app.post('/api/starred', (req, res) => {
   try {
-    fs.writeFileSync(STARRED_FILE, JSON.stringify(req.body, null, 2));
+    STARRED_STATE.write(req.body);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1734,10 +1760,13 @@ function httpError(status, message) {
 
 const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
+const ROOM_ASSIGN_STATE = createJsonState({
+  file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
+  defaultValue: {}, validate: isRecord,
+});
 
 function readRoomAssignments() {
-  try { return JSON.parse(fs.readFileSync(ROOM_ASSIGN_FILE, 'utf8')); }
-  catch { return {}; }
+  return ROOM_ASSIGN_STATE.read();
 }
 
 // Only folders with an AGENTS.md count as rooms; `_doctrine.md` and Buzz-era
@@ -1870,15 +1899,28 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     const sid = String(req.body?.sessionId || '').trim();
     if (!sid) throw httpError(400, 'sessionId required');
     if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
-    const assignments = readRoomAssignments();
-    if (req.body?.remove) delete assignments[sid];
-    else assignments[sid] = name;
-    fs.mkdirSync(path.dirname(ROOM_ASSIGN_FILE), { recursive: true });
-    fs.writeFileSync(ROOM_ASSIGN_FILE, JSON.stringify(assignments, null, 2));
+    const assignments = ROOM_ASSIGN_STATE.update((current) => {
+      const next = { ...current };
+      if (req.body?.remove) delete next[sid];
+      else next[sid] = name;
+      return next;
+    });
     roomSnapshotCache.refresh();
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+
+// Validate every durable JSON document before accepting traffic. Only truly
+// missing files receive their documented defaults; corruption fails startup.
+for (const state of [
+  BOXES_STATE,
+  SHARING_STATE,
+  META_STATE,
+  PROJECT_LABELS_STATE,
+  LINKS_STATE,
+  STARRED_STATE,
+  ROOM_ASSIGN_STATE,
+]) state.read();
 
 const server = http.createServer(app);
 
