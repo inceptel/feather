@@ -45,7 +45,10 @@ test.beforeAll(() => {
     isSidechain: false, isMeta: false,
     message: {
       role: 'assistant',
-      content: [{ type: 'tool_use', id: 'tool_e2e', name: 'Read', input: { file_path: '/src/MessageView.tsx' } }],
+      content: [
+        { type: 'tool_use', id: 'tool_e2e', name: 'Read', input: { file_path: '/src/MessageView.tsx' } },
+        { type: 'tool_use', id: 'tool_err', name: 'Read', input: { file_path: '/missing.txt' } },
+      ],
     },
   })
   writeLine({
@@ -253,7 +256,7 @@ test.describe('Message rendering', () => {
     const details = page.locator('details')
     await expect(details.first()).toBeVisible()
     const summary = page.locator('details summary')
-    await expect(summary.first()).toHaveText('Thinking...')
+    await expect(summary.first()).toContainText('Reasoning')
 
     // Click to expand
     await summary.first().click()
@@ -269,14 +272,18 @@ test.describe('Message rendering', () => {
     await expect(toolUse).toBeVisible()
   })
 
-  test('tool_result shows Result prefix', async ({ page }) => {
-    const result = page.locator('text=Result:')
-    await expect(result.first()).toBeVisible()
+  test('tool_result output is revealed by expanding the tool call', async ({ page }) => {
+    const summary = page.locator('summary', { hasText: 'MessageView.tsx' }).first()
+    await expect(summary).toBeVisible()
+    await summary.click()
+    await expect(page.locator('text=export function MessageView')).toBeVisible()
   })
 
-  test('error tool_result shows Error prefix', async ({ page }) => {
-    const error = page.locator('text=Error:')
-    await expect(error.first()).toBeVisible()
+  test('error tool_result is revealed by expanding the failed tool call', async ({ page }) => {
+    const summary = page.locator('summary', { hasText: 'missing.txt' }).first()
+    await expect(summary).toBeVisible()
+    await summary.click()
+    await expect(page.locator('text=ENOENT: no such file')).toBeVisible()
   })
 
   test('timestamps are displayed on messages', async ({ page }) => {
@@ -431,7 +438,7 @@ test.describe('Live updates', () => {
     await expect(page.locator('.markdown').first()).toBeVisible({ timeout: 5000 })
 
     // Count current messages
-    const beforeCount = await page.locator('div[style*="margin-bottom: 16px"]').count()
+    const beforeCount = await page.locator('.msg-row').count()
 
     // Write a new message to the JSONL file
     const liveUuid = `e2e-live-${Date.now()}`
@@ -445,7 +452,7 @@ test.describe('Live updates', () => {
     await expect(page.locator('text=This message arrived via SSE live update!')).toBeVisible({ timeout: 10000 })
 
     // Should have one more message
-    const afterCount = await page.locator('div[style*="margin-bottom: 16px"]').count()
+    const afterCount = await page.locator('.msg-row').count()
     expect(afterCount).toBeGreaterThan(beforeCount)
   })
 })

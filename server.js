@@ -1535,8 +1535,10 @@ app.get('/api/sessions/:id/export', sessionExportHandler);
 const expandTilde = (p) => p === '~' ? HOME : (p && p.startsWith('~/') ? path.join(HOME, p.slice(2)) : p);
 
 app.get('/api/file', (req, res) => {
-  const fpath = expandTilde(req.query.path);
-  if (!fpath || !fpath.startsWith('/')) return res.status(400).json({ error: 'invalid path' });
+  const raw = typeof req.query.path === 'string' ? expandTilde(req.query.path) : null;
+  if (!raw || !raw.startsWith('/') || raw.includes('\0')) return res.status(400).json({ error: 'invalid path' });
+  // Normalize so ../ segments collapse before any fs access or sendFile.
+  const fpath = path.resolve(raw);
   if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'not found' });
   try {
     const stat = fs.statSync(fpath);
