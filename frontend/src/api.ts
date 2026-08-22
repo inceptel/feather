@@ -24,6 +24,7 @@ export interface SessionMeta {
   projectId?: string | null
   projectLabel?: string | null
   share?: string[]
+  roomAssigned?: boolean
 }
 
 export interface BoxInfo {
@@ -90,8 +91,14 @@ export async function createRoom(name: string): Promise<{ name: string, cwd: str
   return responseJson(r)
 }
 
-export const assignSessionToRoom = (room: string, sessionId: string, remove = false) =>
-  fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, remove }) }).then(r => r.json())
+export const assignSessionToRoom = async (room: string, sessionId: string, remove = false) => {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, remove }),
+  })
+  return responseJson<{ ok: true, assignments: Record<string, string> }>(response)
+}
 
 export async function fetchAgents(): Promise<AgentInfo[]> {
   const r = await fetch(`${BASE}/api/agents`)
@@ -128,11 +135,14 @@ export const setSessionShare = (id: string, peers: string[]) =>
 // On a peer box the response also carries `control` (whether we may send).
 // `q` searches ALL sessions (titles + full content, server-side) instead of
 // just the most-recent-50 the plain listing returns.
-export async function fetchSessions(box?: string | null, q?: string): Promise<{ sessions: SessionMeta[], control?: boolean }> {
-  const url = q ? `${BASE}/api/sessions?q=${encodeURIComponent(q)}` : `${BASE}/api/sessions`
+export async function fetchSessions(box?: string | null, q?: string, limit?: number): Promise<{ sessions: SessionMeta[], control?: boolean }> {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (limit) params.set('limit', String(limit))
+  const queryString = params.toString()
+  const url = `${BASE}/api/sessions${queryString ? `?${queryString}` : ''}`
   const r = await fetch(bq(url, box))
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return await r.json()
+  return responseJson<{ sessions: SessionMeta[], control?: boolean }>(r)
 }
 
 export async function fetchProjects(): Promise<Project[]> {
