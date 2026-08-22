@@ -85,8 +85,16 @@ Feather reads Claude's raw JSONL session files, streams updates via SSE, and con
 
 A Room is a folder under `~/rooms/` that gives related Feather chats a shared
 working directory and durable notes. Rooms do not impose a special agent persona:
-start or resume whichever Claude or Codex session is useful, and keep the context
+start or resume whichever Claude, Codex, or OMP session is useful, and keep the context
 that should survive any one chat in the room's `notes.md`.
+
+By default, Feather checks each inactive Room every 15 minutes and launches one
+non-interactive OMP session to do the next useful thing. The Room card shows when
+it last worked and when it will check again. Pause or resume that behavior from
+the card, or from inside the Room with `room pause` and `room wake`.
+
+Agents can run `room complain "..."` to append recurring annoyances to
+`#friction`. `#meta` is the separate place for reusable lessons across Rooms.
 
 The `room` CLI also provides optional delegation tools. Use `room council` when a
 decision benefits from several sealed attempts and a judge; use `room lookup`,

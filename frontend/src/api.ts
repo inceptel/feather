@@ -80,6 +80,14 @@ export interface RoomInfo {
   active: boolean
   latest: { role: string, text: string } | null
   updatedAt: string | null
+  pulse: {
+    enabled: boolean
+    status: 'waiting' | 'working' | 'paused' | 'error'
+    lastRunAt: string | null
+    nextRunAt: string | null
+    sessionId: string | null
+    error?: string | null
+  }
 }
 
 export async function fetchRooms(): Promise<RoomInfo[]> {
@@ -100,6 +108,15 @@ export const assignSessionToRoom = async (room: string, sessionId: string, remov
     body: JSON.stringify({ sessionId, remove }),
   })
   return responseJson<{ ok: true, assignments: Record<string, string> }>(response)
+}
+
+export async function setRoomPulse(room: string, enabled: boolean): Promise<RoomInfo['pulse']> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/pulse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  return (await responseJson<{ ok: true, pulse: RoomInfo['pulse'] }>(response)).pulse
 }
 
 export async function fetchAgents(): Promise<AgentInfo[]> {
