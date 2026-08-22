@@ -45,6 +45,9 @@ const ROOM_PULSE_INTERVAL_MS = Math.max(60_000, Number.isFinite(configuredPulseI
 const configuredPulseCheck = Number(process.env.FEATHER_ROOM_PULSE_CHECK_MS);
 const ROOM_PULSE_CHECK_MS = Math.max(50, Number.isFinite(configuredPulseCheck) && configuredPulseCheck > 0
   ? configuredPulseCheck : 60_000);
+const configuredPulseMax = Number(process.env.FEATHER_ROOM_PULSE_MAX_CONCURRENT);
+const ROOM_PULSE_MAX_CONCURRENT = Math.max(1, Number.isFinite(configuredPulseMax) && configuredPulseMax > 0
+  ? Math.floor(configuredPulseMax) : 3);
 const ROOM_PULSE_STARTED_AT = Date.now();
 const READ_ONLY_ERROR = Object.freeze({ error: 'read-only canary', code: 'FEATHER_READ_ONLY' });
 const SESSION_READ_ROUTE = /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/;
@@ -2201,6 +2204,7 @@ function checkRoomPulses() {
   const now = Date.now();
   const pulseState = ROOM_PULSES_STATE.read();
   const due = [];
+  let inFlight = 0;
   for (const name of listRoomDirs()) {
     let saved = isJsonRecord(pulseState[name]) ? pulseState[name] : {};
     if (saved.status === 'working' && saved.sessionId && !tmuxIsActive(saved.sessionId)) {
@@ -2210,19 +2214,29 @@ function checkRoomPulses() {
       }));
       saved = { ...saved, status: 'waiting' };
     }
+    // A run whose tmux is still alive holds a concurrency slot; never relaunch it.
+    if (saved.status === 'working') { inFlight++; continue; }
     if (saved.enabled === false || now < (Number(saved.nextRunAtMs) || ROOM_PULSE_STARTED_AT + ROOM_PULSE_INTERVAL_MS)) continue;
-    due.push(name);
+    due.push({ name, nextRunAtMs: Number(saved.nextRunAtMs) || 0 });
   }
   if (due.length === 0) return;
+  // Oldest-due first (then name) so a synchronized batch drains fairly instead
+  // of starving whichever rooms sort late.
+  due.sort((a, b) => (a.nextRunAtMs - b.nextRunAtMs) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
   const rooms = new Map(roomSnapshotCache.refresh().map((room) => [room.name, room]));
-  for (const name of due) {
+  for (const { name } of due) {
     const room = rooms.get(name);
     if (!room || room.active) {
       ROOM_PULSES_STATE.update((current) => ({ ...current, [name]: pulseRecord(current[name], { enabled: true, status: 'waiting', nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS }) }));
       continue;
     }
+    // Cap simultaneous autonomous runs: many rooms coming due together must not
+    // spawn one agent each at once. Deferred rooms stay due and launch on later
+    // ticks, which also desynchronizes their schedules over time.
+    if (inFlight >= ROOM_PULSE_MAX_CONCURRENT) continue;
     launchRoomPulse(name);
+    inFlight++;
   }
   const latestPulseState = ROOM_PULSES_STATE.read();
   roomSnapshotCache.update((snapshot) => snapshot.map((room) => ({
