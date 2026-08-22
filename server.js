@@ -15,6 +15,7 @@ import * as sidecar from './lib/sidecar.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
+import { ensureOwnerOnlyFile, ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 
 // Load ~/.env if present
 try {
@@ -29,20 +30,23 @@ const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
-const CLAUDE_PROJECTS = path.join(HOME, '.claude/projects');
-const OMP_SESSIONS = path.join(HOME, '.feather/omp-sessions');
-const CODEX_SESSIONS_ROOT = path.join(HOME, '.codex/sessions');
+const STATE_PATHS = resolveStatePaths({ releaseDir: import.meta.dirname, homeDir: HOME });
+const CLAUDE_PROJECTS = STATE_PATHS.harness.claudeProjectsDir;
+const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
+const CODEX_SESSIONS_ROOT = STATE_PATHS.harness.codexSessionsDir;
 // Head bytes to read when looking for a codex session's first real user
 // message (title, worker detection). The session_meta line plus permissions/
 // context blocks before it now total ~66-88KB, so 64KB missed it; 256KB
 // leaves headroom for further preamble growth.
 const CODEX_HEAD_BYTES = 256 * 1024;
-const STATIC_DIR = path.resolve(import.meta.dirname, 'static');
-const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'version.json'), 'utf8')).version; } catch { return 'unknown'; } })();
-const BRIDGE_EXT = path.resolve(import.meta.dirname, 'lib/feather-bridge.ts');
-const BOXES_FILE = path.resolve(import.meta.dirname, 'boxes.json');
-const SHARING_FILE = path.resolve(import.meta.dirname, 'sharing.json');
-const SHARE_LOG = path.join(HOME, '.feather/share-access.log');
+const STATIC_DIR = STATE_PATHS.release.staticDir;
+const VERSION = (() => { try { return JSON.parse(fs.readFileSync(STATE_PATHS.release.versionFile, 'utf8')).version; } catch { return 'unknown'; } })();
+const BRIDGE_EXT = STATE_PATHS.release.bridgeExtension;
+const BOXES_FILE = STATE_PATHS.instance.boxesFile;
+const SHARING_FILE = STATE_PATHS.instance.sharingFile;
+const SHARE_LOG = STATE_PATHS.coordination.shareAccessLog;
+
+ensureStateLayout(STATE_PATHS);
 
 // Ensure omp session directory exists
 try { fs.mkdirSync(OMP_SESSIONS, { recursive: true }); } catch {}
@@ -66,6 +70,7 @@ function readSharing() {
 
 function writeSharing(sharing) {
   fs.writeFileSync(SHARING_FILE, JSON.stringify(sharing, null, 2), { mode: 0o600 });
+  ensureOwnerOnlyFile(SHARING_FILE);
 }
 
 // CLI: node server.js --add-peer NAME [--all] [--control] — prints the token
@@ -276,7 +281,7 @@ function getAgentForSession(sessionId) {
 
 // ── Session metadata ───────────────────────────────────────────────────────
 
-const META_FILE = path.resolve(import.meta.dirname, 'session-meta.json');
+const META_FILE = STATE_PATHS.instance.metaFile;
 
 function readMeta() {
   try { return JSON.parse(fs.readFileSync(META_FILE, 'utf8')); }
@@ -998,8 +1003,7 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
 
 // ── Express ─────────────────────────────────────────────────────────────────
 
-const UPLOADS_DIR = path.resolve(import.meta.dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
+const UPLOADS_DIR = STATE_PATHS.instance.uploadsDir;
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
@@ -1465,7 +1469,7 @@ app.post('/api/upload', async (req, res) => {
 
 // ── Project labels ──────────────────────────────────────────────────────────
 
-const PROJECT_LABELS_FILE = path.resolve(import.meta.dirname, 'project-labels.json');
+const PROJECT_LABELS_FILE = STATE_PATHS.instance.projectLabelsFile;
 
 function readProjectLabels() {
   try { return JSON.parse(fs.readFileSync(PROJECT_LABELS_FILE, 'utf8')); }
@@ -1508,7 +1512,7 @@ app.delete('/api/projects/:id', (req, res) => {
 
 // ── Quick Links ─────────────────────────────────────────────────────────────
 
-const LINKS_FILE = path.resolve(import.meta.dirname, 'quick-links.json');
+const LINKS_FILE = STATE_PATHS.instance.quickLinksFile;
 
 function readLinks() {
   try { return JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8')); }
@@ -1526,7 +1530,7 @@ app.post('/api/quick-links', (req, res) => {
 
 // ── Starred messages ───────────────────────────────────────────────────────
 
-const STARRED_FILE = path.resolve(import.meta.dirname, 'starred.json');
+const STARRED_FILE = STATE_PATHS.instance.starredFile;
 
 function readStarred() {
   try { return JSON.parse(fs.readFileSync(STARRED_FILE, 'utf8')); }
@@ -1728,8 +1732,8 @@ function httpError(status, message) {
 // ({ sessionId: roomName }), written by the assign endpoint below.
 // See docs/plans/2026-08-20-005-feat-rooms-v2-plan.md.
 
-const ROOMS_HOME_DIR = path.join(HOME, 'rooms');
-const ROOM_ASSIGN_FILE = path.join(HOME, '.feather', 'room-sessions.json');
+const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
+const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
 
 function readRoomAssignments() {
   try { return JSON.parse(fs.readFileSync(ROOM_ASSIGN_FILE, 'utf8')); }

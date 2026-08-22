@@ -4,6 +4,7 @@ static/
 /tmp/
 .DS_Store
 uploads/
+.feather-state/
 quick-links.json
 project-labels.json
 session-meta.json

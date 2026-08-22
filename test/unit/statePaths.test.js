@@ -1,0 +1,187 @@
+import { afterEach, describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { spawnSync } from 'child_process'
+
+import {
+  createLegacyStateSymlinks,
+  ensureOwnerOnlyFile,
+  ensureStateLayout,
+  resolveStatePaths,
+} from '../../lib/state-paths.js'
+
+const roots = []
+
+function tempDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  roots.push(dir)
+  return dir
+}
+
+afterEach(() => {
+  while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true })
+})
+
+describe('state path classification', () => {
+  it('preserves every checkout-local path when FEATHER_STATE_DIR is unset', () => {
+    const releaseDir = '/opt/feather/current'
+    const homeDir = '/home/legacy-user'
+    const paths = resolveStatePaths({ releaseDir, homeDir })
+
+    assert.equal(paths.instance.external, false)
+    assert.equal(paths.instance.root, releaseDir)
+    assert.equal(paths.instance.boxesFile, `${releaseDir}/boxes.json`)
+    assert.equal(paths.instance.sharingFile, `${releaseDir}/sharing.json`)
+    assert.equal(paths.instance.metaFile, `${releaseDir}/session-meta.json`)
+    assert.equal(paths.instance.uploadsDir, `${releaseDir}/uploads`)
+    assert.equal(paths.instance.projectLabelsFile, `${releaseDir}/project-labels.json`)
+    assert.equal(paths.instance.quickLinksFile, `${releaseDir}/quick-links.json`)
+    assert.equal(paths.instance.starredFile, `${releaseDir}/starred.json`)
+  })
+
+  it('moves only instance state under the configured root', () => {
+    const paths = resolveStatePaths({
+      releaseDir: '/opt/feather/releases/a',
+      stateDir: '/srv/feather/state',
+      homeDir: '/home/legacy-user',
+    })
+
+    assert.equal(paths.instance.external, true)
+    assert.equal(paths.instance.metaFile, '/srv/feather/state/session-meta.json')
+    assert.equal(paths.instance.uploadsDir, '/srv/feather/state/uploads')
+    assert.equal(paths.release.staticDir, '/opt/feather/releases/a/static')
+    assert.equal(paths.coordination.sidecarsDir, '/home/legacy-user/.feather/sidecars')
+    assert.equal(paths.coordination.roomAssignmentsFile, '/home/legacy-user/.feather/room-sessions.json')
+    assert.equal(paths.harness.claudeProjectsDir, '/home/legacy-user/.claude/projects')
+    assert.equal(paths.harness.ompSessionsDir, '/home/legacy-user/.feather/omp-sessions')
+    assert.equal(paths.harness.codexSessionsDir, '/home/legacy-user/.codex/sessions')
+    assert.equal(paths.workspace.roomsDir, '/home/legacy-user/rooms')
+    assert.deepEqual(paths.runtime, { managedExternally: ['process', 'tmux', 'temporary-files'] })
+  })
+
+  it('rejects a relative FEATHER_STATE_DIR', () => {
+    assert.throws(
+      () => resolveStatePaths({ releaseDir: '/opt/feather/current', stateDir: 'relative/state' }),
+      /must be an absolute path/,
+    )
+  })
+})
+
+describe('state layout safety', () => {
+  it('creates an external root and uploads directory without replacing existing nodes', () => {
+    const base = tempDir('feather-state-')
+    const releaseDir = path.join(base, 'release')
+    const stateDir = path.join(base, 'state')
+    fs.mkdirSync(releaseDir)
+    const paths = resolveStatePaths({ releaseDir, stateDir, homeDir: base })
+
+    ensureStateLayout(paths)
+    assert.ok(fs.statSync(stateDir).isDirectory())
+    assert.ok(fs.statSync(paths.instance.uploadsDir).isDirectory())
+    assert.equal(fs.statSync(stateDir).mode & 0o777, 0o700)
+
+    const badRoot = path.join(base, 'not-a-directory')
+    fs.writeFileSync(badRoot, 'keep me')
+    assert.throws(
+      () => ensureStateLayout(resolveStatePaths({ releaseDir, stateDir: badRoot, homeDir: base })),
+      /not a directory/,
+    )
+    assert.equal(fs.readFileSync(badRoot, 'utf8'), 'keep me')
+
+    const partialRoot = path.join(base, 'partial-state')
+    fs.mkdirSync(partialRoot)
+    fs.writeFileSync(path.join(partialRoot, 'uploads'), 'also keep me')
+    assert.throws(
+      () => ensureStateLayout(resolveStatePaths({ releaseDir, stateDir: partialRoot, homeDir: base })),
+      /not a directory/,
+    )
+    assert.equal(fs.readFileSync(path.join(partialRoot, 'uploads'), 'utf8'), 'also keep me')
+  })
+
+  it('keeps a valid directory symlink rather than replacing it', () => {
+    const base = tempDir('feather-state-link-')
+    const target = path.join(base, 'target')
+    const link = path.join(base, 'state')
+    fs.mkdirSync(target)
+    fs.symlinkSync(target, link, 'dir')
+    const paths = resolveStatePaths({ releaseDir: path.join(base, 'release'), stateDir: link, homeDir: base })
+
+    ensureStateLayout(paths)
+    assert.ok(fs.lstatSync(link).isSymbolicLink())
+    assert.ok(fs.statSync(path.join(target, 'uploads')).isDirectory())
+  })
+
+  it('enforces owner-only permissions for existing and newly written secret files', () => {
+    const base = tempDir('feather-secret-')
+    const secret = path.join(base, 'sharing.json')
+    fs.writeFileSync(secret, '{}', { mode: 0o644 })
+
+    ensureOwnerOnlyFile(secret)
+    assert.equal(fs.statSync(secret).mode & 0o777, 0o600)
+  })
+})
+
+describe('legacy compatibility symlinks', () => {
+  it('creates links to external state and is idempotent', () => {
+    const base = tempDir('feather-legacy-')
+    const releaseDir = path.join(base, 'release')
+    const stateDir = path.join(base, 'state')
+    fs.mkdirSync(releaseDir)
+    const paths = resolveStatePaths({ releaseDir, stateDir, homeDir: base })
+    ensureStateLayout(paths)
+
+    createLegacyStateSymlinks(paths)
+    createLegacyStateSymlinks(paths)
+
+    assert.ok(fs.lstatSync(path.join(releaseDir, 'sharing.json')).isSymbolicLink())
+    assert.equal(
+      path.resolve(releaseDir, fs.readlinkSync(path.join(releaseDir, 'sharing.json'))),
+      paths.instance.sharingFile,
+    )
+    assert.ok(fs.statSync(path.join(releaseDir, 'uploads')).isDirectory())
+  })
+
+  it('refuses to replace a legacy file or a link to a different target', () => {
+    const base = tempDir('feather-legacy-conflict-')
+    const releaseDir = path.join(base, 'release')
+    const stateDir = path.join(base, 'state')
+    fs.mkdirSync(releaseDir)
+    fs.writeFileSync(path.join(releaseDir, 'boxes.json'), '{"keep":true}')
+    const paths = resolveStatePaths({ releaseDir, stateDir, homeDir: base })
+    ensureStateLayout(paths)
+
+    assert.throws(() => createLegacyStateSymlinks(paths), /refusing to replace/)
+    assert.equal(fs.readFileSync(path.join(releaseDir, 'boxes.json'), 'utf8'), '{"keep":true}')
+
+    fs.unlinkSync(path.join(releaseDir, 'boxes.json'))
+    fs.symlinkSync(path.join(base, 'elsewhere.json'), path.join(releaseDir, 'boxes.json'))
+    assert.throws(() => createLegacyStateSymlinks(paths), /different target/)
+  })
+})
+
+describe('server state integration', () => {
+  it('reads and writes sharing state only in FEATHER_STATE_DIR', () => {
+    const base = tempDir('feather-server-state-')
+    const stateDir = path.join(base, 'state')
+    const homeDir = path.join(base, 'home')
+    fs.mkdirSync(stateDir)
+    fs.mkdirSync(homeDir)
+    fs.writeFileSync(path.join(stateDir, 'sharing.json'), JSON.stringify({ owner: 'legacy-user' }), { mode: 0o644 })
+
+    const result = spawnSync(process.execPath, ['server.js', '--add-peer', 'migration-test'], {
+      cwd: path.resolve(import.meta.dirname, '../..'),
+      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir },
+      encoding: 'utf8',
+      timeout: 10_000,
+    })
+
+    assert.equal(result.status, 0, result.stderr)
+    const sharing = JSON.parse(fs.readFileSync(path.join(stateDir, 'sharing.json'), 'utf8'))
+    assert.equal(sharing.owner, 'legacy-user', 'existing copied state must remain readable')
+    assert.ok(sharing.peers['migration-test'].token)
+    assert.equal(fs.statSync(path.join(stateDir, 'sharing.json')).mode & 0o777, 0o600)
+    assert.ok(fs.statSync(path.join(stateDir, 'uploads')).isDirectory())
+  })
+})
