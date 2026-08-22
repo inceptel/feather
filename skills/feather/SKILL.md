@@ -1,22 +1,23 @@
 ---
 name: feather
-description: Manage a running Feather Claude session viewer — health, logs, quick links, projects, deploy, refeather (pull + rebase + redeploy). Use when the user says /feather.
+description: Manage a running Feather session viewer — health, logs, quick links, projects, and guarded versioned releases. Use when the user says /feather.
 ---
 
 # /feather — server ops
 
-Set `PORT` to your feather port (4870 by default). All `curl` examples below use `localhost:$PORT`:
+Set the exact mounted instance URL. This is authoritative and prevents a CLI
+from selecting another local Feather process:
 
 ```bash
-export PORT=4870   # change to match your install
+export FEATHER_URL="https://host.example/feather2"
 ```
 
 ## Install
 
-Symlink this directory into your Claude skills dir, then restart Claude Code:
+Install the complete promoted bundle for Claude and Codex:
 
 ```bash
-ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
+bin/refeather install-capabilities --release /opt/feather/releases/<commit> --target-root /opt/feather/current
 ```
 
 (Run from the feather repo root.)
@@ -24,7 +25,7 @@ ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
 ## Health
 
 ```bash
-curl -sf localhost:$PORT/api/health | python3 -m json.tool
+curl -sf "$FEATHER_URL/api/health" | python3 -m json.tool
 ```
 
 Non-200 → server is down. Returns `{version, ...}`.
@@ -47,38 +48,27 @@ Depends on how feather is running:
 | systemd | `systemctl restart feather` |
 | foreground | `Ctrl-C` then `npm start` |
 
-## Deploy
+## Stage and promote
 
 ```bash
-cd path/to/feather
-npm run deploy
+release=$(bin/refeather stage --source path/to/clean/feather --releases-dir /opt/feather/releases)
+sudo bin/refeather promote --release "$release" --current-link /opt/feather/current \
+  --program feather-legacy-user --supervisor-socket unix:///run/supervisor.sock \
+  --health-url http://127.0.0.1:8123/feather2/api/health
 ```
 
-`npm run deploy` stamps `version.json`, rebuilds the frontend, then runs `supervisorctl restart feather`. If you don't use supervisord, run `npm run build` and restart however you usually do.
+Staging never restarts a service. Promotion refuses an unsafe source unless a
+complete archive receipt was supplied, owns the host deployment lock, switches
+the stable release link atomically, and verifies the exact built version. Run
+`bin/refeather recover` after an interrupted promotion. Follow
+`docs/runbooks/refeather.md`; never rebase a personalized deployment checkout.
 
 After deploy, both `/api/health` and the frontend tab bar should show the same fresh version timestamp.
 
-## Refeather (pull upstream + redeploy)
+## Refeather
 
-Pull the latest from origin and redeploy. Uses **rebase**, not merge — local
-commits stay on top of upstream changes, no merge commits. **Power through
-conflicts**: don't abort on the first conflict, resolve them in place and
-continue. Most conflicts in this codebase are small (a server.js endpoint or
-an App.tsx state hunk).
-
-```bash
-cd path/to/feather
-git fetch origin
-git rebase origin/main
-# If a conflict pauses the rebase:
-#   1. git status                      → see conflicted files
-#   2. open each, resolve <<<<<<< markers (keep both intents where possible)
-#   3. git add <file>
-#   4. git rebase --continue
-#   5. repeat until rebase finishes
-# Only `git rebase --abort` if integration is genuinely impossible.
-npm run deploy
-```
+Use the staged release workflow above. `refeather` never pulls, rebases,
+resets, or edits the source checkout.
 
 After deploy, sanity-check `/api/health` and click through any feature you
 just integrated to confirm it still works (a passing build doesn't prove
@@ -90,17 +80,17 @@ The "Links" tab in the sidebar reads `quick-links.json`.
 
 ```bash
 # List
-curl -s localhost:$PORT/api/quick-links | python3 -m json.tool
+curl -s "$FEATHER_URL/api/quick-links" | python3 -m json.tool
 
 # Add
-links=$(curl -s localhost:$PORT/api/quick-links)
-curl -s -X POST localhost:$PORT/api/quick-links \
+links=$(curl -s "$FEATHER_URL/api/quick-links")
+curl -s -X POST "$FEATHER_URL/api/quick-links" \
   -H "Content-Type: application/json" \
   -d "$(echo "$links" | python3 -c "import sys,json; l=json.load(sys.stdin); l.append({'label':'LABEL','url':'URL'}); print(json.dumps(l))")"
 
 # Remove
-links=$(curl -s localhost:$PORT/api/quick-links)
-curl -s -X POST localhost:$PORT/api/quick-links \
+links=$(curl -s "$FEATHER_URL/api/quick-links")
+curl -s -X POST "$FEATHER_URL/api/quick-links" \
   -H "Content-Type: application/json" \
   -d "$(echo "$links" | python3 -c "import sys,json; l=json.load(sys.stdin); l=[x for x in l if x['label']!='LABEL']; print(json.dumps(l))")"
 ```
@@ -123,21 +113,21 @@ encode_project_id() { echo "$(realpath "${1:-$PWD}")" | sed 's|/|-|g'; }
 
 ```bash
 # List
-curl -s localhost:$PORT/api/projects | python3 -m json.tool
+curl -s "$FEATHER_URL/api/projects" | python3 -m json.tool
 
 # Add current dir (auto label)
 id=$(encode_project_id)
-curl -s -X POST "localhost:$PORT/api/projects/$id/label" \
+curl -s -X POST "$FEATHER_URL/api/projects/$id/label" \
   -H "Content-Type: application/json" -d '{"label":null}'
 
 # Add a path with custom label
 id=$(encode_project_id ~/life/taxes)
-curl -s -X POST "localhost:$PORT/api/projects/$id/label" \
+curl -s -X POST "$FEATHER_URL/api/projects/$id/label" \
   -H "Content-Type: application/json" -d '{"label":"life / taxes"}'
 
 # Remove
 id=$(encode_project_id ~/old-experiment)
-curl -s -X DELETE "localhost:$PORT/api/projects/$id"
+curl -s -X DELETE "$FEATHER_URL/api/projects/$id"
 ```
 
 ## Sub-commands
@@ -147,8 +137,8 @@ curl -s -X DELETE "localhost:$PORT/api/projects/$id"
 | `/feather` or `/feather status` | Hit `/api/health` |
 | `/feather logs` | Tail logs (best-effort detect supervisord/systemd) |
 | `/feather restart` | Restart the server |
-| `/feather deploy` | `cd <repo> && npm run deploy` |
-| `/feather refeather` | Pull origin, rebase (resolve conflicts in place), redeploy |
+| `/feather deploy` | Stage, then explicitly promote a versioned release |
+| `/feather refeather` | Run the guarded workflow in `docs/runbooks/refeather.md` |
 | `/feather links` | List quick links |
 | `/feather add link LABEL URL` | Append a quick link |
 | `/feather remove link LABEL` | Remove a quick link by label |

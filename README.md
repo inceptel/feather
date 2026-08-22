@@ -99,17 +99,23 @@ it. This is not a cross-harness replacement for detached, indefinite loops.
 Feather's former Auto surface has been retired, and existing `~/auto-*` directories
 are left untouched.
 
-## Slash commands
+## Agent capabilities
 
-Feather ships Claude Code skills under [`skills/`](skills/). Symlink them into your Claude skills dir to use from any chat:
+Install the promoted Feather, Sidecar, and Looper skills for both Claude and
+Codex, plus the `room` and `sidecar` CLIs, through the guarded installer. Point
+the links at the stable `current` release so one promotion updates server and
+agent capabilities together:
 
 ```bash
-ln -sf "$(pwd)/skills/sidecar" ~/.claude/skills/sidecar
-ln -sf "$(pwd)/skills/looper"  ~/.claude/skills/looper
-ln -sf "$(pwd)/skills/feather" ~/.claude/skills/feather
-ln -sf "$(pwd)/bin/sidecar"    ~/.local/bin/sidecar   # the sidecar CLI — must be on PATH
-ln -sf "$(pwd)/bin/room"       ~/.local/bin/room      # optional Rooms CLI
+bin/refeather install-capabilities \
+  --release /opt/feather/releases/<commit> \
+  --target-root /opt/feather/current
 ```
+
+The installer is idempotent. It never overwrites a file or foreign symlink;
+conflicts are copied to a timestamped evidence directory and installation
+stops with cleanup guidance. Ensure `~/.local/bin` is on the environment used
+to spawn Claude and Codex sessions.
 
 - [`/sidecar`](skills/sidecar/SKILL.md) — spawn a paired peer agent thread and chat both ways.
 - [`/looper`](skills/looper/SKILL.md) — run a generator-evaluator loop until `[APPROVED]`.
@@ -227,14 +233,19 @@ existing state. Defaults and rollback compatibility are recorded in
 - **Byte-offset SSE IDs.** Enables resumable streams and gap-free message delivery.
 - **Mobile-first.** `--vh` viewport fix, safe-area insets, `-webkit-overflow-scrolling: touch`, PWA meta tags.
 
-## Deploying changes
+## Releasing changes
 
 ```bash
 cd ~/feather
-npm run deploy    # stamps version.json, builds frontend, restarts server
+npm run deploy    # stages an immutable release; does not restart anything
 ```
 
-Both backend (`/api/health`) and frontend (tab bar) show the same version timestamp.
+Promotion is a separate, guarded operation with explicit current-link,
+Supervisor, and mounted health inputs. It owns a host lock, persists every
+phase, verifies the expected build version, and restores the prior release on
+failure. See [`docs/runbooks/refeather.md`](docs/runbooks/refeather.md).
+
+Both backend (`/api/health`) and frontend (tab bar) show the promoted version timestamp.
 
 ## Deployment
 
@@ -244,6 +255,10 @@ Both backend (`/api/health`) and frontend (tab bar) show the same version timest
 sudo cp infra/feather.supervisor.conf /etc/supervisor/conf.d/feather.conf
 supervisorctl reread && supervisorctl update
 ```
+
+Customize the template first. Production must execute one stable `current`
+link and keep mutable metadata in `FEATHER_STATE_DIR`; never point Supervisor
+at a personalized source checkout.
 
 ### Reverse proxy (Caddy)
 

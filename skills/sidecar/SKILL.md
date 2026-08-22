@@ -16,19 +16,21 @@ It is **not** a generator-evaluator/GAN looper — that's a separate harness bui
 
 ## Install
 
-From the feather repo root, symlink the skill and the CLI, then restart Claude Code:
+Install the complete promoted capability bundle for Claude and Codex:
 
 ```bash
-ln -sf "$(pwd)/skills/sidecar" ~/.claude/skills/sidecar
-ln -sf "$(pwd)/bin/sidecar"    ~/.local/bin/sidecar   # ~/.local/bin must be on PATH
+bin/refeather install-capabilities --release /opt/feather/releases/<commit> --target-root /opt/feather/current
 ```
 
-The `sidecar` CLI auto-detects the backend port (it probes `$PORT`, then 3300,
-then 4870, using whichever answers `/api/health`). Override only if needed:
+Configure the exact instance URL when more than one Feather may be reachable:
 
 ```bash
-export FEATHER_URL="http://127.0.0.1:3300"   # this install runs on 3300
+export FEATHER_URL="https://host.example/feather2"
 ```
+
+Without `FEATHER_URL`, `sidecar` probes `FEATHER_PORT`, 4870, and 3300, validates
+the health shape, and succeeds only when exactly one instance answers. Use
+`sidecar url` to show the selected base URL.
 
 ## How it works
 

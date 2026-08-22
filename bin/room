@@ -24,11 +24,18 @@ set -u
 
 ROOMS_DIR="${ROOMS_DIR:-$HOME/rooms}"
 RUNS_DIR="${ROOM_RUNS_DIR:-$HOME/.feather/room-runs}"
-FEATHER_URL="${FEATHER_URL:-http://127.0.0.1:3300}"
+FEATHER_URL="${FEATHER_URL:-}"
 TIMEOUT="${ROOM_TIMEOUT:-600}"
 LOOKUP_TIMEOUT="${ROOM_LOOKUP_TIMEOUT:-180}"
 
 die() { echo "room: $*" >&2; exit 1; }
+
+ensure_feather_url() {
+  [ -n "$FEATHER_URL" ] && return
+  local script_dir
+  script_dir="$(CDPATH= cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd)"
+  FEATHER_URL="$($script_dir/feather-instance)" || die "could not resolve Feather; set FEATHER_URL"
+}
 
 # ── Room resolution ─────────────────────────────────────────────────────────
 resolve_room() {
@@ -240,6 +247,7 @@ core content, improved by grafting any clearly better ideas from the others,
 cmd_spawn() {
   [ -n "${1:-}" ] || die 'usage: room spawn "<task>"'
   resolve_room
+  ensure_feather_url
   local id; id=$(cat /proc/sys/kernel/random/uuid)
   local resp
   resp=$(curl -sf -X POST "$FEATHER_URL/api/sessions" -H 'Content-Type: application/json' \
@@ -258,6 +266,7 @@ cmd_assignment() { # $1 = attach|detach, $2 = session id
   local action="$1" session_id="${2:-}"
   [ -n "$session_id" ] || die "usage: room $action <session-id>"
   resolve_room
+  ensure_feather_url
   local remove=false verb=attached preposition=to
   if [ "$action" = detach ]; then remove=true; verb=detached; preposition=from; fi
   local payload
@@ -271,6 +280,7 @@ cmd_assignment() { # $1 = attach|detach, $2 = session id
 
 cmd_handoff() {
   resolve_room
+  ensure_feather_url
   new_run_dir handoff
   # Feather normalizes Claude, Codex, and OMP sessions behind one API.
   local latest
