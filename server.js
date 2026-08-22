@@ -52,6 +52,16 @@ const BOXES_FILE = STATE_PATHS.instance.boxesFile;
 const SHARING_FILE = STATE_PATHS.instance.sharingFile;
 const SHARE_LOG = STATE_PATHS.coordination.shareAccessLog;
 
+function isMessageReceiptState(value) {
+  if (!isJsonRecord(value)) return false;
+  return Object.values(value).every((session) => isJsonRecord(session)
+    && Object.values(session).every((receipt) => isJsonRecord(receipt)
+      && /^[0-9a-f]{64}$/.test(receipt.textHash)
+      && isJsonRecord(receipt.response)
+      && receipt.response.ok === true
+      && typeof receipt.response.sentAt === 'string'));
+}
+
 // A canary must be able to inspect a prepared copy without creating directories,
 // changing secret modes, or otherwise becoming a second state writer.
 if (!READ_ONLY_MODE) ensureStateLayout(STATE_PATHS);
@@ -63,6 +73,16 @@ const BOXES_STATE = createJsonState({
 const SHARING_STATE = createJsonState({
   file: SHARING_FILE, root: STATE_PATHS.instance.root, document: 'sharing state',
   defaultValue: {}, validate: isJsonRecord, mode: 0o600,
+});
+const MESSAGE_RECEIPTS_STATE = createJsonState({
+  // Keep delivery metadata inside the already-classified, externally movable
+  // uploads tree so immutable releases never gain a new writable root file.
+  file: path.join(STATE_PATHS.instance.uploadsDir, '.message-receipts.json'),
+  root: STATE_PATHS.instance.root,
+  document: 'message delivery receipts',
+  defaultValue: {},
+  validate: isMessageReceiptState,
+  mode: 0o600,
 });
 
 // Ensure omp session directory exists
@@ -168,6 +188,11 @@ async function proxyToBox(boxId, req, res) {
   const headers = { 'Content-Type': req.headers['content-type'] || 'application/json' };
   // Forward Accept so the remote's compression filter exempts SSE streams
   if (req.headers.accept) headers.Accept = req.headers.accept;
+  // Preserve client idempotency across owner/peer box proxies. The remote
+  // validates the value before using it as a durable delivery receipt key.
+  if (req.headers['x-feather-message-id']) {
+    headers['X-Feather-Message-ID'] = req.headers['x-feather-message-id'];
+  }
 
   // Peer boxes (another user's instance): only the share surface is ever
   // forwarded — rewritten onto their token-gated /api/share namespace. The
@@ -812,6 +837,28 @@ async function sendInput(id, text) {
   return sendLock(id, () => sendInputUnlocked(id, text));
 }
 
+async function sendInputIdempotent(id, text, messageId) {
+  return sendLock(id, async () => {
+    const textHash = createHash('sha256').update(String(text)).digest('hex');
+    const existing = MESSAGE_RECEIPTS_STATE.read()[id]?.[messageId];
+    if (existing) {
+      if (existing.textHash !== textHash) throw httpError(409, 'message id already used with different text');
+      return existing.response;
+    }
+
+    await sendInputUnlocked(id, text);
+    const response = { ok: true, sentAt: new Date().toISOString() };
+    MESSAGE_RECEIPTS_STATE.update((current) => ({
+      ...current,
+      [id]: {
+        ...(isJsonRecord(current[id]) ? current[id] : {}),
+        [messageId]: { textHash, response },
+      },
+    }));
+    return response;
+  });
+}
+
 async function sendInputUnlocked(id, text) {
   if (!tmuxIsActive(id)) {
     resumeSession(id);
@@ -1180,8 +1227,17 @@ app.post('/api/sessions', (req, res) => {
 });
 
 app.post('/api/sessions/:id/send', async (req, res) => {
-  try { await sendInput(req.params.id, req.body.text); res.json({ ok: true, sentAt: new Date().toISOString() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const messageId = req.get('X-Feather-Message-ID');
+    if (messageId !== undefined && !/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) {
+      return res.status(400).json({ error: 'invalid message id' });
+    }
+    if (!messageId) {
+      await sendInput(req.params.id, req.body.text);
+      return res.json({ ok: true, sentAt: new Date().toISOString() });
+    }
+    return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/resume', (req, res) => {
@@ -1462,8 +1518,18 @@ app.post('/api/share/sessions/:id/send', requireShareAccess, async (req, res) =>
   if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   if (!text) return res.status(400).json({ error: 'empty message' });
-  try { await sendInput(req.params.id, `[${req.peer.id}] ${text}`); res.json({ ok: true, sentAt: new Date().toISOString() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    const messageId = req.get('X-Feather-Message-ID');
+    if (messageId !== undefined && !/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) {
+      return res.status(400).json({ error: 'invalid message id' });
+    }
+    const prefixedText = `[${req.peer.id}] ${text}`;
+    if (!messageId) {
+      await sendInput(req.params.id, prefixedText);
+      return res.json({ ok: true, sentAt: new Date().toISOString() });
+    }
+    return res.json(await sendInputIdempotent(req.params.id, prefixedText, messageId));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 app.post('/api/share/sessions/:id/interrupt', requireShareAccess, (req, res) => {
@@ -1798,6 +1864,8 @@ app.get('/api/health', (_req, res) => res.json({
     terminal: !READ_ONLY_MODE,
     shell: !READ_ONLY_MODE,
     backgroundControllers: !READ_ONLY_MODE,
+    maxUploadBytes: MAX_UPLOAD_BYTES,
+    maxAudioBytes: MAX_AUDIO_BYTES,
   },
 }));
 
@@ -1975,7 +2043,10 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
     const assignments = ROOM_ASSIGN_STATE.update((current) => {
       const next = { ...current };
-      if (req.body?.remove) delete next[sid];
+      if (req.body?.remove) {
+        if (current[sid] !== name) throw httpError(409, `session is not assigned to #${name}`);
+        delete next[sid];
+      }
       else next[sid] = name;
       return next;
     });
@@ -1994,6 +2065,7 @@ for (const state of [
   LINKS_STATE,
   STARRED_STATE,
   ROOM_ASSIGN_STATE,
+  MESSAGE_RECEIPTS_STATE,
 ]) state.read();
 
 const server = http.createServer(app);
@@ -2003,22 +2075,21 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  let pathname = '';
+  try { pathname = new URL(req.url, 'http://localhost').pathname; } catch {}
   if (READ_ONLY_MODE) {
-    const pathname = (() => { try { return new URL(req.url, 'http://localhost').pathname; } catch { return ''; } })();
-    if (/(?:^|\/)api\/(terminal|shell)$/.test(pathname)) {
-      const body = JSON.stringify(READ_ONLY_ERROR);
-      socket.end([
-        'HTTP/1.1 403 Forbidden',
-        'Content-Type: application/json',
-        'Cache-Control: no-store',
-        `Content-Length: ${Buffer.byteLength(body)}`,
-        'Connection: close',
-        '', body,
-      ].join('\r\n'));
-      return;
-    }
+    const body = JSON.stringify(READ_ONLY_ERROR);
+    socket.end([
+      'HTTP/1.1 403 Forbidden',
+      'Content-Type: application/json',
+      'Cache-Control: no-store',
+      `Content-Length: ${Buffer.byteLength(body)}`,
+      'Connection: close',
+      '', body,
+    ].join('\r\n'));
+    return;
   }
-  if (req.url?.startsWith('/api/terminal') || req.url?.startsWith('/api/shell')) {
+  if (pathname === '/api/terminal' || pathname === '/api/shell') {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else {
     socket.destroy();
@@ -2028,9 +2099,11 @@ server.on('upgrade', (req, socket, head) => {
 // ── Deepgram batch transcription ────────────────────────────────────────────
 
 app.post('/api/transcribe', async (req, res) => {
-  if (!DEEPGRAM_API_KEY) return res.status(500).json({ error: 'No Deepgram API key configured' });
   try {
+    const declaredSize = Number(req.headers['content-length'] || 0);
+    if (declaredSize > MAX_AUDIO_BYTES) throw httpError(413, 'audio exceeds 25 MB limit');
     const audio = await readBoundedBody(req, MAX_AUDIO_BYTES, 'audio exceeds 25 MB limit');
+    if (!DEEPGRAM_API_KEY) throw httpError(500, 'No Deepgram API key configured');
     const contentType = req.headers['content-type'] || 'audio/webm';
     const dgRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&smart_format=true', {
       method: 'POST',
@@ -2045,7 +2118,7 @@ app.post('/api/transcribe', async (req, res) => {
     const data = await dgRes.json();
     const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
     res.json({ transcript });
-  } catch (e) { res.status(e.name === 'TimeoutError' ? 504 : 500).json({ error: e.message }); }
+  } catch (e) { res.status(e.status || (e.name === 'TimeoutError' ? 504 : 500)).json({ error: e.message }); }
 });
 
 // Register fallbacks after every API route. API misses stay JSON instead of
