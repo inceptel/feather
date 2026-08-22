@@ -11,6 +11,8 @@ session-meta.json
 starred.json
 boxes.json
 sharing.json
+*.json.last-good
+.*.json-state-*.tmp
 version.json
 missing-features.*
 generate-pdf.mjs
