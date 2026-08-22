@@ -445,3 +445,44 @@ suite('static files', () => {
     assert.ok(html.includes('</html>'))
   })
 })
+
+// ── /api/file (serves local files for chat image embeds and links) ──────────
+
+suite('GET /api/file', () => {
+  const fixture = path.join(__dirname, '..', 'fixtures', 'tool-preview.svg')
+
+  it('serves a file by absolute path', async () => {
+    const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(fixture)}`)
+    assert.equal(r.status, 200)
+    const body = await r.text()
+    assert.ok(body.includes('<svg'))
+  })
+
+  it('normalizes ../ segments instead of passing them to sendFile', async () => {
+    const dodgy = path.join(__dirname, '..', 'fixtures', 'nope', '..', 'tool-preview.svg')
+    const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(dodgy)}`)
+    assert.equal(r.status, 200)
+    const body = await r.text()
+    assert.ok(body.includes('<svg'))
+  })
+
+  it('rejects relative paths', async () => {
+    const r = await fetch(`${BASE}/api/file?path=etc/passwd`)
+    assert.equal(r.status, 400)
+  })
+
+  it('rejects paths containing null bytes', async () => {
+    const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent('/etc/passwd\0.png')}`)
+    assert.equal(r.status, 400)
+  })
+
+  it('rejects repeated path params (array injection)', async () => {
+    const r = await fetch(`${BASE}/api/file?path=/etc/hostname&path=/etc/hostname`)
+    assert.equal(r.status, 400)
+  })
+
+  it('404s for missing files', async () => {
+    const r = await fetch(`${BASE}/api/file?path=/no/such/file-ever.png`)
+    assert.equal(r.status, 404)
+  })
+})

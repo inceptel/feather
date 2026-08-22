@@ -27,6 +27,7 @@ import {
   toolInputText,
   toolPresentation,
 } from '../lib/toolPresentation.js'
+import { localFilePath } from '../lib/localMedia.js'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -122,6 +123,37 @@ function fixLinks(el: HTMLElement) {
     }
     a.setAttribute('target', '_blank')
     a.setAttribute('rel', 'noopener')
+  }
+}
+
+// Route Markdown images whose src is a local filesystem path (absolute, ~/,
+// or file://) through the authenticated /api/file endpoint. The browser would
+// otherwise request the raw path as a site URL and show a broken image.
+// If the file fails to load (missing, or not an image), fall back to a
+// clickable path link that opens Feather's file viewer.
+function fixImages(el: HTMLElement, setLightbox?: (v: string | null) => void) {
+  for (const img of el.querySelectorAll('img')) {
+    const targetPath = localFilePath(img.getAttribute('src'))
+    if (!targetPath) continue
+    const url = `/api/file?path=${encodeURIComponent(targetPath)}`
+    img.src = url
+    img.loading = 'lazy'
+    img.classList.add('md-local-img')
+    if (!img.alt) img.alt = targetPath.split('/').pop() || 'image'
+    const insideLink = !!img.closest('a')
+    if (!insideLink) {
+      img.style.cursor = 'zoom-in'
+      img.addEventListener('click', () => {
+        if (setLightbox) setLightbox(url)
+        else window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
+      })
+    }
+    img.addEventListener('error', () => {
+      const a = document.createElement('a')
+      a.textContent = targetPath
+      wirePathLink(a, targetPath)
+      img.replaceWith(a)
+    }, { once: true })
   }
 }
 
@@ -272,7 +304,7 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
 
 function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void, getResult?: (toolUseId: string) => ContentBlock | undefined) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -491,6 +523,8 @@ const markdownCSS = `
 }
 .markdown pre { margin: 8px 0; border-radius: 6px; overflow-x: auto; background: var(--bg-secondary); padding: 10px 12px; }
 .markdown pre code { background: none; padding: 0; font-size: 0.85em; color: var(--code-text); }
+.markdown img { max-width: 100%; }
+.markdown img.md-local-img { display: block; max-height: 400px; border-radius: 6px; margin: 8px 0; object-fit: contain; }
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--text-faint); color: var(--text-secondary);
 }
@@ -865,7 +899,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
               }}>
                 <For each={images}>{(src) => (
-                  <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                 )}</For>
                 <For each={files}>{(f) => {
                   const isPdf = f.name.toLowerCase().endsWith('.pdf')
@@ -881,7 +915,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 }}</For>
                 {(() => {
                   const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} /> : null
                 })()}
                 {metadataRow}
               </div>
@@ -908,7 +942,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   return (
                     <div>
                       <For each={bImgs}>{(src) => (
-                        <img src={src} onClick={() => setLightbox(src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                       )}</For>
                       <For each={bFiles}>{(f) => {
                         const isPdf = f.name.toLowerCase().endsWith('.pdf')
@@ -923,7 +957,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                         )
                       }}</For>
                       {bText.trim() && (
-                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); linkifyPaths(el) })} />
+                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} />
                       )}
                     </div>
                   )
