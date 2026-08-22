@@ -27,7 +27,7 @@ import {
   toolInputText,
   toolPresentation,
 } from '../lib/toolPresentation.js'
-import { localFilePath } from '../lib/localMedia.js'
+import { localFilePath, localFileUrl } from '../lib/localMedia.js'
 import { extractImages } from '../lib/attachments.js'
 
 hljs.registerLanguage('javascript', javascript)
@@ -143,7 +143,7 @@ function fixImages(el: HTMLElement, setLightbox?: (v: string | null) => void) {
   for (const img of el.querySelectorAll('img')) {
     const targetPath = localFilePath(img.getAttribute('src'))
     if (!targetPath) continue
-    const url = `/api/file?path=${encodeURIComponent(targetPath)}`
+    const url = localFileUrl(targetPath)!
     img.src = url
     img.loading = 'lazy'
     img.classList.add('md-local-img')
@@ -330,7 +330,7 @@ function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => vo
     const icon = TOOL_ICONS[name] || '⚙'
     const result = block.id && getResult ? getResult(block.id) : undefined
     const imagePath = toolImagePath(block.name || '', inp)
-    const imageUrl = imagePath ? `/api/file?path=${encodeURIComponent(imagePath)}` : ''
+    const imageUrl = imagePath ? localFileUrl(imagePath)! : ''
     const genericInput = SPECIAL_TOOL_DETAILS.has(name) ? '' : toolInputText(inp)
     const hasDetail = SPECIAL_TOOL_DETAILS.has(name) || !!genericInput || !!imagePath || !!result
     const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:8px 12px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
@@ -585,10 +585,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 `
 
 // ── Component ───────────────────────────────────────────────────────────────
-
-function fileUrl(absPath: string): string {
-  return `${location.pathname.replace(/\/+$/, '')}/api/file?path=${encodeURIComponent(absPath)}`
-}
 
 export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, activeTool?: string | null }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
@@ -888,11 +884,11 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
               }}>
                 <For each={images}>{(src) => (
-                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                  <img src={localFileUrl(src)!} onClick={() => setLightbox(localFileUrl(src)!)} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                 )}</For>
                 <For each={files}>{(f) => {
                   const isPdf = f.name.toLowerCase().endsWith('.pdf')
-                  const url = fileUrl(f.path)
+                  const url = localFileUrl(f.path)!
                   return (
                     <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
                       onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
@@ -931,11 +927,11 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   return (
                     <div>
                       <For each={bImgs}>{(src) => (
-                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                        <img src={localFileUrl(src)!} onClick={() => setLightbox(localFileUrl(src)!)} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                       )}</For>
                       <For each={bFiles}>{(f) => {
                         const isPdf = f.name.toLowerCase().endsWith('.pdf')
-                        const url = fileUrl(f.path)
+                        const url = localFileUrl(f.path)!
                         return (
                           <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
                             onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}

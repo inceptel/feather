@@ -1,4 +1,6 @@
-export const BASE = location.pathname.replace(/\/+$/, '')
+import { appBasePath } from './lib/appPath.js'
+
+export const BASE = appBasePath()
 
 // Append ?box= so the server proxies the call to a remote/peer box
 function bq(url: string, box?: string | null) {

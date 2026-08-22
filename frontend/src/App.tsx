@@ -6,11 +6,13 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, BASE } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords } from './lib/mediaOutbox.js'
+import { appUrl } from './lib/appPath.js'
+import { localFileUrl } from './lib/localMedia.js'
 
 interface QuickLink { label: string; url: string }
 
@@ -184,7 +186,7 @@ export default function App() {
     }
     setViewingFile({ path, kind, content: '' })
     try {
-      const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`)
+      const r = await fetch(localFileUrl(path)!)
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
       setViewingFile({ path, kind, content: await r.text() })
     } catch (e: any) {
@@ -427,8 +429,7 @@ export default function App() {
     if (boxMatch) setCurrentBox(boxMatch[1])
     await refreshSessions()
     fetchAgents().then(setAgents).catch(() => {})
-    const base = location.pathname.replace(/\/+$/, '')
-    fetch(`${base}/api/quick-links`).then(r => r.json()).then(setLinks).catch(() => {})
+    fetch(appUrl('/api/quick-links')).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
     if (boxMatch) select(boxMatch[2])
     else if (hash) select(hash)
@@ -1514,7 +1515,7 @@ export default function App() {
         <Show when={viewingFile()}>
           {(() => {
             const v = viewingFile()!
-            const fileUrl = `${BASE}/api/file?path=${encodeURIComponent(v.path)}`
+            const fileUrl = localFileUrl(v.path)!
             return (
               <div onClick={() => setViewingFile(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.6)', 'z-index': '200', display: 'flex', 'align-items': 'stretch', 'justify-content': 'center', padding: 'max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))' }}>
                 <div onClick={(e) => e.stopPropagation()} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'max-width': '900px', width: '100%', display: 'flex', 'flex-direction': 'column', 'overflow': 'hidden' }}>

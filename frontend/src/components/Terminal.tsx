@@ -1,9 +1,9 @@
 import { onMount, onCleanup, createEffect } from 'solid-js'
 import { init, Terminal as GhosttyTerm, FitAddon } from 'ghostty-web'
 import { themeColors } from '../theme'
+import { appWebSocketUrl } from '../lib/appPath.js'
 
-const basePath = location.pathname.replace(/\/+$/, '')
-const BASE_WS = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${basePath}/api/terminal`
+const BASE_WS = appWebSocketUrl('/api/terminal')
 
 let wasmReady: Promise<void> | null = null
 function ensureInit() {
