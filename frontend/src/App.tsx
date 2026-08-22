@@ -5,8 +5,8 @@ import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar } from './api'
+import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup, RoomUpdate } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
@@ -124,7 +124,11 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'prompts' | 'updates'>('chat')
+  const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
+  const [updatesLoading, setUpdatesLoading] = createSignal(false)
+  const [updatesError, setUpdatesError] = createSignal<string | null>(null)
+  const [updatesRoomName, setUpdatesRoomName] = createSignal<string | null>(null)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
@@ -1127,6 +1131,40 @@ export default function App() {
     background: 'none', color: tab() === t ? '#e5e5e5' : '#666', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
     '-webkit-tap-highlight-color': 'transparent',
   })
+  // Prompts tab: just the user's own inputs, scrollable back through history.
+  // A "prompt" is a user message carrying real text (excludes tool_result-only
+  // user turns, which are tool output fed back to the agent, not asks).
+  const userPrompts = () => messages().filter(m => m.role === 'user' && (m.content || []).some(b => b.type === 'text' && (b.text || '').trim()))
+  const promptText = (m: Message) => (m.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim()
+  const fmtFeedTime = (ts: string | null | undefined) => {
+    if (!ts) return ''
+    const d = new Date(ts)
+    if (isNaN(d.getTime())) return ''
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
+  let promptsScroller: HTMLDivElement | undefined
+  // Open the Prompts tab already scrolled to the latest ask, so "scroll back"
+  // walks into history. Only fires on tab switch, never fights a manual scroll.
+  createEffect(() => {
+    if (tab() !== 'prompts') return
+    const el = promptsScroller
+    if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+  })
+  // Updates tab: the containing Room's human-facing feed. A session carries no
+  // room name, so resolve it from the rooms snapshot, then load that feed.
+  async function loadSessionUpdates(id: string) {
+    setUpdatesLoading(true); setUpdatesError(null); setUpdatesRoomName(null); setUpdatesList([])
+    try {
+      const rooms = await fetchRooms()
+      const room = rooms.find(r => r.sessions.some(s => s.id === id))
+      if (room) { setUpdatesRoomName(room.name); setUpdatesList(await fetchRoomUpdates(room.name)) }
+    } catch (e: any) { setUpdatesError(e.message) }
+    finally { setUpdatesLoading(false) }
+  }
+  createEffect(() => {
+    const id = currentId()
+    if (tab() === 'updates' && id) loadSessionUpdates(id)
+  })
 
   return (
     <div
@@ -1414,7 +1452,9 @@ export default function App() {
         <Show when={currentId()}>
           <div style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '16px', 'flex-shrink': '0' }}>
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
+            <button onClick={() => setTab('prompts')} style={tabStyle('prompts')}>Prompts</button>
             <Show when={!isRemoteBox()}>
+              <button onClick={() => setTab('updates')} style={tabStyle('updates')}>Updates</button>
               <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
               <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
             </Show>
@@ -1554,6 +1594,42 @@ export default function App() {
                   <Terminal sessionId={currentId()} />
                 </Suspense>
               </Show>
+            </div>
+            <div data-testid="prompts-panel" style={{ display: tab() === 'prompts' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
+              <div ref={promptsScroller} style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '12px 16px 24px' }}>
+                <For each={userPrompts()} fallback={<div style={{ color: '#666', 'font-size': '13px', padding: '16px 4px' }}>No prompts yet in this chat.</div>}>
+                  {(m) => (
+                    <div style={{ 'margin-bottom': '10px', padding: '10px 12px', background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '10px' }}>
+                      <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '4px' }}>{fmtFeedTime(m.timestamp)}</div>
+                      <div style={{ 'font-size': '14px', color: '#e0e3e8', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{promptText(m)}</div>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+            <div data-testid="updates-panel" style={{ display: tab() === 'updates' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
+              <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '12px 16px 24px' }}>
+                <Show when={updatesError()}>
+                  <div style={{ color: '#d45555', 'font-size': '13px', padding: '8px 4px' }}>{updatesError()}</div>
+                </Show>
+                <Show when={updatesLoading()}>
+                  <div style={{ color: '#666', 'font-size': '13px', padding: '8px 4px' }}>Loading updates…</div>
+                </Show>
+                <Show when={!updatesLoading() && !updatesError() && !updatesRoomName()}>
+                  <div style={{ color: '#666', 'font-size': '13px', padding: '8px 4px', 'line-height': '1.5' }}>This chat isn't in a Room, so it has no Updates feed. Updates live per Room — open the Rooms home screen to see them.</div>
+                </Show>
+                <Show when={updatesRoomName()}>
+                  <div style={{ 'font-size': '12px', color: '#7a8290', 'margin-bottom': '10px' }}>Updates for <span style={{ color: '#9aa4b2', 'font-weight': '600' }}>#{updatesRoomName()}</span></div>
+                  <For each={[...updatesList()].reverse()} fallback={<div style={{ color: '#666', 'font-size': '13px', padding: '4px' }}>No updates yet in this Room.</div>}>
+                    {(u) => (
+                      <div style={{ padding: '9px 0', 'border-bottom': '1px solid #14141c' }}>
+                        <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{fmtFeedTime(u.ts)}</div>
+                        <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
+                      </div>
+                    )}
+                  </For>
+                </Show>
+              </div>
             </div>
           </Show>
         </div>
