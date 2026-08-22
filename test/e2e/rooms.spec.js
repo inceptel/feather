@@ -59,3 +59,43 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   await page.getByTestId(`attach-${candidate.id}`).click()
   await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
 })
+
+test('surfaces an unread Updates badge, opens the feed, and marks it read per-device', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const updates = [
+    { id: 'u1', ts: '2026-08-22T12:00:00Z', text: 'First briefing. Why it matters: the herd is gone.' },
+    { id: 'u2', ts: '2026-08-22T13:30:00Z', text: 'Second briefing.\nA new paragraph that must keep its line break.' },
+  ]
+  await page.route('**/api/rooms', async (route) => {
+    await route.fulfill({ json: { rooms: [{
+      name: 'meta', cwd: '/srv/rooms/meta', active: false, latest: null, updatedAt: updates[1].ts,
+      updates: { count: updates.length, latestAt: updates[1].ts, latest: 'Second briefing. A new paragraph that must keep its line break.' },
+      pulse: { enabled: true, status: 'waiting', lastRunAt: null, nextRunAt: '2026-08-22T13:45:00Z', sessionId: null },
+      sessions: [],
+    }] } })
+  })
+  await page.route('**/api/rooms/meta/updates', async (route) => {
+    await route.fulfill({ json: { updates } })
+  })
+  // Start from a clean per-device seen state so the badge shows unread.
+  await page.addInitScript(() => { try { localStorage.removeItem('feather:roomUpdatesSeen') } catch {} })
+
+  await page.goto(BASE)
+  const pill = page.getByTestId('updates-meta')
+  await expect(pill).toBeVisible()
+  await expect(pill).toContainText('2 new')
+
+  await pill.click()
+  const panel = page.getByTestId('updates-panel-meta')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('First briefing. Why it matters: the herd is gone.')
+  await expect(panel).toContainText('A new paragraph that must keep its line break.')
+
+  // Opening the feed marks it read: the badge drops to the plain count.
+  await expect(pill).not.toContainText('new')
+  await expect(pill).toContainText('2')
+
+  // Unread is remembered per-device (localStorage), not server-side.
+  const seen = await page.evaluate(() => localStorage.getItem('feather:roomUpdatesSeen'))
+  expect(JSON.parse(seen)).toMatchObject({ meta: 2 })
+})
