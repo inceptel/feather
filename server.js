@@ -16,7 +16,7 @@ import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
-import { createJsonState } from './lib/json-state.js';
+import { createJsonState, isJsonRecord } from './lib/json-state.js';
 
 // Load ~/.env if present
 try {
@@ -55,14 +55,13 @@ const SHARE_LOG = STATE_PATHS.coordination.shareAccessLog;
 // changing secret modes, or otherwise becoming a second state writer.
 if (!READ_ONLY_MODE) ensureStateLayout(STATE_PATHS);
 
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const BOXES_STATE = createJsonState({
   file: BOXES_FILE, root: STATE_PATHS.instance.root, document: 'boxes state',
-  defaultValue: {}, validate: isRecord, mode: 0o600,
+  defaultValue: {}, validate: isJsonRecord, mode: 0o600,
 });
 const SHARING_STATE = createJsonState({
   file: SHARING_FILE, root: STATE_PATHS.instance.root, document: 'sharing state',
-  defaultValue: {}, validate: isRecord, mode: 0o600,
+  defaultValue: {}, validate: isJsonRecord, mode: 0o600,
 });
 
 // Ensure omp session directory exists
@@ -98,7 +97,7 @@ if (process.argv.includes('--add-peer')) {
     process.exit(1);
   }
   const sharing = SHARING_STATE.update((current) => {
-    const peers = isRecord(current.peers) ? current.peers : {};
+    const peers = isJsonRecord(current.peers) ? current.peers : {};
     const existing = peers[name] || {};
     const token = existing.token || randomBytes(32).toString('hex');
     return {
@@ -306,7 +305,7 @@ function getAgentForSession(sessionId) {
 const META_FILE = STATE_PATHS.instance.metaFile;
 const META_STATE = createJsonState({
   file: META_FILE, root: STATE_PATHS.instance.root, document: 'session metadata',
-  defaultValue: {}, validate: isRecord,
+  defaultValue: {}, validate: isJsonRecord,
 });
 
 function readMeta() {
@@ -1483,6 +1482,17 @@ app.post('/api/sessions/:id/share', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+async function readBoundedBody(req, maxBytes, limitMessage) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw httpError(413, limitMessage);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 app.post('/api/upload', async (req, res) => {
   try {
     const filename = decodeURIComponent(req.headers['x-filename'] || 'file');
@@ -1496,23 +1506,18 @@ app.post('/api/upload', async (req, res) => {
     const fpath = path.join(UPLOADS_DIR, dest);
     const declaredSize = Number(req.headers['content-length'] || 0);
     if (declaredSize > MAX_UPLOAD_BYTES) return res.status(413).json({ error: 'upload exceeds 50 MB limit' });
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of req) {
-      size += chunk.length;
-      if (size > MAX_UPLOAD_BYTES) return res.status(413).json({ error: 'upload exceeds 50 MB limit' });
-      chunks.push(chunk);
-    }
-    const body = Buffer.concat(chunks);
-    const sameBody = () => {
+    const body = await readBoundedBody(req, MAX_UPLOAD_BYTES, 'upload exceeds 50 MB limit');
+    const existingBody = () => {
       try {
-        const existing = fs.readFileSync(fpath);
-        return existing.length === body.length &&
-          createHash('sha256').update(existing).digest('hex') === createHash('sha256').update(body).digest('hex');
-      } catch { return false; }
+        return fs.readFileSync(fpath);
+      } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      }
     };
-    if (fs.existsSync(fpath)) {
-      if (!sameBody()) return res.status(409).json({ error: 'upload id already exists with different content' });
+    const existing = existingBody();
+    if (existing) {
+      if (!existing.equals(body)) return res.status(409).json({ error: 'upload id already exists with different content' });
       return res.json({ path: fpath, reused: true });
     }
     const tmp = path.join(UPLOADS_DIR, `.${uploadId}-${randomUUID()}.tmp`);
@@ -1520,7 +1525,8 @@ app.post('/api/upload', async (req, res) => {
     try {
       fs.linkSync(tmp, fpath);
     } catch (e) {
-      if (e.code !== 'EEXIST' || !sameBody()) {
+      const racedBody = e.code === 'EEXIST' ? existingBody() : null;
+      if (e.code !== 'EEXIST' || !racedBody?.equals(body)) {
         if (e.code === 'EEXIST') return res.status(409).json({ error: 'upload id already exists with different content' });
         throw e;
       }
@@ -1536,7 +1542,7 @@ app.post('/api/upload', async (req, res) => {
 const PROJECT_LABELS_FILE = STATE_PATHS.instance.projectLabelsFile;
 const PROJECT_LABELS_STATE = createJsonState({
   file: PROJECT_LABELS_FILE, root: STATE_PATHS.instance.root, document: 'project labels',
-  defaultValue: {}, validate: isRecord,
+  defaultValue: {}, validate: isJsonRecord,
 });
 
 function readProjectLabels() {
@@ -1606,7 +1612,7 @@ app.post('/api/quick-links', (req, res) => {
 const STARRED_FILE = STATE_PATHS.instance.starredFile;
 const STARRED_STATE = createJsonState({
   file: STARRED_FILE, root: STATE_PATHS.instance.root, document: 'starred messages',
-  defaultValue: {}, validate: isRecord,
+  defaultValue: {}, validate: isJsonRecord,
 });
 
 function readStarred() {
@@ -1821,7 +1827,7 @@ const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
-  defaultValue: {}, validate: isRecord,
+  defaultValue: {}, validate: isJsonRecord,
 });
 
 function readRoomAssignments() {
@@ -2015,14 +2021,7 @@ server.on('upgrade', (req, socket, head) => {
 app.post('/api/transcribe', async (req, res) => {
   if (!DEEPGRAM_API_KEY) return res.status(500).json({ error: 'No Deepgram API key configured' });
   try {
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of req) {
-      size += chunk.length;
-      if (size > MAX_AUDIO_BYTES) return res.status(413).json({ error: 'audio exceeds 25 MB limit' });
-      chunks.push(chunk);
-    }
-    const audio = Buffer.concat(chunks);
+    const audio = await readBoundedBody(req, MAX_AUDIO_BYTES, 'audio exceeds 25 MB limit');
     const contentType = req.headers['content-type'] || 'audio/webm';
     const dgRes = await fetch('https://api.deepgram.com/v1/listen?model=nova-3&punctuate=true&smart_format=true', {
       method: 'POST',
