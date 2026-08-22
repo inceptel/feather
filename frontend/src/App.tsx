@@ -165,6 +165,23 @@ export default function App() {
   const [files, setFiles] = createSignal<PendingFile[]>([])
   const [voiceMemos, setVoiceMemos] = createSignal<VoiceMemo[]>([])
   const [mediaNotice, setMediaNotice] = createSignal('')
+  let mediaNoticeTimer: ReturnType<typeof setTimeout> | undefined
+  function dismissMediaNotice() {
+    if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer)
+    mediaNoticeTimer = undefined
+    setMediaNotice('')
+  }
+  function showMediaNotice(message: string, autoDismissMs = 0) {
+    if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer)
+    mediaNoticeTimer = undefined
+    setMediaNotice(message)
+    if (autoDismissMs > 0) {
+      mediaNoticeTimer = setTimeout(() => {
+        setMediaNotice(current => current === message ? '' : current)
+        mediaNoticeTimer = undefined
+      }, autoDismissMs)
+    }
+  }
   const uploadsInFlight = new Map<string, Promise<string>>()
   const voiceMemosInFlight = new Map<string, Promise<void>>()
   type FileKind = 'image' | 'pdf' | 'md' | 'text'
@@ -477,7 +494,7 @@ export default function App() {
     // stops running stale JS.
     if (v !== bootVersion) location.reload()
   }
-  onCleanup(() => { clearPendingMedia(); cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
+  onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearPendingMedia(); cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
 
   const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
   const isRemoteBox = () => currentBox() !== 'local'
@@ -494,6 +511,7 @@ export default function App() {
 
   function selectBox(id: string) {
     if (id === currentBox()) return
+    dismissMediaNotice()
     setCurrentBox(id)
     setPeerControl(false)
     clearSearch()
@@ -510,6 +528,7 @@ export default function App() {
   async function select(id: string) {
     const prev = currentId()
     if (prev) saveDraft(prev, text())
+    dismissMediaNotice()
     setCurrentId(id)
     location.hash = currentBox() === 'local' ? id : `${currentBox()}:${id}`
     setSidebar(false)
@@ -575,6 +594,7 @@ export default function App() {
     if (!confirm('Delete this session?')) return
     setMenuOpen(false)
     await deleteSession(id)
+    dismissMediaNotice()
     setCurrentId(null)
     location.hash = ''
     cleanupSSE?.()
@@ -605,6 +625,7 @@ export default function App() {
   }
 
   function goHome() {
+    dismissMediaNotice()
     setCurrentId(null)
     location.hash = ''
     setSidebar(false)
@@ -876,13 +897,17 @@ export default function App() {
         // stale second tab from replaying the memo even when Blob cleanup fails.
         await patchMediaRecord(memo.id, { status: 'delivered', error: null, deliveredAt: Date.now(), blob: new Blob([], { type: memo.blob.type }) })
         setVoiceMemos(prev => prev.filter(item => item.id !== memo.id))
-        setMediaNotice('Voice memo recovered successfully.')
+        if (memo.sessionId === currentId() && memo.boxId === currentBox()) {
+          showMediaNotice('Voice memo recovered successfully.', 4000)
+        }
       } catch (error: any) {
         const message = error?.message || String(error)
         const patch = { status: 'failed' as const, attempts: lastAttempt, error: message, transcript }
         updateVoice(memo.id, patch)
         await persistMediaPatch(memo.id, patch)
-        setMediaNotice(`Voice memo retained: ${message}`)
+        if (memo.sessionId === currentId() && memo.boxId === currentBox()) {
+          showMediaNotice(`Voice memo retained: ${message}`)
+        }
       }
     })) as Promise<void>
   }
@@ -1593,7 +1618,7 @@ export default function App() {
           <input ref={fileInputRef} type="file" multiple hidden title="Maximum file size: 50 MB" onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = '' } }} />
           <Show when={mediaNotice()}>
             <div role="status" style={{ padding: '7px 12px', 'border-top': '1px solid #332b18', background: '#17140b', color: '#d8bd66', 'font-size': '12px', display: 'flex', 'justify-content': 'space-between', gap: '8px' }}>
-              <span>{mediaNotice()}</span><button onClick={() => setMediaNotice('')} style={{ background: 'none', border: 'none', color: '#d8bd66', cursor: 'pointer' }}>&times;</button>
+              <span>{mediaNotice()}</span><button onClick={dismissMediaNotice} style={{ background: 'none', border: 'none', color: '#d8bd66', cursor: 'pointer' }}>&times;</button>
             </div>
           </Show>
           {/* File previews */}
