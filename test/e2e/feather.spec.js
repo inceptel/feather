@@ -426,6 +426,20 @@ test.describe('Tab switching', () => {
     // Messages should be visible
     await expect(page.locator('.markdown').first()).toBeVisible()
   })
+
+  test('prompts tab lists only the user inputs, hiding assistant turns and composer', async ({ page }) => {
+    await page.locator('button:has-text("Prompts")').click()
+    await page.waitForTimeout(400)
+    const panel = page.getByTestId('prompts-panel')
+    await expect(panel).toBeVisible()
+    // Both user prompts appear (rendered as raw text, markdown not parsed).
+    await expect(panel.getByText('Thanks, that makes sense!')).toBeVisible()
+    await expect(panel.getByText(/rendering works in .*Feather/)).toBeVisible()
+    // Assistant/tool content is not part of the prompts feed.
+    await expect(panel.getByText(/marked/)).toHaveCount(0)
+    // The composer is hidden while viewing prompts.
+    await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
+  })
 })
 
 // ── Live SSE updates in the browser ─────────────────────────────────────────
@@ -448,8 +462,9 @@ test.describe('Live updates', () => {
       message: { role: 'user', content: 'This message arrived via SSE live update!' },
     })
 
-    // Wait for it to appear in the UI
-    await expect(page.locator('text=This message arrived via SSE live update!')).toBeVisible({ timeout: 10000 })
+    // Wait for it to appear in the chat (a user message now also renders in the
+    // hidden Prompts panel, so scope to the chat markdown paragraph).
+    await expect(page.getByRole('paragraph').filter({ hasText: 'This message arrived via SSE live update!' })).toBeVisible({ timeout: 10000 })
 
     // Should have one more message
     const afterCount = await page.locator('.msg-row').count()
