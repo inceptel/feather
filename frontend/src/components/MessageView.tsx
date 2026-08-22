@@ -227,6 +227,43 @@ function injectCopyButtons(el: HTMLElement) {
   }
 }
 
+function enhanceTables(el: HTMLElement, setExpandedTable: (html: string) => void) {
+  for (const table of el.querySelectorAll<HTMLTableElement>('table:not([data-feather-table])')) {
+    table.dataset.featherTable = 'true'
+    const rows = Array.from(table.rows)
+    const columnCount = Math.max(0, ...rows.map((row) => row.cells.length))
+    for (let column = 0; column < columnCount; column++) {
+      const cells = rows.map((row) => row.cells[column]).filter(Boolean)
+      const values = cells.map((cell) => (cell.textContent || '').trim()).filter(Boolean)
+      const compact = values.every((value) => value.length <= 18 && !/\s{2,}|\n/.test(value))
+      cells.forEach((cell) => cell.classList.add(compact ? 'md-col-compact' : 'md-col-wide'))
+    }
+    const frame = document.createElement('div')
+    frame.className = 'md-table-frame'
+    table.parentNode?.insertBefore(frame, table)
+    frame.appendChild(table)
+    const expand = document.createElement('button')
+    expand.type = 'button'
+    expand.className = 'md-table-expand'
+    expand.setAttribute('aria-label', 'Expand table')
+    expand.title = 'Expand table'
+    expand.textContent = '↗'
+    expand.addEventListener('click', (event) => {
+      event.stopPropagation()
+      setExpandedTable(DOMPurify.sanitize(table.outerHTML))
+    })
+    frame.appendChild(expand)
+  }
+}
+
+function enhanceMarkdown(el: HTMLElement, setLightbox: (value: string | null) => void, setExpandedTable: (html: string) => void) {
+  injectCopyButtons(el)
+  fixLinks(el)
+  fixImages(el, setLightbox)
+  linkifyPaths(el)
+  enhanceTables(el, setExpandedTable)
+}
+
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 function stripAnsi(text: string): string {
@@ -301,9 +338,9 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
   )
 }
 
-function renderBlock(block: ContentBlock, setLightbox?: (v: string | null) => void, getResult?: (toolUseId: string) => ContentBlock | undefined) {
+function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => void, getResult: ((toolUseId: string) => ContentBlock | undefined) | undefined, setExpandedTable: (html: string) => void) {
   if (block.type === 'text' && block.text) {
-    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} />
+    return <div class="markdown" innerHTML={renderMarkdown(block.text)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, setExpandedTable))} />
   }
   if (block.type === 'thinking' && block.thinking) {
     return (
@@ -527,9 +564,22 @@ const markdownCSS = `
 .markdown blockquote {
   margin: 6px 0; padding: 4px 12px; border-left: 3px solid var(--text-faint); color: var(--text-secondary);
 }
-.markdown table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; max-width: 100%; table-layout: auto; overflow-wrap: anywhere; }
+.markdown .md-table-frame { position: relative; max-width: 100%; margin: 8px 0; overflow-x: auto; border: 1px solid var(--border-medium); border-radius: 7px; -webkit-overflow-scrolling: touch; }
+.markdown table { border-collapse: collapse; width: max-content; min-width: 100%; max-width: none; margin: 0; font-size: 0.9em; table-layout: auto; }
 .markdown th, .markdown td { border: 1px solid var(--border-medium); padding: 5px 10px; text-align: left; vertical-align: top; }
+.markdown .md-col-compact { white-space: nowrap; width: 1%; }
+.markdown .md-col-wide { min-width: 14rem; max-width: 34rem; white-space: normal; overflow-wrap: break-word; }
 .markdown th { background: rgba(255,255,255,0.05); font-weight: 600; }
+.markdown .md-table-expand { position: sticky; left: calc(100% - 32px); bottom: 6px; width: 26px; height: 26px; margin: 0 6px 6px 0; border: 1px solid var(--border-medium); border-radius: 6px; background: rgba(20,24,30,0.94); color: var(--text-secondary); cursor: zoom-in; font-size: 15px; line-height: 1; }
+.markdown .md-table-expand:hover { color: var(--text-primary); background: var(--bg-surface); }
+.md-table-modal { position: fixed; inset: 0; z-index: 220; display: flex; flex-direction: column; background: rgba(5,7,10,0.96); }
+.md-table-modal-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border-medium); color: var(--text-secondary); font-size: 12px; }
+.md-table-modal-body { flex: 1; overflow: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+.md-table-modal-body table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 14px; }
+.md-table-modal-body th, .md-table-modal-body td { border: 1px solid var(--border-medium); padding: 8px 12px; text-align: left; vertical-align: top; }
+.md-table-modal-body th { background: var(--bg-surface); position: sticky; top: 0; }
+.md-table-modal-body .md-col-compact { white-space: nowrap; width: 1%; }
+.md-table-modal-body .md-col-wide { min-width: 18rem; max-width: 42rem; white-space: normal; overflow-wrap: break-word; }
 .markdown a { color: var(--link); text-decoration: none; }
 .markdown a:hover { text-decoration: underline; }
 .feather-path { color: var(--link); text-decoration: none; cursor: pointer; }
@@ -585,6 +635,30 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, activeTool?: string | null }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
+  const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
+  let tableReturnFocus: HTMLElement | null = null
+  let tableModal: HTMLDivElement | undefined
+
+  function openExpandedTable(html: string) {
+    tableReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setExpandedTable(html)
+  }
+
+  function closeExpandedTable() {
+    setExpandedTable(null)
+    queueMicrotask(() => tableReturnFocus?.focus())
+  }
+
+  function handleTableModalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') { event.preventDefault(); closeExpandedTable(); return }
+    if (event.key !== 'Tab' || !tableModal) return
+    const focusable = Array.from(tableModal.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])'))
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+  }
 
   // Pair tool_use blocks with their matching tool_result so they render as one unit.
   const toolResultsById = createMemo(() => {
@@ -642,6 +716,15 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
     <div style={{ position: 'relative', height: '100%' }}>
     <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
+      <Show when={expandedTable()}>
+        <div ref={tableModal} class="md-table-modal" role="dialog" aria-modal="true" aria-label="Expanded table" onKeyDown={handleTableModalKeydown}>
+          <div class="md-table-modal-bar">
+            <span>Table</span>
+            <button ref={(element) => queueMicrotask(() => element.focus())} aria-label="Close expanded table" onClick={closeExpandedTable} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', 'font-size': '24px', cursor: 'pointer', padding: '2px 8px' }}>&times;</button>
+          </div>
+          <div class="md-table-modal-body" innerHTML={expandedTable()!} ref={(element) => queueMicrotask(() => { fixLinks(element); fixImages(element, setLightbox); linkifyPaths(element) })} />
+        </div>
+      </Show>
       <Show when={props.loading}>
         <div style={{ color: 'var(--text-dim)', 'text-align': 'center', padding: '40px' }}>Loading...</div>
       </Show>
@@ -790,7 +873,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                         <Show when={expanded()}>
                           <div style={{ 'margin-top': '4px' }}>
                             <For each={seg.messages}>{(m) => (
-                              <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult)}</For>
+                              <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult, openExpandedTable)}</For>
                             )}</For>
                           </div>
                         </Show>
@@ -800,7 +883,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   // single tool-only message — render its blocks flat, no per-message bubble
                   const m = seg.msg
                   return (
-                    <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult)}</For>
+                    <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult, openExpandedTable)}</For>
                   )
                 }}</For>
                 {/* one metadata row at the bottom, using last message's timestamp */}
@@ -896,7 +979,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 }}</For>
                 {(() => {
                   const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} /> : null
+                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} /> : null
                 })()}
                 {metadataRow}
               </div>
@@ -938,7 +1021,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                         )
                       }}</For>
                       {bText.trim() && (
-                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => { injectCopyButtons(el); fixLinks(el); fixImages(el, setLightbox); linkifyPaths(el) })} />
+                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} />
                       )}
                     </div>
                   )
@@ -959,7 +1042,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   )
                 }
                 // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
-                return renderBlock(block, setLightbox, getResult)
+                return renderBlock(block, setLightbox, getResult, openExpandedTable)
               }}</For>
               {metadataRow}
             </div>
