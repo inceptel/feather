@@ -885,11 +885,25 @@ export default function App() {
           await persistMediaPatch(memo.id, { transcript })
         }
         if (memo.intent === 'send') {
-          await sendSessionText([memo.capturedText, transcript].filter(Boolean).join(' '), { id: memo.sessionId, box: memo.boxId }, memo.id)
-          const draft = memo.sessionId === currentId() && memo.boxId === currentBox() ? text() : loadDraft(memo.sessionId)
+          const onCurrent = memo.sessionId === currentId() && memo.boxId === currentBox()
+          // One Send sends everything: fold any pending attachments into the same
+          // message as the transcript, so voice + image never needs two taps.
+          const pending = onCurrent ? files() : []
+          const parts = [[memo.capturedText, transcript].filter(Boolean).join(' ')].filter(Boolean)
+          for (const f of pending) {
+            const uploadPath = await uploadPendingFile(f)
+            parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
+          }
+          await sendSessionText(parts.join('\n'), { id: memo.sessionId, box: memo.boxId }, memo.id)
+          for (const f of pending) {
+            URL.revokeObjectURL(f.dataUrl)
+            await deleteMediaRecord(f.id).catch(() => {})
+          }
+          if (onCurrent && pending.length) setFiles(prev => prev.filter(file => !pending.some(sent => sent.id === file.id)))
+          const draft = onCurrent ? text() : loadDraft(memo.sessionId)
           if (draft === memo.capturedText) {
             saveDraft(memo.sessionId, '')
-            if (memo.sessionId === currentId() && memo.boxId === currentBox()) setText('')
+            if (onCurrent) setText('')
           }
         } else {
           const previous = memo.sessionId === currentId() && memo.boxId === currentBox() ? text().trim() : loadDraft(memo.sessionId).trim()

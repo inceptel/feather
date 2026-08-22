@@ -331,22 +331,46 @@ export function subscribeMessages(
   let closed = false
   let retries = 0
   let lastEventId = ''
+  let gen = 0
+  let watchdog: ReturnType<typeof setTimeout> | null = null
+  // The server heartbeats every 15s. If even those stop arriving the stream is a
+  // zombie — common on mobile, where a network change kills the TCP socket but
+  // EventSource never fires onerror, so messages silently stop until a full page
+  // refresh. Any event (connected/heartbeat/message) rearms this; if it lapses,
+  // we tear the socket down and reconnect, resuming from the last byte offset.
+  const IDLE_TIMEOUT = 40000
+  function armWatchdog() {
+    if (watchdog) clearTimeout(watchdog)
+    watchdog = setTimeout(() => {
+      if (closed) return
+      onStatus?.('reconnecting')
+      try { es?.close() } catch {}
+      connect() // bumps gen, so the dead source's late handlers become no-ops
+    }, IDLE_TIMEOUT)
+  }
 
   function connect() {
     if (closed) return
+    const myGen = ++gen
     const url = bq(lastEventId
       ? `${BASE}/api/sessions/${id}/stream?lastEventId=${lastEventId}`
       : `${BASE}/api/sessions/${id}/stream`, box)
-    es = new EventSource(url)
+    const source = new EventSource(url)
+    es = source
+    armWatchdog()
 
-    es.addEventListener('connected', () => { retries = 0; onStatus?.('connected') })
-    es.addEventListener('message', (e) => {
+    source.addEventListener('connected', () => { if (myGen !== gen) return; retries = 0; armWatchdog(); onStatus?.('connected') })
+    source.addEventListener('heartbeat', () => { if (myGen === gen) armWatchdog() })
+    source.addEventListener('message', (e) => {
+      if (myGen !== gen) return
+      armWatchdog()
       if (e.lastEventId) lastEventId = e.lastEventId
       try { onMessage(JSON.parse(e.data)) } catch {}
     })
-    es.onerror = () => {
-      es?.close(); es = null
-      if (closed) return
+    source.onerror = () => {
+      if (closed || myGen !== gen) return
+      if (watchdog) { clearTimeout(watchdog); watchdog = null }
+      try { source.close() } catch {}
       retries++
       onStatus?.('reconnecting')
       setTimeout(connect, Math.min(1000 * 2 ** Math.min(retries - 1, 5), 30000))
@@ -354,5 +378,5 @@ export function subscribeMessages(
   }
 
   connect()
-  return () => { closed = true; es?.close(); es = null }
+  return () => { closed = true; if (watchdog) clearTimeout(watchdog); es?.close(); es = null }
 }
