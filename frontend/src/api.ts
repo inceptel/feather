@@ -162,8 +162,10 @@ export async function fetchMessages(id: string, before = 0, box?: string | null)
   return await r.json()
 }
 
-export async function sendInput(id: string, text: string, box?: string | null): Promise<{ ok: boolean, sentAt: string }> {
-  const r = await fetch(bq(`${BASE}/api/sessions/${id}/send`, box), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+export async function sendInput(id: string, text: string, box?: string | null, messageId?: string): Promise<{ ok: boolean, sentAt: string }> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (messageId) headers['X-Feather-Message-ID'] = messageId
+  const r = await fetch(bq(`${BASE}/api/sessions/${id}/send`, box), { method: 'POST', headers, body: JSON.stringify({ text }) })
   const data = await responseJson<{ ok?: boolean, sentAt: string, error?: string }>(r)
   if (data.ok !== true) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status })
   return data
