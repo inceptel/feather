@@ -38,6 +38,14 @@ if (!process.env.OPENAI_API_KEY && process.env.FEATHER_OPENAI_API_KEY) {
 const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 const envEnabled = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
 const READ_ONLY_MODE = envEnabled(process.env.FEATHER_READ_ONLY);
+const ROOM_PULSES_ENABLED = !READ_ONLY_MODE && !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_ROOM_PULSES || '').trim());
+const configuredPulseInterval = Number(process.env.FEATHER_ROOM_PULSE_INTERVAL_MS);
+const ROOM_PULSE_INTERVAL_MS = Math.max(60_000, Number.isFinite(configuredPulseInterval) && configuredPulseInterval > 0
+  ? configuredPulseInterval : 15 * 60 * 1000);
+const configuredPulseCheck = Number(process.env.FEATHER_ROOM_PULSE_CHECK_MS);
+const ROOM_PULSE_CHECK_MS = Math.max(50, Number.isFinite(configuredPulseCheck) && configuredPulseCheck > 0
+  ? configuredPulseCheck : 60_000);
+const ROOM_PULSE_STARTED_AT = Date.now();
 const READ_ONLY_ERROR = Object.freeze({ error: 'read-only canary', code: 'FEATHER_READ_ONLY' });
 const SESSION_READ_ROUTE = /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/;
 
@@ -709,16 +717,24 @@ function ensureCodexTrust(cwd) {
   try { fs.appendFileSync(cfg, block); } catch (e) { console.warn(`[codex] could not write trust for ${cwd}:`, e.message); }
 }
 
+function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
+  const sessionDir = path.join(OMP_SESSIONS, id);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  watchOmpSessionDir(sessionDir, id);
+  const ompId = resume ? getOmpSessionId(id) : null;
+  const resumeArg = resume ? (ompId ? `--resume ${ompId}` : '--continue') : '';
+  const printArgs = promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}@${promptFile}` : '';
+  const command = `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} ${printArgs} --session-dir ${sessionDir} --allow-home'`;
+  launchInTmux(tmuxName(id), command, cwd);
+}
+
 function spawnSession(id, cwd, agent = 'claude') {
   const name = tmuxName(id);
   // Persist agent type in metadata
   updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent } }));
 
   if (agent === 'omp') {
-    const sessionDir = path.join(OMP_SESSIONS, id);
-    fs.mkdirSync(sessionDir, { recursive: true });
-    watchOmpSessionDir(sessionDir, id);
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp --session-dir ${sessionDir} --allow-home'`, cwd);
+    launchOmpSession(id, cwd);
   } else if (agent === 'codex') {
     // Codex doesn't accept a preset session id (issue openai/codex#15767).
     // Snapshot existing rollout files, spawn codex, then poll for the new file
@@ -782,12 +798,7 @@ function resumeSession(id, cwd) {
   const agent = getAgentForSession(id);
   const name = tmuxName(id);
   if (agent === 'omp') {
-    const sessionDir = path.join(OMP_SESSIONS, id);
-    // Read the omp Snowflake ID from the JSONL header for resume
-    const ompId = getOmpSessionId(id);
-    const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
-    watchOmpSessionDir(sessionDir, id);
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} --session-dir ${sessionDir} --allow-home'`, cwd);
+    launchOmpSession(id, cwd, { resume: true });
   } else if (agent === 'codex') {
     const meta = readMeta();
     const codexUuid = meta[id]?.codexUuid || (UUID_RE.test(id) ? id : null);
@@ -1934,10 +1945,55 @@ function httpError(status, message) {
 
 const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
+const ROOM_PULSES_FILE = STATE_PATHS.coordination.roomPulsesFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
   defaultValue: {}, validate: isJsonRecord,
 });
+const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
+function isRoomPulseState(value) {
+  if (!isJsonRecord(value)) return false;
+  return Object.values(value).every((pulse) => {
+    if (!isJsonRecord(pulse)) return false;
+    if (typeof pulse.enabled !== 'boolean') return false;
+    if (!ROOM_PULSE_STATUSES.has(pulse.status)) return false;
+    if (pulse.lastRunAt !== null && (typeof pulse.lastRunAt !== 'string' || !Number.isFinite(Date.parse(pulse.lastRunAt)))) return false;
+    if (pulse.sessionId !== null && (typeof pulse.sessionId !== 'string' || !UUID_RE.test(pulse.sessionId))) return false;
+    if (pulse.error !== null && typeof pulse.error !== 'string') return false;
+    return pulse.nextRunAtMs === null || (Number.isFinite(pulse.nextRunAtMs) && pulse.nextRunAtMs >= 0 && pulse.nextRunAtMs <= 8.64e15);
+  });
+}
+const ROOM_PULSES_STATE = createJsonState({
+  file: ROOM_PULSES_FILE, root: path.dirname(ROOM_PULSES_FILE), document: 'Room keep-working state',
+  defaultValue: {}, validate: isRoomPulseState,
+});
+
+function pulseRecord(current, changes = {}) {
+  return {
+    enabled: true,
+    status: 'waiting',
+    lastRunAt: null,
+    nextRunAtMs: null,
+    sessionId: null,
+    error: null,
+    ...(isJsonRecord(current) ? current : {}),
+    ...changes,
+  };
+}
+
+function roomPulse(name, now = Date.now(), pulseState = ROOM_PULSES_STATE.read()) {
+  const saved = pulseState[name];
+  const enabled = saved?.enabled !== false;
+  const nextRunAtMs = Number(saved?.nextRunAtMs) || (ROOM_PULSE_STARTED_AT + ROOM_PULSE_INTERVAL_MS);
+  return {
+    enabled,
+    status: enabled ? (saved?.status || 'waiting') : 'paused',
+    lastRunAt: saved?.lastRunAt || null,
+    nextRunAt: enabled ? new Date(Math.max(now, nextRunAtMs)).toISOString() : null,
+    sessionId: saved?.sessionId || null,
+    error: saved?.error || null,
+  };
+}
 
 function readRoomAssignments() {
   return ROOM_ASSIGN_STATE.read();
@@ -1995,6 +2051,7 @@ function lastMessageSnippet(sessionId, agent) {
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
+  const pulseState = ROOM_PULSES_STATE.read();
   const all = discoverSessions(300, null, Object.keys(assignments));
   const byRoom = groupRoomSessions({
     roomNames: names,
@@ -2021,6 +2078,7 @@ function buildRoomsSnapshot() {
       cwd: path.join(ROOMS_HOME_DIR, name),
       sessions,
       active: sessions.some((s) => s.isActive),
+      pulse: roomPulse(name, Date.now(), pulseState),
       latest,
       updatedAt,
     };
@@ -2086,6 +2144,94 @@ app.post('/api/rooms/:name/assign', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+app.post('/api/rooms/:name/pulse', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    if (typeof req.body?.enabled !== 'boolean') throw httpError(400, 'enabled must be true or false');
+    const now = Date.now();
+    ROOM_PULSES_STATE.update((current) => ({
+      ...current,
+      [name]: pulseRecord(current[name], {
+        enabled: req.body.enabled,
+        status: req.body.enabled ? 'waiting' : 'paused',
+        nextRunAtMs: req.body.enabled ? now + ROOM_PULSE_INTERVAL_MS : null,
+        error: null,
+      }),
+    }));
+    const pulse = roomPulse(name, now);
+    roomSnapshotCache.update((rooms) => rooms.map((room) => room.name === name ? { ...room, pulse } : room));
+    res.json({ ok: true, pulse });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did and any open thread to notes.md. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
+function launchRoomPulse(name) {
+  try {
+    const now = Date.now();
+    const saved = ROOM_PULSES_STATE.read()[name] || {};
+    const id = saved.sessionId || randomUUID();
+    const cwd = path.join(ROOMS_HOME_DIR, name);
+    const sessionDir = path.join(OMP_SESSIONS, id);
+    const promptFile = path.join(sessionDir, 'pulse.md');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(promptFile, ROOM_PULSE_PROMPT, { mode: 0o600 });
+    ROOM_PULSES_STATE.update((current) => ({
+      ...current,
+      [name]: pulseRecord(current[name], {
+        enabled: true, status: 'working', sessionId: id,
+        lastRunAt: new Date(now).toISOString(), nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS, error: null,
+      }),
+    }));
+    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title: `Keep working: #${name}` } }));
+    ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: name }));
+    const continuing = !!findOmpJsonlPath(id);
+    launchOmpSession(id, cwd, { resume: continuing, promptFile, autoApprove: true });
+  } catch (error) {
+    ROOM_PULSES_STATE.update((current) => ({
+      ...current,
+      [name]: pulseRecord(current[name], { enabled: true, status: 'error', error: error.message, nextRunAtMs: Date.now() + ROOM_PULSE_INTERVAL_MS }),
+    }));
+    console.warn(`[room pulse] #${name}:`, error.message);
+  }
+}
+
+function checkRoomPulses() {
+  if (!ROOM_PULSES_ENABLED) return;
+  const now = Date.now();
+  const pulseState = ROOM_PULSES_STATE.read();
+  const due = [];
+  for (const name of listRoomDirs()) {
+    let saved = isJsonRecord(pulseState[name]) ? pulseState[name] : {};
+    if (saved.status === 'working' && saved.sessionId && !tmuxIsActive(saved.sessionId)) {
+      ROOM_PULSES_STATE.update((current) => ({
+        ...current,
+        [name]: pulseRecord(current[name], { status: 'waiting' }),
+      }));
+      saved = { ...saved, status: 'waiting' };
+    }
+    if (saved.enabled === false || now < (Number(saved.nextRunAtMs) || ROOM_PULSE_STARTED_AT + ROOM_PULSE_INTERVAL_MS)) continue;
+    due.push(name);
+  }
+  if (due.length === 0) return;
+
+  const rooms = new Map(roomSnapshotCache.refresh().map((room) => [room.name, room]));
+  for (const name of due) {
+    const room = rooms.get(name);
+    if (!room || room.active) {
+      ROOM_PULSES_STATE.update((current) => ({ ...current, [name]: pulseRecord(current[name], { enabled: true, status: 'waiting', nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS }) }));
+      continue;
+    }
+    launchRoomPulse(name);
+  }
+  const latestPulseState = ROOM_PULSES_STATE.read();
+  roomSnapshotCache.update((snapshot) => snapshot.map((room) => ({
+    ...room,
+    pulse: roomPulse(room.name, Date.now(), latestPulseState),
+  })));
+  roomSnapshotCache.invalidate();
+}
+
 // Validate every durable JSON document before accepting traffic. Only truly
 // missing files receive their documented defaults; corruption fails startup.
 for (const state of [
@@ -2096,6 +2242,7 @@ for (const state of [
   LINKS_STATE,
   STARRED_STATE,
   ROOM_ASSIGN_STATE,
+  ROOM_PULSES_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();
 
@@ -2217,4 +2364,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Feather v2 on http://0.0.0.0:${PORT}`);
   // Warm the expensive Rooms snapshot before the first interactive request.
   setTimeout(() => { try { roomSnapshotCache.get(); } catch {} }, 0);
+  if (ROOM_PULSES_ENABLED) {
+    setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));
+    setInterval(checkRoomPulses, ROOM_PULSE_CHECK_MS);
+  }
 });
