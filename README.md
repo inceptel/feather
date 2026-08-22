@@ -102,7 +102,7 @@ are left untouched.
 ## Agent capabilities
 
 Install the promoted Feather, Sidecar, and Looper skills for both Claude and
-Codex, plus the `room` and `sidecar` CLIs, through the guarded installer. Point
+Codex, plus the `room`, `sidecar`, and `refeather` CLIs, through the guarded installer. Point
 the links at the stable `current` release so one promotion updates server and
 agent capabilities together:
 
