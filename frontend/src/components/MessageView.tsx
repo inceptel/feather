@@ -132,6 +132,13 @@ function fixLinks(el: HTMLElement) {
 // otherwise request the raw path as a site URL and show a broken image.
 // If the file fails to load (missing, or not an image), fall back to a
 // clickable path link that opens Feather's file viewer.
+function replaceImageWithPathLink(img: HTMLImageElement, targetPath: string) {
+  const a = document.createElement('a')
+  a.textContent = targetPath
+  wirePathLink(a, targetPath)
+  img.replaceWith(a)
+}
+
 function fixImages(el: HTMLElement, setLightbox?: (v: string | null) => void) {
   for (const img of el.querySelectorAll('img')) {
     const targetPath = localFilePath(img.getAttribute('src'))
@@ -149,12 +156,7 @@ function fixImages(el: HTMLElement, setLightbox?: (v: string | null) => void) {
         else window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
       })
     }
-    img.addEventListener('error', () => {
-      const a = document.createElement('a')
-      a.textContent = targetPath
-      wirePathLink(a, targetPath)
-      img.replaceWith(a)
-    }, { once: true })
+    img.addEventListener('error', () => replaceImageWithPathLink(img, targetPath), { once: true })
   }
 }
 
@@ -886,7 +888,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
               }}>
                 <For each={images}>{(src) => (
-                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => { const a = document.createElement('a'); a.textContent = src; wirePathLink(a, src); e.currentTarget.replaceWith(a) }} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                  <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                 )}</For>
                 <For each={files}>{(f) => {
                   const isPdf = f.name.toLowerCase().endsWith('.pdf')
@@ -929,7 +931,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                   return (
                     <div>
                       <For each={bImgs}>{(src) => (
-                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => { const a = document.createElement('a'); a.textContent = src; wirePathLink(a, src); e.currentTarget.replaceWith(a) }} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                        <img src={fileUrl(src)} onClick={() => setLightbox(fileUrl(src))} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '8px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
                       )}</For>
                       <For each={bFiles}>{(f) => {
                         const isPdf = f.name.toLowerCase().endsWith('.pdf')

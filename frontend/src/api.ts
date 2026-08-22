@@ -6,6 +6,14 @@ function bq(url: string, box?: string | null) {
   return url + (url.includes('?') ? '&' : '?') + `box=${encodeURIComponent(box)}`
 }
 
+async function responseJson<T = any>(response: Response): Promise<T> {
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || `HTTP ${response.status}`), { status: response.status })
+  }
+  return data as T
+}
+
 export interface SessionMeta {
   id: string
   title: string
@@ -79,11 +87,7 @@ export async function fetchRooms(): Promise<RoomInfo[]> {
 
 export async function createRoom(name: string): Promise<{ name: string, cwd: string }> {
   const r = await fetch(`${BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}))
-    throw new Error(body.error || `HTTP ${r.status}`)
-  }
-  return await r.json()
+  return responseJson(r)
 }
 
 export const assignSessionToRoom = (room: string, sessionId: string, remove = false) =>
@@ -148,18 +152,15 @@ export async function fetchMessages(id: string, before = 0, box?: string | null)
 
 export async function sendInput(id: string, text: string, box?: string | null): Promise<{ ok: boolean, sentAt: string }> {
   const r = await fetch(bq(`${BASE}/api/sessions/${id}/send`, box), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok || data.ok !== true) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status })
+  const data = await responseJson<{ ok?: boolean, sentAt: string, error?: string }>(r)
+  if (data.ok !== true) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status })
   return data
 }
 
 export async function createSession(cwd?: string, agent?: string): Promise<string> {
   const id = crypto.randomUUID()
   const r = await fetch(`${BASE}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, cwd, agent }) })
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}))
-    throw new Error(body.error || `HTTP ${r.status}`)
-  }
+  await responseJson(r)
   return id
 }
 
@@ -179,8 +180,7 @@ export async function uploadFileWithId(blob: Blob, name: string, uploadId: strin
     },
     body: blob,
   })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status })
+  const data = await responseJson<{ path?: string }>(r)
   if (typeof data.path !== 'string' || !data.path.startsWith('/')) throw new Error('Upload response did not include a valid path')
   return data.path
 }
@@ -191,8 +191,7 @@ export async function transcribeAudio(blob: Blob, signal?: AbortSignal): Promise
     headers: { 'Content-Type': blob.type || 'application/octet-stream' },
     body: blob,
   })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status })
+  const data = await responseJson<{ transcript?: string }>(r)
   if (typeof data.transcript !== 'string') throw new Error('Transcription response did not include text')
   if (!data.transcript.trim()) throw new Error('No speech was detected')
   return data.transcript.trim()
