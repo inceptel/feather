@@ -17,6 +17,7 @@ import { resolveCodexWatchId } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
+import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 
 // Load ~/.env if present
 try {
@@ -477,7 +478,7 @@ function grepSessionFiles(q, files) {
 // contains it (case-insensitive). Search ignores the mtime-ranked candidate
 // cutoff that the plain listing has: every candidate is considered, so old
 // threads that fell off the sidebar are still findable.
-function discoverSessions(limit = 50, query = null) {
+function discoverSessions(limit = 50, query = null, requiredIds = []) {
   const candidates = [];
   const meta = readMeta();
   const labels = readProjectLabels();
@@ -549,9 +550,13 @@ function discoverSessions(limit = 50, query = null) {
   const now = Date.now();
 
   const sessions = [];
+  const required = new Set(requiredIds);
   for (const { id, fpath, mtime, agent, projectId: candidateProjectId } of candidates) {
     let projectId = candidateProjectId;
-    if (sessions.length >= limit) break;
+    if (sessions.length >= limit) {
+      if (required.size === 0) break;
+      if (!required.has(id)) continue;
+    }
     try {
       const fd = fs.openSync(fpath, 'r');
       const bufCap = agent === 'codex' ? CODEX_HEAD_BYTES : 16384;
@@ -565,7 +570,7 @@ function discoverSessions(limit = 50, query = null) {
       // carry no directory-derived projectId. Derive one from the session cwd
       // (same encoding Claude uses: separators → dashes) so cwd-based grouping
       // — e.g. the rooms view — works for every agent.
-      if (!projectId && sessionCwd) projectId = sessionCwd.replace(/[/.]/g, '-');
+      if (!projectId && sessionCwd) projectId = encodeProjectPath(sessionCwd);
 
       // Worker detection: use explicit canary or actual worker cwd/project.
       // Broad path mentions in prompt/context are too noisy for Codex sessions.
@@ -592,6 +597,7 @@ function discoverSessions(limit = 50, query = null) {
         projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
       });
+      required.delete(id);
     } catch {}
   }
 
@@ -1884,16 +1890,13 @@ function lastMessageSnippet(sessionId, agent) {
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
-  const all = discoverSessions(300);
-  const byRoom = new Map(names.map((n) => [n, []]));
-  for (const s of all) {
-    let room = assignments[s.id];
-    if (!room) {
-      const m = /^-home-user-rooms-(.+)$/.exec(s.projectId || '');
-      if (m) room = m[1];
-    }
-    if (room && byRoom.has(room)) byRoom.get(room).push(s);
-  }
+  const all = discoverSessions(300, null, Object.keys(assignments));
+  const byRoom = groupRoomSessions({
+    roomNames: names,
+    roomsRoot: ROOMS_HOME_DIR,
+    sessions: all,
+    assignments,
+  });
   const rooms = names.map((name) => {
     const sessions = byRoom.get(name); // activity-sorted by discoverSessions
     const newest = sessions[0] || null;
