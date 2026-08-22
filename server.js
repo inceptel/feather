@@ -1136,6 +1136,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/files$/,
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
+  /^\/api\/rooms\/[^/]+\/updates$/,
 ];
 
 function readOnlyRequestAllowed(req) {
@@ -2051,6 +2052,57 @@ function lastMessageSnippet(sessionId, agent) {
   return null;
 }
 
+// ── Room updates: an append-only, human-facing feed ──────────────────────────
+// notes.md is the agent's terse working memory. updates.jsonl is the briefing
+// for a human who walks in cold: what happened and why it matters, one JSON
+// entry per line {id, ts, text}, only ever appended. Each append is a single
+// write() through an O_APPEND handle, which Linux serializes per inode, so
+// concurrent writers (CLI + API) never interleave a partial line.
+const ROOM_UPDATE_MAX_CHARS = 4000;
+function roomUpdatesFile(name) { return path.join(ROOMS_HOME_DIR, name, 'updates.jsonl'); }
+
+function readRoomUpdates(name) {
+  let raw;
+  try { raw = fs.readFileSync(roomUpdatesFile(name), 'utf8'); } catch { return []; }
+  const updates = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry && typeof entry.text === 'string') {
+        updates.push({
+          id: typeof entry.id === 'string' ? entry.id : null,
+          ts: typeof entry.ts === 'string' ? entry.ts : null,
+          text: entry.text,
+        });
+      }
+    } catch {}
+  }
+  return updates; // file order == chronological, since we only ever append
+}
+
+// Compact summary for the rooms snapshot: total count drives the client's
+// unread badge (count is monotonic because the feed is append-only), and the
+// newest entry supplies a one-line preview for the room card.
+function roomUpdatesSummary(name) {
+  const updates = readRoomUpdates(name);
+  const newest = updates[updates.length - 1] || null;
+  return {
+    count: updates.length,
+    latestAt: newest?.ts || null,
+    latest: newest ? newest.text.replace(/\s+/g, ' ').trim().slice(0, 180) : null,
+  };
+}
+
+function appendRoomUpdate(name, text) {
+  const clean = String(text == null ? '' : text).trim();
+  if (!clean) throw httpError(400, 'update text is required');
+  if (clean.length > ROOM_UPDATE_MAX_CHARS) throw httpError(413, `update exceeds ${ROOM_UPDATE_MAX_CHARS} characters`);
+  const entry = { id: randomUUID(), ts: new Date().toISOString(), text: clean };
+  fs.appendFileSync(roomUpdatesFile(name), JSON.stringify(entry) + '\n');
+  return entry;
+}
+
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
@@ -2084,6 +2136,7 @@ function buildRoomsSnapshot() {
       pulse: roomPulse(name, Date.now(), pulseState),
       latest,
       updatedAt,
+      updates: roomUpdatesSummary(name),
     };
   });
   rooms.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
@@ -2168,7 +2221,30 @@ app.post('/api/rooms/:name/pulse', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did and any open thread to notes.md. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
+// Human-facing briefing feed for a room. GET is allowed in read-only canary
+// mode (see READ_ONLY_API_ROUTES); POST is a mutation and is blocked there.
+app.get('/api/rooms/:name/updates', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    res.json({ updates: readRoomUpdates(name) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+app.post('/api/rooms/:name/updates', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const entry = appendRoomUpdate(name, req.body?.text);
+    // Reflect the new count in the cached snapshot immediately so the unread
+    // badge does not wait for the next 10s rebuild.
+    roomSnapshotCache.update((rooms) => rooms.map((room) =>
+      room.name === name ? { ...room, updates: roomUpdatesSummary(name) } : room));
+    res.json({ ok: true, update: entry });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did and any open thread to notes.md. If you did something a person walking in cold would care about, also post a human-facing briefing: room update "<what happened and why it matters>". Write that update for a busy, sharp executive who has not seen this room in a day — plain language, lead with the outcome and why they should care, a few sentences over terseness; notes.md stays your terse working memory. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
 function launchRoomPulse(name) {
   try {
     const now = Date.now();

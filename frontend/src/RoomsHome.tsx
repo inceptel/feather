@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, RoomInfo, SessionMeta } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomUpdates, RoomInfo, SessionMeta, RoomUpdate } from './api'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -41,6 +41,26 @@ function pulseLabel(room: RoomInfo) {
   return `${worked ? `${worked} · ` : ''}checks again ${timeUntil(room.pulse.nextRunAt)}`
 }
 
+// Unread is per-device, not per-server: Feather has no per-user identity, so
+// "what have I already seen" lives in this browser's localStorage. The feed is
+// append-only, so a monotonic count is a sound seen-marker (no per-id set).
+const SEEN_KEY = 'feather:roomUpdatesSeen'
+function loadSeen(): Record<string, number> {
+  try { const v = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}'); return v && typeof v === 'object' ? v : {} }
+  catch { return {} }
+}
+function saveSeen(map: Record<string, number>) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(map)) } catch {}
+}
+function updateTimeLabel(iso: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const when = d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  const ago = timeAgo(iso)
+  return ago && ago !== 'now' ? `${when} · ${ago} ago` : `${when} · just now`
+}
+
 export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void }) {
   const [rooms, setRooms] = createSignal<RoomInfo[] | null>(null)
   const [error, setError] = createSignal<string | null>(null)
@@ -51,6 +71,11 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   const [attachCandidates, setAttachCandidates] = createSignal<SessionMeta[]>([])
   const [attachError, setAttachError] = createSignal<string | null>(null)
   const [attachQuery, setAttachQuery] = createSignal('')
+  const [seen, setSeen] = createSignal<Record<string, number>>(loadSeen())
+  const [updatesRoom, setUpdatesRoom] = createSignal<string | null>(null)
+  const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
+  const [updatesLoading, setUpdatesLoading] = createSignal(false)
+  const [updatesError, setUpdatesError] = createSignal<string | null>(null)
 
   async function refresh() {
     try { setRooms(await fetchRooms()); setError(null) }
@@ -134,6 +159,25 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     finally { setBusy(false) }
   }
 
+  const unreadCount = (room: RoomInfo) => Math.max(0, (room.updates?.count || 0) - (seen()[room.name] || 0))
+
+  function markSeen(room: RoomInfo) {
+    const next = { ...seen(), [room.name]: room.updates?.count || 0 }
+    setSeen(next); saveSeen(next)
+  }
+
+  async function openUpdates(room: RoomInfo, event: MouseEvent) {
+    event.stopPropagation()
+    if (updatesRoom() === room.name) { setUpdatesRoom(null); return }
+    setUpdatesRoom(room.name)
+    setUpdatesError(null)
+    markSeen(room)
+    setUpdatesLoading(true)
+    try { setUpdatesList(await fetchRoomUpdates(room.name)) }
+    catch (e: any) { setUpdatesError(e.message); setUpdatesList([]) }
+    finally { setUpdatesLoading(false) }
+  }
+
   // Tap the card → open the newest chat (iMessage model). The chevron (or a
   // room with no chats) expands the card to show all chats + new-chat buttons.
   function openRoom(room: RoomInfo) {
@@ -202,8 +246,35 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                       {room.pulse.enabled ? 'Keep working' : 'Paused'}
                     </button>
                     <span style={{ color: room.pulse.status === 'error' ? '#d48166' : '#666', 'font-size': '11px' }}>{pulseLabel(room)}</span>
+                    <button data-testid={`updates-${room.name}`} onClick={(event) => openUpdates(room, event)}
+                      aria-label={`Updates for #${room.name}`}
+                      style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: updatesRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                      Updates
+                      <Show when={unreadCount(room) > 0} fallback={<span style={{ color: '#555', 'font-weight': '500' }}>{room.updates?.count || 0}</span>}>
+                        <span style={{ background: '#c0392b', color: '#fff', 'border-radius': '999px', padding: '0 6px', 'font-size': '10px', 'line-height': '16px' }}>{unreadCount(room)} new</span>
+                      </Show>
+                    </button>
                   </div>
                 </div>
+                <Show when={updatesRoom() === room.name}>
+                  <div data-testid={`updates-panel-${room.name}`} style={{ 'border-top': '1px solid #16161f', padding: '8px 16px 12px', background: '#0a0d13' }}>
+                    <Show when={updatesError()}>
+                      <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{updatesError()}</div>
+                    </Show>
+                    <Show when={updatesLoading()}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading updates…</div>
+                    </Show>
+                    <Show when={!updatesLoading() && !updatesError() && updatesList().length === 0}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No updates yet. Agents post here with <code style={{ color: '#e0a050' }}>room update</code> when something worth knowing happens.</div>
+                    </Show>
+                    <For each={[...updatesList()].reverse()}>{(u) => (
+                      <div style={{ padding: '9px 0', 'border-bottom': '1px solid #14141c' }}>
+                        <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(u.ts)}</div>
+                        <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
+                      </div>
+                    )}</For>
+                  </div>
+                </Show>
                 <Show when={expanded() === room.name}>
                   <For each={room.sessions}>{(s) => sessionRow(room, s)}</For>
                   <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '10px 16px 12px 28px', 'border-top': '1px solid #16161f' }}>

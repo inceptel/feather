@@ -80,6 +80,7 @@ export interface RoomInfo {
   active: boolean
   latest: { role: string, text: string } | null
   updatedAt: string | null
+  updates: { count: number, latestAt: string | null, latest: string | null }
   pulse: {
     enabled: boolean
     status: 'waiting' | 'working' | 'paused' | 'error'
@@ -94,6 +95,14 @@ export async function fetchRooms(): Promise<RoomInfo[]> {
   const r = await fetch(`${BASE}/api/rooms`)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return (await r.json()).rooms
+}
+
+export interface RoomUpdate { id: string | null, ts: string | null, text: string }
+
+export async function fetchRoomUpdates(room: string): Promise<RoomUpdate[]> {
+  const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/updates`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).updates
 }
 
 export async function createRoom(name: string): Promise<{ name: string, cwd: string }> {

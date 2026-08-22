@@ -83,12 +83,23 @@ describe('room assignment CLI', () => {
       ])
       await run(cli, ['pause'], { cwd: roomDir, env })
       await run(cli, ['wake'], { cwd: roomDir, env })
-      assert.match(fs.readFileSync(path.join(roomsDir, 'friction/notes.md'), 'utf8'), /Complaint from #health: The upload button loses my file/)
-      assert.match(fs.readFileSync(path.join(roomsDir, 'friction/notes.md'), 'utf8'), /Complaint from #health: The table gets crushed on mobile/)
-      assert.deepEqual(requests, [
+      // Each complaint also fires a detached, best-effort `room wake` for
+      // #friction so a paused queue resumes; those POSTs land asynchronously.
+      for (let i = 0; i < 200 && requests.filter((r) => r.url === '/api/rooms/friction/pulse').length < 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      const notes = fs.readFileSync(path.join(roomsDir, 'friction/notes.md'), 'utf8')
+      assert.match(notes, /Complaint from #health: The upload button loses my file/)
+      assert.match(notes, /Complaint from #health: The table gets crushed on mobile/)
+      // Explicit pause then wake on #health are ordered and exact.
+      assert.deepEqual(requests.filter((r) => r.url === '/api/rooms/health/pulse'), [
         { url: '/api/rooms/health/pulse', body: { enabled: false } },
         { url: '/api/rooms/health/pulse', body: { enabled: true } },
       ])
+      // Both complaints woke #friction.
+      const frictionWakes = requests.filter((r) => r.url === '/api/rooms/friction/pulse')
+      assert.equal(frictionWakes.length, 2)
+      assert.ok(frictionWakes.every((r) => r.body.enabled === true))
     } finally {
       await new Promise((resolve) => server.close(resolve))
     }
