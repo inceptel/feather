@@ -7,28 +7,20 @@
 #   sidecar read [--since <seq>] [--from <role>]  print the thread (optionally filtered)
 #   sidecar wait --from <role|all> --count <N> [--timeout <S>]   block until N replies land
 #   sidecar whoami                                show this session's group(s)
+#   sidecar url                                   show the selected Feather base URL
 #
 # When this session is in several groups, pass --group <id> (or set SIDECAR_GROUP).
 # Install: ln -s <feather>/bin/sidecar ~/.local/bin/sidecar   (must be on PATH)
-# Override the backend with FEATHER_URL (else it probes $PORT, 3300, 4870).
+# FEATHER_URL is authoritative. Without it, discovery succeeds only when one
+# Feather-shaped service answers on FEATHER_PORT, 4870, or 3300.
 set -euo pipefail
 
 die() { echo "sidecar: $*" >&2; exit 1; }
 command -v jq   >/dev/null || die "jq is required"
 command -v curl >/dev/null || die "curl is required"
 
-resolve_base() {
-  if [ -n "${FEATHER_URL:-}" ]; then printf '%s' "$FEATHER_URL"; return; fi
-  local p
-  for p in "${PORT:-}" 3300 4870; do
-    [ -n "$p" ] || continue
-    if curl -fsS -o /dev/null "http://127.0.0.1:$p/api/health" 2>/dev/null; then
-      printf '%s' "http://127.0.0.1:$p"; return
-    fi
-  done
-  printf '%s' "http://127.0.0.1:3300"
-}
-BASE="$(resolve_base)"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd)"
+BASE="$($SCRIPT_DIR/feather-instance)" || die "could not resolve Feather; set FEATHER_URL"
 
 self_prefix() {
   local s
@@ -62,6 +54,9 @@ self_role() { # $1 prefix, $2 gid
 
 cmd="${1:-}"; shift || true
 case "$cmd" in
+  url)
+    printf '%s\n' "$BASE"
+    ;;
   post)
     to=""; group=""; text=""
     while [ $# -gt 0 ]; do
