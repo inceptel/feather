@@ -252,34 +252,35 @@ test.describe('Message rendering', () => {
     expect(page.url()).toBe(chatUrl)
   })
 
-  test('assistant reasoning is folded into one Work log while the final answer stays visible', async ({ page }) => {
+  test('assistant reasoning is folded into quiet Details while the final answer stays visible', async ({ page }) => {
     await expect(page.getByText(/Feather uses .*marked.* with GFM support/)).toBeVisible()
-    const workLog = page.getByTestId('work-log-summary').first()
-    await expect(workLog).toBeVisible()
-    await expect(workLog).toContainText('Work log')
-    await expect(workLog).toContainText('1 step')
+    const details = page.getByTestId('work-log-summary').first()
+    await expect(details).toBeVisible()
+    await expect(details).toContainText('Details')
+    await expect(details).not.toContainText('execution step')
     await expect(page.getByText('Let me explain the markdown pipeline step by step.')).not.toBeVisible()
 
-    await workLog.click()
+    await details.click()
     await expect(page.getByText('Let me explain the markdown pipeline step by step.')).toBeVisible()
+    await expect(page.getByTestId('work-log-detail').first()).toContainText('1 execution step')
     await expect(page.getByTestId('work-log-detail').first()).toContainText('Reasoning')
   })
 
-  test('tool_use block is preserved inside the Work log', async ({ page }) => {
-    await page.getByTestId('work-log-summary').filter({ hasText: 'failed' }).click()
+  test('tool_use block is preserved inside Details', async ({ page }) => {
+    await page.getByTestId('work-log-summary').filter({ hasText: 'issue' }).click()
     await expect(page.locator('text=Read').first()).toBeVisible()
   })
 
-  test('tool_result output is revealed from the Work log and tool call', async ({ page }) => {
-    await page.getByTestId('work-log-summary').filter({ hasText: 'failed' }).click()
+  test('tool_result output is revealed from Details and the tool call', async ({ page }) => {
+    await page.getByTestId('work-log-summary').filter({ hasText: 'issue' }).click()
     const summary = page.locator('summary', { hasText: 'MessageView.tsx' }).first()
     await expect(summary).toBeVisible()
     await summary.click()
     await expect(page.locator('text=export function MessageView')).toBeVisible()
   })
 
-  test('failed work is flagged compactly and its error remains reachable', async ({ page }) => {
-    const workLog = page.getByTestId('work-log-summary').filter({ hasText: 'failed' })
+  test('failed work is flagged quietly and its error remains reachable', async ({ page }) => {
+    const workLog = page.getByTestId('work-log-summary').filter({ hasText: 'issue' })
     await expect(workLog).toBeVisible()
     await workLog.click()
     const summary = page.locator('summary', { hasText: 'missing.txt' }).first()
