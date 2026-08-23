@@ -13,6 +13,7 @@ import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation,
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
 import { appUrl } from './lib/appPath.js'
 import { localFileUrl } from './lib/localMedia.js'
+import { deriveTellUserState, tellUserTransition } from './lib/tellUserStatus.js'
 
 interface QuickLink { label: string; url: string }
 
@@ -231,6 +232,7 @@ export default function App() {
   }
   const [uploading, setUploading] = createSignal(false)
   const [working, setWorking] = createSignal(false)
+  const [tellUserStatus, setTellUserStatus] = createSignal('')
   const [dragging, setDragging] = createSignal(false)
   const [menuOpen, setMenuOpen] = createSignal(false)
   const [historyIdx, setHistoryIdx] = createSignal(-1)
@@ -505,10 +507,28 @@ export default function App() {
   // On a peer box we can only type if the peer granted us control
   const canSend = () => !isPeerBox() || peerControl()
 
+  async function findSessionMeta(id: string, box: string, recent: SessionMeta[] = sessions()) {
+    const listed = recent.find(session => session.id === id)
+    if (listed) return listed
+    try {
+      const result = await fetchSessions(box, id, 5)
+      return result.sessions.find(session => session.id === id)
+    } catch {
+      return undefined
+    }
+  }
+
   async function refreshSessions() {
     try {
-      const r = await fetchSessions(currentBox())
+      const box = currentBox()
+      const r = await fetchSessions(box)
+      if (box !== currentBox()) return
       setSessions(r.sessions)
+      const selectedId = currentId()
+      if (selectedId && (working() || tellUserStatus())) {
+        const selected = await findSessionMeta(selectedId, box, r.sessions)
+        if (!selected?.isActive) { setWorking(false); setTellUserStatus('') }
+      }
       if (isPeerBox()) setPeerControl(!!r.control)
     } catch {}
   }
@@ -538,23 +558,35 @@ export default function App() {
     setSidebar(false)
     setLoading(true)
     setMessages([])
-    setWorking(false)
+    setTellUserStatus('')
+    setWorking(!!sessions().find(session => session.id === id)?.isActive)
     setText(loadDraft(id))
     restoreMedia(currentBox(), id)
     setHistoryIdx(-1)
     setHistoryOpen(false)
     cleanupSSE?.()
     try {
-      const result = await fetchMessages(id, 0, currentBox())
+      const box = currentBox()
+      const listed = sessions().find(session => session.id === id)
+      const [result, sessionMeta] = await Promise.all([
+        fetchMessages(id, 0, box),
+        listed ? Promise.resolve(listed) : findSessionMeta(id, box),
+      ])
+      const tellUserState = deriveTellUserState(result.messages)
+      const inactive = !sessionMeta?.isActive
       setMessages(result.messages)
+      setTellUserStatus(inactive ? '' : tellUserState.status)
+      setWorking(inactive ? false : tellUserState.working)
       setHasMore(result.hasMore)
     } catch {}
     setLoading(false)
     setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
-      if (msg.role === 'assistant') setWorking(false)
       setMessages(prev => {
         if (prev.some(m => m.uuid === msg.uuid)) return prev
+        const transition = tellUserTransition(tellUserStatus(), msg)
+        setTellUserStatus(transition.status)
+        if (transition.working !== null) setWorking(transition.working)
         if (msg.role === 'user') {
           const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
           const idx = prev.findIndex(m =>
@@ -592,6 +624,7 @@ export default function App() {
 
   async function handleInterrupt(id: string) {
     await interruptSession(id, currentBox())
+    if (id === currentId()) { setWorking(false); setTellUserStatus('') }
   }
 
   async function handleDelete(id: string) {
@@ -1052,7 +1085,7 @@ export default function App() {
       throw error
     }
     pushHistory(fullText)
-    if (targetIsCurrent) setWorking(true)
+    if (targetIsCurrent) { setTellUserStatus(''); setWorking(true) }
   }
 
   async function sendComposedMessage(rawText: string, pending: PendingFile[] = files()) {
@@ -1092,6 +1125,13 @@ export default function App() {
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
+  createEffect(() => {
+    const session = cur()
+    if (!loading() && session && !session.isActive) {
+      setWorking(false)
+      setTellUserStatus('')
+    }
+  })
 
   createEffect(() => {
     const s = cur()
@@ -1487,7 +1527,7 @@ export default function App() {
             <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
           }>
             <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
-              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId() && canSend()) sendInput(currentId()!, t, currentBox()) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} />
+              <MessageView messages={messages()} loading={loading()} hasMore={hasMore()} loadingMore={loadingMore()} onLoadEarlier={loadEarlier} onAnswer={(t) => { if (currentId() && canSend()) sendInput(currentId()!, t, currentBox()) }} starred={new Set(starred()[currentId()!] || [])} onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }} working={working()} statusText={tellUserStatus()} />
             </div>
             <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
               {/* Mode toggle */}

@@ -596,7 +596,7 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, activeTool?: string | null }) {
+export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, statusText?: string | null }) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
@@ -1017,12 +1017,12 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
       {/* Typing indicator */}
       <Show when={props.working}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{ padding: '10px 16px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center' }}>
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite' }} />
-            <Show when={props.activeTool}>
-              <span style={{ 'margin-left': '6px', 'font-size': '11px', color: 'var(--info)', 'font-family': "'SF Mono', Menlo, monospace" }}>{props.activeTool}</span>
+          <div role="status" aria-live="polite" style={{ padding: '10px 14px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite', 'flex-shrink': '0' }} />
+            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite', 'flex-shrink': '0' }} />
+            <Show when={props.statusText}>
+              <span style={{ 'margin-left': '6px', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</span>
             </Show>
           </div>
         </div>
