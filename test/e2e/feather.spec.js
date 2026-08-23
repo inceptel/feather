@@ -35,7 +35,7 @@ test.beforeAll(() => {
     message: {
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: 'Let me explain the markdown pipeline step by step.' },
+        { type: 'thinking', thinking: '**Planning** the markdown pipeline.' },
         { type: 'text', text: 'Feather uses **marked** with GFM support.\n\n## How it works\n\n1. Raw text goes through `marked.parse()`\n2. Output is sanitized with `DOMPurify`\n3. Result is cached in an LRU map\n\n```js\nconst html = marked.parse(text)\nconst safe = DOMPurify.sanitize(html)\n```\n\nThis keeps things **fast** and **secure**.' },
       ],
     },
@@ -263,12 +263,15 @@ test.describe('Message rendering', () => {
     await expect(details).toBeVisible()
     await expect(details).toContainText('Details')
     await expect(details).not.toContainText('execution step')
-    await expect(page.getByText('Let me explain the markdown pipeline step by step.')).not.toBeVisible()
+    await expect(page.getByText('Planning the markdown pipeline.')).not.toBeVisible()
 
     await details.click()
-    await expect(page.getByText('Let me explain the markdown pipeline step by step.')).toBeVisible()
-    await expect(page.getByTestId('work-log-detail').first()).toContainText('1 execution step')
-    await expect(page.getByTestId('work-log-detail').first()).toContainText('Reasoning')
+    const workLogDetail = page.getByTestId('work-log-detail').first()
+    await expect(workLogDetail).toContainText('1 execution step')
+    await expect(workLogDetail).toContainText('Planning the markdown pipeline.')
+    await expect(workLogDetail.locator('strong')).toHaveText('Planning')
+    await expect(workLogDetail).not.toContainText('**Planning**')
+    await expect(workLogDetail).not.toContainText('Reasoning')
   })
 
   test('tool_use block is preserved inside Details', async ({ page }) => {
