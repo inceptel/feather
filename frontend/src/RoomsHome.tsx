@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomUpdates, RoomInfo, SessionMeta, RoomUpdate } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomUpdates, fetchRoomFriction, RoomInfo, SessionMeta, RoomUpdate, FrictionComplaint } from './api'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -76,6 +76,10 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
   const [updatesLoading, setUpdatesLoading] = createSignal(false)
   const [updatesError, setUpdatesError] = createSignal<string | null>(null)
+  const [frictionRoom, setFrictionRoom] = createSignal<string | null>(null)
+  const [frictionList, setFrictionList] = createSignal<FrictionComplaint[]>([])
+  const [frictionLoading, setFrictionLoading] = createSignal(false)
+  const [frictionError, setFrictionError] = createSignal<string | null>(null)
 
   async function refresh() {
     try { setRooms(await fetchRooms()); setError(null) }
@@ -168,6 +172,7 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
 
   async function openUpdates(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
+    setFrictionRoom(null)
     if (updatesRoom() === room.name) { setUpdatesRoom(null); return }
     setUpdatesRoom(room.name)
     setUpdatesError(null)
@@ -176,6 +181,22 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     try { setUpdatesList(await fetchRoomUpdates(room.name)) }
     catch (e: any) { setUpdatesError(e.message); setUpdatesList([]) }
     finally { setUpdatesLoading(false) }
+  }
+
+  async function openFriction(room: RoomInfo, event: MouseEvent) {
+    event.stopPropagation()
+    if (frictionRoom() === room.name) { setFrictionRoom(null); return }
+    setUpdatesRoom(null)
+    setFrictionRoom(room.name)
+    setFrictionError(null)
+    setFrictionLoading(true)
+    try { setFrictionList(await fetchRoomFriction(room.name)) }
+    catch (error) {
+      setFrictionError(error instanceof Error ? error.message : String(error))
+      setFrictionList([])
+    } finally {
+      setFrictionLoading(false)
+    }
   }
 
   // Tap the card → open the newest chat (iMessage model). The chevron (or a
@@ -254,6 +275,11 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                         <span style={{ background: '#c0392b', color: '#fff', 'border-radius': '999px', padding: '0 6px', 'font-size': '10px', 'line-height': '16px' }}>{unreadCount(room)} new</span>
                       </Show>
                     </button>
+                    <button data-testid={`friction-${room.name}`} onClick={(event) => openFriction(room, event)}
+                      aria-label={`Friction from #${room.name}`}
+                      style={{ display: 'flex', 'align-items': 'center', gap: '5px', background: frictionRoom() === room.name ? '#2a2115' : 'transparent', border: '1px solid #3a3328', color: '#b7a27d', 'font-size': '11px', 'font-weight': '600', padding: '3px 8px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                      Friction <span style={{ color: '#6f6250', 'font-weight': '500' }}>{room.friction?.count || 0}</span>
+                    </button>
                   </div>
                 </div>
                 <Show when={updatesRoom() === room.name}>
@@ -272,6 +298,28 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                         <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(u.ts)}</div>
                         <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
                       </div>
+                    )}</For>
+                  </div>
+                </Show>
+                <Show when={frictionRoom() === room.name}>
+                  <div data-testid={`friction-panel-${room.name}`} style={{ 'border-top': '1px solid #1c1a16', padding: '8px 16px 12px', background: '#0b0d10' }}>
+                    <Show when={frictionError()}>
+                      <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{frictionError()}</div>
+                    </Show>
+                    <Show when={frictionLoading()}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading friction…</div>
+                    </Show>
+                    <Show when={!frictionLoading() && !frictionError() && frictionList().length === 0}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No friction reported from #{room.name}.</div>
+                    </Show>
+                    <For each={frictionList()}>{(complaint) => (
+                      <article style={{ padding: '9px 0', 'border-bottom': '1px solid #171713' }}>
+                        <div style={{ color: '#5a6472', 'font-size': '10px', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(complaint.timestamp)}</div>
+                        <div style={{ color: '#d0d4da', 'font-size': '13px', 'line-height': '1.45', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.summary}</div>
+                        <Show when={complaint.evidence}>
+                          <div style={{ color: '#77818f', 'font-size': '11px', 'font-family': 'monospace', 'line-height': '1.4', 'margin-top': '5px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.evidence}</div>
+                        </Show>
+                      </article>
                     )}</For>
                   </div>
                 </Show>

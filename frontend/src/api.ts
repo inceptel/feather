@@ -82,6 +82,7 @@ export interface RoomInfo {
   latest: { role: string, text: string } | null
   updatedAt: string | null
   updates: { count: number, latestAt: string | null, latest: string | null }
+  friction: { count: number, latestAt: string | null, latest: string | null }
   pulse: {
     enabled: boolean
     status: 'waiting' | 'working' | 'paused' | 'error'
@@ -114,8 +115,8 @@ export interface FrictionComplaint {
   evidence: string | null
 }
 
-export async function fetchFriction(): Promise<FrictionComplaint[]> {
-  const response = await fetch(`${BASE}/api/friction`)
+export async function fetchRoomFriction(room: string): Promise<FrictionComplaint[]> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/friction`)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return (await response.json()).complaints
 }

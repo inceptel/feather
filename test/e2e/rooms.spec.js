@@ -70,6 +70,7 @@ test('surfaces an unread Updates badge, opens the feed, and marks it read per-de
     await route.fulfill({ json: { rooms: [{
       name: 'meta', cwd: '/srv/rooms/meta', active: false, latest: null, updatedAt: updates[1].ts,
       updates: { count: updates.length, latestAt: updates[1].ts, latest: 'Second briefing. A new paragraph that must keep its line break.' },
+      friction: { count: 0, latestAt: null, latest: null },
       pulse: { enabled: true, status: 'waiting', lastRunAt: null, nextRunAt: '2026-08-22T13:45:00Z', sessionId: null },
       sessions: [],
     }] } })
@@ -98,4 +99,37 @@ test('surfaces an unread Updates badge, opens the feed, and marks it read per-de
   // Unread is remembered per-device (localStorage), not server-side.
   const seen = await page.evaluate(() => localStorage.getItem('feather:roomUpdatesSeen'))
   expect(JSON.parse(seen)).toMatchObject({ meta: 2 })
+})
+
+test('shows friction only on the Room that reported it', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const complaints = [{
+    id: 'f1', timestamp: '2026-08-23T12:00:00Z', source: 'health',
+    summary: 'Calendar login loop', evidence: 'OAuth callback returned 401',
+  }]
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
+    name: 'health', cwd: '/srv/rooms/health', active: false, latest: null,
+    updatedAt: complaints[0].timestamp,
+    updates: { count: 0, latestAt: null, latest: null },
+    friction: { count: 1, latestAt: complaints[0].timestamp, latest: complaints[0].summary },
+    pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
+    sessions: [],
+  }, {
+    name: 'family', cwd: '/srv/rooms/family', active: false, latest: null, updatedAt: null,
+    updates: { count: 0, latestAt: null, latest: null },
+    friction: { count: 0, latestAt: null, latest: null },
+    pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
+    sessions: [],
+  }] } }))
+  await page.route('**/api/rooms/health/friction', route => route.fulfill({ json: { complaints, count: 1 } }))
+
+  await page.goto(BASE)
+  await expect(page.getByTestId('friction-health')).toContainText('1')
+  await expect(page.getByTestId('friction-family')).toContainText('0')
+  await page.getByTestId('friction-health').click()
+  const panel = page.getByTestId('friction-panel-health')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('Calendar login loop')
+  await expect(panel).toContainText('OAuth callback returned 401')
+  await expect(page.getByTestId('friction-panel-family')).toHaveCount(0)
 })
