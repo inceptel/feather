@@ -574,6 +574,28 @@ pre:hover .copy-btn { opacity: 1; }
 div:hover > div > .star-btn { opacity: 0.6 !important; }
 .star-btn:hover { opacity: 1 !important; }
 
+/* Execution details: quiet at rest, full fidelity on demand */
+.work-log { width: 100%; margin-top: 3px; }
+.work-log > summary::-webkit-details-marker { display: none; }
+.work-log-summary {
+  display: flex; align-items: center; gap: 6px; width: max-content; min-height: 32px;
+  padding: 0 10px; border: 1px solid rgba(255,255,255,0.055); border-radius: 999px;
+  background: rgba(255,255,255,0.035); color: var(--text-dim); font-size: 11px;
+  cursor: pointer; list-style: none; user-select: none;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.work-log-summary:hover { color: var(--text-primary); background: var(--bg-surface); border-color: var(--border-medium); }
+.work-log-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.work-log-chevron { display: inline-block; transition: transform 120ms ease; }
+.work-log[open] .work-log-chevron { transform: rotate(90deg); }
+.work-log-issue { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
+.work-log-issue-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.work-log-detail {
+  margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border-subtle);
+  border-radius: 9px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5;
+}
+.work-log-meta { margin-bottom: 8px; color: var(--text-ghost); font-size: 10px; }
+
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
@@ -648,26 +670,21 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
     ).length
     const last = messages[messages.length - 1]
     return (
-      <details style={{
-        width: '100%', 'max-width': '100%', background: errorCount ? 'rgba(234,179,8,0.035)' : 'transparent',
-        border: `1px solid ${errorCount ? 'rgba(234,179,8,0.18)' : 'var(--border-subtle)'}`,
-        'border-radius': '9px', overflow: 'hidden', 'margin-top': '5px',
-      }}>
-        <summary data-testid="work-log-summary" style={{
-          display: 'flex', 'align-items': 'center', gap: '7px', 'min-height': '40px',
-          padding: '0 10px', cursor: 'pointer', 'list-style': 'none', 'user-select': 'none',
-          color: 'var(--text-muted)', 'font-size': '12px',
-        }}>
-          <span style={{ 'font-size': '12px', 'line-height': '1' }}>›</span>
-          <span style={{ 'font-weight': '600' }}>Work log</span>
-          <span style={{ color: 'var(--text-dim)' }}>· {traceBlocks.length} step{traceBlocks.length === 1 ? '' : 's'}</span>
-          {errorCount > 0 && <span style={{ color: 'var(--warning)' }}>· {errorCount} failed</span>}
-          <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px' }}>{formatTime(last.timestamp)}</span>
+      <details class="work-log">
+        <summary class="work-log-summary" data-testid="work-log-summary">
+          <span class="work-log-chevron">›</span>
+          <span style={{ 'font-weight': '600' }}>Details</span>
+          {errorCount > 0 && (
+            <span class="work-log-issue">
+              <span class="work-log-issue-dot" />
+              {errorCount} issue{errorCount === 1 ? '' : 's'}
+            </span>
+          )}
         </summary>
-        <div data-testid="work-log-detail" style={{
-          padding: '8px 12px 10px', 'border-top': '1px solid var(--border-subtle)',
-          background: 'var(--bg-secondary)', 'font-size': '13px', 'line-height': '1.5',
-        }}>
+        <div class="work-log-detail" data-testid="work-log-detail">
+          <div class="work-log-meta">
+            {traceBlocks.length} execution step{traceBlocks.length === 1 ? '' : 's'} · {formatTime(last.timestamp)}
+          </div>
           <For each={messages}>{(message) => (
             <For each={message.content}>{(block) => {
               if (block.type === 'thinking' && block.thinking) {
