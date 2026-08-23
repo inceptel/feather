@@ -17,6 +17,7 @@ import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js'
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from './lib/omp.js';
+import { ompSessionIdFromHead } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 
@@ -730,7 +731,8 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   fs.mkdirSync(sessionDir, { recursive: true });
   watchOmpSessionDir(sessionDir, id);
   const ompId = resume ? getOmpSessionId(id) : null;
-  const resumeArg = resume ? (ompId ? `--resume ${ompId}` : '--continue') : '';
+  if (resume && !ompId) throw new Error(`Cannot resume OMP session ${id}: exact OMP session id not found`);
+  const resumeArg = resume ? `--resume ${ompId}` : '';
   const printArgs = promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}@${promptFile}` : '';
   const command = `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}${resumeArg} ${printArgs} --session-dir ${sessionDir} --allow-home'`;
   launchInTmux(tmuxName(id), command, cwd);
@@ -848,14 +850,16 @@ function getOmpSessionId(featherId) {
   if (!fpath) return null;
   try {
     const fd = fs.openSync(fpath, 'r');
-    const buf = Buffer.alloc(Math.min(4096, fs.fstatSync(fd).size));
-    fs.readSync(fd, buf, 0, buf.length, 0);
-    fs.closeSync(fd);
-    const firstLine = buf.toString('utf8').split('\n')[0];
-    const d = JSON.parse(firstLine);
-    if (d.type === 'session' && d.id) return d.id;
-  } catch {}
-  return null;
+    try {
+      const buf = Buffer.alloc(Math.min(64 * 1024, fs.fstatSync(fd).size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      return ompSessionIdFromHead(buf.toString('utf8'));
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
 }
 
 // Per-session send lock (U1): serialize the tmux send-keys/paste-buffer
@@ -1330,8 +1334,8 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       // omp doesn't have --fork-session; just resume in a new tmux
       const sessionDir = path.join(OMP_SESSIONS, req.params.id);
       const ompId = getOmpSessionId(req.params.id);
-      const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
-      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}${resumeArg} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
+      if (!ompId) throw new Error(`Cannot fork OMP session ${req.params.id}: exact OMP session id not found`);
+      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}--resume ${ompId} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
     } else {
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
     }
