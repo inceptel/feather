@@ -68,6 +68,11 @@ test.beforeAll(() => {
     },
   })
   writeLine({
+    type: 'assistant', uuid: 'e2e-msg-005-final', timestamp: '2025-06-15T14:00:20Z',
+    isSidechain: false, isMeta: false,
+    message: { role: 'assistant', content: 'Tool work complete.' },
+  })
+  writeLine({
     type: 'user', uuid: 'e2e-msg-006', timestamp: '2025-06-15T14:01:00Z',
     isSidechain: false, isMeta: false,
     message: { role: 'user', content: 'Thanks, that makes sense!' },
