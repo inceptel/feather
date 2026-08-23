@@ -60,6 +60,7 @@ export interface ContentBlock {
   text?: string
   thinking?: string
   name?: string
+  intent?: string
   input?: any
   content?: any
   is_error?: boolean
@@ -103,6 +104,20 @@ export async function fetchRoomUpdates(room: string): Promise<RoomUpdate[]> {
   const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/updates`)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return (await r.json()).updates
+}
+
+export interface FrictionComplaint {
+  id: string
+  timestamp: string
+  source: string
+  summary: string
+  evidence: string | null
+}
+
+export async function fetchFriction(): Promise<FrictionComplaint[]> {
+  const response = await fetch(`${BASE}/api/friction`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return (await response.json()).complaints
 }
 
 export async function createRoom(name: string): Promise<{ name: string, cwd: string }> {
