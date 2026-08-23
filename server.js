@@ -20,6 +20,7 @@ import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from './lib/omp.js
 import { ompSessionIdFromHead } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
+import { parseFrictionNotes } from './lib/friction.js';
 
 // Load ~/.env if present
 try {
@@ -1146,6 +1147,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
   /^\/api\/rooms\/[^/]+\/updates$/,
+  /^\/api\/friction$/,
 ];
 
 function readOnlyRequestAllowed(req) {
@@ -1923,6 +1925,17 @@ app.get('/api/health', (_req, res) => res.json({
     maxAudioBytes: MAX_AUDIO_BYTES,
   },
 }));
+
+app.get('/api/friction', (_req, res) => {
+  try {
+    const notesPath = path.join(ROOMS_HOME_DIR, 'friction', 'notes.md');
+    const raw = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, 'utf8') : '';
+    const complaints = parseFrictionNotes(raw).reverse();
+    res.json({ complaints, count: complaints.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // ── Agent discovery ─────────────────────────────────────────────────────────
 

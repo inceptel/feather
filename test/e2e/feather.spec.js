@@ -451,6 +451,26 @@ test.describe('Tab switching', () => {
     // The composer is hidden while viewing prompts.
     await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
   })
+
+  test('friction tab shows the structured #friction complaint queue', async ({ page }) => {
+    await page.route('**/api/friction', route => route.fulfill({
+      json: {
+        count: 1,
+        complaints: [{
+          id: 'friction-1', timestamp: '2026-08-23T12:00:00Z', source: 'health',
+          summary: 'Calendar login loop', evidence: 'OAuth callback returned 401',
+        }],
+      },
+    }))
+    await page.locator('button:has-text("Friction")').click()
+    const panel = page.getByTestId('friction-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel.getByText('#friction')).toBeVisible()
+    await expect(panel.getByText('#health')).toBeVisible()
+    await expect(panel.getByText('Calendar login loop')).toBeVisible()
+    await expect(panel.getByText('OAuth callback returned 401')).toBeVisible()
+    await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
+  })
 })
 
 // ── Live SSE updates in the browser ─────────────────────────────────────────
@@ -482,7 +502,7 @@ test.describe('Live updates', () => {
     expect(afterCount).toBeGreaterThan(beforeCount)
   })
 
-  test('tell_user replaces the live status and a final answer clears it', async ({ page }) => {
+  test('native OMP tool intent replaces live status and a final answer clears it', async ({ page }) => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
     await selectTestSession(page)
@@ -492,7 +512,7 @@ test.describe('Live updates', () => {
       isSidechain: false, isMeta: false,
       message: {
         role: 'assistant',
-        content: [{ type: 'tool_use', id: 'status-tool-1', name: 'tell_user', input: { message: 'Inspecting upload recovery.' } }],
+        content: [{ type: 'tool_use', id: 'status-tool-1', name: 'read', input: { file_path: '/tmp/upload' }, intent: 'Inspecting upload recovery.' }],
       },
     })
     const status = page.getByRole('status').filter({ hasText: 'Inspecting upload recovery.' })
@@ -503,7 +523,7 @@ test.describe('Live updates', () => {
       isSidechain: false, isMeta: false,
       message: {
         role: 'assistant',
-        content: [{ type: 'tool_use', id: 'status-tool-2', name: 'tell_user', input: { message: 'Testing the repaired upload.' } }],
+        content: [{ type: 'tool_use', id: 'status-tool-2', name: 'bash', input: { command: 'npm test' }, intent: 'Testing the repaired upload.' }],
       },
     })
     await expect(page.getByRole('status').filter({ hasText: 'Testing the repaired upload.' })).toBeVisible({ timeout: 10000 })
