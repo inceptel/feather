@@ -606,6 +606,13 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
   border-radius: 9px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5;
 }
 .work-log-meta { margin-bottom: 8px; color: var(--text-ghost); font-size: 10px; }
+.work-log-reasoning {
+  margin: 2px 0 4px; padding-left: 8px; border-left: 1px solid rgba(192,132,252,0.3);
+  color: var(--text-secondary); font-size: 12px; line-height: 1.4;
+}
+.work-log-reasoning p { margin: 0 0 4px; }
+.work-log-reasoning p:last-child { margin-bottom: 0; }
+.work-log-reasoning ul, .work-log-reasoning ol { margin: 2px 0 4px; }
 
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
@@ -700,10 +707,11 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
             <For each={message.content}>{(block) => {
               if (block.type === 'thinking' && block.thinking) {
                 return (
-                  <div style={{ margin: '6px 0 10px', color: 'var(--text-secondary)' }}>
-                    <div style={{ color: '#c084fc', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '3px' }}>Reasoning</div>
-                    <div style={{ 'white-space': 'pre-wrap' }}>{block.thinking}</div>
-                  </div>
+                  <div
+                    class="markdown work-log-reasoning"
+                    innerHTML={renderMarkdown(block.thinking)}
+                    ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))}
+                  />
                 )
               }
               return renderBlock(block, setLightbox, getResult, openExpandedTable)
