@@ -452,25 +452,6 @@ test.describe('Tab switching', () => {
     await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
   })
 
-  test('friction tab shows the structured #friction complaint queue', async ({ page }) => {
-    await page.route('**/api/friction', route => route.fulfill({
-      json: {
-        count: 1,
-        complaints: [{
-          id: 'friction-1', timestamp: '2026-08-23T12:00:00Z', source: 'health',
-          summary: 'Calendar login loop', evidence: 'OAuth callback returned 401',
-        }],
-      },
-    }))
-    await page.locator('button:has-text("Friction")').click()
-    const panel = page.getByTestId('friction-panel')
-    await expect(panel).toBeVisible()
-    await expect(panel.getByText('#friction')).toBeVisible()
-    await expect(panel.getByText('#health')).toBeVisible()
-    await expect(panel.getByText('Calendar login loop')).toBeVisible()
-    await expect(panel.getByText('OAuth callback returned 401')).toBeVisible()
-    await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
-  })
 })
 
 // ── Live SSE updates in the browser ─────────────────────────────────────────

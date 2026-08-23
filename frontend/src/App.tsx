@@ -5,8 +5,8 @@ import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup, RoomUpdate, FrictionComplaint } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates, fetchFriction } from './api'
+import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup, RoomUpdate } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
@@ -125,14 +125,11 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'prompts' | 'updates' | 'friction'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'prompts' | 'updates'>('chat')
   const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
   const [updatesLoading, setUpdatesLoading] = createSignal(false)
   const [updatesError, setUpdatesError] = createSignal<string | null>(null)
   const [updatesRoomName, setUpdatesRoomName] = createSignal<string | null>(null)
-  const [frictionList, setFrictionList] = createSignal<FrictionComplaint[]>([])
-  const [frictionLoading, setFrictionLoading] = createSignal(false)
-  const [frictionError, setFrictionError] = createSignal<string | null>(null)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
@@ -1223,20 +1220,6 @@ export default function App() {
     if (tab() === 'updates' && id) loadSessionUpdates(id)
   })
 
-  async function loadFrictionQueue() {
-    setFrictionLoading(true)
-    setFrictionError(null)
-    try {
-      setFrictionList(await fetchFriction())
-    } catch (error) {
-      setFrictionError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setFrictionLoading(false)
-    }
-  }
-  createEffect(() => {
-    if (tab() === 'friction') loadFrictionQueue()
-  })
 
   return (
     <div
@@ -1527,7 +1510,6 @@ export default function App() {
             <button onClick={() => setTab('prompts')} style={tabStyle('prompts')}>Prompts</button>
             <Show when={!isRemoteBox()}>
               <button onClick={() => setTab('updates')} style={tabStyle('updates')}>Updates</button>
-              <button onClick={() => setTab('friction')} style={tabStyle('friction')}>Friction</button>
               <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
               <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
             </Show>
@@ -1698,36 +1680,6 @@ export default function App() {
                         <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{fmtFeedTime(u.ts)}</div>
                         <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
                       </div>
-                    )}
-                  </For>
-                </Show>
-              </div>
-            </div>
-            <div data-testid="friction-panel" style={{ display: tab() === 'friction' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
-              <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '12px 16px 24px' }}>
-                <div style={{ display: 'flex', 'align-items': 'baseline', gap: '8px', 'margin-bottom': '10px' }}>
-                  <span style={{ color: '#d7dbe2', 'font-size': '14px', 'font-weight': '700' }}>#friction</span>
-                  <span style={{ color: '#5f6875', 'font-size': '11px' }}>{frictionList().length} complaint{frictionList().length === 1 ? '' : 's'}</span>
-                </div>
-                <Show when={frictionError()}>
-                  <div style={{ color: '#d45555', 'font-size': '13px', padding: '8px 0' }}>{frictionError()}</div>
-                </Show>
-                <Show when={frictionLoading()}>
-                  <div style={{ color: '#666', 'font-size': '13px', padding: '8px 0' }}>Loading friction…</div>
-                </Show>
-                <Show when={!frictionLoading() && !frictionError()}>
-                  <For each={frictionList()} fallback={<div style={{ color: '#666', 'font-size': '13px', padding: '8px 0' }}>No complaints in #friction.</div>}>
-                    {(complaint) => (
-                      <article style={{ padding: '11px 0', 'border-bottom': '1px solid #171b22' }}>
-                        <div style={{ display: 'flex', 'align-items': 'center', gap: '7px', 'margin-bottom': '5px' }}>
-                          <span style={{ color: '#d7a85a', 'font-size': '11px', 'font-weight': '600' }}>#{complaint.source}</span>
-                          <span style={{ color: '#4f5865', 'font-size': '10px', 'font-family': 'monospace' }}>{fmtFeedTime(complaint.timestamp)}</span>
-                        </div>
-                        <div style={{ color: '#d0d4da', 'font-size': '13px', 'line-height': '1.45', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.summary}</div>
-                        <Show when={complaint.evidence}>
-                          <div style={{ color: '#77818f', 'font-size': '11px', 'line-height': '1.4', 'font-family': 'monospace', 'margin-top': '6px', padding: '6px 8px', background: '#090d12', 'border-radius': '6px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.evidence}</div>
-                        </Show>
-                      </article>
                     )}
                   </For>
                 </Show>

@@ -1146,8 +1146,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/files$/,
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
-  /^\/api\/rooms\/[^/]+\/updates$/,
-  /^\/api\/friction$/,
+  /^\/api\/rooms\/[^/]+\/(updates|friction)$/,
 ];
 
 function readOnlyRequestAllowed(req) {
@@ -1926,16 +1925,6 @@ app.get('/api/health', (_req, res) => res.json({
   },
 }));
 
-app.get('/api/friction', (_req, res) => {
-  try {
-    const notesPath = path.join(ROOMS_HOME_DIR, 'friction', 'notes.md');
-    const raw = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, 'utf8') : '';
-    const complaints = parseFrictionNotes(raw).reverse();
-    res.json({ complaints, count: complaints.length });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ── Agent discovery ─────────────────────────────────────────────────────────
 
@@ -2146,6 +2135,25 @@ function appendRoomUpdate(name, text) {
   return entry;
 }
 
+function readFrictionComplaints() {
+  const notesPath = path.join(ROOMS_HOME_DIR, 'friction', 'notes.md');
+  try {
+    return parseFrictionNotes(fs.readFileSync(notesPath, 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function roomFrictionSummary(name, complaints) {
+  const matching = complaints.filter(complaint => complaint.source === name);
+  const newest = matching[matching.length - 1] || null;
+  return {
+    count: matching.length,
+    latestAt: newest?.timestamp || null,
+    latest: newest?.summary || null,
+  };
+}
+
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
@@ -2157,6 +2165,7 @@ function buildRoomsSnapshot() {
     sessions: all,
     assignments,
   });
+  const frictionComplaints = readFrictionComplaints();
   const rooms = names.map((name) => {
     const sessions = byRoom.get(name); // activity-sorted by discoverSessions
     const newest = sessions[0] || null;
@@ -2180,6 +2189,7 @@ function buildRoomsSnapshot() {
       latest,
       updatedAt,
       updates: roomUpdatesSummary(name),
+      friction: roomFrictionSummary(name, frictionComplaints),
     };
   });
   rooms.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
@@ -2195,6 +2205,17 @@ const roomSnapshotCache = createSnapshotCache(buildRoomsSnapshot, { ttlMs: 10_00
 app.get('/api/rooms', (_req, res) => {
   try { res.json({ rooms: roomSnapshotCache.get() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/rooms/:name/friction', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const complaints = readFrictionComplaints().filter(complaint => complaint.source === name).reverse();
+    res.json({ complaints, count: complaints.length });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // Scaffold a new room folder — same shape as `room new` in bin/room.
