@@ -637,7 +637,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
       else title = extractClaudeTitle(buf);
 
       const effectiveTitle = meta[id]?.title || title || id.slice(0, 8);
-      if (queryLc && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
+      if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
 
       // Project label is shown only for allowlisted projects (key present in labels);
       // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
@@ -1922,19 +1922,40 @@ app.get('/api/health', (_req, res) => res.json({
 
 // ── Agent discovery ─────────────────────────────────────────────────────────
 
+function executableAvailable(command) {
+  for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    try {
+      const candidate = path.join(dir, command);
+      if (!fs.statSync(candidate).isFile()) continue;
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {}
+  }
+  return false;
+}
+
 app.get('/api/agents', (_req, res) => {
   const agents = [{ id: 'claude', label: 'Claude Code', available: true }];
-  try {
-    const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-    agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
-  } catch {
-    agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
-  }
-  try {
-    const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-    agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
-  } catch {
-    agents.push({ id: 'codex', label: 'Codex', available: false });
+  if (READ_ONLY_MODE) {
+    // Read-only means no writes anywhere, including subprocess caches/logs.
+    // OMP v18 writes audit logs and Bun cache entries even for `--version`, so
+    // determine availability from PATH and omit version labels in canary mode.
+    agents.push({ id: 'omp', label: 'oh-my-pi', available: executableAvailable('omp') });
+    agents.push({ id: 'codex', label: 'Codex', available: executableAvailable('codex') });
+  } else {
+    try {
+      const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+      agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
+    } catch {
+      agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
+    }
+    try {
+      const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+      agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
+    } catch {
+      agents.push({ id: 'codex', label: 'Codex', available: false });
+    }
   }
   res.json({ agents });
 });
