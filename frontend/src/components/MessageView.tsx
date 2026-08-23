@@ -458,34 +458,21 @@ function formatTime(iso: string) {
   catch { return '' }
 }
 
-// ── Consecutive tool-call grouping ──────────────────────────────────────────
-// Mirrors pi-dashboard's groupConsecutiveToolCalls: runs of 3+ assistant messages
-// whose only content is a tool_use with the SAME name + SAME JSON-stringified input
-// collapse into a single expandable group (e.g. retry loops).
-// Adjacent tool-only assistant messages (even with different args) are also wrapped
-// into a single flat "tool chain" container so they read as one sequence instead of
-// a stack of separate bubbles.
-
-function isToolOnlyAssistantMsg(m: Message): boolean {
+// ── Execution-trace grouping ────────────────────────────────────────────────
+// Any assistant message containing reasoning or tool activity is implementation
+// detail, even when it also contains a text preamble ("Let me check…"). Group
+// consecutive trace messages into one collapsed Work log. Text-only assistant
+// messages remain first-class conversation. Questions stay visible because they
+// require the user's attention.
+function isTraceAssistantMsg(m: Message): boolean {
   if (m.role !== 'assistant' || !m.content || m.content.length === 0) return false
-  let hasTool = false
-  for (const b of m.content) {
-    if (b.type === 'tool_use') {
-      // AskUserQuestion is rendered as a special question bubble, not a tool step
-      if ((b as any).name === 'AskUserQuestion') return false
-      hasTool = true
-    } else if (b.type === 'text' && (b as any).text?.trim()) {
-      return false
-    }
-    // thinking blocks are collapsed details, allow them
-    // tool_result blocks only appear on user-role messages
-  }
-  return hasTool
-}
-
-function toolSig(m: Message): { name: string; input: string } {
-  const tu = (m.content || []).find(b => b.type === 'tool_use') as any
-  return { name: tu?.name || '', input: JSON.stringify(tu?.input || {}) }
+  if (m.content.some(block => block.type === 'tool_use' && block.name === 'AskUserQuestion')) return false
+  const hasTool = m.content.some(block => block.type === 'tool_use' || block.type === 'tool_result')
+  const hasThinking = m.content.some(block => block.type === 'thinking')
+  const hasText = m.content.some(block => block.type === 'text' && block.text?.trim())
+  // Thinking alongside a text-only final answer stays with that answer, folded
+  // into its local Work log. Thinking-only and anything with tools is trace.
+  return hasTool || (hasThinking && !hasText)
 }
 
 type RenderItem =
@@ -498,13 +485,13 @@ function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) =>
   while (i < messages.length) {
     const m = messages[i]
     if (isPureToolResult(m)) { i++; continue }
-    if (isToolOnlyAssistantMsg(m)) {
+    if (isTraceAssistantMsg(m)) {
       const chain: Message[] = [m]
       let j = i + 1
       while (j < messages.length) {
         const n = messages[j]
         if (isPureToolResult(n)) { j++; continue }
-        if (!isToolOnlyAssistantMsg(n)) break
+        if (!isTraceAssistantMsg(n)) break
         chain.push(n)
         j++
       }
@@ -514,29 +501,6 @@ function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) =>
       out.push({ kind: 'msg', msg: m })
       i++
     }
-  }
-  return out
-}
-
-type ChainSegment =
-  | { kind: 'single'; msg: Message }
-  | { kind: 'group'; messages: Message[]; name: string; input: string }
-
-function segmentChain(chain: Message[]): ChainSegment[] {
-  const out: ChainSegment[] = []
-  let i = 0
-  while (i < chain.length) {
-    const sig = toolSig(chain[i])
-    let j = i + 1
-    while (j < chain.length) {
-      const s = toolSig(chain[j])
-      if (s.name !== sig.name || s.input !== sig.input) break
-      j++
-    }
-    const run = chain.slice(i, j)
-    if (run.length >= 3) out.push({ kind: 'group', messages: run, name: sig.name, input: sig.input })
-    else for (const m of run) out.push({ kind: 'single', msg: m })
-    i = j
   }
   return out
 }
@@ -672,6 +636,55 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
     return map
   })
   const getResult = (id: string) => toolResultsById().get(id)
+
+  function renderWorkLog(messages: Message[]) {
+    const blocks = messages.flatMap(message => message.content || [])
+    const traceBlocks = blocks.filter(block =>
+      block.type === 'thinking' || block.type === 'tool_use' || block.type === 'tool_result'
+    )
+    const errorCount = traceBlocks.filter(block =>
+      block.type === 'tool_result' ? !!block.is_error :
+      block.type === 'tool_use' && block.id ? !!getResult(block.id)?.is_error : false
+    ).length
+    const last = messages[messages.length - 1]
+    return (
+      <details style={{
+        width: '100%', 'max-width': '100%', background: errorCount ? 'rgba(234,179,8,0.035)' : 'transparent',
+        border: `1px solid ${errorCount ? 'rgba(234,179,8,0.18)' : 'var(--border-subtle)'}`,
+        'border-radius': '9px', overflow: 'hidden', 'margin-top': '5px',
+      }}>
+        <summary data-testid="work-log-summary" style={{
+          display: 'flex', 'align-items': 'center', gap: '7px', 'min-height': '40px',
+          padding: '0 10px', cursor: 'pointer', 'list-style': 'none', 'user-select': 'none',
+          color: 'var(--text-muted)', 'font-size': '12px',
+        }}>
+          <span style={{ 'font-size': '12px', 'line-height': '1' }}>›</span>
+          <span style={{ 'font-weight': '600' }}>Work log</span>
+          <span style={{ color: 'var(--text-dim)' }}>· {traceBlocks.length} step{traceBlocks.length === 1 ? '' : 's'}</span>
+          {errorCount > 0 && <span style={{ color: 'var(--warning)' }}>· {errorCount} failed</span>}
+          <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px' }}>{formatTime(last.timestamp)}</span>
+        </summary>
+        <div data-testid="work-log-detail" style={{
+          padding: '8px 12px 10px', 'border-top': '1px solid var(--border-subtle)',
+          background: 'var(--bg-secondary)', 'font-size': '13px', 'line-height': '1.5',
+        }}>
+          <For each={messages}>{(message) => (
+            <For each={message.content}>{(block) => {
+              if (block.type === 'thinking' && block.thinking) {
+                return (
+                  <div style={{ margin: '6px 0 10px', color: 'var(--text-secondary)' }}>
+                    <div style={{ color: '#c084fc', 'font-size': '11px', 'font-weight': '600', 'margin-bottom': '3px' }}>Reasoning</div>
+                    <div style={{ 'white-space': 'pre-wrap' }}>{block.thinking}</div>
+                  </div>
+                )
+              }
+              return renderBlock(block, setLightbox, getResult, openExpandedTable)
+            }}</For>
+          )}</For>
+        </div>
+      </details>
+    )
+  }
 
   // A message whose visible content is only tool_result gets folded into the tool_use above — skip it.
   function isPureToolResultMsg(m: Message): boolean {
@@ -839,69 +852,9 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
 
       <For each={buildRenderItems(props.messages, isPureToolResultMsg)}>{(item) => {
         if (item.kind === 'chain') {
-          // Flat tool-chain: one compact container wrapping consecutive tool-only
-          // assistant messages. Runs of 3+ identical calls collapse into a group.
-          const segments = segmentChain(item.messages)
           return (
-            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
-              <div style={{
-                'max-width': '78%', padding: '6px 12px',
-                'border-radius': '12px', background: '#1e1e1e',
-                border: '1px solid rgba(255,255,255,0.06)',
-                color: 'var(--text-primary)', overflow: 'hidden',
-                'font-size': '14px', 'line-height': '1.45', 'word-break': 'break-word',
-                display: 'flex', 'flex-direction': 'column', gap: '2px',
-              }}>
-                <For each={segments}>{(seg) => {
-                  if (seg.kind === 'group') {
-                    const [expanded, setExpanded] = createSignal(false)
-                    const firstInput = (seg.messages[0].content || []).find(b => b.type === 'tool_use') as any
-                    const { name: segName, summary } = toolPresentation(seg.name || '', firstInput?.input)
-                    const sumText = summary || segName
-                    const color = TOOL_COLORS[segName] || 'var(--info)'
-                    const icon = TOOL_ICONS[segName] || '⚙'
-                    return (
-                      <div style={{ 'border-left': '2px solid var(--border-medium)', 'padding-left': '10px', margin: '2px 0' }}>
-                        <button onClick={() => setExpanded(!expanded())}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '12px', display: 'flex', 'align-items': 'center', gap: '6px', padding: '2px 0', width: '100%', 'text-align': 'left' }}>
-                          <span style={{ color: 'var(--text-muted)', 'font-size': '11px' }}>↻</span>
-                          <span style={{ color, 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', 'flex-shrink': '0' }}>{icon} {segName}</span>
-                          <span style={{ color: 'var(--text-secondary)', 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'min-width': '0' }}>{sumText}</span>
-                          <span style={{ 'margin-left': 'auto', background: 'var(--bg-secondary)', color: 'var(--text-muted)', 'font-size': '10px', padding: '1px 7px', 'border-radius': '10px', 'font-weight': '600', 'flex-shrink': '0' }}>×{seg.messages.length}</span>
-                          <span style={{ color: 'var(--text-ghost)', 'font-size': '10px', 'flex-shrink': '0' }}>{expanded() ? '▾' : '▸'}</span>
-                        </button>
-                        <Show when={expanded()}>
-                          <div style={{ 'margin-top': '4px' }}>
-                            <For each={seg.messages}>{(m) => (
-                              <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult, openExpandedTable)}</For>
-                            )}</For>
-                          </div>
-                        </Show>
-                      </div>
-                    )
-                  }
-                  // single tool-only message — render its blocks flat, no per-message bubble
-                  const m = seg.msg
-                  return (
-                    <For each={m.content}>{(block) => renderBlock(block, setLightbox, getResult, openExpandedTable)}</For>
-                  )
-                }}</For>
-                {/* one metadata row at the bottom, using last message's timestamp */}
-                {(() => {
-                  const last = item.messages[item.messages.length - 1]
-                  return (
-                    <div class="msg-meta" style={{
-                      display: 'flex', 'align-items': 'center', 'justify-content': 'space-between',
-                      gap: '8px', 'margin-top': '6px', 'padding-top': '4px',
-                      'border-top': '1px solid rgba(255,255,255,0.06)',
-                      'font-size': '11px', color: 'var(--text-faint)',
-                    }}>
-                      <span>{formatTime(last.timestamp)}</span>
-                      <span style={{ color: 'var(--text-ghost)', 'font-size': '10px' }}>{item.messages.length} tool call{item.messages.length === 1 ? '' : 's'}</span>
-                    </div>
-                  )
-                })()}
-              </div>
+            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '6px' }}>
+              {renderWorkLog(item.messages)}
             </div>
           )
         }
@@ -911,6 +864,11 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
         const hasAttachments = images.length > 0 || files.length > 0
+        const inlineTraceBlocks = (msg.content || []).filter(block =>
+          block.type === 'thinking' ||
+          block.type === 'tool_result' ||
+          (block.type === 'tool_use' && block.name !== 'AskUserQuestion')
+        )
 
         // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
         // matching pi-dashboard's style: timestamp on the left, action icons on the right.
@@ -999,6 +957,11 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
               'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
             }}>
               <For each={msg.content}>{(block) => {
+                if (
+                  block.type === 'thinking' ||
+                  block.type === 'tool_result' ||
+                  (block.type === 'tool_use' && block.name !== 'AskUserQuestion')
+                ) return null
                 if (block.type === 'text' && block.text) {
                   const { cleanText: bText, images: bImgs, files: bFiles } = extractImages(block.text)
                   const hasAny = bImgs.length > 0 || bFiles.length > 0 || bText.trim().length > 0
@@ -1044,6 +1007,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
                 return renderBlock(block, setLightbox, getResult, openExpandedTable)
               }}</For>
+              {inlineTraceBlocks.length > 0 ? renderWorkLog([{ ...msg, content: inlineTraceBlocks }]) : null}
               {metadataRow}
             </div>
           </div>
