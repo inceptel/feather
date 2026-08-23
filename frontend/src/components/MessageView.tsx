@@ -475,9 +475,15 @@ function isTraceAssistantMsg(m: Message): boolean {
   return hasTool || (hasThinking && !hasText)
 }
 
+function canAttachTraceToMessage(m: Message): boolean {
+  if (m.role !== 'assistant' || !m.content?.some(block => block.type === 'text' && block.text?.trim())) return false
+  return !m.content.some(block => block.type === 'tool_use' && block.name === 'AskUserQuestion')
+}
+
 type RenderItem =
   | { kind: 'msg'; msg: Message }
   | { kind: 'chain'; messages: Message[] }
+  | { kind: 'turn'; msg: Message; trace: Message[] }
 
 function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) => boolean): RenderItem[] {
   const out: RenderItem[] = []
@@ -495,8 +501,14 @@ function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) =>
         chain.push(n)
         j++
       }
-      out.push({ kind: 'chain', messages: chain })
-      i = j
+      const next = messages[j]
+      if (next && canAttachTraceToMessage(next) && !isTraceAssistantMsg(next)) {
+        out.push({ kind: 'turn', msg: next, trace: chain })
+        i = j + 1
+      } else {
+        out.push({ kind: 'chain', messages: chain })
+        i = j
+      }
     } else {
       out.push({ kind: 'msg', msg: m })
       i++
@@ -578,14 +590,13 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-log { width: 100%; margin-top: 3px; }
 .work-log > summary::-webkit-details-marker { display: none; }
 .work-log-summary {
-  display: flex; align-items: center; gap: 6px; width: max-content; min-height: 32px;
-  padding: 0 10px; border: 1px solid rgba(255,255,255,0.055); border-radius: 999px;
-  background: rgba(255,255,255,0.035); color: var(--text-dim); font-size: 11px;
-  cursor: pointer; list-style: none; user-select: none;
-  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+  display: flex; align-items: center; gap: 5px; width: max-content; min-height: 28px;
+  padding: 0 2px; border: none; background: transparent; color: var(--text-faint);
+  font-size: 11px; cursor: pointer; list-style: none; user-select: none;
+  transition: color 120ms ease;
 }
-.work-log-summary:hover { color: var(--text-primary); background: var(--bg-surface); border-color: var(--border-medium); }
-.work-log-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.work-log-summary:hover { color: var(--text-secondary); }
+.work-log-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .work-log-chevron { display: inline-block; transition: transform 120ms ease; }
 .work-log[open] .work-log-chevron { transform: rotate(90deg); }
 .work-log-issue { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
@@ -868,15 +879,10 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
       </Show>
 
       <For each={buildRenderItems(props.messages, isPureToolResultMsg)}>{(item) => {
-        if (item.kind === 'chain') {
-          return (
-            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '6px' }}>
-              {renderWorkLog(item.messages)}
-            </div>
-          )
-        }
+        if (item.kind === 'chain') return null
 
         const msg = item.msg
+        const turnTrace = item.kind === 'turn' ? item.trace : []
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
@@ -886,6 +892,9 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
           block.type === 'tool_result' ||
           (block.type === 'tool_use' && block.name !== 'AskUserQuestion')
         )
+        const workLogMessages = inlineTraceBlocks.length > 0
+          ? [...turnTrace, { ...msg, content: inlineTraceBlocks }]
+          : turnTrace
 
         // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
         // matching pi-dashboard's style: timestamp on the left, action icons on the right.
@@ -1024,7 +1033,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
                 return renderBlock(block, setLightbox, getResult, openExpandedTable)
               }}</For>
-              {inlineTraceBlocks.length > 0 ? renderWorkLog([{ ...msg, content: inlineTraceBlocks }]) : null}
+              {workLogMessages.length > 0 ? renderWorkLog(workLogMessages) : null}
               {metadataRow}
             </div>
           </div>
