@@ -472,6 +472,42 @@ test.describe('Live updates', () => {
     const afterCount = await page.locator('.msg-row').count()
     expect(afterCount).toBeGreaterThan(beforeCount)
   })
+
+  test('tell_user replaces the live status and a final answer clears it', async ({ page }) => {
+    await page.goto(BASE)
+    await page.waitForLoadState('networkidle')
+    await selectTestSession(page)
+
+    writeLine({
+      type: 'assistant', uuid: `e2e-status-1-${Date.now()}`, timestamp: '2025-06-15T14:06:00Z',
+      isSidechain: false, isMeta: false,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'status-tool-1', name: 'tell_user', input: { message: 'Inspecting upload recovery.' } }],
+      },
+    })
+    const status = page.getByRole('status').filter({ hasText: 'Inspecting upload recovery.' })
+    await expect(status).toBeVisible({ timeout: 10000 })
+
+    writeLine({
+      type: 'assistant', uuid: `e2e-status-2-${Date.now()}`, timestamp: '2025-06-15T14:06:05Z',
+      isSidechain: false, isMeta: false,
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'status-tool-2', name: 'tell_user', input: { message: 'Testing the repaired upload.' } }],
+      },
+    })
+    await expect(page.getByRole('status').filter({ hasText: 'Testing the repaired upload.' })).toBeVisible({ timeout: 10000 })
+    await expect(status).not.toBeVisible()
+
+    writeLine({
+      type: 'assistant', uuid: `e2e-status-final-${Date.now()}`, timestamp: '2025-06-15T14:06:10Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: 'Status lifecycle complete.' },
+    })
+    await expect(page.getByText('Status lifecycle complete.')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('status').filter({ hasText: 'Testing the repaired upload.' })).not.toBeVisible()
+  })
 })
 
 // ── Mobile viewport ─────────────────────────────────────────────────────────
