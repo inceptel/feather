@@ -16,6 +16,7 @@ import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
+import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from './lib/omp.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 
@@ -57,6 +58,10 @@ const HOME = process.env.HOME || '/home/user';
 const STATE_PATHS = resolveStatePaths({ releaseDir: import.meta.dirname, homeDir: HOME });
 const CLAUDE_PROJECTS = STATE_PATHS.harness.claudeProjectsDir;
 const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
+// Every Feather-launched omp session gets an explicit model + reasoning level
+// (see lib/omp.js). Passing them on resume also migrates existing sessions.
+const OMP_MODEL = resolveOmpModel(process.env);
+const OMP_THINKING = resolveOmpThinking(process.env);
 const CODEX_SESSIONS_ROOT = STATE_PATHS.harness.codexSessionsDir;
 // Head bytes to read when looking for a codex session's first real user
 // message (title, worker detection). The session_meta line plus permissions/
@@ -727,7 +732,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   const ompId = resume ? getOmpSessionId(id) : null;
   const resumeArg = resume ? (ompId ? `--resume ${ompId}` : '--continue') : '';
   const printArgs = promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}@${promptFile}` : '';
-  const command = `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} ${printArgs} --session-dir ${sessionDir} --allow-home'`;
+  const command = `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}${resumeArg} ${printArgs} --session-dir ${sessionDir} --allow-home'`;
   launchInTmux(tmuxName(id), command, cwd);
 }
 
@@ -1326,7 +1331,7 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       const sessionDir = path.join(OMP_SESSIONS, req.params.id);
       const ompId = getOmpSessionId(req.params.id);
       const resumeArg = ompId ? `--resume ${ompId}` : '--continue';
-      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${resumeArg} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
+      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}${resumeArg} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
     } else {
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
     }
