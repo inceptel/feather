@@ -663,6 +663,7 @@ export default function App() {
     }
     if (event.type === 'assistant_end' && event.messageId) {
       setAssistantStream(current => current?.id === event.messageId ? { ...current, ended: true } : current)
+      setWorking(false)
       clearTimeout(assistantStreamStaleTimer)
       assistantStreamStaleTimer = setTimeout(() => {
         setAssistantStream(current => current?.id === event.messageId && current.ended ? null : current)
@@ -677,6 +678,7 @@ export default function App() {
         assistantStreamStaleTimer = undefined
         return null
       })
+      if (!event.willContinue) setWorking(false)
       return
     }
     if (event.type === 'agent_start') {
