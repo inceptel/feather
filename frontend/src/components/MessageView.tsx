@@ -1207,7 +1207,9 @@ export function MessageView(props: MessageViewProps) {
         {renderTodo(() => props.todo!, 'omp-todo', true)}
       </Show>
       <For each={renderItems()}>{(item) => {
+        const mirroredCurrentTurn = (props.work?.timeline.length || 0) > 0 && item === renderItems().at(-1)
         if (item.kind === 'chain') {
+          if (mirroredCurrentTurn) return null
           if (item !== renderItems().at(-1)) return null
           return (
             <Show when={props.working}>
@@ -1217,12 +1219,12 @@ export function MessageView(props: MessageViewProps) {
         }
 
         const msg = item.msg
-        const turnTrace = item.kind === 'turn' ? item.trace : []
+        const turnTrace = item.kind === 'turn' && !mirroredCurrentTurn ? item.trace : []
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
         const hasAttachments = images.length > 0 || files.length > 0
-        const inlineTraceBlocks = (msg.content || []).filter(block =>
+        const inlineTraceBlocks = mirroredCurrentTurn ? [] : (msg.content || []).filter(block =>
           block.type === 'thinking' ||
           block.type === 'tool_result' ||
           (block.type === 'tool_use' && !isQuestionBlock(block))
