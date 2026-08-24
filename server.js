@@ -1235,12 +1235,16 @@ function deleteReplayEntries(store, predicate) {
   }
 }
 
-function isParentTransientReplayEvent(event) {
-  return !event.subagentId && (
+function isTransientReplayEventForOwner(event, owner) {
+  return replayOwner(event) === owner && (
     event.type === 'assistant_snapshot' ||
     event.type === 'work_snapshot' ||
     event.type.startsWith('tool_execution_')
   );
+}
+
+function isParentTransientReplayEvent(event) {
+  return isTransientReplayEventForOwner(event, 'parent');
 }
 
 function pruneSettledSubagentReplay(store) {
@@ -1257,6 +1261,11 @@ function pruneSettledSubagentReplay(store) {
 
 function rememberOmpBridgeEvent(sessionId, event) {
   const store = replayStoreFor(sessionId);
+  if (event.type === 'assistant_cancel' && event.willContinue) {
+    const owner = replayOwner(event);
+    deleteReplayEntries(store, candidate => isTransientReplayEventForOwner(candidate, owner));
+    return;
+  }
   if (event.type === 'tool_approval_resolved') {
     const existing = store.entries.get(`approval:${event.toolCallId}`);
     if (existing) {

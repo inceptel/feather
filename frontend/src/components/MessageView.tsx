@@ -934,6 +934,13 @@ export function MessageView(props: MessageViewProps) {
     const visibleTimeline = createMemo(() => inspector ? scope().timeline : scope().timeline.filter(item => !hideParentOrchestration(item)))
     const visibleScope = () => ({ ...scope(), timeline: visibleTimeline() })
     const summary = () => activeOmpStep(visibleScope())
+    let executionDetails: HTMLDetailsElement | undefined
+    let renderedSegment = scope().segment
+    createEffect(() => {
+      const segment = scope().segment
+      if (!inspector && executionDetails && segment !== renderedSegment) executionDetails.open = false
+      renderedSegment = segment
+    })
     if (inspector) {
       return (
         <section class="execution-log" data-testid={testId} aria-label="Agent execution timeline">
@@ -951,7 +958,7 @@ export function MessageView(props: MessageViewProps) {
     }
     return (
       <Show when={visibleTimeline().length > 0}>
-        <details class="execution-log" data-testid={testId}>
+        <details ref={executionDetails} class="execution-log" data-testid={testId} data-segment={scope().segment}>
           <summary class="execution-summary" data-testid={`${testId}-summary`}>
             <span class="execution-chevron">›</span>
             <span class="execution-title">Execution</span>
@@ -966,6 +973,14 @@ export function MessageView(props: MessageViewProps) {
       </Show>
     )
   }
+  function renderParentExecution(scope: () => OmpWorkScope) {
+    return (
+      <Show keyed when={scope().segment + 1}>
+        {() => renderExecutionTimeline(scope, 'omp-parent-execution')}
+      </Show>
+    )
+  }
+
 
   function renderWorkLog(messages: () => Message[], live = false) {
     const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(block =>
@@ -1303,7 +1318,7 @@ export function MessageView(props: MessageViewProps) {
         return (
           <>
           <Show when={mirroredCurrentTurn()}>
-            {renderExecutionTimeline(() => props.work!, 'omp-parent-execution')}
+            {renderParentExecution(() => props.work!)}
           </Show>
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
             <div class="asst-bubble" style={{
@@ -1404,7 +1419,7 @@ export function MessageView(props: MessageViewProps) {
         )
       }}</For>
       <Show when={(props.work?.timeline.length || 0) > 0 && !workAttachedToAnswer()}>
-        {renderExecutionTimeline(() => props.work!, 'omp-parent-execution')}
+        {renderParentExecution(() => props.work!)}
       </Show>
       <Show when={props.assistantStream?.text}>
         <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
