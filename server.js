@@ -69,7 +69,7 @@ const ompBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
 const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
-const OMP_BRIDGE_VERSION = 2;
+const OMP_BRIDGE_VERSION = 3;
 const OMP_WORK_THINKING_CHARS = 3_000;
 const OMP_BRIDGE_EVENT_TYPES = Object.freeze({
   assistant_snapshot: true,
@@ -1789,6 +1789,7 @@ app.post('/api/sessions/:id/rename', (req, res) => {
       ...meta,
       [req.params.id]: { ...(meta[req.params.id] || {}), title: req.body.title },
     }));
+    roomSnapshotCache.invalidate();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2461,10 +2462,20 @@ function httpError(status, message) {
 
 const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
+const ROOM_MAINS_FILE = STATE_PATHS.coordination.roomMainsFile;
 const ROOM_PULSES_FILE = STATE_PATHS.coordination.roomPulsesFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
   defaultValue: {}, validate: isJsonRecord,
+});
+function isRoomMainState(value) {
+  return isJsonRecord(value) && Object.entries(value).every(([name, sessionId]) =>
+    name.length > 0 && name.length <= 255
+      && typeof sessionId === 'string' && sessionId.length > 0 && sessionId.length <= 512);
+}
+const ROOM_MAINS_STATE = createJsonState({
+  file: ROOM_MAINS_FILE, root: path.dirname(ROOM_MAINS_FILE), document: 'Room main chats',
+  defaultValue: {}, validate: isRoomMainState,
 });
 const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
 function isRoomPulseState(value) {
@@ -2637,8 +2648,9 @@ function roomFrictionSummary(name, complaints) {
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
+  const mains = ROOM_MAINS_STATE.read();
   const pulseState = ROOM_PULSES_STATE.read();
-  const all = discoverSessions(300, null, Object.keys(assignments));
+  const all = discoverSessions(300, null, [...new Set([...Object.keys(assignments), ...Object.values(mains)])]);
   const byRoom = groupRoomSessions({
     roomNames: names,
     roomsRoot: ROOMS_HOME_DIR,
@@ -2648,6 +2660,13 @@ function buildRoomsSnapshot() {
   const frictionComplaints = readFrictionComplaints();
   const rooms = names.map((name) => {
     const sessions = byRoom.get(name); // activity-sorted by discoverSessions
+    const pulse = roomPulse(name, Date.now(), pulseState);
+    const requestedMainSessionId = mains[name];
+    const isHumanChat = (session) =>
+      session.id !== pulse.sessionId && !String(session.title || '').startsWith('Keep working: #');
+    const mainSessionId = sessions.find((session) => session.id === requestedMainSessionId && isHumanChat(session))?.id
+      || sessions.find(isHumanChat)?.id
+      || null;
     const newest = sessions[0] || null;
     let latest = newest ? lastMessageSnippet(newest.id, newest.agent || 'claude') : null;
     let updatedAt = newest?.updatedAt || null;
@@ -2664,8 +2683,9 @@ function buildRoomsSnapshot() {
       name,
       cwd: path.join(ROOMS_HOME_DIR, name),
       sessions,
+      mainSessionId,
       active: sessions.some((s) => s.isActive),
-      pulse: roomPulse(name, Date.now(), pulseState),
+      pulse,
       latest,
       updatedAt,
       updates: roomUpdatesSummary(name),
@@ -2739,9 +2759,52 @@ app.post('/api/rooms/:name/assign', (req, res) => {
       else next[sid] = name;
       return next;
     });
+    const targetRoom = req.body?.remove ? null : name;
+    ROOM_MAINS_STATE.update((current) => {
+      const next = { ...current };
+      for (const [roomName, mainSessionId] of Object.entries(current)) {
+        if (mainSessionId === sid && roomName !== targetRoom) delete next[roomName];
+      }
+      return next;
+    });
     roomSnapshotCache.refresh();
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+app.post('/api/rooms/:name/main', (req, res) => {
+  try {
+    const { name } = req.params;
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!sessionId) throw httpError(400, 'sessionId required');
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
+    const session = room?.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session) throw httpError(409, `session does not belong to #${name}`);
+    if (String(session.title || '').startsWith('Keep working: #')) {
+      throw httpError(409, 'Keep-working chats cannot be a Room main chat');
+    }
+    ROOM_MAINS_STATE.update((current) => ({ ...current, [name]: sessionId }));
+    if (sessionId === room.pulse.sessionId) {
+      const now = Date.now();
+      ROOM_PULSES_STATE.update((current) => {
+        const enabled = current[name]?.enabled !== false;
+        return {
+          ...current,
+          [name]: pulseRecord(current[name], {
+            status: enabled ? 'waiting' : 'paused',
+            nextRunAtMs: enabled ? now + ROOM_PULSE_INTERVAL_MS : null,
+            sessionId: null,
+            error: null,
+          }),
+        };
+      });
+    }
+    roomSnapshotCache.refresh();
+    res.json({ ok: true, mainSessionId: sessionId, pulse: roomPulse(name, Date.now()) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 app.post('/api/rooms/:name/pulse', (req, res) => {
@@ -2876,6 +2939,7 @@ for (const state of [
   LINKS_STATE,
   STARRED_STATE,
   ROOM_ASSIGN_STATE,
+  ROOM_MAINS_STATE,
   ROOM_PULSES_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();

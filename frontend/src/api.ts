@@ -79,6 +79,7 @@ export interface RoomInfo {
   name: string
   cwd: string
   sessions: SessionMeta[]
+  mainSessionId: string | null
   active: boolean
   latest: { role: string, text: string } | null
   updatedAt: string | null
@@ -134,6 +135,15 @@ export const assignSessionToRoom = async (room: string, sessionId: string, remov
     body: JSON.stringify({ sessionId, remove }),
   })
   return responseJson<{ ok: true, assignments: Record<string, string> }>(response)
+}
+
+export async function setRoomMain(room: string, sessionId: string): Promise<{ mainSessionId: string, pulse: RoomInfo['pulse'] }> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/main`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  })
+  return responseJson<{ ok: true, mainSessionId: string, pulse: RoomInfo['pulse'] }>(response)
 }
 
 export async function setRoomPulse(room: string, enabled: boolean): Promise<RoomInfo['pulse']> {

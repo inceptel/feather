@@ -232,7 +232,7 @@ describe('Feather OMP bridge extension', () => {
     assert.equal(requests[0].url, BRIDGE_URL)
     assert.equal(requests[0].options.headers['X-Feather-Bridge-Token'], 'bridge-secret')
     assert.deepEqual(Object.keys(requests[0].body), ['version', 'events'])
-    assert.equal(requests[0].body.version, 2)
+    assert.equal(requests[0].body.version, 3)
     assert.equal('sessionId' in events[0], false)
   })
   it('streams thinking-only and tool-only work, clears it, and caps aggregate thinking', async (t) => {

@@ -95,14 +95,13 @@ describe('portable Room membership', () => {
       })
       fs.utimesSync(file, new Date(baseMs + index * 1000), new Date(baseMs + index * 1000))
     }
-
-    const cwdId = 'cwd-marriage-session'
+    const cwdId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const cwdFile = path.join(roomProject, `${cwdId}.jsonl`)
     writeClaudeSession(cwdFile, {
       id: cwdId, cwd: roomDir, title: 'Portable marriage session',
-      timestamp: new Date(baseMs + 400_000).toISOString(),
+      timestamp: '2019-01-01T00:00:00Z',
     })
-    fs.utimesSync(cwdFile, new Date(baseMs + 400_000), new Date(baseMs + 400_000))
+    fs.utimesSync(cwdFile, new Date('2019-01-01T00:00:00Z'), new Date('2019-01-01T00:00:00Z'))
 
     const movedId = 'moved-marriage-session'
     const movedFile = path.join(roomProject, `${movedId}.jsonl`)
@@ -122,6 +121,13 @@ describe('portable Room membership', () => {
     fs.writeFileSync(path.join(home, '.feather/room-sessions.json'), JSON.stringify({
       [oldId]: 'marriage',
       [movedId]: 'other',
+    }))
+    fs.writeFileSync(path.join(home, '.feather/room-mains.json'), JSON.stringify({ marriage: cwdId }))
+    fs.writeFileSync(path.join(home, '.feather/room-pulses.json'), JSON.stringify({
+      marriage: {
+        enabled: true, status: 'working', lastRunAt: '2026-08-22T12:00:00Z',
+        nextRunAtMs: null, sessionId: cwdId, error: null,
+      },
     }))
 
     const port = 24_000 + (process.pid % 10_000)
@@ -144,11 +150,59 @@ describe('portable Room membership', () => {
       assert.ok(rooms, stderr || 'server did not become ready')
       const marriage = rooms.find((room) => room.name === 'marriage')
       assert.equal(marriage.pulse.enabled, true)
-      assert.equal(marriage.pulse.status, 'waiting')
-      assert.deepEqual(marriage.sessions.map((session) => session.id), [cwdId, oldId])
-      assert.equal(marriage.sessions[1].title, 'Historical marriage conversation')
-      assert.equal(marriage.sessions[1].roomAssigned, true)
+      assert.equal(marriage.pulse.status, 'working')
+      assert.equal(marriage.pulse.sessionId, cwdId)
+      assert.equal(marriage.mainSessionId, oldId)
+      assert.deepEqual(marriage.sessions.map((session) => session.id), [oldId, cwdId])
+      const historical = marriage.sessions.find((session) => session.id === oldId)
+      assert.equal(historical.title, 'Historical marriage conversation')
+      assert.equal(historical.roomAssigned, true)
       assert.deepEqual(rooms.find((room) => room.name === 'other').sessions.map((session) => session.id), [movedId])
+
+      const wrongRoomMain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/main`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: movedId }),
+      })
+      assert.equal(wrongRoomMain.status, 409)
+      assert.match((await wrongRoomMain.json()).error, /does not belong to #marriage/)
+
+      const setMain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/main`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: cwdId }),
+      })
+      assert.equal(setMain.status, 200)
+      const promotion = await setMain.json()
+      assert.equal(promotion.mainSessionId, cwdId)
+      assert.equal(promotion.pulse.sessionId, null)
+      assert.equal(promotion.pulse.status, 'waiting')
+      rooms = (await (await fetch(`http://127.0.0.1:${port}/api/rooms`)).json()).rooms
+      const promotedMarriage = rooms.find((room) => room.name === 'marriage')
+      assert.equal(promotedMarriage.mainSessionId, cwdId)
+      assert.equal(promotedMarriage.pulse.sessionId, null)
+      assert.equal(promotedMarriage.pulse.status, 'waiting')
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-mains.json'), 'utf8')), { marriage: cwdId })
+
+      const historicalMain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/main`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: oldId }),
+      })
+      assert.equal(historicalMain.status, 200)
+      const detachMain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: oldId, remove: true }),
+      })
+      assert.equal(detachMain.status, 200)
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-mains.json'), 'utf8')), {})
+      const reattachMain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: oldId }),
+      })
+      assert.equal(reattachMain.status, 200)
+      rooms = (await (await fetch(`http://127.0.0.1:${port}/api/rooms`)).json()).rooms
+      assert.equal(rooms.find((room) => room.name === 'marriage').mainSessionId, oldId)
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-mains.json'), 'utf8')), {})
 
       const wrongRoomDetach = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
         method: 'POST',
@@ -167,7 +221,7 @@ describe('portable Room membership', () => {
       })
       assert.equal(detach.status, 200)
       rooms = (await (await fetch(`http://127.0.0.1:${port}/api/rooms`)).json()).rooms
-      assert.deepEqual(rooms.find((room) => room.name === 'marriage').sessions.map((session) => session.id), [movedId, cwdId, oldId])
+      assert.deepEqual(rooms.find((room) => room.name === 'marriage').sessions.map((session) => session.id), [movedId, oldId])
       assert.equal(new Set(rooms.flatMap((room) => room.sessions.map((session) => session.id))).size,
         rooms.flatMap((room) => room.sessions).length)
 

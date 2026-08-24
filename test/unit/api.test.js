@@ -575,7 +575,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       const accepted = await fetch(`${BASE}/api/internal/sessions/${sessionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': token },
-        body: JSON.stringify({ version: 2, events: [{
+        body: JSON.stringify({ version: 3, events: [{
           type: 'assistant_snapshot',
           messageId: 'm1',
           text: 'Hello',

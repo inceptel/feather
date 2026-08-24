@@ -92,12 +92,12 @@ describe('safe OMP resume', () => {
     let stderr = ''
     child.stderr.on('data', chunk => { stderr += chunk })
     await waitForServer(base)
-    const oldBridge = await fetch(`${base}/api/internal/sessions/${goodFeatherId}/events`, {
+    const staleWorkBridge = await fetch(`${base}/api/internal/sessions/${goodFeatherId}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'stale-token' },
-      body: JSON.stringify({ version: 1, events: [{ type: 'agent_start' }] }),
+      body: JSON.stringify({ version: 2, events: [{ type: 'agent_start' }] }),
     })
-    assert.equal(oldBridge.status, 204)
+    assert.equal(staleWorkBridge.status, 204)
     fs.appendFileSync(goodPath, JSON.stringify({
       type: 'message',
       message: { role: 'assistant', content: [{ type: 'text', text: 'finished' }], stopReason: 'stop' },
@@ -120,7 +120,7 @@ describe('safe OMP resume', () => {
     const bridgeAlive = await fetch(`${base}/api/internal/sessions/${goodFeatherId}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': storedBridge.token },
-      body: JSON.stringify({ version: 2, events: [{ type: 'agent_start' }] }),
+      body: JSON.stringify({ version: 3, events: [{ type: 'agent_start' }] }),
     })
     assert.equal(bridgeAlive.status, 204)
     const logBeforeLiveFinal = fs.readFileSync(tmuxLog, 'utf8')
