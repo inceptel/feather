@@ -796,6 +796,8 @@ export function MessageView(props: MessageViewProps) {
       (b.type === 'text' && !b.text?.trim())
     ) && m.content.some(b => b.type === 'tool_result')
   }
+  const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
+
 
   let scrollRef: HTMLDivElement | undefined
   const [pinned, setPinned] = createSignal(true) // pinned to bottom by default
@@ -956,8 +958,22 @@ export function MessageView(props: MessageViewProps) {
         </div>
       </Show>
 
-      <For each={buildRenderItems(props.messages, isPureToolResultMsg)}>{(item) => {
-        if (item.kind === 'chain') return null
+      <For each={renderItems()}>{(item) => {
+        if (item.kind === 'chain') {
+          if (!props.working || item !== renderItems().at(-1)) return null
+          return (
+            <div class="msg-row" data-testid="live-work-turn" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
+              <div class="asst-bubble" style={{
+                'max-width': '100%', padding: '6px 12px',
+                'border-radius': '12px', background: '#1e1e1e',
+                border: '1px solid rgba(255,255,255,0.06)',
+                color: 'var(--text-primary)', overflow: 'hidden',
+              }}>
+                {renderWorkLog(item.messages)}
+              </div>
+            </div>
+          )
+        }
 
         const msg = item.msg
         const turnTrace = item.kind === 'turn' ? item.trace : []
