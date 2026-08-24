@@ -592,7 +592,7 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .star-btn:hover { opacity: 1 !important; }
 
 /* Execution details: quiet at rest, full fidelity on demand */
-.work-log { width: 100%; margin-top: 3px; }
+.work-log { width: 100%; margin: 0 0 4px; }
 .work-log > summary::-webkit-details-marker { display: none; }
 .work-log-summary {
   display: flex; align-items: center; gap: 5px; width: max-content; min-height: 28px;
@@ -1060,6 +1060,7 @@ export function MessageView(props: MessageViewProps) {
               color: 'var(--text-primary)', overflow: 'hidden',
               'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
             }}>
+              {workLogMessages.length > 0 ? renderWorkLog(workLogMessages) : null}
               <For each={msg.content}>{(block) => {
                 if (
                   block.type === 'thinking' ||
@@ -1142,7 +1143,6 @@ export function MessageView(props: MessageViewProps) {
                 // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
                 return renderBlock(block, setLightbox, getResult, openExpandedTable)
               }}</For>
-              {workLogMessages.length > 0 ? renderWorkLog(workLogMessages) : null}
               {metadataRow}
             </div>
           </div>
