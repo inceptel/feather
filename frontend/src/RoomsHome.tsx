@@ -61,6 +61,12 @@ function updateTimeLabel(iso: string | null) {
   return ago && ago !== 'now' ? `${when} · ${ago} ago` : `${when} · just now`
 }
 
+function primaryRoomSession(room: RoomInfo) {
+  return room.sessions.find(session =>
+    session.id !== room.pulse.sessionId && !session.title.startsWith('Keep working: #')
+  ) || null
+}
+
 export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void }) {
   const [rooms, setRooms] = createSignal<RoomInfo[] | null>(null)
   const [error, setError] = createSignal<string | null>(null)
@@ -199,11 +205,13 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     }
   }
 
-  // Tap the card → open the newest chat (iMessage model). The chevron (or a
-  // room with no chats) expands the card to show all chats + new-chat buttons.
+  // Tap the card → open the newest human-facing chat, never the autonomous
+  // Keep-working pulse. If the Room has only pulse history, create its first
+  // OMP chat and make that the stable card destination on the next refresh.
   function openRoom(room: RoomInfo) {
-    if (room.sessions.length === 0) { setExpanded(expanded() === room.name ? null : room.name); return }
-    props.onOpen(room.sessions[0].id)
+    const primary = primaryRoomSession(room)
+    if (primary) props.onOpen(primary.id)
+    else newChat(room, 'omp')
   }
   const toggleExpand = (name: string) => setExpanded(expanded() === name ? null : name)
 
@@ -215,6 +223,9 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
       style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '9px 16px 9px 28px', 'border-top': '1px solid #16161f', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
       <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: s.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
       <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: agentBg(s.agent), color: agentColor(s.agent), 'flex-shrink': '0', 'font-weight': '600' }}>{s.agent || 'claude'}</span>
+      <Show when={primaryRoomSession(room)?.id === s.id}>
+        <span style={{ 'font-size': '9px', color: '#69c77f', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Main</span>
+      </Show>
       <span style={{ flex: '1', 'font-size': '13px', color: '#ccc', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</span>
       <Show when={s.roomAssigned}>
         <button data-testid={`detach-${s.id}`} aria-label={`Detach ${s.title} from #${room.name}`} disabled={busy()}
