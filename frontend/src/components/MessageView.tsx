@@ -696,8 +696,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .execution-payload-label { margin-bottom: 4px; color: var(--text-faint); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
 .execution-payload pre { max-height: 220px; overflow: auto; margin: 0; color: var(--text-secondary); font: 10px/1.45 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .execution-status { flex-shrink: 0; color: currentColor; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
-.omp-todo-status { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 5px; width: 100%; max-width: 960px; min-height: 36px; margin: 0 auto 4px; padding: 0 11px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); box-shadow: 0 6px 18px var(--bg-base); color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; text-align: left; box-sizing: border-box; }
-.omp-todo-status-active { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 500; }
 .omp-todo-surface { max-width: 960px; overflow: visible; margin: 0 auto 10px; padding: 0 11px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); }
 .omp-todo-surface > summary { padding: 8px 0; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; }
 .agent-surface { max-width: 938px; margin: 0 auto 10px; padding: 10px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); }
@@ -719,6 +717,8 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .agent-inspector .execution-log { margin-bottom: 0; background: var(--bg-base); }
 .agent-answer { margin-top: 10px; padding: 10px 12px; border-left: 2px solid var(--info); border-radius: 0 8px 8px 0; background: var(--bg-base); color: var(--text-primary); }
 .agent-answer-label { margin-bottom: 5px; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.agents-hub-view .agent-surface { margin-bottom: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.agents-hub-view .agent-surface-heading { margin-bottom: 14px; color: var(--text-primary); font-size: 16px; }
 @media (max-width: 520px) {
   .execution-tool > summary { min-height: 44px; }
   .agent-layout.is-open { display: block; }
@@ -783,12 +783,12 @@ type MessageViewProps = {
   intentHistory?: string[]
   assistantStream?: { text: string; ended: boolean } | null
   work?: OmpWorkScope | null
-  todo?: OmpTodoSnapshot | null
   notice?: { kind: string; text: string } | null
   approval?: { toolName: string; approvalMode: string; reason?: string } | null
   subagents?: OmpSubagentState[]
   jobs?: MessageViewJob[]
   runtime?: MessageViewRuntime | null
+  standaloneAgents?: boolean
 }
 
 export function MessageView(props: MessageViewProps) {
@@ -796,7 +796,6 @@ export function MessageView(props: MessageViewProps) {
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
   const [selectedSubagentId, setSelectedSubagentId] = createSignal<string | null>(null)
-  const [parentTodoOpen, setParentTodoOpen] = createSignal(true)
   let tableReturnFocus: HTMLElement | null = null
   let tableModal: HTMLDivElement | undefined
 
@@ -843,54 +842,32 @@ export function MessageView(props: MessageViewProps) {
     if (selectedId && !(props.subagents || []).some(agent => agent.id === selectedId)) setSelectedSubagentId(null)
   })
 
-  let todoWasWorking = !!props.working
-  createEffect(() => {
-    const working = !!props.working
-    if (working && !todoWasWorking) setParentTodoOpen(true)
-    todoWasWorking = working
-  })
 
-  function renderTodo(todo: () => OmpTodoSnapshot, testId: string, sticky: boolean) {
-    const taskList = () => (
-      <div style={{ padding: '0 0 9px' }}>
-        <For each={todo().phases}>{(phase) => (
-          <div style={{ 'margin-top': '7px' }}>
-            <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
-            <For each={phase.tasks}>{(task) => (
-              <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
-                <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
-                  {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
-                </span>
-                <span>
-                  {task.content}
-                  <Show when={task.blocker}><span style={{ display: 'block', color: 'var(--warning)', 'font-size': '10px', 'margin-top': '2px' }}>{task.blocker}</span></Show>
-                </span>
-              </div>
-            )}</For>
-          </div>
-        )}</For>
-      </div>
-    )
-    if (sticky) {
-      return (
-        <>
-          <button type="button" data-testid={testId} class="omp-todo-status" aria-expanded={parentTodoOpen()} onClick={() => setParentTodoOpen(open => !open)}>
-            <span>{parentTodoOpen() ? '▾' : '›'} Todo · {todo().completed}/{todo().total}</span>
-            <Show when={todo().active}><span class="omp-todo-status-active">· {todo().active}</span></Show>
-          </button>
-          <Show when={parentTodoOpen()}>
-            <div data-testid={`${testId}-body`} class="omp-todo-surface">{taskList()}</div>
-          </Show>
-        </>
-      )
-    }
+  function renderTodo(todo: () => OmpTodoSnapshot, testId: string) {
     return (
       <details data-testid={testId} open class="omp-todo-surface">
         <summary>
           Todo · {todo().completed}/{todo().total}
           <Show when={todo().active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {todo().active}</span></Show>
         </summary>
-        {taskList()}
+        <div style={{ padding: '0 0 9px' }}>
+          <For each={todo().phases}>{(phase) => (
+            <div style={{ 'margin-top': '7px' }}>
+              <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
+              <For each={phase.tasks}>{(task) => (
+                <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
+                  <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--info)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
+                    {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
+                  </span>
+                  <span>
+                    {task.content}
+                    <Show when={task.blocker}><span style={{ display: 'block', color: 'var(--warning)', 'font-size': '10px', 'margin-top': '2px' }}>{task.blocker}</span></Show>
+                  </span>
+                </div>
+              )}</For>
+            </div>
+          )}</For>
+        </div>
       </details>
     )
   }
@@ -1035,6 +1012,11 @@ export function MessageView(props: MessageViewProps) {
     ) && m.content.some(b => b.type === 'tool_result')
   }
   const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
+  const workAttachedToAnswer = createMemo(() => {
+    if ((props.work?.timeline.length || 0) === 0) return false
+    const latest = renderItems().at(-1)
+    return !!latest && latest.kind !== 'chain' && latest.msg.role === 'assistant'
+  })
 
 
   let scrollRef: HTMLDivElement | undefined
@@ -1079,7 +1061,7 @@ export function MessageView(props: MessageViewProps) {
   })
 
   return (
-    <div style={{ position: 'relative', height: '100%' }}>
+    <div class={props.standaloneAgents ? 'agents-hub-view' : undefined} style={{ position: 'relative', height: '100%' }}>
     <div ref={scrollRef} onScroll={onScroll} onClick={handleCopyClick} style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', 'overscroll-behavior': 'contain', padding: '16px', 'padding-bottom': '80px' }}>
       <style>{markdownCSS}</style>
       <Show when={expandedTable()}>
@@ -1203,35 +1185,31 @@ export function MessageView(props: MessageViewProps) {
         </div>
       </Show>
 
-      <Show when={props.todo}>
-        {renderTodo(() => props.todo!, 'omp-todo', true)}
-      </Show>
-      <For each={renderItems()}>{(item) => {
-        const mirroredCurrentTurn = (props.work?.timeline.length || 0) > 0 && item === renderItems().at(-1)
+      <For each={renderItems()}>{(item, itemIndex) => {
+        const isLatestItem = () => itemIndex() === renderItems().length - 1
+        const mirroredCurrentTurn = createMemo(() => (props.work?.timeline.length || 0) > 0 && isLatestItem())
         if (item.kind === 'chain') {
-          if (mirroredCurrentTurn) return null
-          if (item !== renderItems().at(-1)) return null
           return (
-            <Show when={props.working}>
-              {renderProvisionalWork(() => item.messages, 'live-work-turn')}
+            <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working}>
+              {renderProvisionalWork(() => item.messages, 'live-work-turn', true)}
             </Show>
           )
         }
 
         const msg = item.msg
-        const turnTrace = item.kind === 'turn' && !mirroredCurrentTurn ? item.trace : []
+        const turnTrace = createMemo(() => item.kind === 'turn' && !mirroredCurrentTurn() ? item.trace : [])
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
         const hasAttachments = images.length > 0 || files.length > 0
-        const inlineTraceBlocks = mirroredCurrentTurn ? [] : (msg.content || []).filter(block =>
+        const inlineTraceBlocks = createMemo(() => mirroredCurrentTurn() ? [] : (msg.content || []).filter(block =>
           block.type === 'thinking' ||
           block.type === 'tool_result' ||
           (block.type === 'tool_use' && !isQuestionBlock(block))
-        )
-        const workLogMessages = inlineTraceBlocks.length > 0
-          ? [...turnTrace, { ...msg, content: inlineTraceBlocks }]
-          : turnTrace
+        ))
+        const workLogMessages = createMemo(() => inlineTraceBlocks().length > 0
+          ? [...turnTrace(), { ...msg, content: inlineTraceBlocks() }]
+          : turnTrace())
 
         // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
         // matching pi-dashboard's style: timestamp on the left, action icons on the right.
@@ -1310,6 +1288,10 @@ export function MessageView(props: MessageViewProps) {
 
         // Assistant message: single wide bubble containing all blocks (text, tool_use, thinking) + metadata inside.
         return (
+          <>
+          <Show when={mirroredCurrentTurn()}>
+            {renderExecutionTimeline(() => props.work!, 'omp-parent-execution')}
+          </Show>
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
             <div class="asst-bubble" style={{
               'max-width': '100%', padding: '10px 14px 8px',
@@ -1319,7 +1301,7 @@ export function MessageView(props: MessageViewProps) {
               color: 'var(--text-primary)', overflow: 'hidden',
               'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
             }}>
-              {workLogMessages.length > 0 ? renderWorkLog(() => workLogMessages) : null}
+              <Show when={workLogMessages().length > 0}>{renderWorkLog(() => workLogMessages())}</Show>
               <For each={msg.content}>{(block) => {
                 if (
                   block.type === 'thinking' ||
@@ -1405,10 +1387,18 @@ export function MessageView(props: MessageViewProps) {
               {metadataRow}
             </div>
           </div>
+          </>
         )
       }}</For>
-      <Show when={(props.work?.timeline.length || 0) > 0}>
+      <Show when={(props.work?.timeline.length || 0) > 0 && !workAttachedToAnswer()}>
         {renderExecutionTimeline(() => props.work!, 'omp-parent-execution')}
+      </Show>
+      <Show when={props.assistantStream?.text}>
+        <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
+          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
+            {props.assistantStream!.text}<span aria-hidden="true" style={{ display: 'inline-block', width: '1px', height: '1em', background: 'var(--text-secondary)', 'margin-left': '2px', 'vertical-align': 'text-bottom', opacity: props.assistantStream!.ended ? '0.35' : '0.9' }} />
+          </div>
+        </div>
       </Show>
 
 
@@ -1504,7 +1494,7 @@ export function MessageView(props: MessageViewProps) {
                     </section>
                   </Show>
                   <Show when={agent().todo}>
-                    {renderTodo(() => agent().todo!, 'omp-subagent-todo', false)}
+                    {renderTodo(() => agent().todo!, 'omp-subagent-todo')}
                   </Show>
                   <Show when={agent().timeline.length > 0} fallback={<div style={{ padding: '10px 0', color: 'var(--text-muted)', 'font-size': '11px' }}>Waiting for the first execution step.</div>}>
                     {renderExecutionTimeline(() => agent(), 'omp-subagent-execution', true)}
@@ -1538,13 +1528,6 @@ export function MessageView(props: MessageViewProps) {
       </Show>
 
 
-      <Show when={props.assistantStream?.text}>
-        <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
-            {props.assistantStream!.text}<span aria-hidden="true" style={{ display: 'inline-block', width: '1px', height: '1em', background: 'var(--text-secondary)', 'margin-left': '2px', 'vertical-align': 'text-bottom', opacity: props.assistantStream!.ended ? '0.35' : '0.9' }} />
-          </div>
-        </div>
-      </Show>
 
       <Show when={props.working}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
