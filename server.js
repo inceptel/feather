@@ -66,6 +66,8 @@ const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
 const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'feather-bridge.js');
 const ompBridgeTokens = new Map();
+const ompBridgeLastSeen = new Map();
+const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
 const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
 const OMP_BRIDGE_EVENT_TYPES = Object.freeze({
   assistant_snapshot: true,
@@ -756,6 +758,19 @@ function ompBridgeTokenPath(sessionId) {
   const file = createHash('sha256').update(String(sessionId)).digest('hex');
   return path.join(OMP_BRIDGE_TOKENS_DIR, file);
 }
+function ensureOmpBridgeDiscovery() {
+  fs.mkdirSync(path.dirname(OMP_DISCOVERED_BRIDGE), { recursive: true, mode: 0o700 });
+  try {
+    const stat = fs.lstatSync(OMP_DISCOVERED_BRIDGE);
+    if (stat.isSymbolicLink() && path.resolve(path.dirname(OMP_DISCOVERED_BRIDGE), fs.readlinkSync(OMP_DISCOVERED_BRIDGE)) === OMP_BRIDGE_EXTENSION) return;
+    console.warn(`[omp bridge] discovery path is occupied: ${OMP_DISCOVERED_BRIDGE}`);
+    return;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  fs.symlinkSync(OMP_BRIDGE_EXTENSION, OMP_DISCOVERED_BRIDGE);
+}
+
 
 
 function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
@@ -765,9 +780,15 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   const ompId = resume ? getOmpSessionId(id) : null;
   if (resume && !ompId) throw new Error(`Cannot resume OMP session ${id}: exact OMP session id not found`);
   const bridgeToken = randomUUID();
+  const bridgeUrl = `http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`;
   ompBridgeTokens.set(id, bridgeToken);
+  ompBridgeLastSeen.delete(id);
+  ensureOmpBridgeDiscovery();
   fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
+  fs.writeFileSync(path.join(sessionDir, '.feather-bridge.json'), JSON.stringify({
+    url: bridgeUrl, token: bridgeToken, sessionId: id,
+  }), { mode: 0o600 });
   const args = [
     'omp',
     ompModelFlags(OMP_MODEL, OMP_THINKING).trim(),
@@ -778,7 +799,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
     '--allow-home',
   ].filter(Boolean).join(' ');
   const env = [
-    `FEATHER_BRIDGE_URL=${shellQuote(`http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`)}`,
+    `FEATHER_BRIDGE_URL=${shellQuote(bridgeUrl)}`,
     `FEATHER_BRIDGE_TOKEN=${shellQuote(bridgeToken)}`,
     `FEATHER_SESSION_ID=${shellQuote(id)}`,
   ].join(' ');
@@ -1046,10 +1067,9 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
 
 const pendingOmpBridgeMigrations = new Map();
 
-function ompBridgeConfigured(sessionId) {
-  if (ompBridgeTokens.has(sessionId)) return true;
-  try { return !!fs.readFileSync(ompBridgeTokenPath(sessionId), 'utf8').trim(); }
-  catch { return false; }
+function ompBridgeIsLive(sessionId, now = Date.now()) {
+  const lastSeen = ompBridgeLastSeen.get(sessionId);
+  return Number.isFinite(lastSeen) && now - lastSeen < 30_000;
 }
 
 function cancelOmpBridgeMigration(sessionId) {
@@ -1067,10 +1087,10 @@ function observeOmpTurnBoundary(sessionId, line) {
     return;
   }
   if (getAgentForSession(sessionId) !== 'omp') return;
-  if (ompBridgeConfigured(sessionId) || !tmuxIsActive(sessionId) || pendingOmpBridgeMigrations.has(sessionId)) return;
+  if (ompBridgeIsLive(sessionId) || !tmuxIsActive(sessionId) || pendingOmpBridgeMigrations.has(sessionId)) return;
   const timer = setTimeout(() => {
     pendingOmpBridgeMigrations.delete(sessionId);
-    if (ompBridgeConfigured(sessionId) || !tmuxIsActive(sessionId) || getAgentForSession(sessionId) !== 'omp') return;
+    if (ompBridgeIsLive(sessionId) || !tmuxIsActive(sessionId) || getAgentForSession(sessionId) !== 'omp') return;
     try {
       launchOmpSession(sessionId, getOmpSessionCwd(sessionId), { resume: true });
       console.log(`[omp bridge] migrated completed session ${sessionId}`);
@@ -1535,6 +1555,7 @@ app.post('/api/internal/sessions/:id/events', (req, res) => {
   if (normalized.some(event => event === null)) {
     return res.status(400).json({ error: 'invalid bridge event' });
   }
+  ompBridgeLastSeen.set(id, Date.now());
   for (const event of normalized) broadcastNamedEvent(id, 'omp_event', event);
   res.status(204).end();
 });
