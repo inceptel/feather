@@ -3,10 +3,102 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const SNAPSHOT_INTERVAL_MS = 50
-const BRIDGE_VERSION = 3
+const BRIDGE_VERSION = 4
 const MAX_LIVE_THINKING_CHARS = 3_000
 const MAX_POST_BYTES = 400_000
+const JSON_LIMITS = Object.freeze({
+  maxDepth: 6,
+  maxNodes: 500,
+  maxArrayItems: 100,
+  maxObjectKeys: 100,
+  maxKeyBytes: 240,
+  maxStringBytes: 20_000,
+  maxTotalBytes: 80_000,
+})
 const textEncoder = new TextEncoder()
+const SKIP_JSON_VALUE = Symbol('skip-json-value')
+const ANSWER_EVENT_TYPES = new Set(['assistant_snapshot', 'assistant_end', 'assistant_cancel'])
+const TOOL_EVENT_TYPES = new Set(['tool_execution_start', 'tool_execution_update', 'tool_execution_end'])
+
+function byteLength(value) {
+  return textEncoder.encode(value).byteLength
+}
+
+function truncateUtf8(value, maxBytes) {
+  if (maxBytes <= 0) return ''
+  if (byteLength(value) <= maxBytes) return value
+  let low = 0
+  let high = value.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (byteLength(value.slice(0, middle)) <= maxBytes) low = middle
+    else high = middle - 1
+  }
+  return value.slice(0, low)
+}
+
+function sanitizeJson(value) {
+  const state = { nodes: 0, bytes: 0, seen: new WeakSet() }
+
+  function visit(candidate, depth) {
+    if (state.nodes >= JSON_LIMITS.maxNodes || state.bytes >= JSON_LIMITS.maxTotalBytes) return SKIP_JSON_VALUE
+    state.nodes += 1
+    state.bytes += 8
+    if (state.bytes > JSON_LIMITS.maxTotalBytes) return SKIP_JSON_VALUE
+
+    if (candidate === null) return null
+    if (typeof candidate === 'boolean') return candidate
+    if (typeof candidate === 'number') return Number.isFinite(candidate) ? candidate : null
+    if (typeof candidate === 'string') {
+      const remaining = Math.max(0, JSON_LIMITS.maxTotalBytes - state.bytes)
+      const text = truncateUtf8(candidate, Math.min(JSON_LIMITS.maxStringBytes, remaining))
+      state.bytes += byteLength(text)
+      return text
+    }
+    if (typeof candidate === 'bigint') {
+      const remaining = Math.max(0, JSON_LIMITS.maxTotalBytes - state.bytes)
+      const text = truncateUtf8(String(candidate), Math.min(JSON_LIMITS.maxStringBytes, remaining))
+      state.bytes += byteLength(text)
+      return text
+    }
+    if (typeof candidate !== 'object' || depth >= JSON_LIMITS.maxDepth || state.seen.has(candidate)) {
+      return null
+    }
+
+    state.seen.add(candidate)
+    if (Array.isArray(candidate)) {
+      const result = []
+      const itemCount = Math.min(candidate.length, JSON_LIMITS.maxArrayItems)
+      for (let index = 0; index < itemCount; index += 1) {
+        const clean = visit(candidate[index], depth + 1)
+        if (clean === SKIP_JSON_VALUE) break
+        result.push(clean)
+      }
+      state.seen.delete(candidate)
+      return result
+    }
+
+    const result = Object.create(null)
+    let count = 0
+    for (const [rawKey, item] of Object.entries(candidate)) {
+      if (count >= JSON_LIMITS.maxObjectKeys) break
+      const key = truncateUtf8(rawKey, JSON_LIMITS.maxKeyBytes)
+      if (!key) continue
+      const keyBytes = byteLength(key)
+      if (state.bytes + keyBytes > JSON_LIMITS.maxTotalBytes) break
+      state.bytes += keyBytes
+      const clean = visit(item, depth + 1)
+      if (clean === SKIP_JSON_VALUE) break
+      result[key] = clean
+      count += 1
+    }
+    state.seen.delete(candidate)
+    return result
+  }
+
+  const result = visit(value, 0)
+  return result === SKIP_JSON_VALUE ? null : result
+}
 
 function assistantText(message) {
   if (message?.role !== 'assistant' || !Array.isArray(message.content)) return ''
@@ -19,6 +111,7 @@ function assistantText(message) {
     .join('')
 }
 function assistantWork(message) {
+  if (message?.role !== 'assistant' || !Array.isArray(message.content)) return []
   const blocks = []
   let remainingThinkingChars = MAX_LIVE_THINKING_CHARS
   const parts = message.content.slice(0, 40)
@@ -66,7 +159,7 @@ function bridgeConfig(env, argv = process.argv) {
   }
 }
 
-function todoDetails(message) {
+function todoDetails(message, subagentId) {
   if (message?.role !== 'toolResult' || message.toolName !== 'todo' || !message.details || !Array.isArray(message.details.phases)) return null
   const phases = message.details.phases.slice(0, 30).map((phase) => ({
     name: typeof phase?.name === 'string' ? phase.name.slice(0, 120) : '',
@@ -79,8 +172,39 @@ function todoDetails(message) {
   return {
     type: 'todo',
     phases,
-    ...(typeof message.details.op === 'string' ? { op: message.details.op } : {}),
+    ...(typeof message.details.op === 'string' ? { op: message.details.op.slice(0, 20) } : {}),
     isError: !!message.isError,
+    ...(subagentId ? { subagentId } : {}),
+  }
+}
+
+function latestTodoFromBranch(sessionManager) {
+  const branch = sessionManager?.getBranch?.()
+  if (!Array.isArray(branch)) return null
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const todo = todoDetails(branch[index]?.type === 'message' ? branch[index].message : null)
+    if (todo) return todo
+  }
+  return null
+}
+
+function toolBridgeEvent(event, subagentId) {
+  if (!event || !TOOL_EVENT_TYPES.has(event.type)) return null
+  const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId.slice(0, 128) : ''
+  const toolName = typeof event.toolName === 'string' && event.toolName.trim() ? event.toolName.slice(0, 80) : ''
+  if (!toolCallId || !toolName) return null
+  return {
+    type: event.type,
+    toolCallId,
+    toolName,
+    ...(event.type !== 'tool_execution_end' && event.args !== undefined ? { args: sanitizeJson(event.args) } : {}),
+    ...(typeof event.intent === 'string' ? { intent: event.intent.slice(0, 300) } : {}),
+    ...(event.type === 'tool_execution_update' && event.partialResult !== undefined
+      ? { partialResult: sanitizeJson(event.partialResult) }
+      : {}),
+    ...(event.type === 'tool_execution_end' && event.result !== undefined ? { result: sanitizeJson(event.result) } : {}),
+    ...(event.type === 'tool_execution_end' ? { isError: !!event.isError } : {}),
+    ...(subagentId ? { subagentId } : {}),
   }
 }
 
@@ -110,6 +234,7 @@ export default function featherBridgeExtension(pi) {
   const config = bridgeConfig(process.env)
   let enabled = !!config && !config.sessionDir
   let activeMessage = null
+  const childMessages = new Map()
   const pendingTimers = new Set()
   const unsubscribe = []
   const pendingEvents = []
@@ -118,7 +243,7 @@ export default function featherBridgeExtension(pi) {
   let shuttingDown = false
   let runtimeTimer = null
   let lastRuntimeState = ''
-  let workEventsEnabled = true
+  let richEventsEnabled = true
   let lastJobs = ''
 
   function logDeliveryFailure(error) {
@@ -133,9 +258,12 @@ export default function featherBridgeExtension(pi) {
   }
 
   function coalesceKey(event) {
-    if (event.type === 'assistant_snapshot' || event.type === 'work_snapshot') return `${event.type}:${event.messageId}`
-    if (event.type === 'subagent_progress') return `${event.type}:${event.id}`
-    if (event.type === 'session_state' || event.type === 'async_jobs' || event.type === 'todo') return event.type
+    const owner = event.subagentId || 'parent'
+    if (event.type === 'assistant_snapshot' || event.type === 'work_snapshot') return `${event.type}:${owner}:${event.messageId}`
+    if (event.type.startsWith('tool_execution_')) return `tool:${owner}:${event.toolCallId}`
+    if (event.type === 'subagent_progress' || event.type === 'subagent_lifecycle') return `subagent:${event.id}`
+    if (event.type === 'session_state' || event.type === 'async_jobs') return event.type
+    if (event.type === 'todo') return `${event.type}:${owner}`
     return null
   }
 
@@ -144,7 +272,11 @@ export default function featherBridgeExtension(pi) {
     if (key) {
       const index = pendingEvents.findLastIndex(candidate => coalesceKey(candidate) === key)
       if (index >= 0) {
-        pendingEvents[index] = event
+        const previous = pendingEvents[index]
+        const mergePrevious = event.type.startsWith('tool_execution_')
+          || event.type === 'subagent_progress'
+          || event.type === 'subagent_lifecycle'
+        pendingEvents[index] = mergePrevious ? { ...previous, ...event, type: event.type } : event
         return
       }
     }
@@ -196,8 +328,11 @@ export default function featherBridgeExtension(pi) {
             signal,
           })
           if (!response.ok) {
-            if (response.status === 400 && events.every(event => event.type === 'work_snapshot')) {
-              workEventsEnabled = false
+            if (response.status === 400 && events.every(event => !ANSWER_EVENT_TYPES.has(event.type))) {
+              richEventsEnabled = false
+              for (let index = pendingEvents.length - 1; index >= 0; index -= 1) {
+                if (!ANSWER_EVENT_TYPES.has(pendingEvents[index].type)) pendingEvents.splice(index, 1)
+              }
               continue
             }
             throw new Error(`HTTP ${response.status ?? 'error'}`)
@@ -216,7 +351,7 @@ export default function featherBridgeExtension(pi) {
   function post(events) {
     if (!config || !enabled || events.length === 0 || shuttingDown) return
     for (const event of events) {
-      if (event.type !== 'work_snapshot' || workEventsEnabled) enqueue(event)
+      if (ANSWER_EVENT_TYPES.has(event.type) || richEventsEnabled) enqueue(event)
     }
     void deliver()
   }
@@ -258,13 +393,31 @@ export default function featherBridgeExtension(pi) {
   }
 
 
+  function createMessageState(message, subagentId) {
+    const work = assistantWork(message)
+    return {
+      messageId: randomUUID(),
+      text: assistantText(message),
+      work,
+      latestMessage: message,
+      lastSnapshot: null,
+      lastWorkJson: work.length > 0 ? null : '[]',
+      terminalType: null,
+      willContinue: false,
+      timer: null,
+      subagentId,
+    }
+  }
+
   function flushMessage(state) {
+    const owner = state.subagentId ? { subagentId: state.subagentId } : {}
     const answerEvents = []
     if (state.lastSnapshot !== state.text) {
       answerEvents.push({
         type: 'assistant_snapshot',
         messageId: state.messageId,
         text: state.text,
+        ...owner,
       })
       state.lastSnapshot = state.text
     }
@@ -275,6 +428,7 @@ export default function featherBridgeExtension(pi) {
         type: 'work_snapshot',
         messageId: state.messageId,
         blocks: state.work,
+        ...owner,
       }])
       state.lastWorkJson = workJson
     }
@@ -283,8 +437,11 @@ export default function featherBridgeExtension(pi) {
       answerEvents.push({
         type: state.terminalType,
         messageId: state.messageId,
+        ...(state.willContinue ? { willContinue: true } : {}),
+        ...owner,
       })
-      if (activeMessage === state) activeMessage = null
+      if (state.subagentId) childMessages.delete(state.subagentId)
+      else if (activeMessage === state) activeMessage = null
     }
 
     post(answerEvents)
@@ -310,18 +467,7 @@ export default function featherBridgeExtension(pi) {
 
   pi.on('message_start', (event) => {
     if (event.message?.role !== 'assistant') return
-
-    const work = assistantWork(event.message)
-    activeMessage = {
-      messageId: randomUUID(),
-      text: assistantText(event.message),
-      work,
-      latestMessage: event.message,
-      lastSnapshot: null,
-      lastWorkJson: work.length > 0 ? null : '[]',
-      terminalType: null,
-      timer: null,
-    }
+    activeMessage = createMessageState(event.message)
   })
 
   pi.on('message_update', (event, ctx) => {
@@ -342,9 +488,10 @@ export default function featherBridgeExtension(pi) {
     state.latestMessage = event.message
     state.text = assistantText(event.message)
     state.work = assistantWork(event.message)
-    state.terminalType = event.message.stopReason === 'aborted' || hasToolCall(event.message)
-      ? 'assistant_cancel'
-      : 'assistant_end'
+    const aborted = event.message.stopReason === 'aborted'
+    const toolSegment = hasToolCall(event.message)
+    state.terminalType = aborted || toolSegment ? 'assistant_cancel' : 'assistant_end'
+    state.willContinue = toolSegment && !aborted
 
     if (state.timer) return
     if (state.lastSnapshot === state.text) {
@@ -353,6 +500,50 @@ export default function featherBridgeExtension(pi) {
       scheduleSnapshot(state, ctx)
     }
   })
+
+  for (const eventName of ['tool_execution_start', 'tool_execution_update', 'tool_execution_end']) {
+    pi.on(eventName, (event) => {
+      const clean = toolBridgeEvent(event)
+      if (clean) post([clean])
+    })
+  }
+
+  function handleChildEvent(payload) {
+    const subagentId = typeof payload?.id === 'string' ? payload.id.slice(0, 128) : ''
+    const event = payload?.event
+    if (!subagentId || !event || typeof event !== 'object') return
+
+    if (event.type === 'message_start' && event.message?.role === 'assistant') {
+      childMessages.set(subagentId, createMessageState(event.message, subagentId))
+      return
+    }
+    if (event.type === 'message_update' && event.message?.role === 'assistant') {
+      const state = childMessages.get(subagentId)
+      if (!state) return
+      state.latestMessage = event.message
+      state.text = assistantText(event.message)
+      state.work = assistantWork(event.message)
+      flushMessage(state)
+      return
+    }
+    if (event.type === 'message_end') {
+      const todo = todoDetails(event.message, subagentId)
+      if (todo) post([todo])
+      if (event.message?.role !== 'assistant') return
+      const state = childMessages.get(subagentId) || createMessageState(event.message, subagentId)
+      state.latestMessage = event.message
+      state.text = assistantText(event.message)
+      state.work = assistantWork(event.message)
+      const aborted = event.message.stopReason === 'aborted'
+      const toolSegment = hasToolCall(event.message)
+      state.terminalType = aborted || toolSegment ? 'assistant_cancel' : 'assistant_end'
+      state.willContinue = toolSegment && !aborted
+      flushMessage(state)
+      return
+    }
+    const toolEvent = toolBridgeEvent(event, subagentId)
+    if (toolEvent) post([toolEvent])
+  }
 
   // Lifecycle payloads are explicit scalar allowlists. Never spread an OMP
   // event: agent messages, compaction results, retry arrays, and tool data may
@@ -418,6 +609,13 @@ export default function featherBridgeExtension(pi) {
 
   const taskEvents = pi.events
   if (taskEvents?.on) {
+    const metadata = (event) => ({
+      ...(typeof event.agentSource === 'string' ? { agentSource: event.agentSource.slice(0, 20) } : {}),
+      ...(typeof event.task === 'string' ? { task: event.task.slice(0, 2_000) } : {}),
+      ...(typeof event.assignment === 'string' ? { assignment: event.assignment.slice(0, 1_000) } : {}),
+      ...(typeof event.sessionFile === 'string' ? { sessionFile: event.sessionFile.slice(0, 1_000) } : {}),
+      ...(typeof event.parentToolCallId === 'string' ? { parentToolCallId: event.parentToolCallId.slice(0, 128) } : {}),
+    })
     unsubscribe.push(taskEvents.on('task:subagent:lifecycle', (event) => post([{
       type: 'subagent_lifecycle',
       id: event.id,
@@ -425,6 +623,7 @@ export default function featherBridgeExtension(pi) {
       status: event.status,
       index: event.index,
       detached: !!event.detached,
+      ...metadata(event),
       ...(typeof event.description === 'string' ? { description: event.description.slice(0, 300) } : {}),
     }])))
     unsubscribe.push(taskEvents.on('task:subagent:progress', (event) => post([{
@@ -434,6 +633,7 @@ export default function featherBridgeExtension(pi) {
       status: event.progress?.status,
       index: event.index,
       detached: !!event.detached,
+      ...metadata(event),
       toolCount: event.progress?.toolCount,
       requests: event.progress?.requests,
       tokens: event.progress?.tokens,
@@ -444,6 +644,7 @@ export default function featherBridgeExtension(pi) {
       ...(Number.isFinite(event.progress?.contextTokens) ? { contextTokens: event.progress.contextTokens } : {}),
       ...(Number.isFinite(event.progress?.contextWindow) ? { contextWindow: event.progress.contextWindow } : {}),
     }])))
+    unsubscribe.push(taskEvents.on('task:subagent:event', handleChildEvent))
   }
 
   pi.on('session_start', (_event, ctx) => {
@@ -452,6 +653,8 @@ export default function featherBridgeExtension(pi) {
       enabled = !!sessionFile && path.dirname(path.resolve(sessionFile)) === path.resolve(config.sessionDir)
     }
     if (!enabled) return
+    const todo = latestTodoFromBranch(ctx.sessionManager)
+    if (todo) post([todo])
     emitRuntimeState(ctx)
     emitJobs(ctx)
     runtimeTimer = ctx.setInterval(() => {
@@ -472,5 +675,6 @@ export default function featherBridgeExtension(pi) {
     runtimeTimer = null
     for (const stop of unsubscribe) stop()
     activeMessage = null
+    childMessages.clear()
   })
 }

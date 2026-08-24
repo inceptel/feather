@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
-import type { Message, ContentBlock } from '../api'
+import { For, Index, Show, createEffect, createMemo, createSignal } from 'solid-js'
+import type { Message, ContentBlock, OmpSubagentState, OmpTodoSnapshot, OmpTimelineItem, OmpWorkScope } from '../api'
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
@@ -29,6 +29,7 @@ import {
 } from '../lib/toolPresentation.js'
 import { localFilePath, localFileUrl } from '../lib/localMedia.js'
 import { extractImages } from '../lib/attachments.js'
+import { activeOmpStep } from '../lib/ompMirror.js'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -464,6 +465,50 @@ function formatTime(iso: string) {
   try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
   catch { return '' }
 }
+function formatDuration(durationMs?: number) {
+  if (durationMs === undefined) return ''
+  const seconds = Math.max(0, Math.round(durationMs / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${seconds % 60}s`
+}
+
+function executionStatusLabel(status: string) {
+  if (status === 'error' || status === 'failed') return 'Failed'
+  if (status === 'cancelled' || status === 'canceled' || status === 'aborted') return 'Canceled'
+  if (status === 'success' || status === 'completed' || status === 'complete' || status === 'succeeded') return 'Success'
+  if (status === 'running' || status === 'started' || status === 'working') return 'Running'
+  return status || 'Idle'
+}
+
+function executionStatusColor(status: string) {
+  const label = executionStatusLabel(status)
+  if (label === 'Failed') return 'var(--error)'
+  if (label === 'Success') return 'var(--success)'
+  if (label === 'Running') return 'var(--info)'
+  return 'var(--text-muted)'
+}
+
+function executionStatusMark(status: string) {
+  const label = executionStatusLabel(status)
+  if (label === 'Success') return '✓'
+  if (label === 'Failed') return '!'
+  if (label === 'Canceled') return '×'
+  if (label === 'Running') return '●'
+  return '○'
+}
+
+function executionValue(value: unknown) {
+  if (value === undefined || value === null) return ''
+  if (typeof value === 'string') return value
+  try { return JSON.stringify(value, null, 2) }
+  catch { return String(value) }
+}
+
+function timelineToolPresentation(item: Extract<OmpTimelineItem, { kind: 'tool' }>) {
+  const args = item.args && typeof item.args === 'object' && !Array.isArray(item.args) ? item.args as Record<string, unknown> : {}
+  return toolPresentation(item.toolName, args)
+}
 
 // ── Execution-trace grouping ────────────────────────────────────────────────
 // Any assistant message containing reasoning or tool activity is implementation
@@ -624,6 +669,62 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-log-reasoning p:last-child { margin-bottom: 0; }
 .work-log-reasoning ul, .work-log-reasoning ol { margin: 2px 0 4px; }
 
+
+/* OMP mirror: one quiet disclosure, then a bounded chronological run rail */
+.execution-log { width: 100%; max-width: 960px; margin: 0 auto 10px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); overflow: hidden; }
+.execution-log > summary::-webkit-details-marker, .execution-tool > summary::-webkit-details-marker { display: none; }
+.execution-summary { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 12px; color: var(--text-secondary); cursor: pointer; list-style: none; user-select: none; }
+.execution-summary:focus-visible, .execution-tool > summary:focus-visible, .agent-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.execution-title { flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.execution-active { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+.execution-chevron, .execution-tool-chevron { color: var(--text-faint); transition: transform 120ms ease; }
+.execution-log[open] > .execution-summary .execution-chevron, .execution-tool[open] > summary .execution-tool-chevron { transform: rotate(90deg); }
+.execution-detail { padding: 4px 12px 12px; border-top: 1px solid var(--border-subtle); }
+.execution-meta { padding: 6px 0 8px; color: var(--text-faint); font-size: 10px; }
+.execution-timeline { list-style: none; margin: 0; padding: 0; }
+.execution-item { position: relative; min-width: 0; padding: 0 0 8px 18px; }
+.execution-item:not(:last-child)::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: -4px; width: 1px; background: var(--border-medium); }
+.execution-node { position: absolute; left: 0; top: 9px; width: 9px; height: 9px; border: 2px solid var(--bg-surface); border-radius: 50%; background: currentColor; box-sizing: border-box; }
+.execution-item[data-status='running'] .execution-card { border-color: var(--info); }
+.execution-card { min-width: 0; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-base); overflow: hidden; }
+.execution-thinking { padding: 8px 10px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.execution-thinking-label { margin-bottom: 4px; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.execution-tool > summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 38px; padding: 0 10px; cursor: pointer; list-style: none; }
+.execution-tool-name { flex-shrink: 0; color: var(--text-primary); font: 600 11px 'SF Mono', Menlo, monospace; }
+.execution-tool-intent { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; }
+.execution-payload { padding: 8px 10px; border-top: 1px solid var(--border-subtle); }
+.execution-payload-label { margin-bottom: 4px; color: var(--text-faint); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.execution-payload pre { max-height: 220px; overflow: auto; margin: 0; color: var(--text-secondary); font: 10px/1.45 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.execution-status { flex-shrink: 0; color: currentColor; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+.omp-todo-status { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 5px; width: 100%; max-width: 960px; min-height: 36px; margin: 0 auto 4px; padding: 0 11px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); box-shadow: 0 6px 18px var(--bg-base); color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; text-align: left; box-sizing: border-box; }
+.omp-todo-status-active { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 500; }
+.omp-todo-surface { max-width: 960px; overflow: visible; margin: 0 auto 10px; padding: 0 11px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); }
+.omp-todo-surface > summary { padding: 8px 0; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; }
+.agent-surface { max-width: 938px; margin: 0 auto 10px; padding: 10px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); }
+.agent-surface-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.agent-layout.is-open { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; }
+.agent-rail { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.agent-rail > li { display: flex; flex: 1 1 190px; min-width: 0; max-width: 260px; }
+.agent-layout.is-open .agent-rail { align-content: start; }
+.agent-layout.is-open .agent-rail > li { flex: none; width: 100%; max-width: none; }
+.agent-card { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-left: 3px solid currentColor; border-radius: 8px; background: var(--bg-base); color: var(--text-muted); cursor: pointer; text-align: left; }
+.agent-card[aria-expanded='true'] { border-color: var(--accent); background: var(--accent-subtle); }
+.agent-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 11px; font-weight: 700; }
+.agent-inspector { max-height: min(54vh, 560px); overflow-y: auto; padding-left: 12px; border-left: 1px solid var(--border-medium); }
+.agent-inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-inspector-title { color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.agent-inspector-assignment { margin-top: 4px; color: var(--text-secondary); font-size: 11px; line-height: 1.4; }
+.agent-inspector-meta { margin: 8px 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-inspector .execution-log { margin-bottom: 0; background: var(--bg-base); }
+.agent-answer { margin-top: 10px; padding: 10px 12px; border-left: 2px solid var(--info); border-radius: 0 8px 8px 0; background: var(--bg-base); color: var(--text-primary); }
+.agent-answer-label { margin-bottom: 5px; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+@media (max-width: 520px) {
+  .execution-tool > summary { min-height: 44px; }
+  .agent-layout.is-open { display: block; }
+  .agent-rail > li { flex-basis: 100%; max-width: none; }
+  .agent-inspector { max-height: none; overflow: visible; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-medium); border-left: none; }
+}
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
@@ -646,24 +747,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-type MessageViewTodo = {
-  phases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>
-  completed: number
-  total: number
-  active: string | null
-}
-type MessageViewSubagent = {
-  id: string
-  agent: string
-  status: string
-  description?: string
-  intent?: string
-  resolvedModel?: string
-  toolCount?: number
-  requests?: number
-  tokens?: number
-  durationMs?: number
-}
 
 type MessageViewJob = {
   id: string
@@ -699,11 +782,11 @@ type MessageViewProps = {
   statusText?: string | null
   intentHistory?: string[]
   assistantStream?: { text: string; ended: boolean } | null
-  liveWork?: Message | null
-  todo?: MessageViewTodo | null
+  work?: OmpWorkScope | null
+  todo?: OmpTodoSnapshot | null
   notice?: { kind: string; text: string } | null
   approval?: { toolName: string; approvalMode: string; reason?: string } | null
-  subagents?: MessageViewSubagent[]
+  subagents?: OmpSubagentState[]
   jobs?: MessageViewJob[]
   runtime?: MessageViewRuntime | null
 }
@@ -712,6 +795,8 @@ export function MessageView(props: MessageViewProps) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
+  const [selectedSubagentId, setSelectedSubagentId] = createSignal<string | null>(null)
+  const [parentTodoOpen, setParentTodoOpen] = createSignal(true)
   let tableReturnFocus: HTMLElement | null = null
   let tableModal: HTMLDivElement | undefined
 
@@ -748,6 +833,149 @@ export function MessageView(props: MessageViewProps) {
     return map
   })
   const getResult = (id: string) => toolResultsById().get(id)
+  const selectedSubagent = createMemo(() => {
+    const selectedId = selectedSubagentId()
+    return selectedId ? (props.subagents || []).find(agent => agent.id === selectedId) || null : null
+  })
+
+  createEffect(() => {
+    const selectedId = selectedSubagentId()
+    if (selectedId && !(props.subagents || []).some(agent => agent.id === selectedId)) setSelectedSubagentId(null)
+  })
+
+  let todoWasWorking = !!props.working
+  createEffect(() => {
+    const working = !!props.working
+    if (working && !todoWasWorking) setParentTodoOpen(true)
+    todoWasWorking = working
+  })
+
+  function renderTodo(todo: () => OmpTodoSnapshot, testId: string, sticky: boolean) {
+    const taskList = () => (
+      <div style={{ padding: '0 0 9px' }}>
+        <For each={todo().phases}>{(phase) => (
+          <div style={{ 'margin-top': '7px' }}>
+            <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
+            <For each={phase.tasks}>{(task) => (
+              <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
+                <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
+                  {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
+                </span>
+                <span>
+                  {task.content}
+                  <Show when={task.blocker}><span style={{ display: 'block', color: 'var(--warning)', 'font-size': '10px', 'margin-top': '2px' }}>{task.blocker}</span></Show>
+                </span>
+              </div>
+            )}</For>
+          </div>
+        )}</For>
+      </div>
+    )
+    if (sticky) {
+      return (
+        <>
+          <button type="button" data-testid={testId} class="omp-todo-status" aria-expanded={parentTodoOpen()} onClick={() => setParentTodoOpen(open => !open)}>
+            <span>{parentTodoOpen() ? '▾' : '›'} Todo · {todo().completed}/{todo().total}</span>
+            <Show when={todo().active}><span class="omp-todo-status-active">· {todo().active}</span></Show>
+          </button>
+          <Show when={parentTodoOpen()}>
+            <div data-testid={`${testId}-body`} class="omp-todo-surface">{taskList()}</div>
+          </Show>
+        </>
+      )
+    }
+    return (
+      <details data-testid={testId} open class="omp-todo-surface">
+        <summary>
+          Todo · {todo().completed}/{todo().total}
+          <Show when={todo().active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {todo().active}</span></Show>
+        </summary>
+        {taskList()}
+      </details>
+    )
+  }
+
+  function ExecutionEntry(entryProps: { item: OmpTimelineItem }) {
+    const thinking = createMemo(() => entryProps.item.kind === 'thinking' ? entryProps.item : null)
+    const tool = createMemo(() => entryProps.item.kind === 'tool' ? entryProps.item : null)
+    const presentation = createMemo(() => tool() ? timelineToolPresentation(tool()!) : null)
+    const intent = createMemo(() => tool()?.intent || presentation()?.summary || '')
+    const input = createMemo(() => executionValue(tool()?.args))
+    const output = createMemo(() => executionValue(tool()?.result !== undefined ? tool()?.result : tool()?.partialResult))
+    return (
+      <li class="execution-item" style={{ color: executionStatusColor(entryProps.item.status) }} data-status={entryProps.item.status}>
+        <span class="execution-node" aria-hidden="true" />
+        <Show when={thinking()} fallback={
+          <details class="execution-card execution-tool" open={tool()?.status === 'error'} data-testid="omp-tool-card" data-tool-call-id={tool()?.toolCallId} data-status={tool()?.status}>
+            <summary>
+              <span class="execution-tool-name">{presentation()?.name || tool()?.toolName}</span>
+              <Show when={intent()}><span class="execution-tool-intent">{intent()}</span></Show>
+              <span class="execution-tool-chevron" aria-hidden="true">›</span>
+              <span class="execution-status">{executionStatusMark(tool()?.status || '')} {executionStatusLabel(tool()?.status || '')}</span>
+            </summary>
+            <Show when={input()}>
+              <div class="execution-payload">
+                <div class="execution-payload-label">Input</div>
+                <pre ref={linkifyRef}>{input().slice(0, 3000)}{input().length > 3000 ? '\n… (truncated)' : ''}</pre>
+              </div>
+            </Show>
+            <Show when={output()}>
+              <div class="execution-payload">
+                <div class="execution-payload-label">{tool()?.result !== undefined ? 'Result' : 'Latest output'}</div>
+                <pre ref={linkifyRef}>{output().slice(0, 3000)}{output().length > 3000 ? '\n… (truncated)' : ''}</pre>
+              </div>
+            </Show>
+          </details>
+        }>
+          <article class="execution-card execution-thinking" data-testid="omp-thinking-step">
+            <div class="execution-thinking-label">Reasoning · {executionStatusMark(thinking()?.status || '')} {executionStatusLabel(thinking()?.status || '')}</div>
+            <div class="markdown" innerHTML={renderLiveMarkdown(thinking()?.text || '')} ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))} />
+          </article>
+        </Show>
+      </li>
+    )
+  }
+
+  function renderTimelineItems(scope: () => OmpWorkScope) {
+    return (
+      <ol class="execution-timeline">
+        <Index each={scope().timeline}>{(item) => <ExecutionEntry item={item()} />}</Index>
+      </ol>
+    )
+  }
+
+  function renderExecutionTimeline(scope: () => OmpWorkScope, testId: string, inspector = false) {
+    const summary = () => activeOmpStep(scope())
+    if (inspector) {
+      return (
+        <section class="execution-log" data-testid={testId} aria-label="Agent execution timeline">
+          <div class="execution-summary">
+            <span class="execution-title">Execution</span>
+            <span class="execution-active">{summary() || `${scope().timeline.length} steps`}</span>
+            <span class="execution-status" style={{ color: executionStatusColor(scope().runStatus) }}>{executionStatusMark(scope().runStatus)} {executionStatusLabel(scope().runStatus)}</span>
+          </div>
+          <div class="execution-detail">
+            <div class="execution-meta">{scope().timeline.length} chronological step{scope().timeline.length === 1 ? '' : 's'}</div>
+            {renderTimelineItems(scope)}
+          </div>
+        </section>
+      )
+    }
+    return (
+      <details class="execution-log" data-testid={testId}>
+        <summary class="execution-summary" data-testid={`${testId}-summary`}>
+          <span class="execution-chevron">›</span>
+          <span class="execution-title">Execution</span>
+          <span class="execution-active">{summary() || `${scope().timeline.length} steps`}</span>
+          <span class="execution-status" style={{ color: executionStatusColor(scope().runStatus) }}>{executionStatusMark(scope().runStatus)} {executionStatusLabel(scope().runStatus)}</span>
+        </summary>
+        <div class="execution-detail">
+          <div class="execution-meta">{scope().timeline.length} chronological step{scope().timeline.length === 1 ? '' : 's'}</div>
+          {renderTimelineItems(scope)}
+        </div>
+      </details>
+    )
+  }
 
   function renderWorkLog(messages: () => Message[], live = false) {
     const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(block =>
@@ -807,9 +1035,6 @@ export function MessageView(props: MessageViewProps) {
     ) && m.content.some(b => b.type === 'tool_result')
   }
   const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
-  const displayedRenderItems = createMemo(() =>
-    props.liveWork ? renderItems().filter(item => item.kind !== 'chain') : renderItems()
-  )
 
 
   let scrollRef: HTMLDivElement | undefined
@@ -831,19 +1056,22 @@ export function MessageView(props: MessageViewProps) {
 
   let prevMsgLen = props.messages.length
   let prevStreamText = props.assistantStream?.text || ''
-  let prevLiveWork = props.liveWork
+  let prevWork = props.work
+  let prevSubagents = props.subagents
 
   createEffect(() => {
     const len = props.messages.length
     const streamText = props.assistantStream?.text || ''
-    const liveWork = props.liveWork
+    const work = props.work
+    const subagents = props.subagents
     const delta = len - prevMsgLen
     const streamChanged = streamText !== prevStreamText
-    const liveWorkChanged = liveWork !== prevLiveWork
+    const liveSurfaceChanged = work !== prevWork || subagents !== prevSubagents
     prevMsgLen = len
     prevStreamText = streamText
-    prevLiveWork = liveWork
-    if (pinned() && (delta !== 0 || streamChanged || liveWorkChanged)) {
+    prevWork = work
+    prevSubagents = subagents
+    if (pinned() && (delta !== 0 || streamChanged || liveSurfaceChanged)) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
     } else if (delta > 0) {
       setUnreadCount(c => c + delta)
@@ -976,29 +1204,9 @@ export function MessageView(props: MessageViewProps) {
       </Show>
 
       <Show when={props.todo}>
-        <details data-testid="omp-todo" open={props.working} style={{ position: 'sticky', top: '0', 'z-index': '3', 'max-height': '42vh', overflow: 'auto', margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)', 'box-shadow': '0 6px 18px rgba(0,0,0,0.24)' }}>
-          <summary style={{ position: 'sticky', top: '0', 'z-index': '2', background: 'var(--bg-surface)', padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
-            Todo · {props.todo!.completed}/{props.todo!.total}
-            <Show when={props.todo!.active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {props.todo!.active}</span></Show>
-          </summary>
-          <div style={{ padding: '0 0 9px' }}>
-            <For each={props.todo!.phases}>{(phase) => (
-              <div style={{ 'margin-top': '7px' }}>
-                <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
-                <For each={phase.tasks}>{(task) => (
-                  <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
-                    <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
-                      {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
-                    </span>
-                    <span>{task.content}</span>
-                  </div>
-                )}</For>
-              </div>
-            )}</For>
-          </div>
-        </details>
+        {renderTodo(() => props.todo!, 'omp-todo', true)}
       </Show>
-      <For each={displayedRenderItems()}>{(item) => {
+      <For each={renderItems()}>{(item) => {
         if (item.kind === 'chain') {
           if (item !== renderItems().at(-1)) return null
           return (
@@ -1197,8 +1405,8 @@ export function MessageView(props: MessageViewProps) {
           </div>
         )
       }}</For>
-      <Show when={props.working ? props.liveWork : null}>
-        {(liveWork) => renderProvisionalWork(() => [liveWork()], 'live-work-snapshot', true)}
+      <Show when={(props.work?.timeline.length || 0) > 0}>
+        {renderExecutionTimeline(() => props.work!, 'omp-parent-execution')}
       </Show>
 
 
@@ -1234,26 +1442,76 @@ export function MessageView(props: MessageViewProps) {
       </Show>
 
       <Show when={(props.subagents?.length || 0) > 0}>
-        <details data-testid="omp-subagents" open={(props.subagents || []).some(agent => agent.status === 'running' || agent.status === 'started')} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
-          <summary style={{ padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
-            Agents · {(props.subagents || []).filter(agent => agent.status === 'running' || agent.status === 'started').length} running
-          </summary>
-          <div style={{ padding: '0 0 8px' }}>
-            <For each={props.subagents || []}>{(agent) => (
-              <div style={{ padding: '5px 0', 'border-top': '1px solid var(--border-subtle)', 'font-size': '11px' }}>
-                <div style={{ display: 'flex', 'justify-content': 'space-between', gap: '8px' }}>
-                  <span style={{ color: 'var(--text-primary)', 'font-weight': '600' }}>{agent.agent}</span>
-                  <span style={{ color: agent.status === 'failed' ? 'var(--error)' : agent.status === 'running' || agent.status === 'started' ? 'var(--accent)' : 'var(--text-muted)' }}>{agent.status}</span>
-                </div>
-                <Show when={agent.description}><div style={{ color: 'var(--text-secondary)', 'margin-top': '2px' }}>{agent.description}</div></Show>
-                <Show when={agent.intent}><div style={{ color: 'var(--text-muted)', 'margin-top': '2px' }}>{agent.intent}</div></Show>
-                <div style={{ color: 'var(--text-faint)', 'font-size': '10px', 'margin-top': '2px' }}>
-                  {[agent.resolvedModel, agent.toolCount !== undefined ? `${agent.toolCount} steps` : '', agent.tokens !== undefined ? `${agent.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}
-                </div>
-              </div>
-            )}</For>
+        <section data-testid="omp-subagents" class="agent-surface" aria-label="Subagents">
+          <div class="agent-surface-heading">
+            <span>Agents</span>
+            <span style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '600' }}>
+              {(props.subagents || []).filter(agent => executionStatusLabel(agent.status) === 'Running').length} running
+            </span>
           </div>
-        </details>
+          <div class={`agent-layout${selectedSubagent() ? ' is-open' : ''}`}>
+            <ul class="agent-rail">
+              <For each={props.subagents || []}>{(agent) => (
+                <li>
+                  <button
+                    type="button"
+                    data-testid={`omp-subagent-${agent.id}`}
+                    class="agent-card"
+                    style={{ color: executionStatusColor(agent.status) }}
+                    aria-expanded={selectedSubagentId() === agent.id}
+                    aria-controls={selectedSubagentId() === agent.id ? `omp-subagent-inspector-${agent.id}` : undefined}
+                    onClick={() => setSelectedSubagentId(current => current === agent.id ? null : agent.id)}
+                  >
+                    <span class="agent-card-head">
+                      <span class="agent-card-name">{agent.agent}</span>
+                      <span class="execution-status">{executionStatusMark(agent.status)} {executionStatusLabel(agent.status)}</span>
+                    </span>
+                  </button>
+                </li>
+              )}</For>
+            </ul>
+            <Show when={selectedSubagent()}>
+              {(agent) => (
+                <section id={`omp-subagent-inspector-${agent().id}`} data-testid="omp-subagent-inspector" class="agent-inspector" aria-label={`${agent().agent} inspector`}>
+                  <div class="agent-inspector-head">
+                    <div style={{ 'min-width': '0' }}>
+                      <div class="agent-inspector-title">
+                        {agent().agent}
+                        <Show when={agent().agentSource}><span style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '500' }}> · {agent().agentSource}</span></Show>
+                      </div>
+                      <div class="agent-inspector-assignment">{agent().assignment || agent().task || agent().description || 'Waiting for assignment'}</div>
+                    </div>
+                    <span class="execution-status" style={{ color: executionStatusColor(agent().status) }}>{executionStatusMark(agent().status)} {executionStatusLabel(agent().status)}</span>
+                  </div>
+                  <div class="agent-inspector-meta">
+                    <div>Model · {agent().resolvedModel || 'Resolving'}</div>
+                    <div>
+                      Elapsed · {formatDuration(agent().durationMs) || '—'}
+                      {' · '}Usage · {[
+                        agent().requests !== undefined ? `${agent().requests} requests` : '',
+                        agent().toolCount !== undefined ? `${agent().toolCount} steps` : '',
+                        agent().tokens !== undefined ? `${agent().tokens!.toLocaleString()} tokens` : '',
+                      ].filter(Boolean).join(' · ') || 'pending'}
+                    </div>
+                    <Show when={agent().sessionFile}><div>Session · {agent().sessionFile}</div></Show>
+                  </div>
+                  <Show when={agent().assistantText}>
+                    <section class="agent-answer" data-testid="omp-subagent-answer" aria-live={agent().assistantEnded ? 'off' : 'polite'}>
+                      <div class="agent-answer-label">Answer{agent().assistantEnded ? '' : ' · streaming'}</div>
+                      <div class="markdown" innerHTML={renderLiveMarkdown(agent().assistantText)} ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))} />
+                    </section>
+                  </Show>
+                  <Show when={agent().todo}>
+                    {renderTodo(() => agent().todo!, 'omp-subagent-todo', false)}
+                  </Show>
+                  <Show when={agent().timeline.length > 0} fallback={<div style={{ padding: '10px 0', color: 'var(--text-muted)', 'font-size': '11px' }}>Waiting for the first execution step.</div>}>
+                    {renderExecutionTimeline(() => agent(), 'omp-subagent-execution', true)}
+                  </Show>
+                </section>
+              )}
+            </Show>
+          </div>
+        </section>
       </Show>
 
       <Show when={(props.jobs?.length || 0) > 0}>

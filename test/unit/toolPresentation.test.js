@@ -43,4 +43,11 @@ describe('Codex tool presentation', () => {
     )
     assert.equal(toolImagePath('read', { path: '/tmp/example.png' }), '')
   })
+
+  it('is total over bounded but malformed bridge arguments', () => {
+    assert.doesNotThrow(() => toolPresentation('read', { path: {} }))
+    assert.deepEqual(toolPresentation('read', { path: {} }), { name: 'Read', summary: '' })
+    assert.deepEqual(toolPresentation('__proto__', {}), { name: 'Proto', summary: '' })
+    assert.deepEqual(toolPresentation('exec_command', { cmd: {} }), { name: 'Bash', summary: '' })
+  })
 })
