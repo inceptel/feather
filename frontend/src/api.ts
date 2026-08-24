@@ -408,6 +408,8 @@ export interface OmpWorkScope {
   runStatus: 'idle' | OmpExecutionStatus
   assistantText: string
   assistantEnded: boolean
+  continuationPending: boolean
+  segment: number
 }
 
 export interface OmpSubagentState extends OmpWorkScope {
