@@ -575,25 +575,44 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       const accepted = await fetch(`${BASE}/api/internal/sessions/${sessionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': token },
-        body: JSON.stringify({ events: [{
+        body: JSON.stringify({ version: 2, events: [{
           type: 'assistant_snapshot',
           messageId: 'm1',
           text: 'Hello',
-          thinking: 'must not cross the boundary',
+          thinking: 'must not cross the answer boundary',
+        }, {
+          type: 'work_snapshot',
+          messageId: 'm1',
+          blocks: [
+            { type: 'thinking', thinking: 'Live reasoning inside Details.' },
+            { type: 'tool_use', id: 'call-1', name: 'bash', intent: 'Checking state', input: { command: 'secret command' } },
+          ],
         }] }),
       })
       assert.equal(accepted.status, 204)
 
-      const { value } = await reader.read()
-      const payload = decoder.decode(value)
+      let payload = ''
+      while (payload.split('\n').filter(line => line.startsWith('data: ')).length < 2) {
+        const { value, done } = await reader.read()
+        if (done || !value) break
+        payload += decoder.decode(value)
+      }
       assert.match(payload, /event: omp_event/)
-      const dataLine = payload.split('\n').find(line => line.startsWith('data: '))
-      assert.deepEqual(JSON.parse(dataLine.replace('data: ', '')), {
+      const dataLines = payload.split('\n').filter(line => line.startsWith('data: '))
+      assert.deepEqual(dataLines.map(line => JSON.parse(line.replace('data: ', ''))), [{
         type: 'assistant_snapshot',
         messageId: 'm1',
         text: 'Hello',
-      })
+      }, {
+        type: 'work_snapshot',
+        messageId: 'm1',
+        blocks: [
+          { type: 'thinking', thinking: 'Live reasoning inside Details.' },
+          { type: 'tool_use', id: 'call-1', name: 'bash', intent: 'Checking state' },
+        ],
+      }])
       assert.equal(payload.includes('must not cross'), false)
+      assert.equal(payload.includes('secret command'), false)
     } finally {
       ctrl.abort()
       try { fs.unlinkSync(path.join(tokenDir, tokenName)) } catch {}

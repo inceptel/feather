@@ -150,16 +150,25 @@ describe('Feather OMP bridge extension', () => {
     })
 
     const harness = createHarness()
+    harness.ctx.sessionManager = { getSessionFile: () => path.join(sessionDir, 'session.jsonl') }
     featherBridgeExtension(harness.pi)
+    harness.emit('session_start', { type: 'session_start' })
     harness.emit('agent_start', { type: 'agent_start' })
     await settleDeliveryQueue()
 
     assert.equal(requests.length, 1)
+    const child = createHarness()
+    child.ctx.sessionManager = { getSessionFile: () => undefined }
+    featherBridgeExtension(child.pi)
+    child.emit('session_start', { type: 'session_start' })
+    child.emit('agent_start', { type: 'agent_start' })
+    await settleDeliveryQueue()
+    assert.equal(requests.length, 1, 'in-memory child agents must not post into the parent session')
     assert.equal(requests[0].url, BRIDGE_URL)
     assert.equal(requests[0].options.headers['X-Feather-Bridge-Token'], 'stored-secret')
   })
 
-  it('sends throttled full-text snapshots without leaking thinking', async (t) => {
+  it('keeps thinking out of answer snapshots and streams it through work snapshots', async (t) => {
     const requests = []
     installRuntime(t, async (...args) => {
       requests.push(parseRequest(...args))
@@ -208,19 +217,59 @@ describe('Feather OMP bridge extension', () => {
     await settleDeliveryQueue()
 
     const events = requests.flatMap((request) => request.body.events)
-    assert.deepEqual(events.map((event) => [event.type, event.text]), [
+    const answerEvents = events.filter(event => event.type !== 'work_snapshot')
+    assert.deepEqual(answerEvents.map((event) => [event.type, event.text]), [
       ['assistant_snapshot', 'Hel'],
       ['assistant_snapshot', 'Hello'],
       ['assistant_end', undefined],
     ])
+    const workEvents = events.filter(event => event.type === 'work_snapshot')
+    assert.equal(workEvents.length, 3)
+    assert.deepEqual(workEvents.at(-1).blocks, [{ type: 'thinking', thinking: 'final hidden thought' }])
+    assert.equal(JSON.stringify(answerEvents).includes('private'), false)
+    assert.equal(JSON.stringify(answerEvents).includes('hidden thought'), false)
     assert.equal(new Set(events.map((event) => event.messageId)).size, 1)
-    assert.equal(JSON.stringify(requests).includes('private'), false)
-    assert.equal(JSON.stringify(requests).includes('hidden thought'), false)
     assert.equal(requests[0].url, BRIDGE_URL)
     assert.equal(requests[0].options.headers['X-Feather-Bridge-Token'], 'bridge-secret')
-    assert.deepEqual(Object.keys(requests[0].body), ['events'])
+    assert.deepEqual(Object.keys(requests[0].body), ['version', 'events'])
+    assert.equal(requests[0].body.version, 2)
     assert.equal('sessionId' in events[0], false)
   })
+  it('streams thinking-only and tool-only work, clears it, and caps aggregate thinking', async (t) => {
+    const requests = []
+    installRuntime(t, async (...args) => {
+      requests.push(parseRequest(...args))
+      return { ok: true, status: 200 }
+    })
+    const harness = createHarness()
+    featherBridgeExtension(harness.pi)
+
+    const thinking = assistant([
+      { type: 'thinking', thinking: 'a'.repeat(40_000) },
+      { type: 'thinking', thinking: 'b'.repeat(40_000) },
+    ])
+    harness.emit('message_start', { type: 'message_start', message: thinking })
+    harness.emit('message_update', { type: 'message_update', message: thinking })
+    harness.runNextTimer()
+    await settleDeliveryQueue()
+
+    const textOnly = assistant([{ type: 'text', text: 'Now answering' }])
+    harness.emit('message_update', { type: 'message_update', message: textOnly })
+    harness.runNextTimer()
+    await settleDeliveryQueue()
+    const toolOnly = assistant([{ type: 'toolCall', id: 'tool-only', name: '', arguments: { path: '/private' } }])
+    harness.emit('message_start', { type: 'message_start', message: toolOnly })
+    harness.emit('message_update', { type: 'message_update', message: toolOnly })
+    harness.runNextTimer()
+    await settleDeliveryQueue()
+
+    const workEvents = requests.flatMap(request => request.body.events).filter(event => event.type === 'work_snapshot')
+    assert.equal(workEvents[0].blocks.filter(block => block.type === 'thinking').reduce((total, block) => total + block.thinking.length, 0), 3_000)
+    assert.deepEqual(workEvents[1].blocks, [])
+    assert.deepEqual(workEvents[2].blocks, [{ type: 'tool_use', id: 'tool-only', name: 'tool' }])
+    assert.equal(JSON.stringify(workEvents).includes('/private'), false)
+  })
+
 
   it('ends text-only messages and cancels messages containing any tool call', async (t) => {
     const requests = []
@@ -247,17 +296,22 @@ describe('Feather OMP bridge extension', () => {
     ])
 
     const events = requests.flatMap((request) => request.body.events)
-    assert.deepEqual(events.map((event) => event.type), [
+    const answerEvents = events.filter(event => event.type !== 'work_snapshot')
+    assert.deepEqual(answerEvents.map((event) => event.type), [
       'assistant_snapshot',
       'assistant_end',
       'assistant_snapshot',
       'assistant_cancel',
     ])
-    assert.equal(events[0].messageId, events[1].messageId)
-    assert.equal(events[2].messageId, events[3].messageId)
-    assert.notEqual(events[0].messageId, events[2].messageId)
-    assert.equal(JSON.stringify(events).includes('tool rationale'), false)
-    assert.equal(JSON.stringify(events).includes('call-1'), false)
+    assert.equal(answerEvents[0].messageId, answerEvents[1].messageId)
+    assert.equal(answerEvents[2].messageId, answerEvents[3].messageId)
+    assert.notEqual(answerEvents[0].messageId, answerEvents[2].messageId)
+    const work = events.find(event => event.type === 'work_snapshot')
+    assert.deepEqual(work.blocks, [
+      { type: 'thinking', thinking: 'tool rationale' },
+      { type: 'tool_use', id: 'call-1', name: 'read' },
+    ])
+    assert.equal(JSON.stringify(work).includes('secret'), false)
   })
 
   it('coalesces unsent assistant snapshots behind a slow delivery', async (t) => {
@@ -288,10 +342,44 @@ describe('Feather OMP bridge extension', () => {
 
     assert.equal(requests.length, 2)
     assert.deepEqual(requests[1].body.events, [
+
       { type: 'assistant_snapshot', messageId: requests[1].body.events[0].messageId, text: 'Latest snapshot' },
       { type: 'assistant_end', messageId: requests[1].body.events[0].messageId },
     ])
     assert.equal(JSON.stringify(requests).includes('First snapshot'), false)
+  })
+  it('falls back to answer-only streaming when a v1 server rejects work events', async (t) => {
+    const requests = []
+    installRuntime(t, async (...args) => {
+      const request = parseRequest(...args)
+      requests.push(request)
+      const workOnly = request.body.events.every(event => event.type === 'work_snapshot')
+      return { ok: !workOnly, status: workOnly ? 400 : 200 }
+    })
+    const harness = createHarness()
+    featherBridgeExtension(harness.pi)
+
+    const finishToolTurn = async (suffix) => {
+      const message = assistant([
+        { type: 'thinking', thinking: `thinking-${suffix}` },
+        { type: 'text', text: `answer-${suffix}` },
+        { type: 'toolCall', id: `tool-${suffix}`, name: 'read', arguments: { path: '/private' } },
+      ])
+      harness.emit('message_start', { type: 'message_start', message })
+      harness.emit('message_end', { type: 'message_end', message })
+      harness.runNextTimer()
+      await settleDeliveryQueue()
+      await settleDeliveryQueue()
+    }
+
+    await finishToolTurn('one')
+    assert.deepEqual(requests[0].body.events.map(event => event.type), ['work_snapshot'])
+    assert.deepEqual(requests[1].body.events.map(event => event.type), ['assistant_snapshot', 'assistant_cancel'])
+
+    const requestCount = requests.length
+    await finishToolTurn('two')
+    assert.equal(requests.length, requestCount + 1)
+    assert.deepEqual(requests.at(-1).body.events.map(event => event.type), ['assistant_snapshot', 'assistant_cancel'])
   })
 
   it('serializes posts and recovers after a rejected delivery', async (t) => {

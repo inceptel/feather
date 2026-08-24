@@ -79,6 +79,11 @@ function renderMarkdown(text: string): string {
   mdCache.set(text, safe)
   return safe
 }
+function renderLiveMarkdown(text: string): string {
+  const html = marked.parse(text.trimEnd()) as string
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'], FORBID_TAGS: ['img'] })
+}
+
 
 // Copy button handler — attached via event delegation
 function handleCopyClick(e: MouseEvent) {
@@ -358,7 +363,9 @@ function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => voi
   }
   if (block.type === 'tool_use') {
     const inp = block.input || {}
-    const { name, summary } = toolPresentation(block.name || '', inp)
+    const presentation = toolPresentation(block.name || '', inp)
+    const name = presentation.name
+    const summary = presentation.summary || block.intent || ''
     const color = TOOL_COLORS[name] || 'var(--info)'
     const icon = TOOL_ICONS[name] || '⚙'
     const result = block.id && getResult ? getResult(block.id) : undefined
@@ -604,8 +611,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-log-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .work-log-chevron { display: inline-block; transition: transform 120ms ease; }
 .work-log[open] .work-log-chevron { transform: rotate(90deg); }
-.work-log-issue { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
-.work-log-issue-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .work-log-detail {
   margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border-subtle);
   border-radius: 9px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5;
@@ -694,6 +699,7 @@ type MessageViewProps = {
   statusText?: string | null
   intentHistory?: string[]
   assistantStream?: { text: string; ended: boolean } | null
+  liveWork?: Message | null
   todo?: MessageViewTodo | null
   notice?: { kind: string; text: string } | null
   approval?: { toolName: string; approvalMode: string; reason?: string } | null
@@ -743,39 +749,28 @@ export function MessageView(props: MessageViewProps) {
   })
   const getResult = (id: string) => toolResultsById().get(id)
 
-  function renderWorkLog(messages: Message[]) {
-    const blocks = messages.flatMap(message => message.content || [])
-    const traceBlocks = blocks.filter(block =>
+  function renderWorkLog(messages: () => Message[], live = false) {
+    const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(block =>
       block.type === 'thinking' || block.type === 'tool_use' || block.type === 'tool_result'
-    )
-    const errorCount = traceBlocks.filter(block =>
-      block.type === 'tool_result' ? !!block.is_error :
-      block.type === 'tool_use' && block.id ? !!getResult(block.id)?.is_error : false
-    ).length
-    const last = messages[messages.length - 1]
+    ))
+    const last = createMemo(() => messages().at(-1))
     return (
       <details class="work-log">
         <summary class="work-log-summary" data-testid="work-log-summary">
           <span class="work-log-chevron">›</span>
           <span style={{ 'font-weight': '600' }}>Details</span>
-          {errorCount > 0 && (
-            <span class="work-log-issue">
-              <span class="work-log-issue-dot" />
-              {errorCount} issue{errorCount === 1 ? '' : 's'}
-            </span>
-          )}
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
           <div class="work-log-meta">
-            {traceBlocks.length} execution step{traceBlocks.length === 1 ? '' : 's'} · {formatTime(last.timestamp)}
+            {traceBlocks().length} execution step{traceBlocks().length === 1 ? '' : 's'} · {formatTime(last()?.timestamp || '')}
           </div>
-          <For each={messages}>{(message) => (
+          <For each={messages()}>{(message) => (
             <For each={message.content}>{(block) => {
               if (block.type === 'thinking' && block.thinking) {
                 return (
                   <div
                     class="markdown work-log-reasoning"
-                    innerHTML={renderMarkdown(block.thinking)}
+                    innerHTML={live ? renderLiveMarkdown(block.thinking) : renderMarkdown(block.thinking)}
                     ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))}
                   />
                 )
@@ -787,6 +782,21 @@ export function MessageView(props: MessageViewProps) {
       </details>
     )
   }
+  function renderProvisionalWork(messages: () => Message[], testId: string, live = false) {
+    return (
+      <div class="msg-row" data-testid={testId} style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
+        <div class="asst-bubble" style={{
+          'max-width': '100%', padding: '6px 12px',
+          'border-radius': '12px', background: '#1e1e1e',
+          border: '1px solid rgba(255,255,255,0.06)',
+          color: 'var(--text-primary)', overflow: 'hidden',
+        }}>
+          {renderWorkLog(messages, live)}
+        </div>
+      </div>
+    )
+  }
+
 
   // A message whose visible content is only tool_result gets folded into the tool_use above — skip it.
   function isPureToolResultMsg(m: Message): boolean {
@@ -797,6 +807,9 @@ export function MessageView(props: MessageViewProps) {
     ) && m.content.some(b => b.type === 'tool_result')
   }
   const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
+  const displayedRenderItems = createMemo(() =>
+    props.liveWork ? renderItems().filter(item => item.kind !== 'chain') : renderItems()
+  )
 
 
   let scrollRef: HTMLDivElement | undefined
@@ -818,15 +831,19 @@ export function MessageView(props: MessageViewProps) {
 
   let prevMsgLen = props.messages.length
   let prevStreamText = props.assistantStream?.text || ''
+  let prevLiveWork = props.liveWork
 
   createEffect(() => {
     const len = props.messages.length
     const streamText = props.assistantStream?.text || ''
+    const liveWork = props.liveWork
     const delta = len - prevMsgLen
     const streamChanged = streamText !== prevStreamText
+    const liveWorkChanged = liveWork !== prevLiveWork
     prevMsgLen = len
     prevStreamText = streamText
-    if (pinned() && (delta !== 0 || streamChanged)) {
+    prevLiveWork = liveWork
+    if (pinned() && (delta !== 0 || streamChanged || liveWorkChanged)) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
     } else if (delta > 0) {
       setUnreadCount(c => c + delta)
@@ -958,20 +975,13 @@ export function MessageView(props: MessageViewProps) {
         </div>
       </Show>
 
-      <For each={renderItems()}>{(item) => {
+      <For each={displayedRenderItems()}>{(item) => {
         if (item.kind === 'chain') {
-          if (!props.working || item !== renderItems().at(-1)) return null
+          if (item !== renderItems().at(-1)) return null
           return (
-            <div class="msg-row" data-testid="live-work-turn" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
-              <div class="asst-bubble" style={{
-                'max-width': '100%', padding: '6px 12px',
-                'border-radius': '12px', background: '#1e1e1e',
-                border: '1px solid rgba(255,255,255,0.06)',
-                color: 'var(--text-primary)', overflow: 'hidden',
-              }}>
-                {renderWorkLog(item.messages)}
-              </div>
-            </div>
+            <Show when={props.working}>
+              {renderProvisionalWork(() => item.messages, 'live-work-turn')}
+            </Show>
           )
         }
 
@@ -1076,7 +1086,7 @@ export function MessageView(props: MessageViewProps) {
               color: 'var(--text-primary)', overflow: 'hidden',
               'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
             }}>
-              {workLogMessages.length > 0 ? renderWorkLog(workLogMessages) : null}
+              {workLogMessages.length > 0 ? renderWorkLog(() => workLogMessages) : null}
               <For each={msg.content}>{(block) => {
                 if (
                   block.type === 'thinking' ||
@@ -1164,6 +1174,10 @@ export function MessageView(props: MessageViewProps) {
           </div>
         )
       }}</For>
+      <Show when={props.working ? props.liveWork : null}>
+        {(liveWork) => renderProvisionalWork(() => [liveWork()], 'live-work-snapshot', true)}
+      </Show>
+
 
       <Show when={props.approval}>
         <div data-testid="omp-approval" role="alert" style={{ margin: '0 0 10px', padding: '11px 12px', 'border-radius': '10px', border: '1px solid var(--warning)', background: 'rgba(245,158,11,0.08)' }}>
@@ -1241,8 +1255,8 @@ export function MessageView(props: MessageViewProps) {
       </Show>
 
       <Show when={props.todo}>
-        <details open={props.working} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
-          <summary style={{ padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
+        <details data-testid="omp-todo" open={props.working} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
+          <summary style={{ position: 'sticky', top: '0', 'z-index': '2', background: 'var(--bg-surface)', padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
             Todo · {props.todo!.completed}/{props.todo!.total}
             <Show when={props.todo!.active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {props.todo!.active}</span></Show>
           </summary>

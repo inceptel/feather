@@ -69,8 +69,11 @@ const ompBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
 const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
+const OMP_BRIDGE_VERSION = 2;
+const OMP_WORK_THINKING_CHARS = 3_000;
 const OMP_BRIDGE_EVENT_TYPES = Object.freeze({
   assistant_snapshot: true,
+  work_snapshot: true,
   assistant_end: true,
   assistant_cancel: true,
   agent_start: true,
@@ -202,6 +205,11 @@ function findPeerByToken(token) {
     if (timingSafeEqual(given, expected)) return { id, policy: cfg.policy || 'selected', control: !!cfg.control };
   }
   return null;
+}
+
+function findPeerById(id) {
+  const cfg = readSharing().peers?.[id];
+  return cfg ? { id, policy: cfg.policy || 'selected', control: !!cfg.control } : null;
 }
 
 // Can `peer` see this session? policy 'all' → everything; 'selected' →
@@ -762,13 +770,26 @@ function ensureOmpBridgeDiscovery() {
   fs.mkdirSync(path.dirname(OMP_DISCOVERED_BRIDGE), { recursive: true, mode: 0o700 });
   try {
     const stat = fs.lstatSync(OMP_DISCOVERED_BRIDGE);
-    if (stat.isSymbolicLink() && path.resolve(path.dirname(OMP_DISCOVERED_BRIDGE), fs.readlinkSync(OMP_DISCOVERED_BRIDGE)) === OMP_BRIDGE_EXTENSION) return;
-    console.warn(`[omp bridge] discovery path is occupied: ${OMP_DISCOVERED_BRIDGE}`);
-    return;
+    if (!stat.isSymbolicLink()) {
+      console.warn(`[omp bridge] discovery path is occupied: ${OMP_DISCOVERED_BRIDGE}`);
+      return false;
+    }
+    const currentTarget = path.resolve(path.dirname(OMP_DISCOVERED_BRIDGE), fs.readlinkSync(OMP_DISCOVERED_BRIDGE));
+    if (currentTarget === OMP_BRIDGE_EXTENSION) return true;
+    if (!currentTarget.endsWith(path.join('omp-extensions', 'feather-bridge.js'))) {
+      console.warn(`[omp bridge] refusing to replace unrelated symlink: ${OMP_DISCOVERED_BRIDGE}`);
+      return false;
+    }
+    const replacement = `${OMP_DISCOVERED_BRIDGE}.tmp-${process.pid}`;
+    try { fs.unlinkSync(replacement); } catch {}
+    fs.symlinkSync(OMP_BRIDGE_EXTENSION, replacement);
+    fs.renameSync(replacement, OMP_DISCOVERED_BRIDGE);
+    return true;
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
   fs.symlinkSync(OMP_BRIDGE_EXTENSION, OMP_DISCOVERED_BRIDGE);
+  return true;
 }
 
 
@@ -783,18 +804,21 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   const bridgeUrl = `http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`;
   ompBridgeTokens.set(id, bridgeToken);
   ompBridgeLastSeen.delete(id);
-  ensureOmpBridgeDiscovery();
+  const bridgeDiscovered = ensureOmpBridgeDiscovery();
   fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(OMP_BRIDGE_TOKENS_DIR, 0o700);
   fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
+  fs.chmodSync(ompBridgeTokenPath(id), 0o600);
   fs.writeFileSync(path.join(sessionDir, '.feather-bridge.json'), JSON.stringify({
     url: bridgeUrl, token: bridgeToken, sessionId: id,
   }), { mode: 0o600 });
+  fs.chmodSync(path.join(sessionDir, '.feather-bridge.json'), 0o600);
   const args = [
     'omp',
     ompModelFlags(OMP_MODEL, OMP_THINKING).trim(),
     resume ? `--resume ${shellQuote(ompId)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
-    `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
+    bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
     `--session-dir ${shellQuote(sessionDir)}`,
     '--allow-home',
   ].filter(Boolean).join(' ');
@@ -1020,14 +1044,42 @@ async function sendInputUnlocked(id, text) {
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 const sseClients = new Map(); // sessionId -> Set<res>
+const ssePeerAuth = new WeakMap();
+let sharingRevision = 0;
 
-function writeSse(clients, res, chunk) {
+function ssePeerAuthorized(sessionId, res, force = false) {
+  const auth = ssePeerAuth.get(res);
+  if (!auth) return true;
+  if (!force && auth.revision === sharingRevision) return true;
+  const peer = findPeerById(auth.peerId);
+  if (!peer || !peerCanAccessSession(peer, sessionId)) return false;
+  auth.revision = sharingRevision;
+  return true;
+}
+
+function writeSse(sessionId, clients, res, chunk, forceAuth = false) {
+  if (!ssePeerAuthorized(sessionId, res, forceAuth)) {
+    clients.delete(res);
+    try { res.end(); } catch {}
+    return false;
+  }
   try {
-    if (res.write(chunk)) return;
+    if (res.write(chunk)) return true;
     clients.delete(res);
     res.end();
   } catch {
     clients.delete(res);
+  }
+  return false;
+}
+
+function evictRevokedSseClients(sessionId) {
+  const clients = sseClients.get(sessionId);
+  if (!clients) return;
+  for (const res of clients) {
+    if (ssePeerAuthorized(sessionId, res, true)) continue;
+    clients.delete(res);
+    try { res.end(); } catch {}
   }
 }
 
@@ -1038,14 +1090,14 @@ function broadcast(sessionId, line, offset) {
   const parsed = parseMessageForAgent(line, agent);
   if (!parsed) return;
   const chunk = `id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`;
-  for (const res of clients) writeSse(clients, res, chunk);
+  for (const res of clients) writeSse(sessionId, clients, res, chunk);
 }
 
 function broadcastNamedEvent(sessionId, eventName, data) {
   const clients = sseClients.get(sessionId);
   if (!clients || clients.size === 0) return;
   const chunk = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) writeSse(clients, res, chunk);
+  for (const res of clients) writeSse(sessionId, clients, res, chunk);
 }
 
 // ── File watcher ────────────────────────────────────────────────────────────
@@ -1068,8 +1120,8 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
 const pendingOmpBridgeMigrations = new Map();
 
 function ompBridgeIsLive(sessionId, now = Date.now()) {
-  const lastSeen = ompBridgeLastSeen.get(sessionId);
-  return Number.isFinite(lastSeen) && now - lastSeen < 30_000;
+  const live = ompBridgeLastSeen.get(sessionId);
+  return Number.isFinite(live?.seenAt) && live.version >= OMP_BRIDGE_VERSION && now - live.seenAt < 30_000;
 }
 
 function cancelOmpBridgeMigration(sessionId) {
@@ -1407,6 +1459,32 @@ function normalizeOmpBridgeEvent(event) {
     const text = bridgeString(event.text, 100_000);
     return messageId && text !== undefined ? { type, messageId, text } : null;
   }
+  if (type === 'work_snapshot') {
+    const messageId = bridgeString(event.messageId, 128);
+    if (!messageId || !Array.isArray(event.blocks) || event.blocks.length > 40) return null;
+    let thinkingChars = 0;
+    const blocks = [];
+    for (const block of event.blocks) {
+      if (block?.type === 'thinking') {
+        const thinking = bridgeString(block.thinking, OMP_WORK_THINKING_CHARS);
+        if (thinking === undefined || thinkingChars + thinking.length > OMP_WORK_THINKING_CHARS) return null;
+        thinkingChars += thinking.length;
+        blocks.push({ type: 'thinking', thinking });
+      } else if (block?.type === 'tool_use') {
+        const name = bridgeString(block.name, 80);
+        if (!name) return null;
+        blocks.push({
+          type: 'tool_use',
+          ...(bridgeString(block.id, 128) !== undefined ? { id: block.id } : {}),
+          name,
+          ...(bridgeString(block.intent, 300) !== undefined ? { intent: block.intent } : {}),
+        });
+      } else {
+        return null;
+      }
+    }
+    return { type, messageId, blocks };
+  }
   if (type === 'assistant_end' || type === 'assistant_cancel') {
     const messageId = bridgeString(event.messageId, 128);
     return messageId ? { type, messageId } : null;
@@ -1555,7 +1633,8 @@ app.post('/api/internal/sessions/:id/events', (req, res) => {
   if (normalized.some(event => event === null)) {
     return res.status(400).json({ error: 'invalid bridge event' });
   }
-  ompBridgeLastSeen.set(id, Date.now());
+  const bridgeVersion = Number.isSafeInteger(req.body?.version) ? req.body.version : 0;
+  ompBridgeLastSeen.set(id, { seenAt: Date.now(), version: bridgeVersion });
   for (const event of normalized) broadcastNamedEvent(id, 'omp_event', event);
   res.status(204).end();
 });
@@ -1609,8 +1688,11 @@ function sessionStreamHandler(req, res) {
 
   if (!sseClients.has(sid)) sseClients.set(sid, new Set());
   sseClients.get(sid).add(res);
-  const hb = setInterval(() => { try { res.write('event: heartbeat\ndata: {}\n\n'); } catch { clearInterval(hb); } }, 15000);
-  res.on('close', () => { clearInterval(hb); sseClients.get(sid)?.delete(res); });
+  if (req.peer?.id) ssePeerAuth.set(res, { peerId: req.peer.id, revision: sharingRevision });
+  const hb = setInterval(() => {
+    if (!writeSse(sid, sseClients.get(sid) || new Set(), res, 'event: heartbeat\ndata: {}\n\n', true)) clearInterval(hb);
+  }, 15000);
+  res.on('close', () => { clearInterval(hb); sseClients.get(sid)?.delete(res); ssePeerAuth.delete(res); });
 }
 
 app.get('/api/sessions/:id/stream', sessionStreamHandler);
@@ -1994,7 +2076,9 @@ app.post('/api/sessions/:id/share', (req, res) => {
       ...meta,
       [req.params.id]: { ...(meta[req.params.id] || {}), share: peers },
     }));
+    sharingRevision++;
     res.json({ ok: true, share: peers });
+    evictRevokedSseClients(req.params.id);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
