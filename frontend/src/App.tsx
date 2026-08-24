@@ -1,4 +1,5 @@
 declare const __BUILD_TIME__: string
+declare const __BUILD_VERSION__: string
 import { createSignal, createEffect, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
@@ -352,7 +353,7 @@ export default function App() {
   let selectGeneration = 0
   let sessionPoll: ReturnType<typeof setInterval> | undefined
   let versionPoll: ReturnType<typeof setInterval> | undefined
-  let bootVersion: string | null = null
+  let bootVersion: string | null = __BUILD_VERSION__ || null
   let mediaRecorder: MediaRecorder | null = null
   let audioChunks: Blob[] = []
   let audioContext: AudioContext | null = null
@@ -516,12 +517,11 @@ export default function App() {
     // Poll the session list so active/idle (green dot) status stays fresh
     // without needing a manual action. Skip while the tab is hidden.
     sessionPoll = setInterval(() => { if (document.visibilityState === 'visible') refreshSessions() }, 15000)
-    // Auto-reload when a newer build is deployed. A resident client (esp. an
-    // installed iOS PWA) keeps the old JS in memory across suspend/resume and
-    // never re-fetches index.html, so a stale bundle — e.g. one without the
-    // session poll above — silently shows stale green dots and ordering. Poll
-    // the server's build version and reload once when it changes.
-    fetchBuildVersion().then(v => { bootVersion = v })
+    // Compare the server against the version embedded in this JS bundle. Fetching
+    // a baseline after boot masks stale resident/PWA bundles: they learn the new
+    // server version and incorrectly conclude that their old code is current.
+    document.documentElement.dataset.buildVersion = __BUILD_VERSION__
+    void checkVersion()
     versionPoll = setInterval(checkVersion, 60000)
     document.addEventListener('visibilitychange', checkVersion)
     // Prefetch Terminal chunk during idle so the tab click feels instant
