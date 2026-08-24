@@ -52,6 +52,9 @@ describe('safe OMP resume', () => {
     fs.mkdirSync(path.join(home, '.feather/omp-sessions'), { recursive: true })
     fs.mkdirSync(stateDir, { recursive: true })
     fs.mkdirSync(binDir, { recursive: true })
+    const discoveryDir = path.join(home, '.omp/agent/extensions')
+    fs.mkdirSync(discoveryDir, { recursive: true })
+    fs.symlinkSync('/old-release/omp-extensions/feather-bridge.js', path.join(discoveryDir, 'feather-bridge.js'))
 
     const goodFeatherId = 'resume-good-feather-id'
     const goodDir = path.join(home, '.feather/omp-sessions', goodFeatherId)
@@ -89,6 +92,12 @@ describe('safe OMP resume', () => {
     let stderr = ''
     child.stderr.on('data', chunk => { stderr += chunk })
     await waitForServer(base)
+    const oldBridge = await fetch(`${base}/api/internal/sessions/${goodFeatherId}/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'stale-token' },
+      body: JSON.stringify({ version: 1, events: [{ type: 'agent_start' }] }),
+    })
+    assert.equal(oldBridge.status, 204)
     fs.appendFileSync(goodPath, JSON.stringify({
       type: 'message',
       message: { role: 'assistant', content: [{ type: 'text', text: 'finished' }], stopReason: 'stop' },
@@ -97,9 +106,9 @@ describe('safe OMP resume', () => {
     for (let attempt = 0; attempt < 100; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 50))
       try { migratedLog = fs.readFileSync(tmuxLog, 'utf8') } catch {}
-      if (migratedLog.includes('feather-bridge.js')) break
+      if (migratedLog.includes('omp-exact-resume-id')) break
     }
-    assert.match(migratedLog, /--extension .*feather-bridge\.js/, stderr)
+    assert.doesNotMatch(migratedLog, /--extension/, 'native discovery must load the bridge only once')
     assert.match(migratedLog, /--resume .*omp-exact-resume-id/, stderr)
     assert.match(migratedLog, /-c \/tmp\/project/, 'automatic migration must preserve the recorded cwd')
     const discoveredBridge = path.join(home, '.omp/agent/extensions/feather-bridge.js')
@@ -111,7 +120,7 @@ describe('safe OMP resume', () => {
     const bridgeAlive = await fetch(`${base}/api/internal/sessions/${goodFeatherId}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': storedBridge.token },
-      body: JSON.stringify({ events: [{ type: 'agent_start' }] }),
+      body: JSON.stringify({ version: 2, events: [{ type: 'agent_start' }] }),
     })
     assert.equal(bridgeAlive.status, 204)
     const logBeforeLiveFinal = fs.readFileSync(tmuxLog, 'utf8')

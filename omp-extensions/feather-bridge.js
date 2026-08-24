@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const SNAPSHOT_INTERVAL_MS = 50
+const BRIDGE_VERSION = 2
+const MAX_LIVE_THINKING_CHARS = 3_000
+const MAX_POST_BYTES = 400_000
+const textEncoder = new TextEncoder()
 
 function assistantText(message) {
   if (message?.role !== 'assistant' || !Array.isArray(message.content)) return ''
@@ -14,6 +18,28 @@ function assistantText(message) {
     .map((part) => part.text)
     .join('')
 }
+function assistantWork(message) {
+  const blocks = []
+  let remainingThinkingChars = MAX_LIVE_THINKING_CHARS
+  const parts = message.content.slice(0, 40)
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index]
+    if (part?.type === 'thinking' && typeof part.thinking === 'string' && part.thinking && remainingThinkingChars > 0) {
+      const thinking = part.thinking.slice(-remainingThinkingChars)
+      remainingThinkingChars -= thinking.length
+      blocks.unshift({ type: 'thinking', thinking })
+    } else if (part?.type === 'toolCall') {
+      blocks.unshift({
+        type: 'tool_use',
+        id: typeof part.id === 'string' ? part.id.slice(0, 128) : '',
+        name: typeof part.name === 'string' && part.name.trim() ? part.name.slice(0, 80) : 'tool',
+        ...(typeof part.intent === 'string' ? { intent: part.intent.slice(0, 300) } : {}),
+      })
+    }
+  }
+  return blocks
+}
+
 
 function hasToolCall(message) {
   return message?.role === 'assistant' &&
@@ -22,18 +48,18 @@ function hasToolCall(message) {
 }
 
 function bridgeConfig(env, argv = process.argv) {
+  const sessionDirIndex = argv.indexOf('--session-dir')
+  const sessionDir = sessionDirIndex >= 0 ? argv[sessionDirIndex + 1] : null
   const url = env.FEATHER_BRIDGE_URL?.trim()
   const token = env.FEATHER_BRIDGE_TOKEN?.trim()
   const sessionId = env.FEATHER_SESSION_ID?.trim()
-  if (url && token && sessionId) return { url, token, sessionId }
+  if (url && token && sessionId) return { url, token, sessionId, sessionDir }
 
-  const sessionDirIndex = argv.indexOf('--session-dir')
-  const sessionDir = sessionDirIndex >= 0 ? argv[sessionDirIndex + 1] : null
   if (!sessionDir) return null
   try {
     const stored = JSON.parse(readFileSync(path.join(sessionDir, '.feather-bridge.json'), 'utf8'))
     return typeof stored?.url === 'string' && typeof stored?.token === 'string' && typeof stored?.sessionId === 'string'
-      ? { url: stored.url, token: stored.token, sessionId: stored.sessionId }
+      ? { url: stored.url, token: stored.token, sessionId: stored.sessionId, sessionDir }
       : null
   } catch {
     return null
@@ -82,6 +108,7 @@ export default function featherBridgeExtension(pi) {
   // Read configuration when OMP constructs the extension, not when the module is
   // imported. This keeps each runtime bound to its own session environment.
   const config = bridgeConfig(process.env)
+  let enabled = !!config && !config.sessionDir
   let activeMessage = null
   const pendingTimers = new Set()
   const unsubscribe = []
@@ -91,6 +118,7 @@ export default function featherBridgeExtension(pi) {
   let shuttingDown = false
   let runtimeTimer = null
   let lastRuntimeState = ''
+  let workEventsEnabled = true
   let lastJobs = ''
 
   function logDeliveryFailure(error) {
@@ -105,7 +133,7 @@ export default function featherBridgeExtension(pi) {
   }
 
   function coalesceKey(event) {
-    if (event.type === 'assistant_snapshot') return `${event.type}:${event.messageId}`
+    if (event.type === 'assistant_snapshot' || event.type === 'work_snapshot') return `${event.type}:${event.messageId}`
     if (event.type === 'subagent_progress') return `${event.type}:${event.id}`
     if (event.type === 'session_state' || event.type === 'async_jobs' || event.type === 'todo') return event.type
     return null
@@ -126,12 +154,32 @@ export default function featherBridgeExtension(pi) {
     pendingEvents.splice(replaceable >= 0 ? replaceable : 0, 1)
   }
 
+  function takeDeliveryBatch() {
+    const events = []
+    let bytes = 32
+    while (pendingEvents.length > 0 && events.length < 50) {
+      const candidate = pendingEvents[0]
+      const candidateBytes = textEncoder.encode(JSON.stringify(candidate)).byteLength + 1
+      if (candidateBytes > MAX_POST_BYTES) {
+        pendingEvents.shift()
+        logDeliveryFailure(new Error(`Feather bridge event exceeds ${MAX_POST_BYTES} bytes`))
+        continue
+      }
+      if (events.length > 0 && bytes + candidateBytes > MAX_POST_BYTES) break
+      pendingEvents.shift()
+      events.push(candidate)
+      bytes += candidateBytes
+    }
+    return events
+  }
+
   async function deliver() {
     if (!config || delivering || shuttingDown) return
     delivering = true
     try {
       while (pendingEvents.length > 0 && !shuttingDown) {
-        const events = pendingEvents.splice(0, 50)
+        const events = takeDeliveryBatch()
+        if (events.length === 0) continue
         deliveryController = new AbortController()
         const timeoutSignal = AbortSignal.timeout?.(5_000)
         const signal = timeoutSignal && AbortSignal.any
@@ -144,10 +192,16 @@ export default function featherBridgeExtension(pi) {
               'Content-Type': 'application/json',
               'X-Feather-Bridge-Token': config.token,
             },
-            body: JSON.stringify({ events }),
+            body: JSON.stringify({ version: BRIDGE_VERSION, events }),
             signal,
           })
-          if (!response.ok) throw new Error(`HTTP ${response.status ?? 'error'}`)
+          if (!response.ok) {
+            if (response.status === 400 && events.every(event => event.type === 'work_snapshot')) {
+              workEventsEnabled = false
+              continue
+            }
+            throw new Error(`HTTP ${response.status ?? 'error'}`)
+          }
         } catch (error) {
           if (!shuttingDown) logDeliveryFailure(error)
         } finally {
@@ -160,10 +214,13 @@ export default function featherBridgeExtension(pi) {
   }
 
   function post(events) {
-    if (!config || events.length === 0 || shuttingDown) return
-    for (const event of events) enqueue(event)
+    if (!config || !enabled || events.length === 0 || shuttingDown) return
+    for (const event of events) {
+      if (event.type !== 'work_snapshot' || workEventsEnabled) enqueue(event)
+    }
     void deliver()
   }
+
   function postChanged(event, previous, setPrevious) {
     if (!event) return
     const serialized = JSON.stringify(event)
@@ -202,9 +259,9 @@ export default function featherBridgeExtension(pi) {
 
 
   function flushMessage(state) {
-    const events = []
+    const answerEvents = []
     if (state.lastSnapshot !== state.text) {
-      events.push({
+      answerEvents.push({
         type: 'assistant_snapshot',
         messageId: state.messageId,
         text: state.text,
@@ -212,15 +269,25 @@ export default function featherBridgeExtension(pi) {
       state.lastSnapshot = state.text
     }
 
+    const workJson = JSON.stringify(state.work)
+    if (state.lastWorkJson !== workJson) {
+      post([{
+        type: 'work_snapshot',
+        messageId: state.messageId,
+        blocks: state.work,
+      }])
+      state.lastWorkJson = workJson
+    }
+
     if (state.terminalType) {
-      events.push({
+      answerEvents.push({
         type: state.terminalType,
         messageId: state.messageId,
       })
       if (activeMessage === state) activeMessage = null
     }
 
-    post(events)
+    post(answerEvents)
   }
 
   function scheduleSnapshot(state, ctx) {
@@ -234,6 +301,7 @@ export default function featherBridgeExtension(pi) {
       pendingTimers.delete(timer)
       state.timer = null
       state.text = assistantText(state.latestMessage)
+      state.work = assistantWork(state.latestMessage)
       flushMessage(state)
     }, SNAPSHOT_INTERVAL_MS)
     state.timer = timer
@@ -243,11 +311,14 @@ export default function featherBridgeExtension(pi) {
   pi.on('message_start', (event) => {
     if (event.message?.role !== 'assistant') return
 
+    const work = assistantWork(event.message)
     activeMessage = {
       messageId: randomUUID(),
       text: assistantText(event.message),
+      work,
       latestMessage: event.message,
       lastSnapshot: null,
+      lastWorkJson: work.length > 0 ? null : '[]',
       terminalType: null,
       timer: null,
     }
@@ -270,6 +341,7 @@ export default function featherBridgeExtension(pi) {
     const state = activeMessage
     state.latestMessage = event.message
     state.text = assistantText(event.message)
+    state.work = assistantWork(event.message)
     state.terminalType = event.message.stopReason === 'aborted' || hasToolCall(event.message)
       ? 'assistant_cancel'
       : 'assistant_end'
@@ -375,6 +447,11 @@ export default function featherBridgeExtension(pi) {
   }
 
   pi.on('session_start', (_event, ctx) => {
+    if (config?.sessionDir) {
+      const sessionFile = ctx.sessionManager?.getSessionFile?.()
+      enabled = !!sessionFile && path.dirname(path.resolve(sessionFile)) === path.resolve(config.sessionDir)
+    }
+    if (!enabled) return
     emitRuntimeState(ctx)
     emitJobs(ctx)
     runtimeTimer = ctx.setInterval(() => {

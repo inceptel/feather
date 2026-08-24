@@ -5,7 +5,7 @@ import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, AgentInfo, FileListing, SidecarGroup, RoomUpdate, OmpBridgeEvent, OmpAsyncJob } from './api'
+import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, RoomUpdate, OmpBridgeEvent, OmpAsyncJob } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates } from './api'
 import type { BoxInfo, PeerInfo } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
@@ -267,6 +267,7 @@ export default function App() {
   const [dragging, setDragging] = createSignal(false)
   const [toolIntentHistory, setToolIntentHistory] = createSignal<string[]>([])
   const [assistantStream, setAssistantStream] = createSignal<AssistantStream | null>(null)
+  const [ompLiveWork, setOmpLiveWork] = createSignal<Message | null>(null)
   const [todoSnapshot, setTodoSnapshot] = createSignal<TodoSnapshot | null>(null)
   const [ompNotice, setOmpNotice] = createSignal<OmpNotice | null>(null)
   const [ompApproval, setOmpApproval] = createSignal<OmpApproval | null>(null)
@@ -278,6 +279,7 @@ export default function App() {
     clearTimeout(assistantStreamStaleTimer)
     assistantStreamStaleTimer = undefined
     setAssistantStream(null)
+    setOmpLiveWork(null)
   }
   function clearOmpLiveSurfaces() {
     setTodoSnapshot(null)
@@ -286,6 +288,7 @@ export default function App() {
     setOmpSubagents([])
     setOmpJobs([])
     setOmpRuntime(null)
+    setOmpLiveWork(null)
   }
 
 
@@ -365,6 +368,7 @@ export default function App() {
   const [agents, setAgents] = createSignal<AgentInfo[]>([])
   const [agentDropdown, setAgentDropdown] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
+  let selectGeneration = 0
   let sessionPoll: ReturnType<typeof setInterval> | undefined
   let versionPoll: ReturnType<typeof setInterval> | undefined
   let bootVersion: string | null = null
@@ -590,6 +594,7 @@ export default function App() {
 
   function selectBox(id: string) {
     if (id === currentBox()) return
+    selectGeneration++
     dismissMediaNotice()
     setCurrentBox(id)
     setPeerControl(false)
@@ -665,6 +670,16 @@ export default function App() {
       })
       return
     }
+    if (event.type === 'work_snapshot' && event.messageId && event.blocks) {
+      setOmpLiveWork(event.blocks.length > 0 ? {
+        uuid: event.messageId,
+        role: 'assistant',
+        content: event.blocks,
+        timestamp: new Date().toISOString(),
+      } : null)
+      return
+    }
+
     if (event.type === 'assistant_snapshot' && event.messageId && typeof event.text === 'string') {
       clearTimeout(assistantStreamStaleTimer)
       assistantStreamStaleTimer = undefined
@@ -674,6 +689,7 @@ export default function App() {
     }
     if (event.type === 'assistant_end' && event.messageId) {
       setAssistantStream(current => current?.id === event.messageId ? { ...current, ended: true } : current)
+      setOmpLiveWork(current => current?.uuid === event.messageId ? null : current)
       clearTimeout(assistantStreamStaleTimer)
       assistantStreamStaleTimer = setTimeout(() => {
         setAssistantStream(current => current?.id === event.messageId && current.ended ? null : current)
@@ -688,6 +704,7 @@ export default function App() {
         assistantStreamStaleTimer = undefined
         return null
       })
+      setOmpLiveWork(current => current?.uuid === event.messageId ? null : current)
       return
     }
     if (event.type === 'agent_start') {
@@ -720,11 +737,13 @@ export default function App() {
   }
 
   async function select(id: string) {
+    const generation = ++selectGeneration
+    const box = currentBox()
     const prev = currentId()
     if (prev) saveDraft(prev, text())
     dismissMediaNotice()
     setCurrentId(id)
-    location.hash = currentBox() === 'local' ? id : `${currentBox()}:${id}`
+    location.hash = box === 'local' ? id : `${box}:${id}`
     setSidebar(false)
     setLoading(true)
     setMessages([])
@@ -734,17 +753,17 @@ export default function App() {
     clearOmpLiveSurfaces()
     setWorking(!!sessions().find(session => session.id === id)?.isActive)
     setText(loadDraft(id))
-    restoreMedia(currentBox(), id)
+    restoreMedia(box, id)
     setHistoryIdx(-1)
     setHistoryOpen(false)
     cleanupSSE?.()
     try {
-      const box = currentBox()
       const listed = sessions().find(session => session.id === id)
       const [result, sessionMeta] = await Promise.all([
         fetchMessages(id, 0, box),
         listed ? Promise.resolve(listed) : findSessionMeta(id, box),
       ])
+      if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
       const toolIntentState = deriveToolIntentState(result.messages)
       const inactive = !sessionMeta?.isActive
       setMessages(result.messages)
@@ -754,9 +773,11 @@ export default function App() {
       setWorking(inactive ? false : toolIntentState.working)
       setHasMore(result.hasMore)
     } catch {}
+    if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
     setLoading(false)
     setSSEStatus('connected')
     cleanupSSE = subscribeMessages(id, (msg) => {
+      if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
       setMessages(prevMessages => {
         if (prevMessages.some(m => m.uuid === msg.uuid)) return prevMessages
         const transition = toolIntentTransition({
@@ -769,6 +790,10 @@ export default function App() {
         setWorking(transition.working)
         const todo = todoSnapshotFromMessage(msg)
         if (todo !== undefined) setTodoSnapshot(todo)
+        const hasExecutionTrace = msg.role === 'assistant' && msg.content?.some(block =>
+          block.type === 'thinking' || block.type === 'tool_use' || block.type === 'tool_result'
+        )
+        if (hasExecutionTrace) setOmpLiveWork(null)
         if (isFinalAssistantMessage(msg)) clearAssistantStream()
         if (msg.role === 'user') {
           const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
@@ -786,9 +811,12 @@ export default function App() {
         return [...prevMessages, msg]
       })
     }, status => {
+      if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
       setSSEStatus(status)
       if (status === 'reconnecting') clearAssistantStream()
-    }, currentBox(), handleOmpEvent)
+    }, box, event => {
+      if (generation === selectGeneration && currentId() === id && currentBox() === box) handleOmpEvent(event)
+    })
   }
 
   async function handleNew(agent?: string) {
@@ -1734,6 +1762,7 @@ export default function App() {
                 statusText={toolIntentStatus()}
                 intentHistory={toolIntentHistory()}
                 assistantStream={assistantStream()}
+                liveWork={ompLiveWork()}
                 todo={todoSnapshot()}
                 notice={ompNotice()}
                 approval={ompApproval()}

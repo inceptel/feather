@@ -285,26 +285,29 @@ test.describe('Message rendering', () => {
   })
 
   test('tool_use block is preserved inside Details', async ({ page }) => {
-    await page.getByTestId('work-log-summary').filter({ hasText: 'issue' }).click()
-    await expect(page.locator('text=Read').first()).toBeVisible()
+    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
+    await toolBubble.getByTestId('work-log-summary').click()
+    await expect(toolBubble.getByText('Read').first()).toBeVisible()
   })
 
   test('tool_result output is revealed from Details and the tool call', async ({ page }) => {
-    await page.getByTestId('work-log-summary').filter({ hasText: 'issue' }).click()
-    const summary = page.locator('summary', { hasText: 'MessageView.tsx' }).first()
+    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
+    await toolBubble.getByTestId('work-log-summary').click()
+    const summary = toolBubble.locator('summary', { hasText: 'MessageView.tsx' })
     await expect(summary).toBeVisible()
     await summary.click()
-    await expect(page.locator('text=export function MessageView')).toBeVisible()
+    await expect(toolBubble.getByText('export function MessageView')).toBeVisible()
   })
 
-  test('failed work is flagged quietly and its error remains reachable', async ({ page }) => {
-    const workLog = page.getByTestId('work-log-summary').filter({ hasText: 'issue' })
-    await expect(workLog).toBeVisible()
+  test('failed work error remains reachable inside Details', async ({ page }) => {
+    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
+    const workLog = toolBubble.getByTestId('work-log-summary')
+    await expect(workLog).toHaveText(/Details/)
     await workLog.click()
-    const summary = page.locator('summary', { hasText: 'missing.txt' }).first()
+    const summary = toolBubble.locator('summary', { hasText: 'missing.txt' })
     await expect(summary).toBeVisible()
     await summary.click()
-    await expect(page.locator('text=ENOENT: no such file')).toBeVisible()
+    await expect(toolBubble.getByText('ENOENT: no such file')).toBeVisible()
   })
 
   test('timestamps are displayed on messages', async ({ page }) => {

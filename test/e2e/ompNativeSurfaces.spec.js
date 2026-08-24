@@ -72,8 +72,12 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const response = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ events: [
+    body: JSON.stringify({ version: 2, events: [
       { type: 'assistant_snapshot', messageId: 'stream-1', text: 'This answer is arriving token by token.' },
+      { type: 'work_snapshot', messageId: 'stream-1', blocks: [
+        { type: 'thinking', thinking: 'Inspecting the live OMP work timeline.' },
+        { type: 'tool_use', id: 'live-tool-1', name: 'bash', intent: 'Checking native state', input: { command: 'must stay private' } },
+      ] },
       { type: 'todo', phases: [{ name: 'Build', tasks: [{ content: 'Wire bridge', status: 'completed' }, { content: 'Verify native UI', status: 'in_progress' }] }], op: 'start', isError: false },
       { type: 'session_state', modelProvider: 'openai', modelId: 'gpt-5.6', modelApi: 'responses', thinkingLevel: 'high', serviceTiers: { openai: 'priority' }, contextTokens: 42000, contextWindow: 200000, contextPercent: 21 },
       { type: 'subagent_lifecycle', id: 'agent-1', agent: 'scout', status: 'started', index: 0, detached: true, description: 'Map OMP events' },
@@ -84,6 +88,88 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   expect(response.status).toBe(204)
 
   await expect(page.getByTestId('assistant-stream')).toContainText('arriving token by token')
+  const liveWork = page.getByTestId('live-work-snapshot')
+  await expect(liveWork).toBeVisible()
+  await expect(liveWork.getByText('Inspecting the live OMP work timeline.')).not.toBeVisible()
+  await liveWork.getByTestId('work-log-summary').click()
+  await expect(liveWork.getByText('Inspecting the live OMP work timeline.')).toBeVisible()
+  await expect(liveWork).toContainText('Bash')
+  await expect(liveWork).toContainText('Checking native state')
+  await expect(liveWork).not.toContainText('must stay private')
+  writeLine({
+    type: 'assistant', uuid: `native-live-trace-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: 'durable-tool', name: 'Read', input: { file_path: '/tmp/durable' } }] },
+  })
+  await expect(page.getByTestId('live-work-turn')).toBeVisible()
+  await expect(liveWork).toHaveCount(0)
+
+  const replacement = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [{
+      type: 'work_snapshot', messageId: 'stream-2', blocks: [
+        { type: 'thinking', thinking: 'Refined live reasoning replaced the first snapshot.' },
+        { type: 'tool_use', id: 'live-tool-2', name: 'read', intent: 'Reading replacement state' },
+      ],
+    }] }),
+  })
+  expect(replacement.status).toBe(204)
+  await expect(page.getByTestId('live-work-turn')).toHaveCount(0)
+  await expect(liveWork).toBeVisible()
+  await liveWork.getByTestId('work-log-summary').click()
+  await expect(liveWork.getByText('Refined live reasoning replaced the first snapshot.')).toBeVisible()
+  await expect(liveWork).toContainText('Reading replacement state')
+  const newest = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [{
+      type: 'work_snapshot', messageId: 'stream-2', blocks: [
+        { type: 'thinking', thinking: 'Newest reasoning updates without collapsing Details.' },
+      ],
+    }] }),
+  })
+  expect(newest.status).toBe(204)
+  await expect(liveWork.locator('details')).toHaveJSProperty('open', true)
+  await expect(liveWork.getByText('Newest reasoning updates without collapsing Details.')).toBeVisible()
+
+  const cleared = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [{ type: 'work_snapshot', messageId: 'stream-2', blocks: [] }] }),
+  })
+  expect(cleared.status).toBe(204)
+  await expect(liveWork).toHaveCount(0)
+
+  const cancelled = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [
+      { type: 'work_snapshot', messageId: 'stream-3', blocks: [{ type: 'tool_use', id: 'live-tool-3', name: 'read' }] },
+      { type: 'assistant_cancel', messageId: 'other-stream' },
+    ] }),
+  })
+  expect(cancelled.status).toBe(204)
+  await expect(liveWork).toBeVisible()
+  const cancelCurrent = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [{ type: 'assistant_cancel', messageId: 'stream-3' }] }),
+  })
+  expect(cancelCurrent.status).toBe(204)
+  await expect(liveWork).toHaveCount(0)
+
+  const ended = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
+    body: JSON.stringify({ version: 2, events: [
+      { type: 'work_snapshot', messageId: 'stream-4', blocks: [{ type: 'tool_use', id: 'live-tool-4', name: 'read' }] },
+      { type: 'assistant_end', messageId: 'stream-4' },
+    ] }),
+  })
+  expect(ended.status).toBe(204)
+  await expect(liveWork).toHaveCount(0)
+  await expect(page.getByTestId('omp-todo').locator('summary')).toBeVisible()
+  expect(await page.getByTestId('omp-todo').locator('summary').evaluate(element => getComputedStyle(element).position)).toBe('sticky')
   await expect(page.getByText(/Todo · 1\/2/)).toBeVisible()
   await expect(page.getByText('Verify native UI', { exact: true })).toBeVisible()
   await expect(page.getByTestId('omp-runtime')).toContainText('openai/gpt-5.6')
@@ -102,4 +188,5 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   })
   await expect(page.getByText('This answer is now durable.')).toBeVisible()
   await expect(page.getByTestId('assistant-stream')).toHaveCount(0)
+  await expect(liveWork).toHaveCount(0)
 })

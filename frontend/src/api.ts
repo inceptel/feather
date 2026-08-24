@@ -366,6 +366,7 @@ export interface OmpBridgeEvent {
   messageId?: string
   text?: string
   reason?: string
+  blocks?: ContentBlock[]
   attempt?: number
   provider?: string
   maxAttempts?: number

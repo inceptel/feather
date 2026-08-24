@@ -50,9 +50,11 @@ function fixture() {
   fs.writeFileSync(readableFile, 'canary-readable')
   writeJson(path.join(state, 'boxes.json'), {}, 0o600)
   writeJson(path.join(state, 'sharing.json'), {
-    owner: 'zak', peers: { viewer: { token: 'read-only-token', policy: 'all', control: true } },
+    owner: 'zak', peers: { viewer: { token: 'read-only-token', policy: 'selected', control: true } },
   }, 0o600)
-  writeJson(path.join(state, 'session-meta.json'), {})
+  writeJson(path.join(state, 'session-meta.json'), {
+    [sessionId]: { agent: 'claude', share: ['viewer'] },
+  })
   writeJson(path.join(state, 'project-labels.json'), {})
   writeJson(path.join(state, 'quick-links.json'), [])
   writeJson(path.join(state, 'starred.json'), {})
@@ -253,6 +255,21 @@ describe('server-enforced read-only canary', () => {
     })
     assert.equal(response.status, 200)
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fx.state, 'quick-links.json'), 'utf8')), [{ label: 'Normal mode', url: 'https://example.test' }])
+    const streamAbort = new AbortController()
+    const sharedStream = await fetch(`${base}/api/share/sessions/${fx.sessionId}/stream`, {
+      headers: { Authorization: 'Bearer read-only-token' },
+      signal: streamAbort.signal,
+    })
+    const streamReader = sharedStream.body.getReader()
+    await streamReader.read()
+    const revoked = await fetch(`${base}/api/sessions/${fx.sessionId}/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ peers: [] }),
+    })
+    assert.equal(revoked.status, 200)
+    assert.equal((await streamReader.read()).done, true, 'revoking a peer must close its existing SSE stream')
+    streamAbort.abort()
 
     await expectOpenedUpgrade(`ws://127.0.0.1:${port}/api/shell`)
     for (const route of ['/api/shell/', '/api/shell-near-match', '/api/terminal/', '/api/terminal-near-match']) {
