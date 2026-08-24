@@ -464,9 +464,14 @@ function formatTime(iso: string) {
 // consecutive trace messages into one collapsed Work log. Text-only assistant
 // messages remain first-class conversation. Questions stay visible because they
 // require the user's attention.
+function isQuestionBlock(block: ContentBlock): boolean {
+  if (block.type !== 'tool_use') return false
+  return block.name === 'AskUserQuestion' || block.name?.toLowerCase() === 'ask'
+}
+
 function isTraceAssistantMsg(m: Message): boolean {
   if (m.role !== 'assistant' || !m.content || m.content.length === 0) return false
-  if (m.content.some(block => block.type === 'tool_use' && block.name === 'AskUserQuestion')) return false
+  if (m.content.some(isQuestionBlock)) return false
   const hasTool = m.content.some(block => block.type === 'tool_use' || block.type === 'tool_result')
   const hasThinking = m.content.some(block => block.type === 'thinking')
   const hasText = m.content.some(block => block.type === 'text' && block.text?.trim())
@@ -477,7 +482,7 @@ function isTraceAssistantMsg(m: Message): boolean {
 
 function canAttachTraceToMessage(m: Message): boolean {
   if (m.role !== 'assistant' || !m.content?.some(block => block.type === 'text' && block.text?.trim())) return false
-  return !m.content.some(block => block.type === 'tool_use' && block.name === 'AskUserQuestion')
+  return !m.content.some(isQuestionBlock)
 }
 
 type RenderItem =
@@ -636,7 +641,68 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 
 // ── Component ───────────────────────────────────────────────────────────────
 
-export function MessageView(props: { messages: Message[], loading: boolean, hasMore?: boolean, loadingMore?: boolean, onLoadEarlier?: () => void, onAnswer?: (text: string) => void, starred?: Set<string>, onToggleStar?: (uuid: string) => void, onViewRaw?: (msg: Message) => void, working?: boolean, statusText?: string | null }) {
+type MessageViewTodo = {
+  phases: Array<{ name: string; tasks: Array<{ content: string; status: string }> }>
+  completed: number
+  total: number
+  active: string | null
+}
+type MessageViewSubagent = {
+  id: string
+  agent: string
+  status: string
+  description?: string
+  intent?: string
+  resolvedModel?: string
+  toolCount?: number
+  requests?: number
+  tokens?: number
+  durationMs?: number
+}
+
+type MessageViewJob = {
+  id: string
+  type: string
+  status: string
+  label?: string
+}
+
+type MessageViewRuntime = {
+  modelProvider?: string
+  modelId?: string
+  modelApi?: string
+  thinkingLevel?: string
+  serviceTiers?: Record<string, string | null>
+  contextTokens?: number
+  contextWindow?: number
+  contextPercent?: number
+}
+
+
+type MessageViewProps = {
+  messages: Message[]
+  loading: boolean
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadEarlier?: () => void
+  onAnswer?: (text: string) => void
+  onKeys?: (keys: string[]) => void
+  starred?: Set<string>
+  onToggleStar?: (uuid: string) => void
+  onViewRaw?: (msg: Message) => void
+  working?: boolean
+  statusText?: string | null
+  intentHistory?: string[]
+  assistantStream?: { text: string; ended: boolean } | null
+  todo?: MessageViewTodo | null
+  notice?: { kind: string; text: string } | null
+  approval?: { toolName: string; approvalMode: string; reason?: string } | null
+  subagents?: MessageViewSubagent[]
+  jobs?: MessageViewJob[]
+  runtime?: MessageViewRuntime | null
+}
+
+export function MessageView(props: MessageViewProps) {
   const [lightbox, setLightbox] = createSignal<string | null>(null)
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
@@ -749,12 +815,16 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
   }
 
   let prevMsgLen = props.messages.length
+  let prevStreamText = props.assistantStream?.text || ''
 
   createEffect(() => {
-    const len = props.messages.length // track
+    const len = props.messages.length
+    const streamText = props.assistantStream?.text || ''
     const delta = len - prevMsgLen
+    const streamChanged = streamText !== prevStreamText
     prevMsgLen = len
-    if (pinned()) {
+    prevStreamText = streamText
+    if (pinned() && (delta !== 0 || streamChanged)) {
       requestAnimationFrame(() => scrollRef?.scrollTo({ top: scrollRef!.scrollHeight }))
     } else if (delta > 0) {
       setUnreadCount(c => c + delta)
@@ -898,7 +968,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         const inlineTraceBlocks = (msg.content || []).filter(block =>
           block.type === 'thinking' ||
           block.type === 'tool_result' ||
-          (block.type === 'tool_use' && block.name !== 'AskUserQuestion')
+          (block.type === 'tool_use' && !isQuestionBlock(block))
         )
         const workLogMessages = inlineTraceBlocks.length > 0
           ? [...turnTrace, { ...msg, content: inlineTraceBlocks }]
@@ -994,7 +1064,7 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                 if (
                   block.type === 'thinking' ||
                   block.type === 'tool_result' ||
-                  (block.type === 'tool_use' && block.name !== 'AskUserQuestion')
+                  (block.type === 'tool_use' && !isQuestionBlock(block))
                 ) return null
                 if (block.type === 'text' && block.text) {
                   const { cleanText: bText, images: bImgs, files: bFiles } = extractImages(block.text)
@@ -1023,19 +1093,50 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
                     </div>
                   )
                 }
-                if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
-                  const q = block.input?.question || 'Claude is asking a question...'
+                if (isQuestionBlock(block)) {
+                  const rawQuestions = Array.isArray(block.input?.questions)
+                    ? block.input.questions
+                    : [{ id: 'question', question: block.input?.question || 'The assistant needs your input.', options: [{ label: 'Yes' }, { label: 'No' }, { label: 'Continue' }] }]
                   return (
-                    <div style={{ 'margin': '6px 0', background: 'rgba(168, 85, 247, 0.06)', border: '1px solid rgba(168, 85, 247, 0.25)', 'border-left': '2px solid #a855f7', 'border-radius': '10px', padding: '12px' }}>
-                      <div style={{ color: '#a855f7', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em', 'margin-bottom': '6px' }}>Question</div>
-                      <div style={{ color: 'var(--text-primary)', 'font-size': '14px', 'margin-bottom': '10px' }}>{q}</div>
-                      <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap' }}>
-                        <For each={['Yes', 'No', 'Continue']}>{(label) => (
-                          <button onClick={() => props.onAnswer?.(label)}
-                            style={{ background: 'var(--border-medium)', border: '1px solid var(--text-dim)', color: 'var(--text-primary)', padding: '4px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}>{label}</button>
-                        )}</For>
-                      </div>
-                    </div>
+                    <For each={rawQuestions}>{(question, questionIndex) => {
+                      const options = Array.isArray(question.options) ? question.options : []
+                      const answered = block.id ? !!getResult(block.id) : false
+                      return (
+                        <div style={{ margin: '6px 0', background: 'rgba(168, 85, 247, 0.06)', border: '1px solid rgba(168, 85, 247, 0.25)', 'border-left': '2px solid #a855f7', 'border-radius': '10px', padding: '12px' }}>
+                          <div style={{ color: '#a855f7', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em', 'margin-bottom': '6px' }}>{answered ? 'Answered' : question.header || 'Question'}</div>
+                          <div style={{ color: 'var(--text-primary)', 'font-size': '14px', 'margin-bottom': '10px' }}>{question.question}</div>
+                          <div style={{ display: 'flex', gap: '6px', 'flex-wrap': 'wrap' }}>
+                            <For each={options}>{(option, optionIndex) => (
+                              <button
+                                onClick={() => {
+                                  if (answered) return
+                                  if (!props.onKeys) {
+                                    props.onAnswer?.(rawQuestions.length > 1 ? `${question.id}: ${option.label}` : option.label)
+                                    return
+                                  }
+                                  props.onKeys(['Home', ...Array(optionIndex()).fill('Down'), question.multi ? 'Space' : 'Enter'])
+                                }}
+                                title={option.description || undefined}
+                                disabled={answered}
+                                style={{ background: 'var(--border-medium)', border: '1px solid var(--text-dim)', color: 'var(--text-primary)', padding: '5px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: answered ? 'default' : 'pointer', 'text-align': 'left', opacity: answered ? '0.55' : '1' }}
+                              >
+                                <span>{option.label}</span>
+                                <Show when={option.description}><span style={{ display: 'block', color: 'var(--text-muted)', 'font-size': '10px', 'margin-top': '2px' }}>{option.description}</span></Show>
+                              </button>
+                            )}</For>
+                            <Show when={question.multi}>
+                              <button
+                                disabled={answered}
+                                onClick={() => props.onKeys?.(['End', 'Enter'])}
+                                style={{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', padding: '5px 12px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}
+                              >Done</button>
+                            </Show>
+                          </div>
+                          <Show when={question.multi}><div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'margin-top': '7px' }}>Multiple selections allowed</div></Show>
+                          <Show when={questionIndex() < rawQuestions.length - 1}><div style={{ height: '6px' }} /></Show>
+                        </div>
+                      )
+                    }}</For>
                   )
                 }
                 // thinking, tool_use, tool_result — flat rendering via renderBlock (inside bubble)
@@ -1048,15 +1149,128 @@ export function MessageView(props: { messages: Message[], loading: boolean, hasM
         )
       }}</For>
 
-      {/* Typing indicator */}
+      <Show when={props.approval}>
+        <div data-testid="omp-approval" role="alert" style={{ margin: '0 0 10px', padding: '11px 12px', 'border-radius': '10px', border: '1px solid var(--warning)', background: 'rgba(245,158,11,0.08)' }}>
+          <div style={{ color: 'var(--warning)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.08em' }}>Approval required</div>
+          <div style={{ color: 'var(--text-primary)', 'font-size': '13px', 'margin-top': '4px' }}>{props.approval!.toolName}</div>
+          <Show when={props.approval!.reason}><div style={{ color: 'var(--text-muted)', 'font-size': '11px', 'margin-top': '3px', 'white-space': 'pre-wrap' }}>{props.approval!.reason}</div></Show>
+          <div style={{ display: 'flex', gap: '7px', 'margin-top': '9px' }}>
+            <button onClick={() => props.onKeys?.(['Enter'])} style={{ background: 'var(--success)', color: '#07140b', border: 'none', padding: '5px 13px', 'border-radius': '6px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer' }}>Approve</button>
+            <button onClick={() => props.onKeys?.(['Escape'])} style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-medium)', padding: '5px 13px', 'border-radius': '6px', 'font-size': '12px', cursor: 'pointer' }}>Reject</button>
+          </div>
+        </div>
+      </Show>
+
+      <Show when={props.runtime}>
+        <details data-testid="omp-runtime" style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+          <summary style={{ padding: '7px 0', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '11px' }}>
+            {[props.runtime!.modelProvider, props.runtime!.modelId].filter(Boolean).join('/') || 'OMP session'}
+            <Show when={props.runtime!.thinkingLevel}><span> · {props.runtime!.thinkingLevel}</span></Show>
+            <Show when={props.runtime!.contextPercent !== undefined}><span> · {Math.round(props.runtime!.contextPercent!)}% context</span></Show>
+          </summary>
+          <div style={{ padding: '0 0 8px', color: 'var(--text-muted)', 'font-size': '10px', 'line-height': '1.55' }}>
+            <Show when={props.runtime!.modelApi}><div>API · {props.runtime!.modelApi}</div></Show>
+            <Show when={props.runtime!.contextTokens !== undefined && props.runtime!.contextWindow !== undefined}>
+              <div>Context · {props.runtime!.contextTokens!.toLocaleString()} / {props.runtime!.contextWindow!.toLocaleString()} tokens</div>
+            </Show>
+            <Show when={Object.keys(props.runtime!.serviceTiers || {}).length}>
+              <div>Service · {Object.entries(props.runtime!.serviceTiers || {}).map(([family, tier]) => `${family}: ${tier || 'default'}`).join(' · ')}</div>
+            </Show>
+          </div>
+        </details>
+      </Show>
+
+      <Show when={(props.subagents?.length || 0) > 0}>
+        <details data-testid="omp-subagents" open={(props.subagents || []).some(agent => agent.status === 'running' || agent.status === 'started')} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
+          <summary style={{ padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
+            Agents · {(props.subagents || []).filter(agent => agent.status === 'running' || agent.status === 'started').length} running
+          </summary>
+          <div style={{ padding: '0 0 8px' }}>
+            <For each={props.subagents || []}>{(agent) => (
+              <div style={{ padding: '5px 0', 'border-top': '1px solid var(--border-subtle)', 'font-size': '11px' }}>
+                <div style={{ display: 'flex', 'justify-content': 'space-between', gap: '8px' }}>
+                  <span style={{ color: 'var(--text-primary)', 'font-weight': '600' }}>{agent.agent}</span>
+                  <span style={{ color: agent.status === 'failed' ? 'var(--error)' : agent.status === 'running' || agent.status === 'started' ? 'var(--accent)' : 'var(--text-muted)' }}>{agent.status}</span>
+                </div>
+                <Show when={agent.description}><div style={{ color: 'var(--text-secondary)', 'margin-top': '2px' }}>{agent.description}</div></Show>
+                <Show when={agent.intent}><div style={{ color: 'var(--text-muted)', 'margin-top': '2px' }}>{agent.intent}</div></Show>
+                <div style={{ color: 'var(--text-faint)', 'font-size': '10px', 'margin-top': '2px' }}>
+                  {[agent.resolvedModel, agent.toolCount !== undefined ? `${agent.toolCount} steps` : '', agent.tokens !== undefined ? `${agent.tokens.toLocaleString()} tokens` : ''].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+            )}</For>
+          </div>
+        </details>
+      </Show>
+
+      <Show when={(props.jobs?.length || 0) > 0}>
+        <details data-testid="omp-jobs" style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
+          <summary style={{ padding: '7px 0', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '11px' }}>
+            Background jobs · {(props.jobs || []).filter(job => job.status === 'running').length} running
+          </summary>
+          <div style={{ padding: '0 0 7px' }}>
+            <For each={props.jobs || []}>{(job) => (
+              <div style={{ display: 'flex', 'justify-content': 'space-between', gap: '8px', padding: '3px 0', color: 'var(--text-muted)', 'font-size': '10px' }}>
+                <span>{job.label || job.type}</span><span>{job.status}</span>
+              </div>
+            )}</For>
+          </div>
+        </details>
+      </Show>
+
+      <Show when={props.notice}>
+        <div role="status" style={{ margin: '0 0 10px', padding: '8px 11px', 'border-radius': '9px', border: '1px solid var(--warning)', background: 'rgba(245,158,11,0.08)', color: 'var(--warning)', 'font-size': '12px' }}>
+          {props.notice!.text}
+        </div>
+      </Show>
+
+      <Show when={props.todo}>
+        <details open={props.working} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
+          <summary style={{ padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
+            Todo · {props.todo!.completed}/{props.todo!.total}
+            <Show when={props.todo!.active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {props.todo!.active}</span></Show>
+          </summary>
+          <div style={{ padding: '0 0 9px' }}>
+            <For each={props.todo!.phases}>{(phase) => (
+              <div style={{ 'margin-top': '7px' }}>
+                <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
+                <For each={phase.tasks}>{(task) => (
+                  <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
+                    <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
+                      {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
+                    </span>
+                    <span>{task.content}</span>
+                  </div>
+                )}</For>
+              </div>
+            )}</For>
+          </div>
+        </details>
+      </Show>
+
+      <Show when={props.assistantStream?.text}>
+        <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
+          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
+            {props.assistantStream!.text}<span aria-hidden="true" style={{ display: 'inline-block', width: '1px', height: '1em', background: 'var(--text-secondary)', 'margin-left': '2px', 'vertical-align': 'text-bottom', opacity: props.assistantStream!.ended ? '0.35' : '0.9' }} />
+          </div>
+        </div>
+      </Show>
+
       <Show when={props.working}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
-          <div role="status" aria-live="polite" style={{ padding: '10px 14px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
+          <div role="status" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite', 'flex-shrink': '0' }} />
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite', 'flex-shrink': '0' }} />
             <Show when={props.statusText}>
-              <span style={{ 'margin-left': '6px', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</span>
+              <Show when={(props.intentHistory?.length || 0) > 1} fallback={<span style={{ 'margin-left': '6px', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</span>}>
+                <details style={{ 'margin-left': '6px' }}>
+                  <summary style={{ cursor: 'pointer', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</summary>
+                  <div style={{ 'margin-top': '6px', padding: '6px 8px', 'border-left': '1px solid var(--border-medium)', color: 'var(--text-muted)', 'font-size': '10px', 'line-height': '1.45' }}>
+                    <For each={(props.intentHistory || []).slice(0, -1)}>{(intent) => <div>{intent}</div>}</For>
+                  </div>
+                </details>
+              </Show>
             </Show>
           </div>
         </div>

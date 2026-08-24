@@ -316,11 +316,24 @@ describe('server-enforced read-only canary', () => {
     assert.equal(sharedFirst.status, 200)
     assert.equal(sharedRetry.status, 200)
     assert.deepEqual(await sharedRetry.json(), await sharedFirst.json())
+    const sharedKeys = await fetch(`${running.base}/api/share/sessions/${fx.sessionId}/keys`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer read-only-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: ['Home', 'Down', 'Enter'] }),
+    })
+    assert.equal(sharedKeys.status, 200)
+    const invalidSharedKeys = await fetch(`${running.base}/api/share/sessions/${fx.sessionId}/keys`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer read-only-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: ['C-c'] }),
+    })
+    assert.equal(invalidSharedKeys.status, 400)
 
     const calls = fs.readFileSync(fx.tmuxLog, 'utf8').trim().split('\n')
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l deliver once').length, 1)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l legacy retry').length, 2)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l [viewer] peer deliver once').length, 1)
+    assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly Home Down Enter').length, 1)
     const receiptsFile = path.join(fx.state, 'uploads/.message-receipts.json')
     const stored = JSON.parse(fs.readFileSync(receiptsFile, 'utf8'))
     assert.deepEqual(stored[fx.sessionId]['voice-recovery-0001'].response, firstReceipt)

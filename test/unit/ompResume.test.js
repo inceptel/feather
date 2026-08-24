@@ -85,7 +85,8 @@ describe('safe OMP resume', () => {
     })
     assert.equal(good.status, 200, stderr)
     const logAfterGood = fs.readFileSync(tmuxLog, 'utf8')
-    assert.match(logAfterGood, /--resume omp-exact-resume-id/)
+    assert.match(logAfterGood, /--resume/)
+    assert.match(logAfterGood, /omp-exact-resume-id/)
     assert.doesNotMatch(logAfterGood, /--continue/)
 
     const bad = await fetch(`${base}/api/sessions/${badFeatherId}/resume`, {

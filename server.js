@@ -64,6 +64,28 @@ const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
 // (see lib/omp.js). Passing them on resume also migrates existing sessions.
 const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
+const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'feather-bridge.js');
+const ompBridgeTokens = new Map();
+const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
+const OMP_BRIDGE_EVENT_TYPES = Object.freeze({
+  assistant_snapshot: true,
+  assistant_end: true,
+  assistant_cancel: true,
+  agent_start: true,
+  agent_end: true,
+  auto_retry_start: true,
+  auto_retry_end: true,
+  auto_compaction_start: true,
+  auto_compaction_end: true,
+  credential_disabled: true,
+  todo: true,
+  tool_approval_requested: true,
+  tool_approval_resolved: true,
+  subagent_lifecycle: true,
+  subagent_progress: true,
+  async_jobs: true,
+  session_state: true,
+});
 const CODEX_SESSIONS_ROOT = STATE_PATHS.harness.codexSessionsDir;
 // Head bytes to read when looking for a codex session's first real user
 // message (title, worker detection). The session_meta line plus permissions/
@@ -222,12 +244,12 @@ async function proxyToBox(boxId, req, res) {
   // Peer boxes (another user's instance): only the share surface is ever
   // forwarded — rewritten onto their token-gated /api/share namespace. The
   // remote enforces its own grants; this allowlist just refuses to even ask
-  // for anything outside view + send/interrupt.
+  // for anything outside view + send/interrupt/interactive terminal controls.
   if (box.peer) {
     const allowed =
       (req.method === 'GET' && (pathname === '/api/sessions' || SESSION_READ_ROUTE.test(pathname))) ||
-      (req.method === 'POST' && /^\/api\/sessions\/[^/]+\/(send|interrupt)$/.test(pathname));
-    if (!allowed) return res.status(403).json({ error: `peer box ${boxId}: only viewing shared sessions (and send/interrupt if granted) is supported` });
+      (req.method === 'POST' && /^\/api\/sessions\/[^/]+\/(send|interrupt|keys)$/.test(pathname));
+    if (!allowed) return res.status(403).json({ error: `peer box ${boxId}: only viewing shared sessions (and controls if granted) is supported` });
     pathname = pathname.replace(/^\/api\/sessions/, '/api/share/sessions');
     if (box.token) headers.Authorization = `Bearer ${box.token}`;
   }
@@ -727,15 +749,40 @@ function ensureCodexTrust(cwd) {
   try { fs.appendFileSync(cfg, block); } catch (e) { console.warn(`[codex] could not write trust for ${cwd}:`, e.message); }
 }
 
+function shellQuote(value) {
+  return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
+}
+function ompBridgeTokenPath(sessionId) {
+  const file = createHash('sha256').update(String(sessionId)).digest('hex');
+  return path.join(OMP_BRIDGE_TOKENS_DIR, file);
+}
+
+
 function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
   const sessionDir = path.join(OMP_SESSIONS, id);
   fs.mkdirSync(sessionDir, { recursive: true });
   watchOmpSessionDir(sessionDir, id);
   const ompId = resume ? getOmpSessionId(id) : null;
   if (resume && !ompId) throw new Error(`Cannot resume OMP session ${id}: exact OMP session id not found`);
-  const resumeArg = resume ? `--resume ${ompId}` : '';
-  const printArgs = promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}@${promptFile}` : '';
-  const command = `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}${resumeArg} ${printArgs} --session-dir ${sessionDir} --allow-home'`;
+  const bridgeToken = randomUUID();
+  ompBridgeTokens.set(id, bridgeToken);
+  fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
+  const args = [
+    'omp',
+    ompModelFlags(OMP_MODEL, OMP_THINKING).trim(),
+    resume ? `--resume ${shellQuote(ompId)}` : '',
+    promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
+    `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
+    `--session-dir ${shellQuote(sessionDir)}`,
+    '--allow-home',
+  ].filter(Boolean).join(' ');
+  const env = [
+    `FEATHER_BRIDGE_URL=${shellQuote(`http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`)}`,
+    `FEATHER_BRIDGE_TOKEN=${shellQuote(bridgeToken)}`,
+    `FEATHER_SESSION_ID=${shellQuote(id)}`,
+  ].join(' ');
+  const command = `bash --rcfile ~/.bashrc -ic ${shellQuote(`${env} ${args}`)}`;
   launchInTmux(tmuxName(id), command, cwd);
 }
 
@@ -934,6 +981,7 @@ async function sendInputUnlocked(id, text) {
     // lock covers the Enter).
     await new Promise(r => setTimeout(r, 500));
     try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
+
   } else {
     execFileSync('tmux', ['send-keys', '-t', target, '-l', text], { stdio: 'ignore' });
     execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' });
@@ -944,6 +992,16 @@ async function sendInputUnlocked(id, text) {
 
 const sseClients = new Map(); // sessionId -> Set<res>
 
+function writeSse(clients, res, chunk) {
+  try {
+    if (res.write(chunk)) return;
+    clients.delete(res);
+    res.end();
+  } catch {
+    clients.delete(res);
+  }
+}
+
 function broadcast(sessionId, line, offset) {
   const clients = sseClients.get(sessionId);
   if (!clients || clients.size === 0) return;
@@ -951,9 +1009,14 @@ function broadcast(sessionId, line, offset) {
   const parsed = parseMessageForAgent(line, agent);
   if (!parsed) return;
   const chunk = `id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`;
-  for (const res of clients) {
-    try { res.write(chunk); } catch { clients.delete(res); }
-  }
+  for (const res of clients) writeSse(clients, res, chunk);
+}
+
+function broadcastNamedEvent(sessionId, eventName, data) {
+  const clients = sseClients.get(sessionId);
+  if (!clients || clients.size === 0) return;
+  const chunk = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of clients) writeSse(clients, res, chunk);
 }
 
 // ── File watcher ────────────────────────────────────────────────────────────
@@ -1171,7 +1234,7 @@ app.use(compression({
     return compression.filter(req, res);
   },
 }));
-app.use(express.json());
+app.use(express.json({ limit: '512kb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/ootw', express.static('/home/user/auto-gan-otherworld/app', { extensions: ['html'] }));
 
@@ -1188,6 +1251,7 @@ app.get('/api/boxes', async (_req, res) => {
     const cached = boxStatusCache.get(id);
     if (cached && now - cached.ts < BOX_CACHE_TTL) {
       result.push({ id, label: box.label || id, available: cached.available, peer: !!box.peer });
+
       continue;
     }
     let available = false;
@@ -1199,6 +1263,233 @@ app.get('/api/boxes', async (_req, res) => {
     result.push({ id, label: box.label || id, available, peer: !!box.peer });
   }
   res.json({ boxes: result });
+});
+
+function bridgeTokenValid(sessionId, value) {
+  if (typeof value !== 'string') return false;
+  let expected = ompBridgeTokens.get(sessionId);
+  if (!expected) {
+    try {
+      expected = fs.readFileSync(ompBridgeTokenPath(sessionId), 'utf8').trim();
+      if (expected) ompBridgeTokens.set(sessionId, expected);
+    } catch {
+      return false;
+    }
+  }
+  if (!expected) return false;
+  const givenHash = createHash('sha256').update(value).digest();
+  const expectedHash = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(givenHash, expectedHash);
+}
+
+function bridgeString(value, maxLength) {
+  return typeof value === 'string' && value.length <= maxLength ? value : undefined;
+}
+
+function bridgeNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  return Number.isFinite(value) && value >= min && value <= max ? value : undefined;
+}
+
+function normalizeTodoEvent(event) {
+  if (!Array.isArray(event.phases) || event.phases.length > 30) return null;
+  const allowedStatuses = new Set(['pending', 'in_progress', 'completed', 'abandoned', 'blocked']);
+  const phases = [];
+  for (const phase of event.phases) {
+    const name = bridgeString(phase?.name, 120);
+    if (!name || !Array.isArray(phase.tasks) || phase.tasks.length > 200) return null;
+    const tasks = [];
+    for (const task of phase.tasks) {
+      const content = bridgeString(task?.content, 500);
+      if (!content || !allowedStatuses.has(task.status)) return null;
+      tasks.push({
+        content,
+        status: task.status,
+        ...(bridgeString(task.blocker, 300) !== undefined ? { blocker: task.blocker } : {}),
+      });
+    }
+    phases.push({ name, tasks });
+  }
+  return {
+    type: 'todo',
+    phases,
+    ...(bridgeString(event.op, 20) !== undefined ? { op: event.op } : {}),
+    isError: !!event.isError,
+  };
+}
+
+function normalizeAsyncJob(job) {
+  const id = bridgeString(job?.id, 120);
+  const type = bridgeString(job?.type, 20);
+  const status = bridgeString(job?.status, 20);
+  const startTime = bridgeNumber(job?.startTime, 0);
+  if (!id || !type || !status || startTime === undefined) return null;
+  return {
+    id,
+    type,
+    status,
+    startTime,
+    ...(type === 'task' && bridgeString(job.label, 160) !== undefined ? { label: job.label } : {}),
+  };
+}
+
+function normalizeOmpBridgeEvent(event) {
+  if (!event || typeof event !== 'object' || !OMP_BRIDGE_EVENT_TYPES[event.type]) return null;
+  const type = event.type;
+  if (type === 'assistant_snapshot') {
+    const messageId = bridgeString(event.messageId, 128);
+    const text = bridgeString(event.text, 100_000);
+    return messageId && text !== undefined ? { type, messageId, text } : null;
+  }
+  if (type === 'assistant_end' || type === 'assistant_cancel') {
+    const messageId = bridgeString(event.messageId, 128);
+    return messageId ? { type, messageId } : null;
+  }
+  if (type === 'agent_start') return { type };
+  if (type === 'agent_end') {
+    return { type, ...(typeof event.willContinue === 'boolean' ? { willContinue: event.willContinue } : {}) };
+  }
+  if (type === 'auto_retry_start') {
+    if (!Number.isSafeInteger(event.attempt) || !Number.isSafeInteger(event.maxAttempts) || !Number.isSafeInteger(event.delayMs)) return null;
+    return {
+      type,
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      delayMs: event.delayMs,
+      ...(bridgeString(event.errorMessage, 500) !== undefined ? { errorMessage: event.errorMessage } : {}),
+    };
+  }
+  if (type === 'auto_retry_end') {
+    if (typeof event.success !== 'boolean' || !Number.isSafeInteger(event.attempt)) return null;
+    return {
+      type,
+      success: event.success,
+      attempt: event.attempt,
+      ...(bridgeString(event.finalError, 500) !== undefined ? { finalError: event.finalError } : {}),
+    };
+  }
+  if (type === 'auto_compaction_start') {
+    const reason = bridgeString(event.reason, 32);
+    const action = bridgeString(event.action, 32);
+    return reason && action ? { type, reason, action } : null;
+  }
+  if (type === 'auto_compaction_end') {
+    const action = bridgeString(event.action, 32);
+    if (!action || typeof event.aborted !== 'boolean' || typeof event.willRetry !== 'boolean') return null;
+    return {
+      type,
+      action,
+      aborted: event.aborted,
+      willRetry: event.willRetry,
+      ...(typeof event.skipped === 'boolean' ? { skipped: event.skipped } : {}),
+      ...(bridgeString(event.errorMessage, 500) !== undefined ? { errorMessage: event.errorMessage } : {}),
+    };
+  }
+  if (type === 'credential_disabled') {
+    const provider = bridgeString(event.provider, 80);
+    return provider ? { type, provider } : null;
+  }
+  if (type === 'todo') return normalizeTodoEvent(event);
+  if (type === 'tool_approval_requested') {
+    const toolCallId = bridgeString(event.toolCallId, 128);
+    const toolName = bridgeString(event.toolName, 80);
+    const approvalMode = bridgeString(event.approvalMode, 40);
+    if (!toolCallId || !toolName || !approvalMode) return null;
+    return {
+      type,
+      toolCallId,
+      toolName,
+      approvalMode,
+      ...(bridgeString(event.reason, 500) !== undefined ? { reason: event.reason } : {}),
+    };
+  }
+  if (type === 'tool_approval_resolved') {
+    const toolCallId = bridgeString(event.toolCallId, 128);
+    const toolName = bridgeString(event.toolName, 80);
+    if (!toolCallId || !toolName || typeof event.approved !== 'boolean') return null;
+    return {
+      type,
+      toolCallId,
+      toolName,
+      approved: event.approved,
+      ...(bridgeString(event.reason, 500) !== undefined ? { reason: event.reason } : {}),
+    };
+  }
+  if (type === 'subagent_lifecycle' || type === 'subagent_progress') {
+    const id = bridgeString(event.id, 128);
+    const agent = bridgeString(event.agent, 80);
+    const status = bridgeString(event.status, 20);
+    const index = bridgeNumber(event.index, 0, 1000);
+    if (!id || !agent || !status || index === undefined) return null;
+    return {
+      type,
+      id,
+      agent,
+      status,
+      index,
+      detached: !!event.detached,
+      ...(bridgeString(event.description, 300) !== undefined ? { description: event.description } : {}),
+      ...(bridgeString(event.intent, 300) !== undefined ? { intent: event.intent } : {}),
+      ...(bridgeString(event.resolvedModel, 160) !== undefined ? { resolvedModel: event.resolvedModel } : {}),
+      ...(bridgeNumber(event.toolCount) !== undefined ? { toolCount: event.toolCount } : {}),
+      ...(bridgeNumber(event.requests) !== undefined ? { requests: event.requests } : {}),
+      ...(bridgeNumber(event.tokens) !== undefined ? { tokens: event.tokens } : {}),
+      ...(bridgeNumber(event.durationMs) !== undefined ? { durationMs: event.durationMs } : {}),
+      ...(bridgeNumber(event.contextTokens) !== undefined ? { contextTokens: event.contextTokens } : {}),
+      ...(bridgeNumber(event.contextWindow) !== undefined ? { contextWindow: event.contextWindow } : {}),
+    };
+  }
+  if (type === 'async_jobs') {
+    if (!Array.isArray(event.running) || !Array.isArray(event.recent) || event.running.length > 30 || event.recent.length > 20) return null;
+    const running = event.running.map(normalizeAsyncJob);
+    const recent = event.recent.map(normalizeAsyncJob);
+    if (running.some(job => job === null) || recent.some(job => job === null)) return null;
+    return {
+      type,
+      running,
+      recent,
+      delivery: {
+        queued: bridgeNumber(event.delivery?.queued, 0, 1000) || 0,
+        delivering: !!event.delivery?.delivering,
+      },
+    };
+  }
+  if (type === 'session_state') {
+    const serviceTiers = {};
+    if (event.serviceTiers && typeof event.serviceTiers === 'object' && !Array.isArray(event.serviceTiers)) {
+      for (const [family, tier] of Object.entries(event.serviceTiers).slice(0, 20)) {
+        if (bridgeString(family, 40) && (tier === null || bridgeString(tier, 40) !== undefined)) serviceTiers[family] = tier;
+      }
+    }
+    return {
+      type,
+      ...(bridgeString(event.modelProvider, 80) !== undefined ? { modelProvider: event.modelProvider } : {}),
+      ...(bridgeString(event.modelId, 160) !== undefined ? { modelId: event.modelId } : {}),
+      ...(bridgeString(event.modelApi, 80) !== undefined ? { modelApi: event.modelApi } : {}),
+      ...(bridgeString(event.thinkingLevel, 40) !== undefined ? { thinkingLevel: event.thinkingLevel } : {}),
+      serviceTiers,
+      ...(bridgeNumber(event.contextTokens) !== undefined ? { contextTokens: event.contextTokens } : {}),
+      ...(bridgeNumber(event.contextWindow) !== undefined ? { contextWindow: event.contextWindow } : {}),
+      ...(bridgeNumber(event.contextPercent, 0, 100) !== undefined ? { contextPercent: event.contextPercent } : {}),
+    };
+  }
+  return null;
+}
+
+app.post('/api/internal/sessions/:id/events', (req, res) => {
+  const { id } = req.params;
+  if (!bridgeTokenValid(id, req.get('X-Feather-Bridge-Token'))) {
+    return res.status(403).json({ error: 'invalid bridge token' });
+  }
+  const events = req.body?.events;
+  if (!Array.isArray(events) || events.length === 0 || events.length > 50) {
+    return res.status(400).json({ error: 'events must be a non-empty array (max 50)' });
+  }
+  const normalized = events.map(normalizeOmpBridgeEvent);
+  if (normalized.some(event => event === null)) {
+    return res.status(400).json({ error: 'invalid bridge event' });
+  }
+  for (const event of normalized) broadcastNamedEvent(id, 'omp_event', event);
+  res.status(204).end();
 });
 
 // ── Box proxy middleware for session routes ──────────────────────────────────
@@ -1277,6 +1568,29 @@ app.post('/api/sessions/:id/send', async (req, res) => {
     return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab']);
+
+function validatedTerminalKeys(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= 20 && value.every(key => TERMINAL_KEYS.has(key))
+    ? value
+    : null;
+}
+
+function sendTerminalKeys(sessionId, keys) {
+  execFileSync('tmux', ['send-keys', '-t', tmuxName(sessionId), ...keys], { stdio: 'ignore' });
+}
+
+app.post('/api/sessions/:id/keys', (req, res) => {
+  const keys = validatedTerminalKeys(req.body?.keys);
+  if (!keys) return res.status(400).json({ error: 'invalid terminal keys' });
+  try {
+    sendTerminalKeys(req.params.id, keys);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 app.post('/api/sessions/:id/resume', (req, res) => {
   try { resumeSession(req.params.id, req.body?.cwd); res.json({ ok: true }); }
@@ -1295,6 +1609,8 @@ app.post('/api/sessions/:id/delete', (req, res) => {
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
     if (agent === 'omp') {
       const dir = path.join(OMP_SESSIONS, id);
+      ompBridgeTokens.delete(id);
+      try { fs.unlinkSync(ompBridgeTokenPath(id)); } catch {}
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     } else {
       const fpath = findJsonlPath(id, agent);
@@ -1575,6 +1891,18 @@ app.post('/api/share/sessions/:id/send', requireShareAccess, async (req, res) =>
     return res.json(await sendInputIdempotent(req.params.id, prefixedText, messageId));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+app.post('/api/share/sessions/:id/keys', requireShareAccess, (req, res) => {
+  if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });
+  const keys = validatedTerminalKeys(req.body?.keys);
+  if (!keys) return res.status(400).json({ error: 'invalid terminal keys' });
+  try {
+    sendTerminalKeys(req.params.id, keys);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 app.post('/api/share/sessions/:id/interrupt', requireShareAccess, (req, res) => {
   if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });
