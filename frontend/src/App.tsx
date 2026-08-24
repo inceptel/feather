@@ -536,9 +536,25 @@ export default function App() {
     const v = await fetchBuildVersion()
     if (!v) return
     if (bootVersion === null) { bootVersion = v; return }
-    // A newer build is live. Reload to pull the latest bundle so this client
-    // stops running stale JS.
-    if (v !== bootVersion) location.reload()
+    if (v === bootVersion) {
+      try { sessionStorage.removeItem(`feather:build-reload:${v}`) } catch {}
+      return
+    }
+    // Reload at most once per server version. A proxy/cache mismatch must never
+    // turn stale-code recovery into an infinite loop that makes Feather unusable.
+    const reloadKey = `feather:build-reload:${v}`
+    try {
+      if (sessionStorage.getItem(reloadKey) === '1') {
+        console.warn(`Feather bundle ${bootVersion} still differs from server ${v}; suppressing reload loop`)
+        bootVersion = v
+        return
+      }
+      sessionStorage.setItem(reloadKey, '1')
+    } catch {
+      bootVersion = v
+      return
+    }
+    location.reload()
   }
   onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearAssistantStream(); clearPendingMedia(); cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
 
