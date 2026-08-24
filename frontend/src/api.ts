@@ -16,6 +16,13 @@ async function responseJson<T = any>(response: Response): Promise<T> {
   return data as T
 }
 
+async function protocolMutationJson(response: Response): Promise<{ run: ProtocolRunSnapshot }> {
+  const data = await response.json().catch(() => ({}))
+  if (data.run && typeof data.run === 'object') return { run: data.run as ProtocolRunSnapshot }
+  if (!response.ok) throw Object.assign(new Error(data.error || `HTTP ${response.status}`), { status: response.status })
+  throw new Error('Protocol response did not include a run')
+}
+
 export interface SessionMeta {
   id: string
   title: string
@@ -80,6 +87,116 @@ export interface Message {
   timestamp: string
   content: ContentBlock[]
   delivery?: 'sent' | 'delivered'
+}
+
+export type ProtocolRunStatus =
+  | 'starting'
+  | 'start_failed'
+  | 'pending'
+  | 'running'
+  | 'cancelling'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+
+export type ProtocolSeatStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
+export type ProtocolStageStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+
+export interface ProtocolRanking {
+  seatId: string
+  rationale: string
+}
+
+export interface ProtocolDisagreement {
+  summary: string
+  evidenceIds: string[]
+}
+
+export interface ProtocolVerdict {
+  ranking: ProtocolRanking[]
+  recommendation: string
+  disagreements: ProtocolDisagreement[]
+  confidence: 'low' | 'medium' | 'high'
+  citedEvidenceIds: string[]
+}
+
+export interface ProtocolSeatSnapshot {
+  seatId: string
+  stageId: 'candidates' | 'judge'
+  attempt: number
+  role: string
+  status: ProtocolSeatStatus
+  evidenceIds?: string[]
+  ompChildId?: string
+  reason?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+export interface ProtocolAttemptSnapshot {
+  attempt: number
+  status: ProtocolStageStatus
+  seats: ProtocolSeatSnapshot[]
+  reason?: string
+}
+
+export interface ProtocolStageSnapshot {
+  stageId: 'candidates' | 'judge'
+  status: ProtocolStageStatus
+  attempts: ProtocolAttemptSnapshot[]
+  reason?: string
+}
+
+export interface ProtocolEvidenceSnapshot {
+  evidenceId: string
+  kind: 'candidate_answer' | 'judge_verdict'
+  stageId: 'candidates' | 'judge'
+  seatId: string
+  attempt: number
+  content: string | ProtocolVerdict
+  artifactReferences?: string[]
+}
+
+export interface ProtocolRunSnapshot {
+  schemaVersion: 1
+  sessionId: string
+  runId: string
+  protocol: 'advisory'
+  status: ProtocolRunStatus
+  lastSeq: number
+  invocationMessageId: string
+  actionId: string
+  question: string
+  candidateCount: number
+  roles: Array<{ seatId: string; role: string }>
+  roleMode: 'diverse' | 'neutral'
+  timeoutMs: number
+  rubric?: string
+  sourceRunId?: string
+  ownerExecutionId?: string
+  createdAt: string
+  updatedAt?: string
+  startedAt?: string
+  finishedAt?: string
+  stages: ProtocolStageSnapshot[]
+  seats: ProtocolSeatSnapshot[]
+  evidence: ProtocolEvidenceSnapshot[]
+  verdict: ProtocolVerdict | null
+  verdictEvidenceId?: string | null
+  verdictRecordedAt?: string
+  cancelActionId?: string
+  reason?: string
+  error?: string
+}
+
+export interface AdvisoryLaunchInput {
+  protocol?: 'advisory'
+  question: string
+  candidateCount?: number
+  roleMode?: 'diverse' | 'neutral'
+  timeoutMs?: number
+  rubric?: string
 }
 
 export interface RoomInfo {
@@ -220,6 +337,38 @@ export async function fetchMessages(id: string, before = 0, box?: string | null)
   const r = await fetch(bq(url, box))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return await r.json()
+}
+
+export async function fetchProtocolRuns(id: string, box?: string | null): Promise<{ runs: ProtocolRunSnapshot[] }> {
+  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs`, box))
+  return responseJson<{ runs: ProtocolRunSnapshot[] }>(response)
+}
+
+export async function launchProtocolRun(id: string, input: AdvisoryLaunchInput, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
+  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs`, box), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return protocolMutationJson(response)
+}
+
+export async function cancelProtocolRun(id: string, runId: string, actionId: string, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
+  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs/${encodeURIComponent(runId)}/cancel`, box), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actionId }),
+  })
+  return protocolMutationJson(response)
+}
+
+export async function rerunProtocolRun(id: string, runId: string, actionId: string, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
+  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs/${encodeURIComponent(runId)}/rerun`, box), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actionId }),
+  })
+  return protocolMutationJson(response)
 }
 
 export async function sendInput(id: string, text: string, box?: string | null, messageId?: string): Promise<{ ok: boolean, sentAt: string }> {
@@ -494,13 +643,16 @@ export interface OmpBridgeEvent {
   contextPercent?: number
 }
 
-export function subscribeMessages(
-  id: string,
-  onMessage: (msg: Message) => void,
-  onStatus?: (status: 'connected' | 'reconnecting') => void,
-  box?: string | null,
-  onOmpEvent?: (event: OmpBridgeEvent) => void,
-): () => void {
+export interface SubscribeMessagesOptions {
+  onMessage: (message: Message) => void
+  onStatus?: (status: 'connected' | 'reconnecting') => void
+  box?: string | null
+  onOmpEvent?: (event: OmpBridgeEvent) => void
+  onProtocolRun?: (run: ProtocolRunSnapshot) => void
+}
+
+export function subscribeMessages(id: string, options: SubscribeMessagesOptions): () => void {
+  const { onMessage, onStatus, box, onOmpEvent, onProtocolRun } = options
   let es: EventSource | null = null
   let closed = false
   let retries = 0
@@ -545,6 +697,11 @@ export function subscribeMessages(
       if (myGen !== gen) return
       armWatchdog()
       try { onOmpEvent?.(JSON.parse(e.data)) } catch {}
+    })
+    source.addEventListener('protocol_run', (e) => {
+      if (myGen !== gen) return
+      armWatchdog()
+      try { onProtocolRun?.(JSON.parse(e.data)) } catch {}
     })
     source.onerror = () => {
       if (closed || myGen !== gen) return

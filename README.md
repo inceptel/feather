@@ -6,26 +6,24 @@ Open any Claude Code session on your phone. Read the conversation. Send messages
 
 <p align="center"><img src="docs/screenshots/session.png" alt="A Claude Code session rendered like a texting app, on mobile" width="320" /></p>
 
-## Sidecars & loops — multi-agent, built in
+## Sidecars — multi-agent, built in
 
 Spin up a **second agent** with its own context, paired to your current session, and chat with it both ways. It's a Feather session like any other — persistent, resumable, visible in the UI — so you can read the conversation, jump in, or let two agents work it out.
 
-![A generator and an independent evaluator arguing in the Sidecar tab](docs/screenshots/sidecar.png)
+![Two agents collaborating in the Sidecar tab](docs/screenshots/sidecar.png)
 
-- **`/sidecar <task>`** — spawn a peer thread (claude *or* codex) and talk to it via a tiny `sidecar` CLI. Messages are brokered by Feather and injected straight into each agent's tmux; a per-session lock means two senders never garble a pane. → [`skills/sidecar`](skills/sidecar/SKILL.md)
-- **`/looper <task>`** — the generator-evaluator loop: a generator builds, an **independent-context evaluator** opens and inspects the *real artifact* (renders the page, runs the tests — never trusts the builder's claims), and they loop until `[APPROVED]`. Separating the maker from the judge beats self-review. → [`skills/looper`](skills/looper/SKILL.md)
+- **`/sidecar <task>`** — spawn a peer thread (Claude *or* Codex) and talk to it through the `sidecar` CLI. Messages are brokered by Feather and injected into each agent's tmux; a per-session lock prevents two senders from garbling a pane. → [`skills/sidecar`](skills/sidecar/SKILL.md)
 
 Agents talk over a tiny CLI — messages are recorded to a file and injected into the peer's session:
 
 ```bash
 # from inside any agent session:
-sidecar post --to evaluator "ready for review — landing page v2"
+sidecar post --to peer "Please review the current approach."
 sidecar read        # print the whole thread
-# the peer's reply is injected straight back into your session:
-#   [sidecar message from evaluator] NOT APPROVED — the return arrow misses Generate by 62px...
+# the peer's reply is injected straight back into your session.
 ```
 
-The screenshot above is a real loop: an evaluator that rendered a webpage at two breakpoints, measured the DOM, and sent the generator back to fix a misaligned arrow — the harness pattern from Anthropic's long-running-agents work, running inside Feather.
+The peer works in an independent context while sharing a visible, durable thread with the primary session.
 
 ## Make it yours
 
@@ -126,13 +124,11 @@ required to use a Room.
 For finite autonomous work in Codex, the recommended path is `$goal-prep` followed
 by `/goal`: prepare a bounded, verifiable goal, then let the Codex goal session run
 it. This is not a cross-harness replacement for detached, indefinite loops.
-Feather's former Auto surface has been retired, and existing `~/auto-*` directories
-are left untouched.
 
 ## Agent capabilities
 
-Install the promoted Feather, Sidecar, and Looper skills for both Claude and
-Codex, plus the `room`, `sidecar`, and `refeather` CLIs, through the guarded installer. Point
+Install the promoted Feather and Sidecar skills for both Claude and Codex, plus the
+`room`, `sidecar`, and `refeather` CLIs, through the guarded installer. Point
 the links at the stable `current` release so one promotion updates server and
 agent capabilities together:
 
@@ -148,7 +144,6 @@ stops with cleanup guidance. Ensure `~/.local/bin` is on the environment used
 to spawn Claude and Codex sessions.
 
 - [`/sidecar`](skills/sidecar/SKILL.md) — spawn a paired peer agent thread and chat both ways.
-- [`/looper`](skills/looper/SKILL.md) — run a generator-evaluator loop until `[APPROVED]`.
 - [`/feather`](skills/feather/SKILL.md) — manage the running Feather server (status, logs, quick links, deploy).
 
 ## Quick start

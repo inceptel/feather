@@ -248,9 +248,9 @@ describe('POST /api/upload', () => {
   })
 })
 
-// ── Retired surfaces ───────────────────────────────────────────────────────
+// ── Retired CoS surface ─────────────────────────────────────────────────────
 
-describe('retired Auto and CoS APIs', () => {
+describe('retired CoS API', () => {
   it('returns a JSON 404 for the exact API root', async () => {
     const r = await fetch(`${BASE}/api`)
     assert.equal(r.status, 404)
@@ -258,16 +258,9 @@ describe('retired Auto and CoS APIs', () => {
     assert.deepEqual(await r.json(), { error: 'not found' })
   })
 
-  for (const endpoint of ['/api/auto/instances', '/api/cos/workstreams']) {
-    it(`returns a JSON 404 for GET ${endpoint}`, async () => {
-      const r = await fetch(`${BASE}${endpoint}`)
-      assert.equal(r.status, 404)
-      assert.ok(r.headers.get('content-type').includes('application/json'))
-      assert.deepEqual(await r.json(), { error: 'not found' })
-    })
-
-    it(`returns a JSON 404 for POST ${endpoint}`, async () => {
-      const r = await fetch(`${BASE}${endpoint}`, { method: 'POST' })
+  for (const method of ['GET', 'POST']) {
+    it(`returns a JSON 404 for ${method} /api/cos/workstreams`, async () => {
+      const r = await fetch(`${BASE}/api/cos/workstreams`, { method })
       assert.equal(r.status, 404)
       assert.ok(r.headers.get('content-type').includes('application/json'))
       assert.deepEqual(await r.json(), { error: 'not found' })
@@ -881,5 +874,206 @@ describe('GET /api/file', () => {
   it('404s for missing files', async () => {
     const r = await fetch(`${BASE}/api/file?path=/no/such/file-ever.png`)
     assert.equal(r.status, 404)
+  })
+})
+
+// ── Council protocol runs ───────────────────────────────────────────────────
+
+describe('Council protocol-run APIs', () => {
+  const bridgeToken = 'council-test-bridge-token'
+  const ownerExecutionId = 'cafebabe'
+  const invocationMessageId = 'deadbeef'
+  const eventId = (number) => `20000000-0000-4000-8000-${String(number).padStart(12, '0')}`
+
+  async function postJson(url, body, token) {
+    return fetch(`${BASE}${url}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'X-Feather-Bridge-Token': token } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+  }
+
+  before(() => {
+    const tokenDir = path.join(fixtureHome, '.feather', 'omp-sessions', '.feather-bridge-tokens')
+    fs.mkdirSync(tokenDir, { recursive: true, mode: 0o700 })
+    const tokenFile = createHash('sha256').update(TEST_SESSION_ID).digest('hex')
+    fs.writeFileSync(path.join(tokenDir, tokenFile), bridgeToken, { mode: 0o600 })
+  })
+
+  it('validates public list and launch shapes and durably exposes launch failure', async () => {
+    let response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { runs: [] })
+
+    response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs?limit=51`)
+    assert.equal(response.status, 400)
+
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs`, { protocol: 'court', question: 'No' })
+    assert.equal(response.status, 400)
+
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs`, {
+      protocol: 'advisory',
+      question: 'This launch cannot reach the fixture tmux.',
+      candidateCount: 2,
+      roleMode: 'neutral',
+      timeoutMs: 60_000,
+    })
+    assert.equal(response.status, 500)
+    const failed = await response.json()
+    assert.equal(failed.run.status, 'start_failed')
+    assert.equal(failed.run.lastSeq, 1)
+
+    response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)
+    const listed = await response.json()
+    assert.ok(listed.runs.some(run => run.runId === failed.run.runId && run.status === 'start_failed'))
+  })
+
+  it('enforces bridge authentication, parent-only claims, and exact event route identity', async () => {
+    const claimPath = `/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/claim`
+    let response = await postJson(claimPath, { ownerExecutionId, invocationMessageId, mode: 'create', input: { question: 'Choose a plan', candidateCount: 2 } })
+    assert.equal(response.status, 403)
+
+    response = await postJson(claimPath, { ownerExecutionId, invocationMessageId, mode: 'create', input: { question: 'Choose a plan', candidateCount: 2 } }, 'wrong-token')
+    assert.equal(response.status, 403)
+
+    response = await postJson(claimPath, { ownerExecutionId, invocationMessageId, mode: 'create', input: { question: 'Choose a plan', candidateCount: 2 }, subagentId: 'child-1' }, bridgeToken)
+    assert.equal(response.status, 403)
+
+    response = await postJson(claimPath, { ownerExecutionId }, bridgeToken)
+    assert.equal(response.status, 400)
+
+    response = await postJson(claimPath, { ownerExecutionId, invocationMessageId, mode: 'create', input: { question: 'Choose a plan', candidateCount: 2 } }, bridgeToken)
+    assert.equal(response.status, 200)
+    const { envelope } = await response.json()
+    assert.equal(envelope.ownerExecutionId, ownerExecutionId)
+    assert.deepEqual(envelope.input.roles, [
+      { seatId: 'candidate-1', role: 'Advocate' },
+      { seatId: 'candidate-2', role: 'Skeptic' },
+    ])
+
+    const started = {
+      schemaVersion: 1,
+      eventId: eventId(10),
+      runId: envelope.runId,
+      type: 'run_started',
+      payload: {
+        protocol: 'advisory',
+        invocationMessageId,
+        actionId: envelope.actionId,
+        ...envelope.input,
+      },
+    }
+    const eventsPath = `/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${envelope.runId}/events`
+    response = await postJson(eventsPath, { ownerExecutionId, event: started })
+    assert.equal(response.status, 403)
+    response = await postJson(eventsPath, { ownerExecutionId, event: started, unexpected: true }, bridgeToken)
+    assert.equal(response.status, 400)
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${eventId(99)}/events`, { ownerExecutionId, event: started }, bridgeToken)
+    assert.equal(response.status, 409)
+
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${envelope.runId}/events`, { ownerExecutionId, event: started }, bridgeToken)
+    assert.equal(response.status, 200)
+    const accepted = await response.json()
+    assert.equal(accepted.seq, 1)
+    assert.equal(accepted.duplicate, false)
+
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${envelope.runId}/events`, { ownerExecutionId, event: started }, bridgeToken)
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).duplicate, true)
+
+    const conflicting = structuredClone(started)
+    conflicting.payload.question = 'Different question'
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${envelope.runId}/events`, { ownerExecutionId, event: conflicting }, bridgeToken)
+    assert.equal(response.status, 409)
+
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${envelope.runId}/events`, {
+      ownerExecutionId: eventId(77),
+      event: {
+        schemaVersion: 1,
+        eventId: eventId(11),
+        runId: envelope.runId,
+        type: 'stage_started',
+        attempt: 1,
+        stageId: 'candidates',
+        payload: {},
+      },
+    }, bridgeToken)
+    assert.equal(response.status, 403)
+  })
+
+  it('logs cancel before interrupt failure, closes from positive owner lifecycle, and links rerun', async () => {
+    const listed = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()
+    const active = listed.runs.find(run => run.ownerExecutionId === ownerExecutionId && run.status === 'pending')
+    assert.ok(active)
+
+    let response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/events`, {
+      ownerExecutionId,
+      event: {
+        schemaVersion: 1,
+        eventId: eventId(20),
+        runId: active.runId,
+        type: 'stage_started',
+        attempt: 1,
+        stageId: 'candidates',
+        payload: {},
+      },
+    }, bridgeToken)
+    assert.equal(response.status, 200)
+
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/cancel`, {})
+    assert.equal(response.status, 400)
+
+    const cancelActionId = eventId(21)
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/cancel`, { actionId: cancelActionId })
+    assert.equal(response.status, 500)
+    let run = (await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()).runs.find(item => item.runId === active.runId)
+    assert.equal(run.status, 'cancelling')
+    assert.equal(run.cancelActionId, cancelActionId)
+
+    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/events`, {
+      version: 4,
+      events: [{ type: 'assistant_end', messageId: eventId(22), ownerExecutionId }],
+    }, bridgeToken)
+    assert.equal(response.status, 204)
+    run = (await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()).runs.find(item => item.runId === active.runId)
+    assert.equal(run.status, 'cancelled')
+    assert.ok(run.seats.every(seat => seat.status === 'cancelled'))
+
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/rerun`, {})
+    assert.equal(response.status, 400)
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/rerun`, { actionId: eventId(23) })
+    assert.equal(response.status, 500)
+    const rerun = await response.json()
+    assert.equal(rerun.run.status, 'start_failed')
+    assert.equal(rerun.run.sourceRunId, active.runId)
+  })
+
+  it('replays the latest snapshot as a named protocol_run SSE event', async () => {
+    const controller = new AbortController()
+    const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream`, { signal: controller.signal })
+    assert.equal(response.status, 200)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let payload = ''
+    for (let index = 0; index < 10 && !payload.includes('event: protocol_run'); index++) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise(resolve => setTimeout(() => resolve(null), 500)),
+      ])
+      if (chunk?.value) payload += decoder.decode(chunk.value)
+    }
+    controller.abort()
+    assert.match(payload, /event: protocol_run\ndata: /)
+    assert.match(payload, /\"lastSeq\":/)
+  })
+
+  it('rejects missing runs and nonterminal reruns with endpoint-shaped errors', async () => {
+    let response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${eventId(90)}/cancel`, { actionId: eventId(91) })
+    assert.equal(response.status, 404)
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${eventId(90)}/rerun`, { actionId: eventId(92) })
+    assert.equal(response.status, 404)
   })
 })

@@ -1,5 +1,5 @@
 import { For, Index, Show, createEffect, createMemo, createSignal } from 'solid-js'
-import type { Message, ContentBlock, OmpSubagentState, OmpTodoSnapshot, OmpTimelineItem, OmpWorkScope } from '../api'
+import type { Message, ContentBlock, OmpSubagentState, OmpTodoSnapshot, OmpTimelineItem, OmpWorkScope, ProtocolRunSnapshot } from '../api'
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import DOMPurify from 'dompurify'
@@ -30,6 +30,8 @@ import {
 import { localFilePath, localFileUrl } from '../lib/localMedia.js'
 import { extractImages } from '../lib/attachments.js'
 import { activeOmpStep } from '../lib/ompMirror.js'
+import { ProtocolRunCard } from './ProtocolRunCard'
+import { runsForInvocation } from '../lib/protocolRuns.js'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -789,6 +791,9 @@ type MessageViewProps = {
   jobs?: MessageViewJob[]
   runtime?: MessageViewRuntime | null
   standaloneAgents?: boolean
+  protocolRuns?: ProtocolRunSnapshot[]
+  onOpenProtocolRun?: (runId: string) => void
+  focusSubagentId?: string | null
 }
 
 export function MessageView(props: MessageViewProps) {
@@ -840,6 +845,16 @@ export function MessageView(props: MessageViewProps) {
   createEffect(() => {
     const selectedId = selectedSubagentId()
     if (selectedId && !(props.subagents || []).some(agent => agent.id === selectedId)) setSelectedSubagentId(null)
+  })
+  createEffect(() => {
+    const requestedId = props.focusSubagentId
+    if (!requestedId || !(props.subagents || []).some(agent => agent.id === requestedId)) return
+    setSelectedSubagentId(requestedId)
+    queueMicrotask(() => {
+      const target = document.getElementById(`omp-subagent-${requestedId}`)
+      target?.focus({ preventScroll: true })
+      target?.scrollIntoView({ block: 'nearest' })
+    })
   })
 
 
@@ -1280,37 +1295,42 @@ export function MessageView(props: MessageViewProps) {
         // User message: single blue-tinted bubble right-aligned; metadata INSIDE the bubble.
         if (msg.role === 'user') {
           return (
-            <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '12px' }}>
-              <div style={{
-                'max-width': '70%', padding: '10px 14px 8px',
-                'border-radius': '12px',
-                background: '#1e1e1e',
-                border: '1px solid rgba(96, 165, 250, 0.22)',
-                color: 'var(--text-primary)', overflow: 'hidden',
-                'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
-              }}>
-                <For each={images}>{(src) => (
-                  <img src={localFileUrl(src)!} onClick={() => setLightbox(localFileUrl(src)!)} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
-                )}</For>
-                <For each={files}>{(f) => {
-                  const isPdf = f.name.toLowerCase().endsWith('.pdf')
-                  const url = localFileUrl(f.path)!
-                  return (
-                    <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
-                      onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
-                      style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
-                      <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
-                      <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
-                    </a>
-                  )
-                }}</For>
-                {(() => {
-                  const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                  return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} /> : null
-                })()}
-                {metadataRow}
+            <>
+              <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '12px' }}>
+                <div style={{
+                  'max-width': '70%', padding: '10px 14px 8px',
+                  'border-radius': '12px',
+                  background: '#1e1e1e',
+                  border: '1px solid rgba(96, 165, 250, 0.22)',
+                  color: 'var(--text-primary)', overflow: 'hidden',
+                  'font-size': '14px', 'line-height': '1.5', 'word-break': 'break-word',
+                }}>
+                  <For each={images}>{(src) => (
+                    <img src={localFileUrl(src)!} onClick={() => setLightbox(localFileUrl(src)!)} onError={(e) => replaceImageWithPathLink(e.currentTarget, src)} style={{ 'max-width': '100%', 'max-height': '300px', 'border-radius': '6px', 'margin-bottom': '4px', cursor: 'zoom-in', display: 'block' }} />
+                  )}</For>
+                  <For each={files}>{(f) => {
+                    const isPdf = f.name.toLowerCase().endsWith('.pdf')
+                    const url = localFileUrl(f.path)!
+                    return (
+                      <a href={url} target={isPdf ? undefined : '_blank'} rel="noopener"
+                        onClick={(e) => { if (isPdf) { e.preventDefault(); setPdfViewer(url) } }}
+                        style={{ display: 'flex', 'align-items': 'center', gap: '6px', padding: '6px 10px', margin: '2px 0', background: 'rgba(255,255,255,0.05)', 'border-radius': '8px', 'text-decoration': 'none', color: 'var(--link)', 'font-size': '12px' }}>
+                        <span style={{ 'font-size': '16px' }}>{isPdf ? '\uD83D\uDCC4' : '\uD83D\uDCCE'}</span>
+                        <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{f.name}</span>
+                      </a>
+                    )
+                  }}</For>
+                  {(() => {
+                    const display = hasAttachments ? cleanText : (textBlock?.text || '')
+                    return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} /> : null
+                  })()}
+                  {metadataRow}
+                </div>
               </div>
-            </div>
+              <For each={runsForInvocation(props.protocolRuns || [], msg.uuid)}>{(run) => (
+                <ProtocolRunCard run={run} onOpen={(runId) => props.onOpenProtocolRun?.(runId)} />
+              )}</For>
+            </>
           )
         }
 
@@ -1475,6 +1495,7 @@ export function MessageView(props: MessageViewProps) {
                 <li>
                   <button
                     type="button"
+                    id={`omp-subagent-${agent.id}`}
                     data-testid={`omp-subagent-${agent.id}`}
                     class="agent-card"
                     style={{ color: executionStatusColor(agent.status) }}
