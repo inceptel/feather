@@ -1423,8 +1423,8 @@ export function MessageView(props: MessageViewProps) {
       </Show>
       <Show when={props.assistantStream?.text}>
         <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
-            {props.assistantStream!.text}<span aria-hidden="true" style={{ display: 'inline-block', width: '1px', height: '1em', background: 'var(--text-secondary)', 'margin-left': '2px', 'vertical-align': 'text-bottom', opacity: props.assistantStream!.ended ? '0.35' : '0.9' }} />
+          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word' }}>
+            <div class="markdown" innerHTML={renderLiveMarkdown(props.assistantStream!.text)} ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))} />
           </div>
         </div>
       </Show>
