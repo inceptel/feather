@@ -72,7 +72,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const response = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [
+    body: JSON.stringify({ version: 3, events: [
       { type: 'assistant_snapshot', messageId: 'stream-1', text: 'This answer is arriving token by token.' },
       { type: 'work_snapshot', messageId: 'stream-1', blocks: [
         { type: 'thinking', thinking: 'Inspecting the live OMP work timeline.' },
@@ -106,7 +106,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const replacement = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [{
+    body: JSON.stringify({ version: 3, events: [{
       type: 'work_snapshot', messageId: 'stream-2', blocks: [
         { type: 'thinking', thinking: 'Refined live reasoning replaced the first snapshot.' },
         { type: 'tool_use', id: 'live-tool-2', name: 'read', intent: 'Reading replacement state' },
@@ -122,7 +122,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const newest = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [{
+    body: JSON.stringify({ version: 3, events: [{
       type: 'work_snapshot', messageId: 'stream-2', blocks: [
         { type: 'thinking', thinking: 'Newest reasoning updates without collapsing Details.' },
       ],
@@ -135,7 +135,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const cleared = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [{ type: 'work_snapshot', messageId: 'stream-2', blocks: [] }] }),
+    body: JSON.stringify({ version: 3, events: [{ type: 'work_snapshot', messageId: 'stream-2', blocks: [] }] }),
   })
   expect(cleared.status).toBe(204)
   await expect(liveWork).toHaveCount(0)
@@ -143,7 +143,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const cancelled = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [
+    body: JSON.stringify({ version: 3, events: [
       { type: 'work_snapshot', messageId: 'stream-3', blocks: [{ type: 'tool_use', id: 'live-tool-3', name: 'read' }] },
       { type: 'assistant_cancel', messageId: 'other-stream' },
     ] }),
@@ -153,7 +153,7 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const cancelCurrent = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [{ type: 'assistant_cancel', messageId: 'stream-3' }] }),
+    body: JSON.stringify({ version: 3, events: [{ type: 'assistant_cancel', messageId: 'stream-3' }] }),
   })
   expect(cancelCurrent.status).toBe(204)
   await expect(liveWork).toHaveCount(0)
@@ -161,15 +161,21 @@ test('renders and reconciles OMP-native live surfaces', async ({ page }) => {
   const ended = await fetch(`${BASE}/api/internal/sessions/${SESSION_ID}/events`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': 'e2e-native-token' },
-    body: JSON.stringify({ version: 2, events: [
+    body: JSON.stringify({ version: 3, events: [
       { type: 'work_snapshot', messageId: 'stream-4', blocks: [{ type: 'tool_use', id: 'live-tool-4', name: 'read' }] },
       { type: 'assistant_end', messageId: 'stream-4' },
     ] }),
   })
   expect(ended.status).toBe(204)
   await expect(liveWork).toHaveCount(0)
-  await expect(page.getByTestId('omp-todo').locator('summary')).toBeVisible()
-  expect(await page.getByTestId('omp-todo').locator('summary').evaluate(element => getComputedStyle(element).position)).toBe('sticky')
+  const todo = page.getByTestId('omp-todo')
+  await expect(todo.locator('summary')).toBeVisible()
+  expect(await todo.evaluate(element => getComputedStyle(element).position)).toBe('sticky')
+  expect(await page.evaluate(() => {
+    const todoElement = document.querySelector('[data-testid="omp-todo"]')
+    const runtime = document.querySelector('[data-testid="omp-runtime"]')
+    return !!todoElement && !!runtime && !!(todoElement.compareDocumentPosition(runtime) & Node.DOCUMENT_POSITION_FOLLOWING)
+  })).toBe(true)
   await expect(page.getByText(/Todo · 1\/2/)).toBeVisible()
   await expect(page.getByText('Verify native UI', { exact: true })).toBeVisible()
   await expect(page.getByTestId('omp-runtime')).toContainText('openai/gpt-5.6')

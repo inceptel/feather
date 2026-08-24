@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 const SNAPSHOT_INTERVAL_MS = 50
-const BRIDGE_VERSION = 2
+const BRIDGE_VERSION = 3
 const MAX_LIVE_THINKING_CHARS = 3_000
 const MAX_POST_BYTES = 400_000
 const textEncoder = new TextEncoder()

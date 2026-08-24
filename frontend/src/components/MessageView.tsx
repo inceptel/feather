@@ -975,6 +975,29 @@ export function MessageView(props: MessageViewProps) {
         </div>
       </Show>
 
+      <Show when={props.todo}>
+        <details data-testid="omp-todo" open={props.working} style={{ position: 'sticky', top: '0', 'z-index': '3', 'max-height': '42vh', overflow: 'auto', margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)', 'box-shadow': '0 6px 18px rgba(0,0,0,0.24)' }}>
+          <summary style={{ position: 'sticky', top: '0', 'z-index': '2', background: 'var(--bg-surface)', padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
+            Todo · {props.todo!.completed}/{props.todo!.total}
+            <Show when={props.todo!.active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {props.todo!.active}</span></Show>
+          </summary>
+          <div style={{ padding: '0 0 9px' }}>
+            <For each={props.todo!.phases}>{(phase) => (
+              <div style={{ 'margin-top': '7px' }}>
+                <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
+                <For each={phase.tasks}>{(task) => (
+                  <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
+                    <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
+                      {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
+                    </span>
+                    <span>{task.content}</span>
+                  </div>
+                )}</For>
+              </div>
+            )}</For>
+          </div>
+        </details>
+      </Show>
       <For each={displayedRenderItems()}>{(item) => {
         if (item.kind === 'chain') {
           if (item !== renderItems().at(-1)) return null
@@ -1254,29 +1277,6 @@ export function MessageView(props: MessageViewProps) {
         </div>
       </Show>
 
-      <Show when={props.todo}>
-        <details data-testid="omp-todo" open={props.working} style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}>
-          <summary style={{ position: 'sticky', top: '0', 'z-index': '2', background: 'var(--bg-surface)', padding: '8px 0', cursor: 'pointer', color: 'var(--text-secondary)', 'font-size': '12px', 'font-weight': '600' }}>
-            Todo · {props.todo!.completed}/{props.todo!.total}
-            <Show when={props.todo!.active}><span style={{ color: 'var(--text-muted)', 'font-weight': '400' }}> · {props.todo!.active}</span></Show>
-          </summary>
-          <div style={{ padding: '0 0 9px' }}>
-            <For each={props.todo!.phases}>{(phase) => (
-              <div style={{ 'margin-top': '7px' }}>
-                <div style={{ color: 'var(--text-muted)', 'font-size': '10px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '3px' }}>{phase.name}</div>
-                <For each={phase.tasks}>{(task) => (
-                  <div style={{ display: 'flex', gap: '7px', padding: '2px 0', color: task.status === 'completed' ? 'var(--text-dim)' : task.status === 'in_progress' ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '11px', 'text-decoration': task.status === 'abandoned' ? 'line-through' : 'none' }}>
-                    <span style={{ color: task.status === 'completed' ? 'var(--success)' : task.status === 'in_progress' ? 'var(--accent)' : task.status === 'blocked' ? 'var(--warning)' : 'var(--text-faint)', width: '12px', 'flex-shrink': '0' }}>
-                      {task.status === 'completed' ? '✓' : task.status === 'in_progress' ? '●' : task.status === 'blocked' ? '!' : task.status === 'abandoned' ? '×' : '○'}
-                    </span>
-                    <span>{task.content}</span>
-                  </div>
-                )}</For>
-              </div>
-            )}</For>
-          </div>
-        </details>
-      </Show>
 
       <Show when={props.assistantStream?.text}>
         <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>

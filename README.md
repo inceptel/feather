@@ -88,6 +88,11 @@ working directory and durable notes. Rooms do not impose a special agent persona
 start or resume whichever Claude, Codex, or OMP session is useful, and keep the context
 that should survive any one chat in the room's `notes.md`.
 
+Each Room has one durable **Main** chat. Tapping the Room always opens that chat,
+regardless of which background or historical chat spoke most recently. Expanding
+the card keeps Main first and shows only four other chats; **Manage other chats**
+reveals the full history plus Make main and Detach actions.
+
 By default, Feather checks each inactive Room every 15 minutes and launches one
 non-interactive OMP session to do the next useful thing. The Room card shows when
 it last worked and when it will check again. Pause or resume that behavior from

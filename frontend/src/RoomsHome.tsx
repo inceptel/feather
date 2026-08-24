@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomUpdates, fetchRoomFriction, RoomInfo, SessionMeta, RoomUpdate, FrictionComplaint } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomMain, setRoomPulse, fetchRoomUpdates, fetchRoomFriction, RoomInfo, SessionMeta, RoomUpdate, FrictionComplaint } from './api'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -31,7 +31,7 @@ function snippetLabel(latest: { role: string, text: string } | null) {
 }
 
 function pulseLabel(room: RoomInfo) {
-  if (!room.pulse.enabled) return 'Paused'
+  if (!room.pulse.enabled) return ''
   const age = timeAgo(room.pulse.lastRunAt)
   let worked = ''
   if (age === 'now') worked = 'Worked now'
@@ -62,6 +62,9 @@ function updateTimeLabel(iso: string | null) {
 }
 
 function primaryRoomSession(room: RoomInfo) {
+  if (room.mainSessionId !== undefined) {
+    return room.sessions.find(session => session.id === room.mainSessionId) || null
+  }
   return room.sessions.find(session =>
     session.id !== room.pulse.sessionId && !session.title.startsWith('Keep working: #')
   ) || null
@@ -71,6 +74,7 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   const [rooms, setRooms] = createSignal<RoomInfo[] | null>(null)
   const [error, setError] = createSignal<string | null>(null)
   const [expanded, setExpanded] = createSignal<string | null>(null)
+  const [managingRoom, setManagingRoom] = createSignal<string | null>(null)
   const [busy, setBusy] = createSignal(false)
   const [attachLoading, setAttachLoading] = createSignal(false)
   const [attachingRoom, setAttachingRoom] = createSignal<string | null>(null)
@@ -85,11 +89,17 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   const [frictionRoom, setFrictionRoom] = createSignal<string | null>(null)
   const [frictionList, setFrictionList] = createSignal<FrictionComplaint[]>([])
   const [frictionLoading, setFrictionLoading] = createSignal(false)
-  const [frictionError, setFrictionError] = createSignal<string | null>(null)
 
+  let roomsEpoch = 0
+  const [frictionError, setFrictionError] = createSignal<string | null>(null)
   async function refresh() {
-    try { setRooms(await fetchRooms()); setError(null) }
-    catch (e: any) { setError(e.message) }
+    const epoch = roomsEpoch
+    try {
+      const next = await fetchRooms()
+      if (epoch === roomsEpoch) { setRooms(next); setError(null) }
+    } catch (error) {
+      if (epoch === roomsEpoch) setError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   let timer: ReturnType<typeof setInterval>
@@ -159,6 +169,22 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     finally { setBusy(false) }
   }
 
+  async function makeMain(room: RoomInfo, session: SessionMeta, event: MouseEvent) {
+    event.stopPropagation()
+    setBusy(true)
+    const epoch = ++roomsEpoch
+    try {
+      const { mainSessionId, pulse } = await setRoomMain(room.name, session.id)
+      if (epoch !== roomsEpoch) return
+      setRooms((current) => current?.map((item) =>
+        item.name === room.name ? { ...item, mainSessionId, pulse } : item) || null)
+    } catch (error) {
+      if (epoch === roomsEpoch) alert(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (epoch === roomsEpoch) setBusy(false)
+    }
+  }
+
   async function togglePulse(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
     setBusy(true)
@@ -205,29 +231,48 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     }
   }
 
-  // Tap the card → open the newest human-facing chat, never the autonomous
-  // Keep-working pulse. If the Room has only pulse history, create its first
-  // OMP chat and make that the stable card destination on the next refresh.
+  // Tap the card → open the designated main chat, never whichever session
+  // happened to speak most recently. Rooms without a designation fall back
+  // to the newest human-facing chat; pulse-only Rooms create their first chat.
   function openRoom(room: RoomInfo) {
     const primary = primaryRoomSession(room)
     if (primary) props.onOpen(primary.id)
     else newChat(room, 'omp')
   }
-  const toggleExpand = (name: string) => setExpanded(expanded() === name ? null : name)
+  function toggleExpand(name: string) {
+    const next = expanded() === name ? null : name
+    setExpanded(next)
+    if (managingRoom() !== next) setManagingRoom(null)
+  }
+
+  function orderedRoomSessions(room: RoomInfo) {
+    const main = primaryRoomSession(room)
+    return main ? [main, ...room.sessions.filter((session) => session.id !== main.id)] : room.sessions
+  }
+
+  function visibleRoomSessions(room: RoomInfo) {
+    const ordered = orderedRoomSessions(room)
+    return managingRoom() === room.name ? ordered : ordered.slice(0, 5)
+  }
 
   const agentColor = (a?: string) => a === 'codex' ? '#c084fc' : a === 'omp' ? '#e0a050' : '#73b8ff'
   const agentBg = (a?: string) => a === 'codex' ? '#2a1e3a' : a === 'omp' ? '#3a2a1e' : '#1e2a3a'
 
   const sessionRow = (room: RoomInfo, s: SessionMeta) => (
-    <div onClick={(e) => { e.stopPropagation(); props.onOpen(s.id) }}
+    <div data-testid={`session-${s.id}`} onClick={(e) => { e.stopPropagation(); props.onOpen(s.id) }}
       style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '9px 16px 9px 28px', 'border-top': '1px solid #16161f', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
       <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: s.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
       <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: agentBg(s.agent), color: agentColor(s.agent), 'flex-shrink': '0', 'font-weight': '600' }}>{s.agent || 'claude'}</span>
       <Show when={primaryRoomSession(room)?.id === s.id}>
-        <span style={{ 'font-size': '9px', color: '#69c77f', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Main</span>
+        <span data-testid={`main-${s.id}`} style={{ 'font-size': '9px', color: '#69c77f', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Main</span>
       </Show>
       <span style={{ flex: '1', 'font-size': '13px', color: '#ccc', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</span>
-      <Show when={s.roomAssigned}>
+      <Show when={managingRoom() === room.name && primaryRoomSession(room)?.id !== s.id && !s.title.startsWith('Keep working: #')}>
+        <button data-testid={`make-main-${s.id}`} aria-label={`Make ${s.title} the main chat for #${room.name}`} disabled={busy()}
+          onClick={(event) => makeMain(room, s, event)}
+          style={{ background: 'none', border: 'none', color: '#69c77f', 'font-size': '10px', 'font-weight': '600', padding: '3px 4px', cursor: 'pointer', 'flex-shrink': '0', 'white-space': 'nowrap' }}>Make main</button>
+      </Show>
+      <Show when={managingRoom() === room.name && s.roomAssigned}>
         <button data-testid={`detach-${s.id}`} aria-label={`Detach ${s.title} from #${room.name}`} disabled={busy()}
           onClick={(event) => detachSession(room, s, event)}
           style={{ background: 'none', border: 'none', color: '#777', 'font-size': '11px', padding: '3px 5px', cursor: 'pointer', 'flex-shrink': '0' }}>Detach</button>
@@ -335,7 +380,13 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                   </div>
                 </Show>
                 <Show when={expanded() === room.name}>
-                  <For each={room.sessions}>{(s) => sessionRow(room, s)}</For>
+                  <For each={visibleRoomSessions(room)}>{(s) => sessionRow(room, s)}</For>
+                  <Show when={room.sessions.length > 1 || room.sessions.some((session) => session.roomAssigned)}>
+                    <button data-testid={`manage-chats-${room.name}`} onClick={() => setManagingRoom(managingRoom() === room.name ? null : room.name)}
+                      style={{ width: '100%', background: 'none', border: 'none', 'border-top': '1px solid #16161f', color: '#7f8996', 'font-size': '11px', 'font-weight': '600', padding: '8px 28px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}>
+                      {managingRoom() === room.name ? 'Done managing' : room.sessions.length > 1 ? `Manage ${room.sessions.length - 1} other chat${room.sessions.length === 2 ? '' : 's'}` : 'Manage chat'}
+                    </button>
+                  </Show>
                   <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '10px 16px 12px 28px', 'border-top': '1px solid #16161f' }}>
                     <button onClick={() => newChat(room)} disabled={busy()}
                       style={{ background: '#152a1c', border: '1px solid #2a4a34', color: '#4aba6a', 'font-size': '12px', 'font-weight': '600', padding: '5px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>+ New chat here</button>

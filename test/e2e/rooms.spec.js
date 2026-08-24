@@ -42,12 +42,15 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   await expect(page.getByTestId('pulse-marriage')).toHaveText('Keep working')
   await page.getByTestId('pulse-marriage').click()
   await expect(page.getByTestId('pulse-marriage')).toHaveText('Paused')
+  await expect(page.getByText('Paused', { exact: true })).toHaveCount(1)
   await page.locator('button:has-text("›")').click()
   await page.getByTestId('attach-existing-marriage').click()
   await expect(page.getByTestId('attach-picker-marriage')).toBeVisible()
   await page.getByTestId(`attach-${candidate.id}`).click()
 
+  await expect(page.getByTestId(`detach-${candidate.id}`)).toHaveCount(0)
   await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
+  await page.getByTestId('manage-chats-marriage').click()
   await expect(page.getByTestId(`detach-${candidate.id}`)).toBeVisible()
   await page.screenshot({ path: 'test-results/rooms-u3-attach-mobile.png', fullPage: true })
   await page.getByTestId(`detach-${candidate.id}`).click()
@@ -60,31 +63,66 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
 })
 
-test('Room card opens its main human chat instead of the Keep-working pulse', async ({ page }) => {
+test('Room card and explicit promotion use the durable main human chat', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const pulse = {
-    id: 'pulse-chat', title: 'Keep working: #feather', updatedAt: '2026-08-24T01:00:00Z',
+    id: 'pulse-chat', title: 'Human continued this pulse chat', updatedAt: '2026-08-24T01:00:00Z',
     isActive: true, agent: 'omp', roomAssigned: true,
   }
   const main = {
     id: 'main-human-chat', title: '#feather main', updatedAt: '2026-08-23T23:00:00Z',
     isActive: false, agent: 'omp', roomAssigned: true,
   }
+  const newer = {
+    id: 'newer-human-chat', title: 'A newer human chat', updatedAt: '2026-08-24T00:30:00Z',
+    isActive: false, agent: 'claude', roomAssigned: true,
+  }
+  const archived = Array.from({ length: 4 }, (_, index) => ({
+    id: `archived-${index}`, title: `Archived chat ${index}`, updatedAt: `2026-08-22T0${index}:00:00Z`,
+    isActive: false, agent: 'codex', roomAssigned: true,
+  }))
+  let mainSessionId = main.id
+  let pulseSessionId = pulse.id
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
     name: 'feather', cwd: '/home/user/rooms/feather', active: true,
     latest: { role: 'assistant', text: 'Pulse finished work.' }, updatedAt: pulse.updatedAt,
     updates: { count: 0, latestAt: null, latest: null },
     friction: { count: 0, latestAt: null, latest: null },
-    pulse: { enabled: true, status: 'working', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulse.id },
-    sessions: [pulse, main],
+    pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
+    mainSessionId,
+    sessions: [pulse, newer, main, ...archived],
   }] } }))
+  await page.route('**/api/rooms/feather/main', async route => {
+    const body = JSON.parse(route.request().postData() || '{}')
+    mainSessionId = body.sessionId
+    if (mainSessionId === pulseSessionId) pulseSessionId = null
+    await route.fulfill({ json: {
+      ok: true,
+      mainSessionId,
+      pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
+    } })
+  })
 
   await page.goto(BASE)
   await expect(page.getByText('#feather', { exact: true })).toBeVisible()
   await page.locator('button:has-text("›")').click()
-  await expect(page.getByText('Main', { exact: true })).toBeVisible()
+  await expect(page.getByTestId(`main-${main.id}`)).toBeVisible()
+  await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`make-main-${newer.id}`)).toHaveCount(0)
   await page.getByText('#feather', { exact: true }).click()
   await expect(page).toHaveURL(/#main-human-chat$/)
+
+  await page.goto(BASE)
+  await page.locator('button:has-text("›")').click()
+  await page.getByTestId('manage-chats-feather').click()
+  await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toBeVisible()
+  await expect(page.getByTestId(`make-main-${pulse.id}`)).toBeVisible()
+  await page.getByTestId(`make-main-${pulse.id}`).click()
+  await expect(page.getByTestId(`main-${pulse.id}`)).toBeVisible()
+  await page.getByTestId(`make-main-${newer.id}`).click()
+  await expect(page.getByTestId(`main-${newer.id}`)).toBeVisible()
+  await page.getByText('#feather', { exact: true }).click()
+  await expect(page).toHaveURL(/#newer-human-chat$/)
 })
 
 test('surfaces an unread Updates badge, opens the feed, and marks it read per-device', async ({ page }) => {
