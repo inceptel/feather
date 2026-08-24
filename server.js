@@ -17,7 +17,7 @@ import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js'
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from './lib/omp.js';
-import { ompSessionIdFromHead } from './lib/omp-session.js';
+import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { parseFrictionNotes } from './lib/friction.js';
@@ -856,7 +856,7 @@ function resumeSession(id, cwd) {
   const agent = getAgentForSession(id);
   const name = tmuxName(id);
   if (agent === 'omp') {
-    launchOmpSession(id, cwd, { resume: true });
+    launchOmpSession(id, cwd || getOmpSessionCwd(id), { resume: true });
   } else if (agent === 'codex') {
     const meta = readMeta();
     const codexUuid = meta[id]?.codexUuid || (UUID_RE.test(id) ? id : null);
@@ -893,7 +893,7 @@ function resumeSession(id, cwd) {
   }
 }
 
-function getOmpSessionId(featherId) {
+function readOmpSessionHead(featherId) {
   const fpath = findOmpJsonlPath(featherId);
   if (!fpath) return null;
   try {
@@ -901,13 +901,21 @@ function getOmpSessionId(featherId) {
     try {
       const buf = Buffer.alloc(Math.min(64 * 1024, fs.fstatSync(fd).size));
       fs.readSync(fd, buf, 0, buf.length, 0);
-      return ompSessionIdFromHead(buf.toString('utf8'));
+      return buf.toString('utf8');
     } finally {
       fs.closeSync(fd);
     }
   } catch {
     return null;
   }
+}
+
+function getOmpSessionId(featherId) {
+  return ompSessionIdFromHead(readOmpSessionHead(featherId));
+}
+
+function getOmpSessionCwd(featherId) {
+  return ompSessionCwdFromHead(readOmpSessionHead(featherId));
 }
 
 // Per-session send lock (U1): serialize the tmux send-keys/paste-buffer
@@ -1036,6 +1044,44 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
   }
 }
 
+const pendingOmpBridgeMigrations = new Map();
+
+function ompBridgeConfigured(sessionId) {
+  if (ompBridgeTokens.has(sessionId)) return true;
+  try { return !!fs.readFileSync(ompBridgeTokenPath(sessionId), 'utf8').trim(); }
+  catch { return false; }
+}
+
+function cancelOmpBridgeMigration(sessionId) {
+  const timer = pendingOmpBridgeMigrations.get(sessionId);
+  if (!timer) return;
+  clearTimeout(timer);
+  pendingOmpBridgeMigrations.delete(sessionId);
+}
+
+function observeOmpTurnBoundary(sessionId, line) {
+  const boundary = ompTurnBoundaryFromLine(line);
+  if (!boundary) return;
+  if (boundary === 'active') {
+    cancelOmpBridgeMigration(sessionId);
+    return;
+  }
+  if (getAgentForSession(sessionId) !== 'omp') return;
+  if (ompBridgeConfigured(sessionId) || !tmuxIsActive(sessionId) || pendingOmpBridgeMigrations.has(sessionId)) return;
+  const timer = setTimeout(() => {
+    pendingOmpBridgeMigrations.delete(sessionId);
+    if (ompBridgeConfigured(sessionId) || !tmuxIsActive(sessionId) || getAgentForSession(sessionId) !== 'omp') return;
+    try {
+      launchOmpSession(sessionId, getOmpSessionCwd(sessionId), { resume: true });
+      console.log(`[omp bridge] migrated completed session ${sessionId}`);
+    } catch (error) {
+      console.warn(`[omp bridge] migration failed for ${sessionId}:`, error.message);
+    }
+  }, 1500);
+  timer.unref();
+  pendingOmpBridgeMigrations.set(sessionId, timer);
+}
+
 function processFileChange(filePath, sessionIdOverride) {
   if (!filePath.endsWith('.jsonl')) return;
   const sessionId = sessionIdOverride || path.basename(filePath, '.jsonl');
@@ -1055,6 +1101,7 @@ function processFileChange(filePath, sessionIdOverride) {
     for (const line of complete.split('\n').filter(Boolean)) {
       offset += Buffer.byteLength(line + '\n');
       broadcast(sessionId, line, offset);
+      observeOmpTurnBoundary(sessionId, line);
     }
     fileOffsets.set(sessionId, currentOffset + Buffer.byteLength(complete));
   } catch {}
