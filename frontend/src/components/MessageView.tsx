@@ -1559,7 +1559,7 @@ export function MessageView(props: MessageViewProps) {
 
       <Show when={props.working}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
-          <div role="status" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
+          <div role="status" data-testid="working-indicator" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite', 'flex-shrink': '0' }} />
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite', 'flex-shrink': '0' }} />
