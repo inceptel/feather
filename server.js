@@ -21,6 +21,7 @@ import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } 
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { parseFrictionNotes } from './lib/friction.js';
+import { createProtocolRunStore } from './lib/protocol-runs.js';
 
 // Load ~/.env if present
 try {
@@ -53,7 +54,7 @@ const ROOM_PULSE_MAX_CONCURRENT = Math.max(1, Number.isFinite(configuredPulseMax
   ? Math.floor(configuredPulseMax) : 3);
 const ROOM_PULSE_STARTED_AT = Date.now();
 const READ_ONLY_ERROR = Object.freeze({ error: 'read-only canary', code: 'FEATHER_READ_ONLY' });
-const SESSION_READ_ROUTE = /^\/api\/sessions\/[^/]+\/(messages|stream|export)$/;
+const SESSION_READ_ROUTE = /^\/api\/sessions\/[^/]+\/(messages|stream|export|protocol-runs)$/;
 
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
@@ -65,9 +66,13 @@ const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
 const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
 const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'feather-bridge.js');
+const OMP_PROTOCOL_EXTENSION = path.join(import.meta.dirname, 'omp-tools', 'feather-protocol-tools.js');
+const OMP_COUNCIL_SKILL = path.join(import.meta.dirname, 'skills', 'council');
 const ompBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
+const OMP_DISCOVERED_PROTOCOL = path.join(HOME, '.omp/agent/extensions/feather-protocol-tools.js');
+const OMP_DISCOVERED_COUNCIL = path.join(HOME, '.omp/agent/skills/council');
 const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
 // v1-v3 payloads remain accepted for compatibility, but only v4 marks the
 // mirror live. Older sessions therefore keep the existing turn-boundary
@@ -785,31 +790,56 @@ function ompBridgeTokenPath(sessionId) {
   const file = createHash('sha256').update(String(sessionId)).digest('hex');
   return path.join(OMP_BRIDGE_TOKENS_DIR, file);
 }
-function ensureOmpBridgeDiscovery() {
-  fs.mkdirSync(path.dirname(OMP_DISCOVERED_BRIDGE), { recursive: true, mode: 0o700 });
+function ensureManagedOmpSymlink(discoveredPath, targetPath, expectedSuffix, label) {
+  fs.mkdirSync(path.dirname(discoveredPath), { recursive: true, mode: 0o700 });
   try {
-    const stat = fs.lstatSync(OMP_DISCOVERED_BRIDGE);
+    const stat = fs.lstatSync(discoveredPath);
     if (!stat.isSymbolicLink()) {
-      console.warn(`[omp bridge] discovery path is occupied: ${OMP_DISCOVERED_BRIDGE}`);
+      console.warn(`[omp ${label}] discovery path is occupied: ${discoveredPath}`);
       return false;
     }
-    const currentTarget = path.resolve(path.dirname(OMP_DISCOVERED_BRIDGE), fs.readlinkSync(OMP_DISCOVERED_BRIDGE));
-    if (currentTarget === OMP_BRIDGE_EXTENSION) return true;
-    if (!currentTarget.endsWith(path.join('omp-extensions', 'feather-bridge.js'))) {
-      console.warn(`[omp bridge] refusing to replace unrelated symlink: ${OMP_DISCOVERED_BRIDGE}`);
+    const currentTarget = path.resolve(path.dirname(discoveredPath), fs.readlinkSync(discoveredPath));
+    if (currentTarget === targetPath) return true;
+    if (!currentTarget.endsWith(expectedSuffix)) {
+      console.warn(`[omp ${label}] refusing to replace unrelated symlink: ${discoveredPath}`);
       return false;
     }
-    const replacement = `${OMP_DISCOVERED_BRIDGE}.tmp-${process.pid}`;
+    const replacement = `${discoveredPath}.tmp-${process.pid}`;
     try { fs.unlinkSync(replacement); } catch {}
-    fs.symlinkSync(OMP_BRIDGE_EXTENSION, replacement);
-    fs.renameSync(replacement, OMP_DISCOVERED_BRIDGE);
+    fs.symlinkSync(targetPath, replacement);
+    fs.renameSync(replacement, discoveredPath);
     return true;
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  fs.symlinkSync(OMP_BRIDGE_EXTENSION, OMP_DISCOVERED_BRIDGE);
+  fs.symlinkSync(targetPath, discoveredPath);
   return true;
 }
+
+function ensureOmpBridgeDiscovery() {
+  return ensureManagedOmpSymlink(
+    OMP_DISCOVERED_BRIDGE,
+    OMP_BRIDGE_EXTENSION,
+    path.join('omp-extensions', 'feather-bridge.js'),
+    'bridge',
+  );
+}
+
+function ensureOmpCouncilDiscovery() {
+  ensureManagedOmpSymlink(
+    OMP_DISCOVERED_PROTOCOL,
+    OMP_PROTOCOL_EXTENSION,
+    path.join('omp-tools', 'feather-protocol-tools.js'),
+    'protocols',
+  );
+  ensureManagedOmpSymlink(
+    OMP_DISCOVERED_COUNCIL,
+    OMP_COUNCIL_SKILL,
+    path.join('skills', 'council'),
+    'council',
+  );
+}
+
 
 
 
@@ -825,6 +855,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   ompBridgeTokens.set(id, bridgeToken);
   ompBridgeLastSeen.delete(id);
   const bridgeDiscovered = ensureOmpBridgeDiscovery();
+  ensureOmpCouncilDiscovery();
   fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(OMP_BRIDGE_TOKENS_DIR, 0o700);
   fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
@@ -1166,6 +1197,105 @@ function broadcastNamedEvent(sessionId, eventName, data) {
   if (!clients || clients.size === 0) return;
   const chunk = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of clients) writeSse(sessionId, clients, res, chunk);
+}
+
+const protocolRuns = createProtocolRunStore({
+  root: path.join(HOME, '.feather', 'protocol-runs'),
+  onSnapshot: (sessionId, snapshot) => broadcastNamedEvent(sessionId, 'protocol_run', snapshot),
+  readOnly: READ_ONLY_MODE,
+});
+
+function replayProtocolRuns(sessionId, clients, res) {
+  for (const snapshot of protocolRuns.list(sessionId, 50)) {
+    const chunk = `event: protocol_run\ndata: ${JSON.stringify(snapshot)}\n\n`;
+    if (!writeSse(sessionId, clients, res, chunk)) break;
+  }
+}
+
+function ompTranscriptLines(sessionId, cache) {
+  if (cache?.has(sessionId)) return cache.get(sessionId);
+  const file = findOmpJsonlPath(sessionId);
+  let lines = [];
+  try { lines = file ? fs.readFileSync(file, 'utf8').split('\n') : []; } catch {}
+  cache?.set(sessionId, lines);
+  return lines;
+}
+
+function ompOwnerExecutionIsTerminal(sessionId, ownerExecutionId, cache) {
+  const lines = ompTranscriptLines(sessionId, cache);
+  if (lines.length === 0) return false;
+  let found = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!line) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      // Corruption cannot provide a positive owner-terminal signal.
+      return false;
+    }
+    if (!found) {
+      found = entry?.type === 'message' && entry.id === ownerExecutionId && entry.message?.role === 'user';
+      continue;
+    }
+    if (entry?.type === 'message' && entry.message?.role === 'user') return true;
+    if (entry?.type === 'custom' && entry.customType === 'session_exit') return true;
+    if (ompTurnBoundaryFromLine(line) === 'completed') return true;
+  }
+  return false;
+}
+
+function ompUserText(message) {
+  if (typeof message?.content === 'string') return message.content;
+  if (!Array.isArray(message?.content)) return '';
+  return message.content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n');
+}
+
+function ompAdvisoryOwnerForRun(run, cache) {
+  const lines = ompTranscriptLines(run.sessionId, cache);
+  if (lines.length === 0) return null;
+  const expected = `Run Advisory: ${run.question}`;
+  const createdAt = Date.parse(run.createdAt || '');
+  let owner = null;
+  for (const line of lines) {
+    if (!line) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { return null; }
+    if (entry?.type !== 'message' || entry.message?.role !== 'user' || ompUserText(entry.message) !== expected) continue;
+    if (Number.isFinite(createdAt) && Number.isFinite(Date.parse(entry.timestamp)) && Date.parse(entry.timestamp) + 5_000 < createdAt) continue;
+    if (typeof entry.id === 'string' && entry.id) owner = entry.id;
+  }
+  return owner;
+}
+
+async function bindUnclaimedProtocolOwner(sessionId, ownerExecutionId, cache) {
+  const run = protocolRuns.unclaimedStarting(sessionId)
+    .find(candidate => ompAdvisoryOwnerForRun(candidate, cache) === ownerExecutionId);
+  if (!run) return false;
+  try {
+    await protocolRuns.claim(sessionId, { ownerExecutionId, invocationMessageId: ownerExecutionId });
+    return true;
+  } catch (error) {
+    if (error.code === 'PROTOCOL_CLAIM_AMBIGUOUS') return false;
+    throw error;
+  }
+}
+
+async function reconcileProtocolRunOwners() {
+  const transcriptCache = new Map();
+  for (const initial of protocolRuns.active()) {
+    let run = initial;
+    if (!run.ownerExecutionId) {
+      const ownerExecutionId = ompAdvisoryOwnerForRun(run, transcriptCache);
+      if (!ownerExecutionId) continue;
+      if (!await bindUnclaimedProtocolOwner(run.sessionId, ownerExecutionId, transcriptCache)) continue;
+      run = protocolRuns.get(run.sessionId, run.runId);
+    }
+    if (ompOwnerExecutionIsTerminal(run.sessionId, run.ownerExecutionId, transcriptCache)) {
+      await protocolRuns.ownerTerminated(run.sessionId, run.ownerExecutionId);
+    }
+  }
 }
 
 const ompBridgeReplay = new Map();
@@ -1597,7 +1727,6 @@ app.use(compression({
 }));
 app.use(express.json({ limit: '512kb' }));
 app.use('/uploads', express.static(UPLOADS_DIR));
-app.use('/ootw', express.static('/home/user/auto-gan-otherworld/app', { extensions: ['html'] }));
 
 // ── Box discovery (cached) ──────────────────────────────────────────────────
 
@@ -1956,7 +2085,7 @@ function normalizeOmpBridgeEvent(event) {
   return null;
 }
 
-app.post('/api/internal/sessions/:id/events', (req, res) => {
+app.post('/api/internal/sessions/:id/events', async (req, res) => {
   const { id } = req.params;
   if (!bridgeTokenValid(id, req.get('X-Feather-Bridge-Token'))) {
     return res.status(403).json({ error: 'invalid bridge token' });
@@ -1969,13 +2098,69 @@ app.post('/api/internal/sessions/:id/events', (req, res) => {
   if (normalized.some(event => event === null || Buffer.byteLength(JSON.stringify(event)) > OMP_BRIDGE_MAX_EVENT_BYTES)) {
     return res.status(400).json({ error: 'invalid bridge event' });
   }
+  const terminalOwners = new Set();
+  for (const event of events) {
+    const isParentTerminal = !event?.subagentId && (
+      ((event?.type === 'assistant_end' || event?.type === 'assistant_cancel') && !event.willContinue) ||
+      (event?.type === 'agent_end' && !event.willContinue)
+    );
+    if (isParentTerminal && typeof event.ownerExecutionId === 'string') terminalOwners.add(event.ownerExecutionId);
+  }
   const bridgeVersion = Number.isSafeInteger(req.body?.version) ? req.body.version : 0;
   ompBridgeLastSeen.set(id, { seenAt: Date.now(), version: bridgeVersion });
   for (const event of normalized) {
     rememberOmpBridgeEvent(id, event);
     broadcastNamedEvent(id, 'omp_event', event);
   }
-  res.status(204).end();
+  try {
+    for (const ownerExecutionId of terminalOwners) {
+      await bindUnclaimedProtocolOwner(id, ownerExecutionId);
+      await protocolRuns.ownerTerminated(id, ownerExecutionId);
+    }
+    res.status(204).end();
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
+  }
+});
+
+function protocolErrorStatus(error) {
+  return Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599
+    ? error.status
+    : 500;
+}
+
+function protocolBridgeRequestAllowed(req, allowedKeys) {
+  if (!bridgeTokenValid(req.params.id, req.get('X-Feather-Bridge-Token'))) return { status: 403, error: 'invalid bridge token' };
+  if (req.get('X-Feather-Subagent-ID') || req.body?.subagentId) return { status: 403, error: 'protocol tools are parent-only' };
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) return { status: 400, error: 'request body must be an object' };
+  if (Buffer.byteLength(JSON.stringify(req.body)) > 128_000) return { status: 413, error: 'protocol request body exceeds 128000 bytes' };
+  const allowed = new Set(allowedKeys);
+  const unknown = Object.keys(req.body).find(key => !allowed.has(key));
+  if (unknown) return { status: 400, error: `request body contains unknown field ${unknown}` };
+  return null;
+}
+
+app.post('/api/internal/sessions/:id/protocol-runs/claim', async (req, res) => {
+  const denied = protocolBridgeRequestAllowed(req, ['ownerExecutionId', 'invocationMessageId', 'mode', 'input']);
+  if (denied) return res.status(denied.status).json({ error: denied.error });
+  try {
+    const envelope = await protocolRuns.claim(req.params.id, req.body);
+    res.json({ envelope });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
+  }
+});
+
+app.post('/api/internal/sessions/:id/protocol-runs/:runId/events', async (req, res) => {
+  const denied = protocolBridgeRequestAllowed(req, ['ownerExecutionId', 'event']);
+  if (denied) return res.status(denied.status).json({ error: denied.error });
+  if (req.body?.event?.runId !== req.params.runId) return res.status(409).json({ error: 'event runId does not match route runId' });
+  try {
+    const result = await protocolRuns.appendEvent(req.params.id, req.body.ownerExecutionId, req.body.event);
+    res.json({ ok: true, seq: result.seq, duplicate: result.duplicate });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
+  }
 });
 
 // ── Box proxy middleware for session routes ──────────────────────────────────
@@ -1989,6 +2174,85 @@ app.use('/api/sessions', (req, res, next) => {
 app.get('/api/sessions', (req, res) => {
   try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50, (req.query.q || '').trim() || null) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function launchAdvisory(sessionId, input, options = {}) {
+  const run = await protocolRuns.createPending(sessionId, input, options);
+  if (run.status === 'start_failed') return run;
+  try {
+    await sendInputIdempotent(sessionId, `Run Advisory: ${run.question}`, run.deliveryMessageId || run.invocationMessageId);
+    return await protocolRuns.markLaunchSent(sessionId, run.runId);
+  } catch (error) {
+    const failed = await protocolRuns.markStartFailed(sessionId, run.runId, error.message || 'send_failed');
+    error.protocolRun = failed;
+    throw error;
+  }
+}
+
+app.get('/api/sessions/:id/protocol-runs', (req, res) => {
+  try {
+    const requestedLimit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+    res.json({ runs: protocolRuns.list(req.params.id, requestedLimit) });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
+  }
+});
+
+app.post('/api/sessions/:id/protocol-runs', async (req, res) => {
+  try {
+    const headerActionId = req.get('X-Feather-Action-ID');
+    const input = { ...req.body, ...(headerActionId ? { actionId: headerActionId } : {}) };
+    const run = await launchAdvisory(req.params.id, input, { actionId: headerActionId || req.body?.actionId });
+    res.status(202).json({ run });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code, ...(error.protocolRun ? { run: error.protocolRun } : {}) });
+  }
+});
+
+app.post('/api/sessions/:id/protocol-runs/:runId/cancel', async (req, res) => {
+  try {
+    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.actionId !== 'string') {
+      return res.status(400).json({ error: 'body must contain only actionId' });
+    }
+    const { run, transitioned } = await protocolRuns.cancel(req.params.id, req.params.runId, req.body.actionId);
+    if (transitioned) {
+      const grace = setTimeout(() => {
+        protocolRuns.ownerTerminated(req.params.id, run.ownerExecutionId).catch(error => {
+          console.warn(`[protocol run] cancellation tail failed for ${run.runId}:`, error.message);
+        });
+      }, 10_000);
+      grace.unref();
+      execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' });
+    }
+    res.json({ run });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
+  }
+});
+
+app.post('/api/sessions/:id/protocol-runs/:runId/rerun', async (req, res) => {
+  try {
+    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.actionId !== 'string') {
+      return res.status(400).json({ error: 'body must contain only actionId' });
+    }
+    const source = protocolRuns.get(req.params.id, req.params.runId);
+    if (!source) return res.status(404).json({ error: 'protocol run not found' });
+    if (!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(source.status)) {
+      return res.status(409).json({ error: 'only a terminal protocol run can be rerun' });
+    }
+    const input = {
+      protocol: 'advisory',
+      question: source.question,
+      candidateCount: source.candidateCount,
+      roleMode: source.roleMode,
+      timeoutMs: source.timeoutMs,
+      ...(source.rubric !== undefined ? { rubric: source.rubric } : {}),
+    };
+    const run = await launchAdvisory(req.params.id, input, { sourceRunId: source.runId, actionId: req.body.actionId });
+    res.status(202).json({ run });
+  } catch (error) {
+    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code, ...(error.protocolRun ? { run: error.protocolRun } : {}) });
+  }
 });
 
 app.get('/api/sessions/:id/messages', (req, res) => {
@@ -2030,6 +2294,7 @@ function sessionStreamHandler(req, res) {
   }
 
   replayOmpBridgeEvents(sid, clients, res);
+  replayProtocolRuns(sid, clients, res);
   const hb = setInterval(() => {
     if (!writeSse(sid, sseClients.get(sid) || new Set(), res, 'event: heartbeat\ndata: {}\n\n', true)) clearInterval(hb);
   }, 15000);
@@ -2093,10 +2358,11 @@ app.post('/api/sessions/:id/interrupt', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/delete', (req, res) => {
+app.post('/api/sessions/:id/delete', async (req, res) => {
   try {
     const id = req.params.id;
     const agent = getAgentForSession(id);
+    await protocolRuns.deleteSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
     if (agent === 'omp') {
       const dir = path.join(OMP_SESSIONS, id);
@@ -3284,6 +3550,7 @@ for (const state of [
   ROOM_PULSES_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();
+if (!READ_ONLY_MODE) await reconcileProtocolRunOwners();
 
 const server = http.createServer(app);
 

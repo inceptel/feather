@@ -18,7 +18,7 @@ git init -q "$source_repo"
 git -C "$source_repo" config user.email test@example.com
 git -C "$source_repo" config user.name Test
 mkdir -p "$source_repo/skills" "$source_repo/bin"
-for skill in feather sidecar looper; do
+for skill in feather sidecar; do
   mkdir -p "$source_repo/skills/$skill"
   printf -- '---\nname: %s\n---\n' "$skill" >"$source_repo/skills/$skill/SKILL.md"
 done
