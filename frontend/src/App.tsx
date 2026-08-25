@@ -4,11 +4,10 @@ import { createSignal, createEffect, createMemo, onMount, onCleanup, Show, For, 
 import { marked } from 'marked'
 import { MessageView } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
-import { CouncilWorkspace } from './components/CouncilWorkspace'
 import RoomsHome from './RoomsHome'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, RoomUpdate, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, AdvisoryLaunchInput, BoxInfo, PeerInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates, fetchProtocolRuns, launchProtocolRun, cancelProtocolRun, rerunProtocolRun } from './api'
+import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, RoomUpdate, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchRoomUpdates, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -17,7 +16,7 @@ import { localFileUrl } from './lib/localMedia.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, todoSnapshotFromDetails, todoSnapshotFromMessage } from './lib/ompTodo.js'
 import { createOmpMirrorState, reduceOmpMirrorState } from './lib/ompMirror.js'
-import { advisoryLaunchBody, createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
+import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
 
 interface QuickLink { label: string; url: string }
 
@@ -142,7 +141,7 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'prompts' | 'todos' | 'agents' | 'council' | 'updates'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'files' | 'terminal' | 'prompts' | 'todos' | 'agents' | 'updates'>('chat')
   const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
   const [updatesLoading, setUpdatesLoading] = createSignal(false)
   const [updatesError, setUpdatesError] = createSignal<string | null>(null)
@@ -260,10 +259,7 @@ export default function App() {
   const [ompJobs, setOmpJobs] = createSignal<OmpAsyncJob[]>([])
   const [ompRuntime, setOmpRuntime] = createSignal<OmpRuntimeState | null>(null)
   const [protocolRunsState, setProtocolRunsState] = createSignal(createProtocolRunsState())
-  const [selectedProtocolRunId, setSelectedProtocolRunId] = createSignal<string | null>(null)
-  const [focusedSubagentId, setFocusedSubagentId] = createSignal<string | null>(null)
   const protocolRuns = createMemo(() => orderedProtocolRuns(protocolRunsState()))
-  const activeProtocolRunCount = createMemo(() => protocolRuns().filter(run => ['starting', 'pending', 'running', 'cancelling'].includes(run.status)).length)
   function applyProtocolRun(run: ProtocolRunSnapshot) {
     setProtocolRunsState(current => reduceProtocolRunSnapshot(current, run))
   }
@@ -283,8 +279,6 @@ export default function App() {
   }
   function clearProtocolRunSurfaces() {
     setProtocolRunsState(createProtocolRunsState())
-    setSelectedProtocolRunId(null)
-    setFocusedSubagentId(null)
   }
 
 
@@ -837,42 +831,6 @@ export default function App() {
     if (id === currentId()) { setWorking(false); setToolIntentStatus(''); setToolIntentHistory([]); clearAssistantStream() }
   }
 
-  function openCouncilRun(runId: string) {
-    setSelectedProtocolRunId(runId)
-    setTab('council')
-  }
-
-  function openCouncilSeat(ompChildId: string) {
-    setFocusedSubagentId(null)
-    setTab('agents')
-    queueMicrotask(() => setFocusedSubagentId(ompChildId))
-  }
-
-  async function handleCouncilLaunch(input: AdvisoryLaunchInput) {
-    const id = currentId()
-    if (!id) throw new Error('Select a session before starting Advisory')
-    const { run } = await launchProtocolRun(id, advisoryLaunchBody(input), currentBox())
-    applyProtocolRun(run)
-    setSelectedProtocolRunId(run.runId)
-    return run
-  }
-
-  async function handleCouncilCancel(runId: string, actionId: string) {
-    const id = currentId()
-    if (!id) throw new Error('Select a session before stopping Advisory')
-    const { run } = await cancelProtocolRun(id, runId, actionId, currentBox())
-    applyProtocolRun(run)
-    return run
-  }
-
-  async function handleCouncilRerun(runId: string, actionId: string) {
-    const id = currentId()
-    if (!id) throw new Error('Select a session before rerunning Advisory')
-    const { run } = await rerunProtocolRun(id, runId, actionId, currentBox())
-    applyProtocolRun(run)
-    setSelectedProtocolRunId(run.runId)
-    return run
-  }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this session?')) return
@@ -1773,9 +1731,6 @@ export default function App() {
             <button onClick={() => setTab('agents')} style={tabStyle('agents')}>
               Agents<Show when={activeSubagents().length}>{` ${activeSubagents().length}`}</Show>
             </button>
-            <button data-testid="council-tab" onClick={() => setTab('council')} style={tabStyle('council')}>
-              Council<Show when={activeProtocolRunCount()}>{` ${activeProtocolRunCount()}`}</Show>
-            </button>
             <Show when={!isRemoteBox()}>
               <button onClick={() => setTab('updates')} style={tabStyle('updates')}>Updates</button>
               <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
@@ -1794,7 +1749,7 @@ export default function App() {
           <Show when={currentId()} fallback={
             <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
           }>
-            <div style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
+            <div data-testid="chat-panel" style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView
                 messages={messages()}
                 loading={loading()}
@@ -1816,7 +1771,7 @@ export default function App() {
                 jobs={[]}
                 runtime={null}
                 protocolRuns={protocolRuns()}
-                onOpenProtocolRun={openCouncilRun}
+                onOpenAgents={() => setTab('agents')}
               />
             </div>
             <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
@@ -1989,33 +1944,19 @@ export default function App() {
               </div>
             </div>
             <div data-testid="agents-panel" style={{ display: tab() === 'agents' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-              <Show when={activeSubagents().length > 0 || ompJobs().length > 0 || ompRuntime()} fallback={
-                <div style={{ color: '#666', 'font-size': '13px', padding: '30px 20px', 'text-align': 'center' }}>No delegated agents or background jobs in this chat yet.</div>
+              <Show when={activeSubagents().length > 0 || ompJobs().length > 0 || ompRuntime() || ompMirror().parent.timeline.length > 0} fallback={
+                <div style={{ color: '#666', 'font-size': '13px', padding: '30px 20px', 'text-align': 'center' }}>No execution details, delegated agents, or background jobs in this chat yet.</div>
               }>
                 <MessageView
                   messages={[]}
                   loading={false}
+                  work={ompMirror().parent}
                   subagents={activeSubagents()}
                   jobs={ompJobs()}
                   runtime={ompRuntime()}
                   standaloneAgents
-                  focusSubagentId={focusedSubagentId()}
                 />
               </Show>
-            </div>
-            <div data-testid="council-panel" style={{ display: tab() === 'council' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-              <CouncilWorkspace
-                runs={protocolRuns()}
-                selectedRunId={selectedProtocolRunId()}
-                canControl={canSend()}
-                active={tab() === 'council'}
-                availableAgentIds={new Set(activeSubagents().map(agent => agent.id))}
-                onSelectRun={setSelectedProtocolRunId}
-                onLaunch={handleCouncilLaunch}
-                onCancel={handleCouncilCancel}
-                onRerun={handleCouncilRerun}
-                onOpenSeat={openCouncilSeat}
-              />
             </div>
             <div data-testid="updates-panel" style={{ display: tab() === 'updates' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
               <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '12px 16px 24px' }}>
