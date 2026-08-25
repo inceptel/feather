@@ -903,7 +903,7 @@ describe('Council protocol-run APIs', () => {
     fs.writeFileSync(path.join(tokenDir, tokenFile), bridgeToken, { mode: 0o600 })
   })
 
-  it('validates public list and launch shapes and durably exposes launch failure', async () => {
+  it('exposes read-only protocol history without a direct-launch endpoint', async () => {
     let response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { runs: [] })
@@ -911,24 +911,8 @@ describe('Council protocol-run APIs', () => {
     response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs?limit=51`)
     assert.equal(response.status, 400)
 
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs`, { protocol: 'court', question: 'No' })
-    assert.equal(response.status, 400)
-
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs`, {
-      protocol: 'advisory',
-      question: 'This launch cannot reach the fixture tmux.',
-      candidateCount: 2,
-      roleMode: 'neutral',
-      timeoutMs: 60_000,
-    })
-    assert.equal(response.status, 500)
-    const failed = await response.json()
-    assert.equal(failed.run.status, 'start_failed')
-    assert.equal(failed.run.lastSeq, 1)
-
-    response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)
-    const listed = await response.json()
-    assert.ok(listed.runs.some(run => run.runId === failed.run.runId && run.status === 'start_failed'))
+    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs`, { protocol: 'advisory', question: 'No direct form' })
+    assert.equal(response.status, 404)
   })
 
   it('enforces bridge authentication, parent-only claims, and exact event route identity', async () => {
@@ -1004,52 +988,6 @@ describe('Council protocol-run APIs', () => {
     assert.equal(response.status, 403)
   })
 
-  it('logs cancel before interrupt failure, closes from positive owner lifecycle, and links rerun', async () => {
-    const listed = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()
-    const active = listed.runs.find(run => run.ownerExecutionId === ownerExecutionId && run.status === 'pending')
-    assert.ok(active)
-
-    let response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/events`, {
-      ownerExecutionId,
-      event: {
-        schemaVersion: 1,
-        eventId: eventId(20),
-        runId: active.runId,
-        type: 'stage_started',
-        attempt: 1,
-        stageId: 'candidates',
-        payload: {},
-      },
-    }, bridgeToken)
-    assert.equal(response.status, 200)
-
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/cancel`, {})
-    assert.equal(response.status, 400)
-
-    const cancelActionId = eventId(21)
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/cancel`, { actionId: cancelActionId })
-    assert.equal(response.status, 500)
-    let run = (await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()).runs.find(item => item.runId === active.runId)
-    assert.equal(run.status, 'cancelling')
-    assert.equal(run.cancelActionId, cancelActionId)
-
-    response = await postJson(`/api/internal/sessions/${TEST_SESSION_ID}/events`, {
-      version: 4,
-      events: [{ type: 'assistant_end', messageId: eventId(22), ownerExecutionId }],
-    }, bridgeToken)
-    assert.equal(response.status, 204)
-    run = (await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/protocol-runs`)).json()).runs.find(item => item.runId === active.runId)
-    assert.equal(run.status, 'cancelled')
-    assert.ok(run.seats.every(seat => seat.status === 'cancelled'))
-
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/rerun`, {})
-    assert.equal(response.status, 400)
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${active.runId}/rerun`, { actionId: eventId(23) })
-    assert.equal(response.status, 500)
-    const rerun = await response.json()
-    assert.equal(rerun.run.status, 'start_failed')
-    assert.equal(rerun.run.sourceRunId, active.runId)
-  })
 
   it('replays the latest snapshot as a named protocol_run SSE event', async () => {
     const controller = new AbortController()
@@ -1070,10 +1008,4 @@ describe('Council protocol-run APIs', () => {
     assert.match(payload, /\"lastSeq\":/)
   })
 
-  it('rejects missing runs and nonterminal reruns with endpoint-shaped errors', async () => {
-    let response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${eventId(90)}/cancel`, { actionId: eventId(91) })
-    assert.equal(response.status, 404)
-    response = await postJson(`/api/sessions/${TEST_SESSION_ID}/protocol-runs/${eventId(90)}/rerun`, { actionId: eventId(92) })
-    assert.equal(response.status, 404)
-  })
 })

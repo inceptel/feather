@@ -71,17 +71,11 @@ test.afterAll(async () => {
   try { fs.rmSync(protocolPath, { recursive: true, force: true }) } catch {}
 })
 
-test('runs Advisory through candidates, Judge, verdict, replay, and direct launch', async ({ page }) => {
+test('runs Advisory inline through candidates, Judge, verdict, and replay', async ({ page }) => {
   await page.goto(`${BASE}/#${SESSION_ID}`)
   await expect(page.locator('.markdown').getByText('Should Feather make OMP the default harness?', { exact: true }).first()).toBeVisible()
 
-  const agentsTab = page.getByRole('button', { name: 'Agents', exact: true })
-  const councilTab = page.getByRole('button', { name: 'Council', exact: true })
-  await expect(councilTab).toBeVisible()
-  expect(await agentsTab.evaluate((agents, council) => !!(agents.compareDocumentPosition(council) & Node.DOCUMENT_POSITION_FOLLOWING), await councilTab.elementHandle())).toBe(true)
-  await councilTab.click()
-  await expect(page.getByTestId('council-workspace')).toContainText('Multi-agent protocols')
-  await expect(page.getByTestId('council-workspace')).toContainText('Advisory')
+  await expect(page.getByRole('button', { name: 'Council', exact: true })).toHaveCount(0)
 
   const claimResponse = await postJson(`/api/internal/sessions/${SESSION_ID}/protocol-runs/claim`, {
     ownerExecutionId: OWNER_ID,
@@ -124,15 +118,9 @@ test('runs Advisory through candidates, Judge, verdict, replay, and direct launc
   await postOmpEvents([{ type: 'subagent_lifecycle', id: 'council-judge', agent: 'task', status: 'started', index: 2, assignment: 'Fresh Advisory judge' }])
   await appendEvent(runId, 'seat_started', { stageId: 'judge', seatId: 'judge-1', attempt: 1 }, { role: 'Judge', ompChildId: 'council-judge' })
 
-  const runPanel = page.getByTestId(`council-run-${runId}`)
-  await expect(runPanel).toContainText('Judge synthesizing')
-  await expect(runPanel).toContainText('Advocate')
-  await expect(runPanel).toContainText('Skeptic')
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-
-  await page.getByRole('button', { name: 'Chat', exact: true }).click()
   const inlineCard = page.getByTestId(`chat-protocol-run-${runId}`)
   await expect(inlineCard).toContainText('Judge synthesizing')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect(await page.evaluate((runId) => {
     const invocation = [...document.querySelectorAll('.msg-row')].find(row => row.textContent?.includes('Should Feather make OMP the default harness?'))
     const card = document.querySelector(`[data-testid="chat-protocol-run-${runId}"]`)
@@ -155,24 +143,17 @@ test('runs Advisory through candidates, Judge, verdict, replay, and direct launc
   await appendEvent(runId, 'verdict_recorded', {}, { evidenceId: 'evidence-judge-1' })
   await appendEvent(runId, 'run_terminal', {}, { status: 'succeeded' })
 
-  await inlineCard.getByRole('button', { name: 'Open in Council' }).click()
-  await expect(page.getByTestId('council-verdict-recommendation')).toContainText('Make OMP the default harness')
-  await expect(page.getByTestId('council-verdict')).toContainText('Confidence · high')
-  await expect(page.getByTestId('council-verdict')).toContainText('How long the fallback should remain.')
-  await expect(page.getByTestId('council-evidence')).toContainText('Candidate evidence · 2')
+  await expect(inlineCard).toContainText('Complete')
+  await expect(inlineCard).toContainText('Make OMP the default harness')
 
-  await page.getByTestId('council-seat-candidate-1').click()
-  await expect(page.getByTestId('omp-subagents')).toBeVisible()
+  await page.getByRole('button', { name: /Agents 3/ }).click()
+  await page.getByTestId('omp-subagent-council-child-1').click()
   await expect(page.getByTestId('omp-subagent-inspector')).toContainText('Advocate candidate')
 
   await page.reload()
-  await page.getByRole('button', { name: 'Council', exact: true }).click()
-  await page.getByTestId(`council-history-${runId}`).click()
-  await expect(page.getByTestId('council-verdict-recommendation')).toContainText('Make OMP the default harness')
-
-  const launchQuestion = page.getByPlaceholder('What decision should the council examine?')
-  await launchQuestion.fill('Run another Advisory from the Council workspace.')
-  await page.getByRole('button', { name: 'Run Advisory', exact: true }).click()
-  await expect(page.getByTestId('council-workspace')).toContainText('Starting Advisory')
-  await page.screenshot({ path: '/tmp/feather-council-mobile.png', fullPage: false })
+  await expect(page.getByRole('button', { name: 'Council', exact: true })).toHaveCount(0)
+  const replayedCard = page.getByTestId(`chat-protocol-run-${runId}`)
+  await expect(replayedCard).toContainText('Complete')
+  await expect(replayedCard).toContainText('Make OMP the default harness')
+  await page.screenshot({ path: '/tmp/feather-council-inline-mobile.png', fullPage: false })
 })

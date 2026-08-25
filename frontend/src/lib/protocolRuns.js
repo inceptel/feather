@@ -3,13 +3,6 @@ const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'inte
 const TERMINAL_SEAT_STATUSES = new Set(['succeeded', 'failed', 'timed_out', 'cancelled'])
 
 export const PROTOCOL_RUN_LIMIT = 50
-export const COUNCIL_MOBILE_BREAKPOINT = 640
-export const DEFAULT_ADVISORY_INPUT = Object.freeze({
-  protocol: 'advisory',
-  candidateCount: 4,
-  roleMode: 'diverse',
-  timeoutMs: 10 * 60 * 1000,
-})
 
 const DIVERSE_ROLES = ['Advocate', 'Skeptic', 'Operator', 'Contrarian']
 
@@ -57,20 +50,9 @@ export function orderedProtocolRuns(state) {
 }
 
 
-export function advisoryLaunchBody(input) {
-  const body = {
-    protocol: 'advisory',
-    question: String(input?.question || '').trim(),
-    candidateCount: Number(input?.candidateCount || DEFAULT_ADVISORY_INPUT.candidateCount),
-    roleMode: input?.roleMode === 'neutral' ? 'neutral' : 'diverse',
-    timeoutMs: Number(input?.timeoutMs || DEFAULT_ADVISORY_INPUT.timeoutMs),
-  }
-  const rubric = String(input?.rubric || '').trim()
-  return rubric ? { ...body, rubric } : body
-}
 
-export function advisoryRoles(candidateCount, roleMode = 'diverse') {
-  const count = Math.max(2, Math.min(8, Number(candidateCount) || DEFAULT_ADVISORY_INPUT.candidateCount))
+function advisoryRoles(candidateCount, roleMode = 'diverse') {
+  const count = Math.max(2, Math.min(8, Number(candidateCount) || 4))
   if (roleMode === 'neutral') return Array.from({ length: count }, (_, index) => `Independent ${index + 1}`)
   return Array.from({ length: count }, (_, index) => DIVERSE_ROLES[index] || `Independent ${index + 1}`)
 }
@@ -79,9 +61,6 @@ export function protocolSeatId(seat) {
   return String(seat?.seatId || '')
 }
 
-export function protocolEvidenceId(evidence) {
-  return String(evidence?.evidenceId || '')
-}
 
 function stageId(value) {
   return String(value?.stageId || '')
@@ -116,10 +95,6 @@ export function candidateSeats(run) {
 
 export function judgeSeats(run) {
   return (Array.isArray(run?.seats) ? run.seats : []).filter(judgeSeat)
-}
-
-function evidenceForSeat(run, seatId) {
-  return (Array.isArray(run?.evidence) ? run.evidence : []).filter(evidence => evidence?.seatId === seatId)
 }
 
 function normalizeVerdictContent(content) {
@@ -226,44 +201,6 @@ export function protocolRunView(run) {
   }
 }
 
-export function protocolSeatView(run, seat) {
-  const id = protocolSeatId(seat)
-  const evidence = evidenceForSeat(run, id)
-  return {
-    id,
-    role: String(seat?.role || id || 'Seat'),
-    status: String(seat?.status || 'pending'),
-    statusLabel: statusLabel(String(seat?.status || 'pending')),
-    ompChildId: typeof seat?.ompChildId === 'string' ? seat.ompChildId : null,
-    reason: typeof seat?.reason === 'string' ? seat.reason : '',
-    evidence,
-  }
-}
-
-export function protocolSeatAgentTarget(seat, availableAgentIds) {
-  const ompChildId = typeof seat?.ompChildId === 'string' ? seat.ompChildId : ''
-  return ompChildId && availableAgentIds?.has(ompChildId) ? ompChildId : null
-}
-
-export function verdictSections(run) {
-  const verdict = protocolVerdict(run)
-  if (!verdict) return null
-  return {
-    recommendation: String(verdict.recommendation || ''),
-    confidence: String(verdict.confidence || ''),
-    disagreements: Array.isArray(verdict.disagreements) ? verdict.disagreements : [],
-    ranking: Array.isArray(verdict.ranking) ? verdict.ranking : [],
-    citedEvidenceIds: Array.isArray(verdict.citedEvidenceIds) ? verdict.citedEvidenceIds : [],
-  }
-}
-
-export function activeProtocolRuns(runs) {
-  return (Array.isArray(runs) ? runs : []).filter(run => !TERMINAL_RUN_STATUSES.has(run?.status))
-}
-
-export function historicalProtocolRuns(runs) {
-  return (Array.isArray(runs) ? runs : []).filter(run => TERMINAL_RUN_STATUSES.has(run?.status))
-}
 
 export function runsForInvocation(runs, invocationMessageId) {
   return (Array.isArray(runs) ? runs : []).filter(run => run?.invocationMessageId === invocationMessageId)

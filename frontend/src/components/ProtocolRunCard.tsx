@@ -9,7 +9,7 @@ function stateColor(state: ProtocolRunSnapshot['status']) {
   return 'var(--info)'
 }
 
-export function ProtocolRunCard(props: { run: ProtocolRunSnapshot; onOpen: (runId: string) => void }) {
+export function ProtocolRunCard(props: { run: ProtocolRunSnapshot }) {
   const view = createMemo(() => protocolRunView(props.run))
   return (
     <aside
@@ -33,17 +33,6 @@ export function ProtocolRunCard(props: { run: ProtocolRunSnapshot; onOpen: (runI
           <div style={{ color: 'var(--text-primary)', 'font-size': '11px', 'line-height': '1.4', 'margin-top': '5px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{view().verdict!.recommendation}</div>
         </Show>
       </div>
-      <button
-        type="button"
-        onClick={() => props.onOpen(props.run.runId)}
-        style={{
-          background: 'transparent', border: '1px solid var(--border-medium)', color: 'var(--link)',
-          'border-radius': '6px', padding: '6px 8px', 'font-size': '11px', 'font-weight': '600',
-          cursor: 'pointer', 'flex-shrink': '0', 'min-height': '32px',
-        }}
-      >
-        Open in Council
-      </button>
     </aside>
   )
 }

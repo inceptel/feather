@@ -792,8 +792,7 @@ type MessageViewProps = {
   runtime?: MessageViewRuntime | null
   standaloneAgents?: boolean
   protocolRuns?: ProtocolRunSnapshot[]
-  onOpenProtocolRun?: (runId: string) => void
-  focusSubagentId?: string | null
+  onOpenAgents?: () => void
 }
 
 export function MessageView(props: MessageViewProps) {
@@ -845,16 +844,6 @@ export function MessageView(props: MessageViewProps) {
   createEffect(() => {
     const selectedId = selectedSubagentId()
     if (selectedId && !(props.subagents || []).some(agent => agent.id === selectedId)) setSelectedSubagentId(null)
-  })
-  createEffect(() => {
-    const requestedId = props.focusSubagentId
-    if (!requestedId || !(props.subagents || []).some(agent => agent.id === requestedId)) return
-    setSelectedSubagentId(requestedId)
-    queueMicrotask(() => {
-      const target = document.getElementById(`omp-subagent-${requestedId}`)
-      target?.focus({ preventScroll: true })
-      target?.scrollIntoView({ block: 'nearest' })
-    })
   })
 
 
@@ -989,9 +978,28 @@ export function MessageView(props: MessageViewProps) {
     )
   }
   function renderParentExecution(scope: () => OmpWorkScope) {
+    const summary = () => activeOmpStep(scope()) || `${scope().timeline.length} steps`
     return (
       <Show keyed when={scope().segment + 1}>
-        {() => renderExecutionTimeline(scope, 'omp-parent-execution')}
+        {() => props.standaloneAgents
+          ? renderExecutionTimeline(scope, 'omp-parent-execution', true)
+          : (
+            <Show when={scope().timeline.length > 0}>
+              <button
+                type="button"
+                data-testid="omp-parent-execution"
+                onClick={props.onOpenAgents}
+                aria-label="Open execution details in Agents"
+                style={{ width: '100%', height: '36px', margin: '0 0 10px', padding: '0 10px', border: '1px solid var(--border-subtle)', 'border-radius': '10px', background: 'var(--bg-surface)', color: 'var(--text-secondary)', cursor: props.onOpenAgents ? 'pointer' : 'default', display: 'flex', 'align-items': 'center', gap: '8px', 'text-align': 'left', overflow: 'hidden' }}
+              >
+                <span aria-hidden="true" style={{ color: executionStatusColor(scope().runStatus), 'font-size': '11px', 'flex-shrink': '0' }}>{executionStatusMark(scope().runStatus)}</span>
+                <span style={{ color: 'var(--text-primary)', 'font-size': '12px', 'font-weight': '650', 'flex-shrink': '0' }}>{scope().runStatus === 'running' ? 'Working' : 'Work'}</span>
+                <span data-testid="omp-parent-execution-summary" style={{ 'font-size': '11px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1', 'min-width': '0' }}>{summary()}</span>
+                <Show when={props.onOpenAgents}><span style={{ 'font-size': '10px', color: 'var(--text-muted)', 'flex-shrink': '0' }}>Agents ›</span></Show>
+              </button>
+            </Show>
+          )
+        }
       </Show>
     )
   }
@@ -1059,6 +1067,10 @@ export function MessageView(props: MessageViewProps) {
     if ((props.work?.timeline.length || 0) === 0) return false
     const latest = renderItems().at(-1)
     return !!latest && latest.kind !== 'chain' && latest.msg.role === 'assistant'
+  })
+  const currentProtocolOwnsWork = createMemo(() => {
+    const latestUser = [...props.messages].reverse().find(message => message.role === 'user')
+    return !!latestUser && runsForInvocation(props.protocolRuns || [], latestUser.uuid).length > 0
   })
 
 
@@ -1233,7 +1245,7 @@ export function MessageView(props: MessageViewProps) {
         const mirroredCurrentTurn = createMemo(() => (props.work?.timeline.length || 0) > 0 && isLatestItem())
         if (item.kind === 'chain') {
           return (
-            <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working}>
+            <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working && !currentProtocolOwnsWork() && (props.work?.timeline.length || 0) === 0}>
               {renderProvisionalWork(() => item.messages, 'live-work-turn', true)}
             </Show>
           )
@@ -1328,7 +1340,7 @@ export function MessageView(props: MessageViewProps) {
                 </div>
               </div>
               <For each={runsForInvocation(props.protocolRuns || [], msg.uuid)}>{(run) => (
-                <ProtocolRunCard run={run} onOpen={(runId) => props.onOpenProtocolRun?.(runId)} />
+                <ProtocolRunCard run={run} />
               )}</For>
             </>
           )
@@ -1337,7 +1349,7 @@ export function MessageView(props: MessageViewProps) {
         // Assistant message: single wide bubble containing all blocks (text, tool_use, thinking) + metadata inside.
         return (
           <>
-          <Show when={mirroredCurrentTurn()}>
+          <Show when={mirroredCurrentTurn() && !currentProtocolOwnsWork()}>
             {renderParentExecution(() => props.work!)}
           </Show>
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
@@ -1438,7 +1450,7 @@ export function MessageView(props: MessageViewProps) {
           </>
         )
       }}</For>
-      <Show when={(props.work?.timeline.length || 0) > 0 && !workAttachedToAnswer()}>
+      <Show when={(props.work?.timeline.length || 0) > 0 && !workAttachedToAnswer() && !currentProtocolOwnsWork()}>
         {renderParentExecution(() => props.work!)}
       </Show>
       <Show when={props.assistantStream?.text}>
@@ -1578,7 +1590,7 @@ export function MessageView(props: MessageViewProps) {
 
 
 
-      <Show when={props.working}>
+      <Show when={props.working && !currentProtocolOwnsWork() && (props.work?.timeline.length || 0) === 0}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
           <div role="status" data-testid="working-indicator" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />

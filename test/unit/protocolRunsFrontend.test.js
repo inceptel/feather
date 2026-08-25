@@ -1,14 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  activeProtocolRuns,
-  advisoryLaunchBody,
   createProtocolRunsState,
   protocolRunView,
-  protocolSeatAgentTarget,
   reduceProtocolRunSnapshot,
   runsForInvocation,
-  verdictSections,
 } from '../../frontend/src/lib/protocolRuns.js'
 
 const CREATED_AT = '2026-08-24T12:00:00.000Z'
@@ -96,17 +92,8 @@ describe('Council launch and run presentations', () => {
     assert.deepEqual(starting.candidates.map(seat => seat.role), ['Advocate', 'Skeptic', 'Operator', 'Contrarian'])
     assert.equal(failed.statusLabel, 'Start failed')
     assert.match(failed.summary, /OMP send failed/)
-    assert.deepEqual(activeProtocolRuns([makeRun({ status: 'succeeded' }), makeRun({ runId: 'run-2', status: 'start_failed' })]).map(run => run.runId), ['run-2'])
   })
 
-  it('builds the exact direct Advisory launch payload while omitting an empty rubric', () => {
-    assert.deepEqual(advisoryLaunchBody({ question: '  Decide now  ' }), {
-      protocol: 'advisory', question: 'Decide now', candidateCount: 4, roleMode: 'diverse', timeoutMs: 600000,
-    })
-    assert.deepEqual(advisoryLaunchBody({ question: 'Decide', candidateCount: 6, roleMode: 'neutral', timeoutMs: 1800000, rubric: '  Prefer evidence  ' }), {
-      protocol: 'advisory', question: 'Decide', candidateCount: 6, roleMode: 'neutral', timeoutMs: 1800000, rubric: 'Prefer evidence',
-    })
-  })
 
   it('renders active partial progress without dropping a failed seat', () => {
     const seats = [
@@ -223,27 +210,13 @@ describe('Council launch and run presentations', () => {
     })
 
     assert.equal(protocolRunView(run).summary, 'Verdict ready · 2/2 candidates succeeded')
-    assert.deepEqual(verdictSections(run), {
-      recommendation: verdict.recommendation,
-      confidence: 'high',
-      disagreements: verdict.disagreements,
-      ranking: verdict.ranking,
-      citedEvidenceIds: verdict.citedEvidenceIds,
-    })
   })
 })
 
-describe('Council invocation and Agent links', () => {
+describe('Council invocation chronology', () => {
   it('selects only runs anchored to one invocation message', () => {
     const run = makeRun({ invocationMessageId: 'message-1' })
     const unrelated = makeRun({ runId: 'run-2', invocationMessageId: 'missing-message' })
     assert.deepEqual(runsForInvocation([run, unrelated], 'message-1').map(item => item.runId), ['run-1'])
-  })
-
-  it('only enables seat-to-Agents navigation when the OMP child is available', () => {
-    const seat = candidate(1, 'running', { ompChildId: 'omp-child-1' })
-    assert.equal(protocolSeatAgentTarget(seat, new Set(['omp-child-1'])), 'omp-child-1')
-    assert.equal(protocolSeatAgentTarget(seat, new Set(['other-child'])), null)
-    assert.equal(protocolSeatAgentTarget(candidate(2, 'pending'), new Set(['omp-child-1'])), null)
   })
 })

@@ -68,6 +68,7 @@ const OMP_THINKING = resolveOmpThinking(process.env);
 const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'feather-bridge.js');
 const OMP_PROTOCOL_EXTENSION = path.join(import.meta.dirname, 'omp-tools', 'feather-protocol-tools.js');
 const OMP_COUNCIL_SKILL = path.join(import.meta.dirname, 'skills', 'council');
+const OMP_FEATHER_CONFIG = path.join(import.meta.dirname, 'omp-feather.yml');
 const ompBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
@@ -870,6 +871,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
     resume ? `--resume ${shellQuote(ompId)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
     bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
+    `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
     `--session-dir ${shellQuote(sessionDir)}`,
     '--allow-home',
   ].filter(Boolean).join(' ');
@@ -2176,18 +2178,6 @@ app.get('/api/sessions', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-async function launchAdvisory(sessionId, input, options = {}) {
-  const run = await protocolRuns.createPending(sessionId, input, options);
-  if (run.status === 'start_failed') return run;
-  try {
-    await sendInputIdempotent(sessionId, `Run Advisory: ${run.question}`, run.deliveryMessageId || run.invocationMessageId);
-    return await protocolRuns.markLaunchSent(sessionId, run.runId);
-  } catch (error) {
-    const failed = await protocolRuns.markStartFailed(sessionId, run.runId, error.message || 'send_failed');
-    error.protocolRun = failed;
-    throw error;
-  }
-}
 
 app.get('/api/sessions/:id/protocol-runs', (req, res) => {
   try {
@@ -2198,62 +2188,6 @@ app.get('/api/sessions/:id/protocol-runs', (req, res) => {
   }
 });
 
-app.post('/api/sessions/:id/protocol-runs', async (req, res) => {
-  try {
-    const headerActionId = req.get('X-Feather-Action-ID');
-    const input = { ...req.body, ...(headerActionId ? { actionId: headerActionId } : {}) };
-    const run = await launchAdvisory(req.params.id, input, { actionId: headerActionId || req.body?.actionId });
-    res.status(202).json({ run });
-  } catch (error) {
-    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code, ...(error.protocolRun ? { run: error.protocolRun } : {}) });
-  }
-});
-
-app.post('/api/sessions/:id/protocol-runs/:runId/cancel', async (req, res) => {
-  try {
-    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.actionId !== 'string') {
-      return res.status(400).json({ error: 'body must contain only actionId' });
-    }
-    const { run, transitioned } = await protocolRuns.cancel(req.params.id, req.params.runId, req.body.actionId);
-    if (transitioned) {
-      const grace = setTimeout(() => {
-        protocolRuns.ownerTerminated(req.params.id, run.ownerExecutionId).catch(error => {
-          console.warn(`[protocol run] cancellation tail failed for ${run.runId}:`, error.message);
-        });
-      }, 10_000);
-      grace.unref();
-      execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' });
-    }
-    res.json({ run });
-  } catch (error) {
-    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code });
-  }
-});
-
-app.post('/api/sessions/:id/protocol-runs/:runId/rerun', async (req, res) => {
-  try {
-    if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.actionId !== 'string') {
-      return res.status(400).json({ error: 'body must contain only actionId' });
-    }
-    const source = protocolRuns.get(req.params.id, req.params.runId);
-    if (!source) return res.status(404).json({ error: 'protocol run not found' });
-    if (!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(source.status)) {
-      return res.status(409).json({ error: 'only a terminal protocol run can be rerun' });
-    }
-    const input = {
-      protocol: 'advisory',
-      question: source.question,
-      candidateCount: source.candidateCount,
-      roleMode: source.roleMode,
-      timeoutMs: source.timeoutMs,
-      ...(source.rubric !== undefined ? { rubric: source.rubric } : {}),
-    };
-    const run = await launchAdvisory(req.params.id, input, { sourceRunId: source.runId, actionId: req.body.actionId });
-    res.status(202).json({ run });
-  } catch (error) {
-    res.status(protocolErrorStatus(error)).json({ error: error.message, code: error.code, ...(error.protocolRun ? { run: error.protocolRun } : {}) });
-  }
-});
 
 app.get('/api/sessions/:id/messages', (req, res) => {
   const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);

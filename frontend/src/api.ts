@@ -16,12 +16,6 @@ async function responseJson<T = any>(response: Response): Promise<T> {
   return data as T
 }
 
-async function protocolMutationJson(response: Response): Promise<{ run: ProtocolRunSnapshot }> {
-  const data = await response.json().catch(() => ({}))
-  if (data.run && typeof data.run === 'object') return { run: data.run as ProtocolRunSnapshot }
-  if (!response.ok) throw Object.assign(new Error(data.error || `HTTP ${response.status}`), { status: response.status })
-  throw new Error('Protocol response did not include a run')
-}
 
 export interface SessionMeta {
   id: string
@@ -190,14 +184,6 @@ export interface ProtocolRunSnapshot {
   error?: string
 }
 
-export interface AdvisoryLaunchInput {
-  protocol?: 'advisory'
-  question: string
-  candidateCount?: number
-  roleMode?: 'diverse' | 'neutral'
-  timeoutMs?: number
-  rubric?: string
-}
 
 export interface RoomInfo {
   name: string
@@ -344,32 +330,6 @@ export async function fetchProtocolRuns(id: string, box?: string | null): Promis
   return responseJson<{ runs: ProtocolRunSnapshot[] }>(response)
 }
 
-export async function launchProtocolRun(id: string, input: AdvisoryLaunchInput, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
-  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs`, box), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  })
-  return protocolMutationJson(response)
-}
-
-export async function cancelProtocolRun(id: string, runId: string, actionId: string, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
-  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs/${encodeURIComponent(runId)}/cancel`, box), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ actionId }),
-  })
-  return protocolMutationJson(response)
-}
-
-export async function rerunProtocolRun(id: string, runId: string, actionId: string, box?: string | null): Promise<{ run: ProtocolRunSnapshot }> {
-  const response = await fetch(bq(`${BASE}/api/sessions/${id}/protocol-runs/${encodeURIComponent(runId)}/rerun`, box), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ actionId }),
-  })
-  return protocolMutationJson(response)
-}
 
 export async function sendInput(id: string, text: string, box?: string | null, messageId?: string): Promise<{ ok: boolean, sentAt: string }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
