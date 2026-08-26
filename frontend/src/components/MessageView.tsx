@@ -2,6 +2,8 @@ import { For, Index, Show, createEffect, createMemo, createSignal } from 'solid-
 import type { Message, ContentBlock, OmpSubagentState, OmpTodoSnapshot, OmpTimelineItem, OmpWorkScope, ProtocolRunSnapshot } from '../api'
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
+import markedKatex from 'marked-katex-extension'
+import 'katex/dist/katex.min.css'
 import DOMPurify from 'dompurify'
 import Anser from 'anser'
 import { createTwoFilesPatch } from 'diff'
@@ -66,6 +68,7 @@ const marked = new Marked(
       return code
     },
   }),
+  markedKatex({ throwOnError: false }),
 )
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
