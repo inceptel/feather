@@ -3,6 +3,7 @@ import type { Message, ContentBlock, OmpSubagentState, OmpTodoSnapshot, OmpTimel
 import { Marked } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import markedKatex from 'marked-katex-extension'
+import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import DOMPurify from 'dompurify'
 import Anser from 'anser'
@@ -59,6 +60,25 @@ hljs.registerLanguage('md', markdown)
 
 // ── Markdown renderer with LRU cache ────────────────────────────────────────
 
+type MathCode = { source: string; display: boolean }
+
+function mathOnlyCode(text: string, displayOnly = false): MathCode | null {
+  const value = text.trim()
+  const display = value.match(/^\$\$\s*([\s\S]+?)\s*\$\$$/) || value.match(/^\\\[\s*([\s\S]+?)\s*\\\]$/)
+  if (display?.[1]?.trim()) return { source: display[1].trim(), display: true }
+  if (displayOnly) return null
+  const inline = value.match(/^\$(?!\$)([\s\S]+?)\$$/) || value.match(/^\\\(([\s\S]+?)\\\)$/)
+  return inline?.[1]?.trim() ? { source: inline[1].trim(), display: false } : null
+}
+
+function renderMathCode(math: MathCode): string | false {
+  try {
+    return katex.renderToString(math.source, { displayMode: math.display, throwOnError: false, trust: false })
+  } catch {
+    return false
+  }
+}
+
 const marked = new Marked(
   { gfm: true, breaks: true },
   markedHighlight({
@@ -69,6 +89,21 @@ const marked = new Marked(
     },
   }),
   markedKatex({ throwOnError: false }),
+  {
+    renderer: {
+      codespan({ text }) {
+        const math = mathOnlyCode(text)
+        return math ? renderMathCode(math) : false
+      },
+      code({ text, lang }) {
+        const language = lang?.trim().toLowerCase()
+        const math = ['math', 'latex', 'tex'].includes(language || '')
+          ? { source: text.trim(), display: true }
+          : mathOnlyCode(text, true)
+        return math?.source ? renderMathCode(math) : false
+      },
+    },
+  },
 )
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000

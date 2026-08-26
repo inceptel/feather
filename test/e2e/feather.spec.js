@@ -36,7 +36,7 @@ test.beforeAll(() => {
       role: 'assistant',
       content: [
         { type: 'thinking', thinking: '**Planning** the markdown pipeline.' },
-        { type: 'text', text: 'Feather uses **marked** with GFM support.\n\n## How it works\n\n1. Raw text goes through `marked.parse()`\n2. Output is sanitized with `DOMPurify`\n3. Result is cached in an LRU map\n\n```js\nconst html = marked.parse(text)\nconst safe = DOMPurify.sanitize(html)\n```\n\nThis keeps things **fast** and **secure**.\n\nInline math: $2 \\times 4 = 8$.\n\n$$\n\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\n$$\n\nLiteral code stays literal: `$x^2$`.\n\nIt costs $5 and another item costs $10.' },
+        { type: 'text', text: 'Feather uses **marked** with GFM support.\n\n## How it works\n\n1. Raw text goes through `marked.parse()`\n2. Output is sanitized with `DOMPurify`\n3. Result is cached in an LRU map\n\n```js\nconst html = marked.parse(text)\nconst safe = DOMPurify.sanitize(html)\n```\n\nThis keeps things **fast** and **secure**.\n\nInline math: $2 \\times 4 = 8$.\n\n$$\n\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}\n$$\n\nBacktick math: `$x^2$`.\n\nFenced backtick math:\n\n```\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\n```\n\nOrdinary code stays literal: `const formula = \"$x^2$\"`.\n\nIt costs $5 and another item costs $10.' },
       ],
     },
   })
@@ -227,14 +227,14 @@ test.describe('Message rendering', () => {
     expect(count).toBeGreaterThanOrEqual(1)
   })
 
-  test('LaTeX renders as inline and display math without changing code or currency', async ({ page }) => {
+  test('LaTeX renders bare and math-only backtick containers without changing ordinary code or currency', async ({ page }) => {
     const answer = page.locator('.markdown').filter({ hasText: 'Feather uses marked with GFM support.' })
-    await expect(answer.locator('.katex')).toHaveCount(2)
+    await expect(answer.locator('.katex')).toHaveCount(4)
     await expect(answer.locator('.katex').first()).toBeVisible()
-    await expect(answer.locator('.katex-display')).toBeVisible()
-    await expect(answer.locator('code').filter({ hasText: '$x^2$' })).toBeVisible()
+    await expect(answer.locator('.katex-display')).toHaveCount(2)
+    await expect(answer.locator('code').filter({ hasText: 'const formula = \"$x^2$\"' })).toBeVisible()
     await expect(answer.getByText('It costs $5 and another item costs $10.')).toBeVisible()
-    await page.screenshot({ path: '/tmp/feather-math-mobile.png', fullPage: false })
+    await page.screenshot({ path: '/tmp/feather-math-backticks.png', fullPage: false })
   })
 
   test('markdown heading renders as <h2>', async ({ page }) => {
