@@ -246,7 +246,21 @@ export default function App() {
       setBrowseLoading(false)
     }
   }
-  const [uploading, setUploading] = createSignal(false)
+  const [uploadScopes, setUploadScopes] = createSignal<Set<string>>(new Set())
+  const mediaScopeKey = (boxId: string, sessionId: string) => `${boxId}\u0000${sessionId}`
+  const uploading = () => {
+    const sessionId = currentId()
+    return !!sessionId && uploadScopes().has(mediaScopeKey(currentBox(), sessionId))
+  }
+  function setUploadingFor(target: SendTarget, active: boolean) {
+    setUploadScopes(current => {
+      const next = new Set(current)
+      const key = mediaScopeKey(target.box, target.id)
+      if (active) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
   const [working, setWorking] = createSignal(false)
   const [toolIntentStatus, setToolIntentStatus] = createSignal('')
   const [dragging, setDragging] = createSignal(false)
@@ -289,7 +303,7 @@ export default function App() {
   const [listening, setListening] = createSignal(false)
   const [interimText, setInterimText] = createSignal('')
   const [recordingTime, setRecordingTime] = createSignal(0)
-  const [transcribing, setTranscribing] = createSignal(false)
+  const transcribing = () => voiceMemos().some(memo => memo.status === 'transcribing')
   const [audioLevel, setAudioLevel] = createSignal(0)
   const [spinGestureState, setSpinGestureState] = createSignal<SpinGestureState>('off')
   const [motionSamples, setMotionSamples] = createSignal(0)
@@ -1125,26 +1139,18 @@ export default function App() {
           await persistMediaPatch(memo.id, { transcript })
         }
         if (memo.intent === 'send') {
+          const target = { id: memo.sessionId, box: memo.boxId }
           const onCurrent = memo.sessionId === currentId() && memo.boxId === currentBox()
           // One Send sends everything: fold any pending attachments into the same
           // message as the transcript, so voice + image never needs two taps.
           const pending = onCurrent ? files() : []
           const parts = [[memo.capturedText, transcript].filter(Boolean).join(' ')].filter(Boolean)
-          for (const f of pending) {
-            const uploadPath = await uploadPendingFile(f)
-            parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
+          for (const file of pending) {
+            const uploadPath = await uploadPendingFile(file)
+            parts.push(file.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${file.name})`)
           }
-          await sendSessionText(parts.join('\n'), { id: memo.sessionId, box: memo.boxId }, memo.id)
-          for (const f of pending) {
-            URL.revokeObjectURL(f.dataUrl)
-            await deleteMediaRecord(f.id).catch(() => {})
-          }
-          if (onCurrent && pending.length) setFiles(prev => prev.filter(file => !pending.some(sent => sent.id === file.id)))
-          const draft = onCurrent ? text() : loadDraft(memo.sessionId)
-          if (draft === memo.capturedText) {
-            saveDraft(memo.sessionId, '')
-            if (onCurrent) setText('')
-          }
+          await sendSessionText(parts.join('\n'), target, memo.id)
+          acknowledgeComposedMessage(target, memo.capturedText, pending)
         } else {
           const previous = memo.sessionId === currentId() && memo.boxId === currentBox() ? text().trim() : loadDraft(memo.sessionId).trim()
           const next = [previous, transcript].filter(Boolean).join(' ')
@@ -1253,15 +1259,18 @@ export default function App() {
       const name = `voice-memo-${Date.now()}.${blob.type.includes('mp4') ? 'm4a' : 'webm'}`
       const sizeError = blob.size > MAX_AUDIO_BYTES ? 'Voice memo is larger than the 25 MB audio limit' : blob.size < 1000 ? 'Recording was too short to transcribe' : null
       const record = { id, kind: 'audio', name, mimeType: blob.type, blob, status: sizeError ? 'failed' : 'transcribing', attempts: 0, error: sizeError, intent: sendAfterTranscription ? 'send' : 'append', capturedText, sessionId, boxId, createdAt: Date.now() }
+      let recoveryStored = true
       try { await putMediaRecord(record) }
-      catch (e: any) { setMediaNotice(`Voice recovery storage unavailable: ${e?.message || e}. Download the memo before closing this tab.`) }
+      catch (e: any) {
+        recoveryStored = false
+        setMediaNotice(`Voice recovery storage unavailable: ${e?.message || e}. Download the memo before closing this tab.`)
+      }
       const memo: VoiceMemo = { ...record, status: record.status as VoiceStatus, error: record.error || undefined, intent: record.intent as 'append' | 'send' }
       if (sessionId === currentId() && boxId === currentBox()) setVoiceMemos(prev => [...prev, memo])
       stopVoice()
       if (sizeError) return
-      setTranscribing(true)
-      try { await processVoiceMemo(memo) }
-      finally { setTranscribing(false) }
+      if (sendAfterTranscription && recoveryStored) clearComposerText({ id: sessionId, box: boxId }, capturedText)
+      await processVoiceMemo(memo)
     }
     mediaRecorder.onerror = (event: any) => {
       setMediaNotice(`Recording failed: ${event?.error?.message || 'unknown recorder error'}`)
@@ -1300,35 +1309,47 @@ export default function App() {
     }
   }
 
+  function clearComposerText(target: SendTarget, submittedText: string) {
+    const targetIsCurrent = target.id === currentId() && target.box === currentBox()
+    const currentDraft = targetIsCurrent ? text() : loadDraft(target.id)
+    if (currentDraft !== submittedText) return
+    saveDraft(target.id, '')
+    if (targetIsCurrent) setText('')
+  }
+
+  function acknowledgeComposedMessage(target: SendTarget, submittedText: string, pending: PendingFile[]) {
+    const targetIsCurrent = target.id === currentId() && target.box === currentBox()
+    clearComposerText(target, submittedText)
+    for (const file of pending) URL.revokeObjectURL(file.dataUrl)
+    if (targetIsCurrent) {
+      setFiles(current => current.filter(file => !pending.some(sent => sent.id === file.id)))
+      if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.blur() }
+    }
+    // The server has durably acknowledged the prompt. IndexedDB cleanup can
+    // finish behind the now-empty composer instead of blocking navigation.
+    void Promise.allSettled(pending.map(file => deleteMediaRecord(file.id)))
+  }
+
   async function sendComposedMessage(rawText: string, pending: PendingFile[] = files()) {
     const val = rawText.trim()
     if ((!val && !pending.length) || !currentId()) return
-    const targetId = currentId()!
-    const targetBox = currentBox()
-    setUploading(true)
+    const target = { id: currentId()!, box: currentBox() }
+    setUploadingFor(target, true)
     setMediaNotice('')
     try {
       const parts: string[] = val ? [val] : []
-      for (const f of pending) {
-        const uploadPath = await uploadPendingFile(f)
-        parts.push(f.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${f.name})`)
+      for (const file of pending) {
+        const uploadPath = await uploadPendingFile(file)
+        parts.push(file.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${file.name})`)
       }
       // Reuse the first durable attachment id as the delivery key. If the
       // server accepted the prompt but its acknowledgement was lost, Retry
       // receives the same success response without injecting it twice.
-      await sendSessionText(parts.join('\n'), { id: targetId, box: targetBox }, pending[0]?.id)
-      for (const f of pending) {
-        URL.revokeObjectURL(f.dataUrl)
-        await deleteMediaRecord(f.id).catch(() => {})
-      }
-      if (targetId === currentId() && targetBox === currentBox()) {
-        if (text() === rawText) { setText(''); saveDraft(targetId, '') }
-        setFiles(prev => prev.filter(file => !pending.some(sent => sent.id === file.id)))
-        if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.blur() }
-      }
+      await sendSessionText(parts.join('\n'), target, pending[0]?.id)
+      acknowledgeComposedMessage(target, rawText, pending)
     } catch (e: any) {
-      if (targetId === currentId() && targetBox === currentBox()) setMediaNotice(`Media retained — ${e?.message || e}. Retry when ready.`)
-    } finally { setUploading(false) }
+      if (target.id === currentId() && target.box === currentBox()) setMediaNotice(`Media retained — ${e?.message || e}. Retry when ready.`)
+    } finally { setUploadingFor(target, false) }
   }
 
   async function handleSend() {

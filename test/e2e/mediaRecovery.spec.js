@@ -104,6 +104,50 @@ test('an acknowledged send preserves composer edits typed while the request is i
   await expect.poll(() => page.evaluate(id => localStorage.getItem(`feather-draft-${id}`), sessionId)).toBe('newer unsent thought')
 })
 
+test('an in-flight attachment send does not block another room and clears the acknowledged origin draft', async ({ page }) => {
+  let releaseSend
+  let sendReceived = false
+  let sendAcknowledged = false
+  const sendGate = new Promise(resolve => { releaseSend = resolve })
+  await page.route('**/api/upload', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ path: '/tmp/navigation-photo.png' }),
+  }))
+  await page.route(`**/api/sessions/${sessionId}/send`, async route => {
+    sendReceived = true
+    await sendGate
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, sentAt: new Date().toISOString() }) })
+    sendAcknowledged = true
+  })
+
+  await page.goto(`/#${sessionId}`, { waitUntil: 'domcontentloaded' })
+  await page.locator('textarea').fill('send from the first room')
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'navigation.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('durable navigation image'),
+  })
+  await page.locator('button[title="Send"]').last().click()
+  await expect.poll(() => sendReceived).toBe(true)
+
+  await page.locator('button').first().click()
+  await page.getByText('media navigation target', { exact: true }).click()
+  const secondComposer = page.locator('textarea')
+  await expect(secondComposer).toBeEditable()
+  await expect(page.locator('button[title="Send"]').last()).toBeEnabled()
+  await secondComposer.fill('work in the second room')
+
+  releaseSend()
+  await expect.poll(() => sendAcknowledged).toBe(true)
+  await expect(secondComposer).toHaveValue('work in the second room')
+
+  await page.locator('button').first().click()
+  await page.getByText('media recovery test', { exact: true }).click()
+  await expect(page.locator('textarea')).toHaveValue('')
+  await expect(page.locator('img[src^="blob:"]')).toHaveCount(0)
+})
+
 test('oversized attachments are rejected before any upload request', async ({ page }) => {
   let uploads = 0
   const oversizedPath = path.join('/tmp', `feather-too-large-${Date.now()}.bin`)
@@ -175,7 +219,14 @@ test('voice and image work stay pinned to the session where they started', async
       close() {}
     }
   })
-  await page.route('**/api/transcribe', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ transcript: 'pinned voice' }) }))
+  let releaseTranscription
+  let transcriptionReceived = false
+  const transcriptionGate = new Promise(resolve => { releaseTranscription = resolve })
+  await page.route('**/api/transcribe', async route => {
+    transcriptionReceived = true
+    await transcriptionGate
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ transcript: 'pinned voice' }) })
+  })
   let voiceSend
   await page.route(`**/api/sessions/${sessionId}/send`, async route => {
     voiceSend = {
@@ -192,6 +243,11 @@ test('voice and image work stay pinned to the session where they started', async
   await page.getByText('media navigation target', { exact: true }).click()
   await page.locator('textarea').fill('other draft')
   await page.locator('button[title="Stop, transcribe & send"]').last().click()
+  await expect.poll(() => transcriptionReceived).toBe(true)
+  await expect(page.locator('textarea')).toHaveValue('other draft')
+  await expect(page.locator('button[title="Send"]').last()).toBeEnabled()
+  await expect.poll(() => page.evaluate(id => localStorage.getItem(`feather-draft-${id}`), sessionId)).toBe(null)
+  releaseTranscription()
   await expect(page.locator('textarea')).toHaveValue('other draft')
   await expect.poll(() => voiceSend?.text).toBe('original draft pinned voice')
   expect(voiceSend.messageId).toMatch(/^[0-9a-f-]{20,}$/i)
