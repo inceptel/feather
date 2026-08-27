@@ -1143,7 +1143,7 @@ export function MessageView(props: MessageViewProps) {
     const timeline = createMemo(() => scope().timeline.filter(item => !hideParentOrchestration(item)))
     const visibleScope = () => ({ ...scope(), timeline: timeline() })
     const summary = () => activeOmpStep(visibleScope()) || `${timeline().length} steps`
-    const hasWork = () => timeline().length > 0 || !!props.todo || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
+    const hasWork = () => timeline().length > 0 || (props.todo?.total || 0) > 0 || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
     return (
       <Show when={hasWork()}>
         <details class="work-details" data-testid="omp-parent-execution" data-segment={scope().segment}>
@@ -1154,7 +1154,7 @@ export function MessageView(props: MessageViewProps) {
             <span class="execution-status" aria-label={executionStatusLabel(scope().runStatus)} title={executionStatusLabel(scope().runStatus)} style={{ color: executionStatusColor(scope().runStatus) }}>{executionStatusMark(scope().runStatus)}</span>
           </summary>
           <div class="execution-detail">
-            <Show when={props.todo}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
+            <Show when={(props.todo?.total || 0) > 0}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
             <Show when={timeline().length > 0}>
               <div data-testid="omp-parent-execution-timeline">{renderTimelineItems(timeline, summary)}</div>
             </Show>
@@ -1222,7 +1222,7 @@ export function MessageView(props: MessageViewProps) {
   const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
   const hasCurrentWork = createMemo(() => !!props.work && (
     props.work.timeline.length > 0 ||
-    !!props.todo ||
+    (props.todo?.total || 0) > 0 ||
     (props.subagents?.length || 0) > 0 ||
     (props.jobs || []).some(job => job.status === 'running')
   ))
