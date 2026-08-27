@@ -140,6 +140,7 @@ test('an in-flight attachment send does not block another room and clears the ac
 
   releaseSend()
   await expect.poll(() => sendAcknowledged).toBe(true)
+  await expect(page.getByTestId('working-indicator')).toHaveCount(0)
   await expect(secondComposer).toHaveValue('work in the second room')
 
   await page.locator('button').first().click()
