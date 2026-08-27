@@ -1301,7 +1301,7 @@ export default function App() {
       throw error
     }
     pushHistory(fullText)
-    if (targetIsCurrent) {
+    if (targetId === currentId() && targetBox === currentBox()) {
       setToolIntentStatus('')
       setToolIntentHistory([])
       clearAssistantStream()

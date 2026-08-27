@@ -422,23 +422,59 @@ function readMeta() {
 
 function updateMeta(mutator) { return META_STATE.update(mutator); }
 
+const MESSAGE_TAIL_CHUNK_BYTES = 1024 * 1024;
+
+function readLatestMessages(fpath, agent, count) {
+  const wanted = Math.max(1, count);
+  const reverse = [];
+  const fd = fs.openSync(fpath, 'r');
+  let position = fs.fstatSync(fd).size;
+  let suffix = Buffer.alloc(0);
+  try {
+    while (position > 0 && reverse.length <= wanted) {
+      const length = Math.min(MESSAGE_TAIL_CHUNK_BYTES, position);
+      position -= length;
+      const chunk = Buffer.allocUnsafe(length);
+      fs.readSync(fd, chunk, 0, length, position);
+      const data = suffix.length ? Buffer.concat([chunk, suffix]) : chunk;
+      let end = data.length;
+      while (reverse.length <= wanted) {
+        const newline = data.lastIndexOf(10, end - 1);
+        if (newline < 0) break;
+        const line = data.subarray(newline + 1, end);
+        end = newline;
+        if (!line.length) continue;
+        const message = parseMessageForAgent(line.toString('utf8'), agent);
+        if (message) reverse.push(message);
+      }
+      suffix = Buffer.from(data.subarray(0, end));
+    }
+    if (position === 0 && reverse.length <= wanted && suffix.length) {
+      const message = parseMessageForAgent(suffix.toString('utf8'), agent);
+      if (message) reverse.push(message);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return {
+    messages: reverse.slice(0, wanted).reverse(),
+    hasEarlier: reverse.length > wanted,
+  };
+}
+
 function getMessages(sessionId, limit = 100, before = 0) {
   const agent = getAgentForSession(sessionId);
   const fpath = findJsonlPath(sessionId, agent);
   if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
-  const lines = fs.readFileSync(fpath, 'utf8').split('\n').filter(Boolean);
-  const msgs = [];
-  for (const line of lines) {
-    const m = parseMessageForAgent(line, agent);
-    if (m) msgs.push(m);
-  }
-  if (before > 0) {
-    const end = Math.max(0, msgs.length - before);
-    const start = Math.max(0, end - limit);
-    return { messages: msgs.slice(start, end), hasMore: start > 0 };
-  }
-  const start = Math.max(0, msgs.length - limit);
-  return { messages: msgs.slice(start), hasMore: start > 0 };
+  const pageSize = Math.max(1, limit);
+  const offset = Math.max(0, before);
+  const tail = readLatestMessages(fpath, agent, pageSize + offset);
+  const end = Math.max(0, tail.messages.length - offset);
+  const start = Math.max(0, end - pageSize);
+  return {
+    messages: tail.messages.slice(start, end),
+    hasMore: tail.hasEarlier || start > 0,
+  };
 }
 
 // ── Session discovery ───────────────────────────────────────────────────────
@@ -587,6 +623,63 @@ function grepSessionFiles(q, files) {
   return matches;
 }
 
+const sessionCandidateCache = new Map();
+
+function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candidateProjectId }) {
+  const mtimeMs = mtime.getTime();
+  const cached = sessionCandidateCache.get(fpath);
+  if (cached && cached.agent === agent && size >= cached.size) {
+    if (cached.mtimeMs === mtimeMs && cached.size === size) return cached;
+    try {
+      let activityMs = cached.activityMs;
+      const appendedBytes = size - cached.size;
+      if (appendedBytes > 0) {
+        if (appendedBytes <= 4 * 1024 * 1024) {
+          const fd = fs.openSync(fpath, 'r');
+          try {
+            const appended = Buffer.allocUnsafe(appendedBytes);
+            fs.readSync(fd, appended, 0, appendedBytes, cached.size);
+            activityMs = Math.max(activityMs, lastMessageMs(appended.toString('utf8'), agent) || 0);
+          } finally {
+            fs.closeSync(fd);
+          }
+        } else {
+          activityMs = lastActivityMs(fpath, agent, mtimeMs);
+        }
+      }
+      const next = { ...cached, mtimeMs, size, activityMs };
+      sessionCandidateCache.set(fpath, next);
+      return next;
+    } catch {}
+  }
+  const fd = fs.openSync(fpath, 'r');
+  let buf;
+  try {
+    const bufCap = agent === 'codex' ? CODEX_HEAD_BYTES : 16384;
+    buf = Buffer.alloc(Math.min(bufCap, size));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const sessionCwd = extractSessionCwd(buf, agent);
+  const projectId = candidateProjectId || (sessionCwd ? encodeProjectPath(sessionCwd) : null);
+  let title;
+  if (agent === 'omp') title = extractOmpTitle(buf);
+  else if (agent === 'codex') title = extractCodexTitle(buf);
+  else title = extractClaudeTitle(buf);
+  const facts = {
+    mtimeMs,
+    size,
+    agent,
+    projectId,
+    title,
+    worker: isAutoWorkerSession(buf, agent, projectId, sessionCwd),
+    activityMs: lastActivityMs(fpath, agent, mtimeMs),
+  };
+  sessionCandidateCache.set(fpath, facts);
+  return facts;
+}
+
 // `query`, when set, filters to sessions whose title OR full JSONL content
 // contains it (case-insensitive). Search ignores the mtime-ranked candidate
 // cutoff that the plain listing has: every candidate is considered, so old
@@ -612,7 +705,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
             const stat = fs.statSync(fpath);
             if (stat.size < 50) continue;
             if (/-home-user-(?:auto|autoweb)-|feather-aw/.test(dir)) continue;
-            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, agent: 'claude', projectId: dir });
+            candidates.push({ id: file.replace('.jsonl', ''), fpath, mtime: stat.mtime, size: stat.size, agent: 'claude', projectId: dir });
           } catch {}
         }
       } catch {}
@@ -631,7 +724,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
         const fpath = path.join(dirPath, files[0]);
         const stat = fs.statSync(fpath);
         if (stat.size < 50) continue;
-        candidates.push({ id: dir, fpath, mtime: stat.mtime, agent: 'omp' });
+        candidates.push({ id: dir, fpath, mtime: stat.mtime, size: stat.size, agent: 'omp' });
       } catch {}
     }
   }
@@ -639,7 +732,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
   // codex sessions
   for (const { uuid, fpath, mtime, size } of listCodexJsonlFiles()) {
     if (size < 50) continue;
-    candidates.push({ id: codexLocalIds.get(uuid) || uuid, fpath, mtime, agent: 'codex' });
+    candidates.push({ id: codexLocalIds.get(uuid) || uuid, fpath, mtime, size, agent: 'codex' });
   }
 
   // Sort by mtime descending; loop until we have `limit` non-worker sessions.
@@ -661,54 +754,28 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
 
   const sessions = [];
   const required = new Set(requiredIds);
-  for (const { id, fpath, mtime, agent, projectId: candidateProjectId } of candidates) {
-    let projectId = candidateProjectId;
+  for (const candidate of candidates) {
+    const { id, fpath, agent } = candidate;
     if (sessions.length >= limit) {
       if (required.size === 0) break;
       if (!required.has(id)) continue;
     }
     try {
-      const fd = fs.openSync(fpath, 'r');
-      let buf;
-      try {
-        const bufCap = agent === 'codex' ? CODEX_HEAD_BYTES : 16384;
-        buf = Buffer.alloc(Math.min(bufCap, fs.fstatSync(fd).size));
-        fs.readSync(fd, buf, 0, buf.length, 0);
-      } finally {
-        fs.closeSync(fd);
-      }
-
-      const sessionCwd = extractSessionCwd(buf, agent);
-
-      // Codex/omp transcripts don't live under ~/.claude/projects, so they
-      // carry no directory-derived projectId. Derive one from the session cwd
-      // (same encoding Claude uses: separators → dashes) so cwd-based grouping
-      // — e.g. the rooms view — works for every agent.
-      if (!projectId && sessionCwd) projectId = encodeProjectPath(sessionCwd);
-
-      // Worker detection: use explicit canary or actual worker cwd/project.
-      // Broad path mentions in prompt/context are too noisy for Codex sessions.
-      if (isAutoWorkerSession(buf, agent, projectId, sessionCwd)) continue;
-
-      let title;
-      if (agent === 'omp') title = extractOmpTitle(buf);
-      else if (agent === 'codex') title = extractCodexTitle(buf);
-      else title = extractClaudeTitle(buf);
-
-      const effectiveTitle = meta[id]?.title || title || id.slice(0, 8);
+      const facts = inspectSessionCandidate(candidate);
+      if (facts.worker) continue;
+      const effectiveTitle = meta[id]?.title || facts.title || id.slice(0, 8);
       if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
 
       // Project label is shown only for allowlisted projects (key present in labels);
       // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
-      const isAllowlisted = projectId && (projectId in labels);
-      const activityMs = lastActivityMs(fpath, agent, mtime.getTime());
+      const isAllowlisted = facts.projectId && (facts.projectId in labels);
       sessions.push({
         id, title: effectiveTitle,
-        updatedAt: new Date(activityMs).toISOString(),
-        isActive: sessionIsActive(active, id, activityMs, now),
+        updatedAt: new Date(facts.activityMs).toISOString(),
+        isActive: sessionIsActive(active, id, facts.activityMs, now),
         agent,
-        projectId: projectId || null,
-        projectLabel: isAllowlisted ? (labels[projectId] || cleanProjectLabel(projectId)) : null,
+        projectId: facts.projectId || null,
+        projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
       });
       required.delete(id);
@@ -2963,7 +3030,7 @@ function executableAvailable(command) {
   return false;
 }
 
-app.get('/api/agents', (_req, res) => {
+function discoverAgents() {
   const agents = [{ id: 'claude', label: 'Claude Code', available: true }];
   if (READ_ONLY_MODE) {
     // Read-only means no writes anywhere, including subprocess caches/logs.
@@ -2971,22 +3038,25 @@ app.get('/api/agents', (_req, res) => {
     // determine availability from PATH and omit version labels in canary mode.
     agents.push({ id: 'omp', label: 'oh-my-pi', available: executableAvailable('omp') });
     agents.push({ id: 'codex', label: 'Codex', available: executableAvailable('codex') });
-  } else {
-    try {
-      const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-      agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
-    } catch {
-      agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
-    }
-    try {
-      const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-      agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
-    } catch {
-      agents.push({ id: 'codex', label: 'Codex', available: false });
-    }
+    return agents;
   }
-  res.json({ agents });
-});
+  try {
+    const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+    agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
+  } catch {
+    agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
+  }
+  try {
+    const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
+    agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
+  } catch {
+    agents.push({ id: 'codex', label: 'Codex', available: false });
+  }
+  return agents;
+}
+
+const AGENTS_SNAPSHOT = discoverAgents();
+app.get('/api/agents', (_req, res) => res.json({ agents: AGENTS_SNAPSHOT }));
 
 function httpError(status, message) {
   const e = new Error(message);
