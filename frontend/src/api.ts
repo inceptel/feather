@@ -317,10 +317,9 @@ export async function fetchProjects(): Promise<Project[]> {
 }
 
 export async function fetchMessages(id: string, before = 0, box?: string | null): Promise<{ messages: Message[], hasMore: boolean }> {
-  const url = before > 0
-    ? `${BASE}/api/sessions/${id}/messages?before=${before}`
-    : `${BASE}/api/sessions/${id}/messages`
-  const r = await fetch(bq(url, box))
+  const params = new URLSearchParams({ limit: '200' })
+  if (before > 0) params.set('before', String(before))
+  const r = await fetch(bq(`${BASE}/api/sessions/${id}/messages?${params}`, box))
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return await r.json()
 }

@@ -519,11 +519,11 @@ test.describe('Live updates', () => {
         content: [{ type: 'tool_use', id: 'status-tool-1', name: 'read', input: { file_path: '/tmp/upload' }, intent: 'Inspecting upload recovery.' }],
       },
     })
-    const status = page.getByRole('status').filter({ hasText: 'Inspecting upload recovery.' })
-    await expect(status).toBeVisible({ timeout: 10000 })
     const liveWork = page.getByTestId('live-work-turn')
     await expect(liveWork).toBeVisible()
     await expect(liveWork.getByTestId('work-log-summary')).toContainText('Details')
+    await expect(liveWork.getByTestId('work-log-summary')).toContainText('Inspecting upload recovery.')
+    await expect(page.getByTestId('working-indicator')).toHaveCount(0)
 
     writeLine({
       type: 'assistant', uuid: `e2e-status-2-${Date.now()}`, timestamp: '2025-06-15T14:06:05Z',
@@ -533,10 +533,9 @@ test.describe('Live updates', () => {
         content: [{ type: 'tool_use', id: 'status-tool-2', name: 'bash', input: { command: 'npm test' }, intent: 'Testing the repaired upload.' }],
       },
     })
-    const currentStatus = page.getByRole('status').filter({ hasText: 'Testing the repaired upload.' })
-    await expect(currentStatus).toBeVisible({ timeout: 10000 })
-    await expect(currentStatus.locator('summary')).toContainText('Testing the repaired upload.')
-    await expect(currentStatus.locator('summary')).not.toContainText('Inspecting upload recovery.')
+    const currentStatus = liveWork.getByTestId('work-log-summary')
+    await expect(currentStatus).toContainText('Testing the repaired upload.', { timeout: 10000 })
+    await expect(currentStatus).not.toContainText('Inspecting upload recovery.')
 
     writeLine({
       type: 'assistant', uuid: `e2e-status-final-${Date.now()}`, timestamp: '2025-06-15T14:06:10Z',
@@ -544,7 +543,7 @@ test.describe('Live updates', () => {
       message: { role: 'assistant', content: 'Status lifecycle complete.' },
     })
     await expect(page.getByText('Status lifecycle complete.')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByRole('status').filter({ hasText: 'Testing the repaired upload.' })).not.toBeVisible()
+    await expect(currentStatus).not.toBeVisible()
     await expect(liveWork).toHaveCount(0)
     const finalBubble = page.locator('.asst-bubble').filter({ hasText: 'Status lifecycle complete.' })
     await expect(finalBubble.getByTestId('work-log-summary')).toBeVisible()

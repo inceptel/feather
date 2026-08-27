@@ -696,6 +696,12 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-log-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .work-log-chevron { display: inline-block; transition: transform 120ms ease; }
 .work-log[open] .work-log-chevron { transform: rotate(90deg); }
+.live-work-disclosure { width: 100%; min-width: 0; }
+.live-work-disclosure .work-log { margin: 0; }
+.live-work-disclosure .work-log-summary { width: 100%; min-height: 34px; }
+.work-log-active { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+.work-log-live-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--info); }
+.live-work-disclosure .work-log-detail { max-height: min(58vh, 520px); overflow: auto; margin-top: 2px; padding: 8px 10px; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; background: transparent; }
 .work-log-detail {
   margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border-subtle);
   border-radius: 9px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5;
@@ -765,6 +771,25 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
   .agent-rail > li { flex-basis: 100%; max-width: none; }
   .agent-inspector { max-height: none; overflow: visible; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-medium); border-left: none; }
 }
+.work-details { width: 100%; max-width: 960px; margin: 0 auto 10px; color: var(--text-secondary); }
+.work-details > .execution-detail { max-height: min(58vh, 520px); overflow: auto; }
+.work-details > summary::-webkit-details-marker { display: none; }
+.work-details > .execution-summary { min-height: 34px; padding: 0 2px; border: 0; background: transparent; }
+.work-details[open] > .execution-summary { border-bottom: 1px solid var(--border-subtle); }
+.work-details[open] > .execution-summary .execution-chevron { transform: rotate(90deg); }
+.work-details > .execution-detail { padding: 5px 0 0; border: 0; }
+.work-details .execution-item { padding: 0 0 2px 14px; }
+.work-details .execution-item:not(:last-child)::before { left: 3px; top: 14px; bottom: -2px; background: var(--border-subtle); }
+.work-details .execution-node { left: 0; top: 12px; width: 7px; height: 7px; border: 0; }
+.work-details .execution-card { border: 0; border-radius: 6px; background: transparent; }
+.work-details .execution-item[data-status='running'] .execution-card { border: 0; background: rgba(96, 165, 250, 0.05); }
+.work-details .execution-tool > summary { min-height: 32px; padding: 0 6px; }
+.work-details .execution-payload { margin: 0 6px 4px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-base); }
+.work-details .omp-todo-surface { margin: 0 0 5px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; }
+.work-details .agent-surface { margin: 5px 0; padding: 6px; border: 0; border-radius: 6px; background: transparent; }
+.work-details .agent-card { padding: 6px 8px; border: 0; border-left: 2px solid currentColor; border-radius: 5px; background: transparent; }
+.work-details .agent-card[aria-expanded='true'] { border-color: var(--accent); background: rgba(255,255,255,0.025); }
+.work-details .execution-status { font-weight: 650; text-transform: none; letter-spacing: 0; }
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
@@ -913,11 +938,14 @@ export function MessageView(props: MessageViewProps) {
     )
   }
 
-  function ExecutionEntry(entryProps: { item: OmpTimelineItem }) {
+  function ExecutionEntry(entryProps: { item: OmpTimelineItem; summaryIntent?: string }) {
     const thinking = createMemo(() => entryProps.item.kind === 'thinking' ? entryProps.item : null)
     const tool = createMemo(() => entryProps.item.kind === 'tool' ? entryProps.item : null)
     const presentation = createMemo(() => tool() ? timelineToolPresentation(tool()!) : null)
-    const intent = createMemo(() => tool()?.intent || presentation()?.summary || '')
+    const intent = createMemo(() => {
+      const value = tool()?.intent || presentation()?.summary || ''
+      return value === entryProps.summaryIntent ? '' : value
+    })
     const input = createMemo(() => executionValue(tool()?.args))
     const output = createMemo(() => executionValue(tool()?.result !== undefined ? tool()?.result : tool()?.partialResult))
     return (
@@ -963,10 +991,10 @@ export function MessageView(props: MessageViewProps) {
     return op === 'wait' || op === 'jobs' || op === 'inbox' || op === 'list'
   }
 
-  function renderTimelineItems(timeline: () => OmpTimelineItem[]) {
+  function renderTimelineItems(timeline: () => OmpTimelineItem[], summaryIntent?: () => string) {
     return (
       <ol class="execution-timeline">
-        <Index each={timeline()}>{(item) => <ExecutionEntry item={item()} />}</Index>
+        <Index each={timeline()}>{(item) => <ExecutionEntry item={item()} summaryIntent={summaryIntent?.()} />}</Index>
       </ol>
     )
   }
@@ -1017,24 +1045,6 @@ export function MessageView(props: MessageViewProps) {
   function renderWorkAuxiliarySurfaces() {
     return (
       <>
-      <Show when={props.runtime}>
-        <details data-testid="omp-runtime" style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
-          <summary style={{ padding: '7px 0', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '11px' }}>
-            {[props.runtime!.modelProvider, props.runtime!.modelId].filter(Boolean).join('/') || 'OMP session'}
-            <Show when={props.runtime!.thinkingLevel}><span> · {props.runtime!.thinkingLevel}</span></Show>
-            <Show when={props.runtime!.contextPercent !== undefined}><span> · {Math.round(props.runtime!.contextPercent!)}% context</span></Show>
-          </summary>
-          <div style={{ padding: '0 0 8px', color: 'var(--text-muted)', 'font-size': '10px', 'line-height': '1.55' }}>
-            <Show when={props.runtime!.modelApi}><div>API · {props.runtime!.modelApi}</div></Show>
-            <Show when={props.runtime!.contextTokens !== undefined && props.runtime!.contextWindow !== undefined}>
-              <div>Context · {props.runtime!.contextTokens!.toLocaleString()} / {props.runtime!.contextWindow!.toLocaleString()} tokens</div>
-            </Show>
-            <Show when={Object.keys(props.runtime!.serviceTiers || {}).length}>
-              <div>Service · {Object.entries(props.runtime!.serviceTiers || {}).map(([family, tier]) => `${family}: ${tier || 'default'}`).join(' · ')}</div>
-            </Show>
-          </div>
-        </details>
-      </Show>
 
       <Show when={(props.subagents?.length || 0) > 0}>
         <section data-testid="omp-subagents" class="agent-surface" aria-label="Subagents">
@@ -1110,13 +1120,13 @@ export function MessageView(props: MessageViewProps) {
         </section>
       </Show>
 
-      <Show when={(props.jobs?.length || 0) > 0}>
+      <Show when={(props.jobs || []).some(job => job.status === 'running')}>
         <details data-testid="omp-jobs" style={{ margin: '0 0 10px', padding: '0 11px', 'border-radius': '10px', border: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
           <summary style={{ padding: '7px 0', cursor: 'pointer', color: 'var(--text-muted)', 'font-size': '11px' }}>
             Background jobs · {(props.jobs || []).filter(job => job.status === 'running').length} running
           </summary>
           <div style={{ padding: '0 0 7px' }}>
-            <For each={props.jobs || []}>{(job) => (
+            <For each={(props.jobs || []).filter(job => job.status === 'running')}>{(job) => (
               <div style={{ display: 'flex', 'justify-content': 'space-between', gap: '8px', padding: '3px 0', color: 'var(--text-muted)', 'font-size': '10px' }}>
                 <span>{job.label || job.type}</span><span>{job.status}</span>
               </div>
@@ -1128,11 +1138,13 @@ export function MessageView(props: MessageViewProps) {
     )
   }
   function renderParentExecution(scope: () => OmpWorkScope) {
-    const summary = () => activeOmpStep(scope()) || `${scope().timeline.length} steps`
-    const hasWork = () => scope().timeline.length > 0 || !!props.todo || (props.subagents?.length || 0) > 0 || (props.jobs?.length || 0) > 0
+    const timeline = createMemo(() => scope().timeline.filter(item => !hideParentOrchestration(item)))
+    const visibleScope = () => ({ ...scope(), timeline: timeline() })
+    const summary = () => activeOmpStep(visibleScope()) || `${timeline().length} steps`
+    const hasWork = () => timeline().length > 0 || !!props.todo || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
     return (
       <Show when={hasWork()}>
-        <details class="execution-log" data-testid="omp-parent-execution" data-segment={scope().segment}>
+        <details class="work-details" data-testid="omp-parent-execution" data-segment={scope().segment}>
           <summary class="execution-summary" data-testid="omp-parent-execution-summary">
             <span class="execution-chevron">›</span>
             <span class="execution-title">{scope().runStatus === 'running' ? 'Working' : 'Details'}</span>
@@ -1141,8 +1153,8 @@ export function MessageView(props: MessageViewProps) {
           </summary>
           <div class="execution-detail">
             <Show when={props.todo}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
-            <Show when={scope().timeline.length > 0}>
-              {renderExecutionTimeline(scope, 'omp-parent-execution-timeline', true)}
+            <Show when={timeline().length > 0}>
+              <div data-testid="omp-parent-execution-timeline">{renderTimelineItems(timeline, summary)}</div>
             </Show>
             {renderWorkAuxiliarySurfaces()}
           </div>
@@ -1162,6 +1174,7 @@ export function MessageView(props: MessageViewProps) {
         <summary class="work-log-summary" data-testid="work-log-summary">
           <span class="work-log-chevron">›</span>
           <span style={{ 'font-weight': '600' }}>Details</span>
+          <Show when={live && props.statusText}><span class="work-log-active">{props.statusText}</span><span class="work-log-live-dot" aria-label="Running" /></Show>
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
           <div class="work-log-meta">
@@ -1187,13 +1200,8 @@ export function MessageView(props: MessageViewProps) {
   }
   function renderProvisionalWork(messages: () => Message[], testId: string, live = false) {
     return (
-      <div class="msg-row" data-testid={testId} style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
-        <div class="asst-bubble" style={{
-          'max-width': '100%', padding: '6px 12px',
-          'border-radius': '12px', background: '#1e1e1e',
-          border: '1px solid rgba(255,255,255,0.06)',
-          color: 'var(--text-primary)', overflow: 'hidden',
-        }}>
+      <div class="msg-row" data-testid={testId} style={{ width: '100%', display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
+        <div class="live-work-disclosure">
           {renderWorkLog(messages, live)}
         </div>
       </div>
@@ -1214,8 +1222,9 @@ export function MessageView(props: MessageViewProps) {
     props.work.timeline.length > 0 ||
     !!props.todo ||
     (props.subagents?.length || 0) > 0 ||
-    (props.jobs?.length || 0) > 0
+    (props.jobs || []).some(job => job.status === 'running')
   ))
+  const liveLegacyWork = createMemo(() => props.working && !hasCurrentWork() && renderItems().at(-1)?.kind === 'chain')
   const workAttachedToAnswer = createMemo(() => {
     if (!hasCurrentWork()) return false
     const latest = renderItems().at(-1)
@@ -1636,7 +1645,7 @@ export function MessageView(props: MessageViewProps) {
 
 
 
-      <Show when={props.working && !currentProtocolOwnsWork() && !hasCurrentWork()}>
+      <Show when={props.working && !currentProtocolOwnsWork() && !hasCurrentWork() && !liveLegacyWork()}>
         <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
           <div role="status" data-testid="working-indicator" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
             <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />
