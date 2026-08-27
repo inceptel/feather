@@ -682,8 +682,8 @@ pre:hover .copy-btn { opacity: 1; }
 .star-btn { -webkit-tap-highlight-color: transparent; }
 div:hover > div > .star-btn { opacity: 0.6 !important; }
 .star-btn:hover { opacity: 1 !important; }
-.msg-action { min-width: 28px; min-height: 28px; align-items: center; justify-content: center; border-radius: 5px !important; color: var(--text-muted) !important; opacity: 0.82 !important; }
-.msg-action:hover, .msg-action:focus-visible { color: var(--text-primary) !important; background: rgba(255,255,255,0.06) !important; opacity: 1 !important; }
+.msg-action { min-width: 28px; min-height: 28px; align-items: center; justify-content: center; border-radius: 5px !important; color: var(--text-secondary) !important; opacity: 1 !important; }
+.msg-action:hover, .msg-action:focus-visible { color: var(--text-primary) !important; background: rgba(255,255,255,0.07) !important; }
 
 /* Execution details: quiet at rest, full fidelity on demand */
 .work-log { width: 100%; margin: 0 0 4px; }
@@ -701,7 +701,7 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .live-work-disclosure { width: 100%; min-width: 0; }
 .live-work-disclosure .work-log { margin: 0; }
 .live-work-disclosure .work-log-summary { width: 100%; min-height: 34px; }
-.work-log-active { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+.work-log-active { min-width: 0; flex: 0 1 auto; max-width: 75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 12px; }
 .work-log-live-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--info); }
 .live-work-disclosure .work-log-detail { max-height: min(58vh, 520px); overflow: auto; margin-top: 2px; padding: 8px 10px; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; background: transparent; }
 .work-log-detail {
@@ -792,6 +792,9 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-details .agent-card { padding: 6px 8px; border: 0; border-left: 2px solid currentColor; border-radius: 5px; background: transparent; }
 .work-details .agent-card[aria-expanded='true'] { border-color: var(--accent); background: rgba(255,255,255,0.025); }
 .work-details .execution-status { font-weight: 650; text-transform: none; letter-spacing: 0; }
+.work-details .execution-title { color: var(--text-muted); font-weight: 600; }
+.work-details .execution-active { flex: 0 1 auto; max-width: 75%; color: var(--text-primary); }
+.work-details .execution-status { margin-left: 2px; }
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
@@ -1175,7 +1178,7 @@ export function MessageView(props: MessageViewProps) {
       <details class="work-log">
         <summary class="work-log-summary" data-testid="work-log-summary">
           <span class="work-log-chevron">›</span>
-          <span style={{ 'font-weight': '600' }}>Details</span>
+          <span style={{ color: 'var(--text-muted)', 'font-weight': '600' }}>Details</span>
           <Show when={live && props.statusText}><span class="work-log-active">{props.statusText}</span><span class="work-log-live-dot" aria-label="Running" /></Show>
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
@@ -1441,7 +1444,7 @@ export function MessageView(props: MessageViewProps) {
             display: 'flex', 'align-items': 'center', 'justify-content': 'space-between',
             gap: '8px', 'margin-top': '8px', 'padding-top': '6px',
             'border-top': '1px solid rgba(255,255,255,0.06)',
-            'font-size': '11px', color: 'var(--text-faint)',
+            'font-size': '11px', color: 'var(--text-muted)',
           }}>
             <span>{formatTime(msg.timestamp)}</span>
             <div style={{ display: 'flex', 'align-items': 'center', gap: '8px' }}>
@@ -1474,7 +1477,7 @@ export function MessageView(props: MessageViewProps) {
             <>
               <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '12px' }}>
                 <div style={{
-                  'max-width': 'min(82%, 760px)', padding: '10px 14px 8px',
+                  'max-width': 'min(82%, 68ch)', padding: '10px 14px 8px',
                   'border-radius': '12px',
                   background: '#1e1e1e',
                   border: '1px solid rgba(96, 165, 250, 0.22)',
@@ -1518,7 +1521,7 @@ export function MessageView(props: MessageViewProps) {
           </Show>
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
             <div class="asst-bubble" style={{
-              'max-width': 'min(100%, 960px)', padding: '10px 14px 8px',
+              'max-width': 'min(100%, 78ch)', padding: '10px 14px 8px',
               'border-radius': '12px',
               background: '#1e1e1e',
               border: '1px solid rgba(255,255,255,0.06)',
