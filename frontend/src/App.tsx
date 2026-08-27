@@ -1416,8 +1416,8 @@ export default function App() {
   }
 
   const tabStyle = (t: string) => ({
-    padding: '9px 14px', border: 'none', 'border-bottom': tab() === t ? '2px solid #4aba6a' : '2px solid transparent',
-    background: 'none', color: tab() === t ? '#e5e5e5' : '#666', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
+    padding: '9px 14px', border: 'none', 'border-bottom': tab() === t ? '2px solid var(--success)' : '2px solid transparent',
+    background: 'none', color: tab() === t ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
     '-webkit-tap-highlight-color': 'transparent', 'flex-shrink': '0',
   })
   // Prompts tab: just the user's own inputs, scrollable back through history.
