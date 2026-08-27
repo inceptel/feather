@@ -682,6 +682,8 @@ pre:hover .copy-btn { opacity: 1; }
 .star-btn { -webkit-tap-highlight-color: transparent; }
 div:hover > div > .star-btn { opacity: 0.6 !important; }
 .star-btn:hover { opacity: 1 !important; }
+.msg-action { min-width: 28px; min-height: 28px; align-items: center; justify-content: center; border-radius: 5px !important; color: var(--text-muted) !important; opacity: 0.82 !important; }
+.msg-action:hover, .msg-action:focus-visible { color: var(--text-primary) !important; background: rgba(255,255,255,0.06) !important; opacity: 1 !important; }
 
 /* Execution details: quiet at rest, full fidelity on demand */
 .work-log { width: 100%; margin: 0 0 4px; }
@@ -1472,7 +1474,7 @@ export function MessageView(props: MessageViewProps) {
             <>
               <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '12px' }}>
                 <div style={{
-                  'max-width': '70%', padding: '10px 14px 8px',
+                  'max-width': 'min(82%, 760px)', padding: '10px 14px 8px',
                   'border-radius': '12px',
                   background: '#1e1e1e',
                   border: '1px solid rgba(96, 165, 250, 0.22)',
@@ -1516,7 +1518,7 @@ export function MessageView(props: MessageViewProps) {
           </Show>
           <div class="msg-row" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '12px' }}>
             <div class="asst-bubble" style={{
-              'max-width': '100%', padding: '10px 14px 8px',
+              'max-width': 'min(100%, 960px)', padding: '10px 14px 8px',
               'border-radius': '12px',
               background: '#1e1e1e',
               border: '1px solid rgba(255,255,255,0.06)',
