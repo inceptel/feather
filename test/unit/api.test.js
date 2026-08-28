@@ -824,6 +824,8 @@ describe('POST /api/sessions/:id/send', () => {
     const body = await response.json()
     assert.equal(typeof body.error, 'string')
     assert.ok(body.error.length > 0)
+    const trust = JSON.parse(fs.readFileSync(path.join(fixtureHome, '.claude.json'), 'utf8'))
+    assert.equal(trust.projects[fixtureHome].hasTrustDialogAccepted, true)
   })
 })
 
