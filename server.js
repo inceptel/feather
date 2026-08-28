@@ -2323,7 +2323,7 @@ app.post('/api/sessions/:id/send', async (req, res) => {
       return res.json({ ok: true, sentAt: new Date().toISOString() });
     }
     return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId));
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab']);
 
@@ -2648,7 +2648,7 @@ app.post('/api/share/sessions/:id/send', requireShareAccess, async (req, res) =>
       return res.json({ ok: true, sentAt: new Date().toISOString() });
     }
     return res.json(await sendInputIdempotent(req.params.id, prefixedText, messageId));
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 app.post('/api/share/sessions/:id/keys', requireShareAccess, (req, res) => {
   if (!req.peer.control) return res.status(403).json({ error: 'view-only access' });

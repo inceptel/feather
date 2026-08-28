@@ -813,6 +813,20 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
 
 // ── Error handling ──────────────────────────────────────────────────────────
 
+describe('POST /api/sessions/:id/send', () => {
+  it('normalizes process exit codes to a JSON 500 response', async () => {
+    const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Feather-Message-ID': 'process-exit-status-0001' },
+      body: JSON.stringify({ text: 'must not crash Express status handling' }),
+    })
+    assert.equal(response.status, 500)
+    const body = await response.json()
+    assert.equal(typeof body.error, 'string')
+    assert.ok(body.error.length > 0)
+  })
+})
+
 describe('POST /api/sessions/:id/interrupt', () => {
   it('returns 500 for nonexistent tmux session', async () => {
     const r = await fetch(`${BASE}/api/sessions/no-such-session/interrupt`, { method: 'POST' })
