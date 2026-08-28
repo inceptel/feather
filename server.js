@@ -851,6 +851,41 @@ function ensureCodexTrust(cwd) {
   try { fs.appendFileSync(cfg, block); } catch (e) { console.warn(`[codex] could not write trust for ${cwd}:`, e.message); }
 }
 
+// Claude Code's workspace trust prompt defaults to "No, exit". Feather sends
+// Enter after launch to dismiss harmless startup prompts, so an untrusted cwd
+// otherwise exits before the first message and leaves /send targeting no tmux.
+function ensureClaudeTrust(cwd) {
+  const trustedCwd = cwd || HOME;
+  const cfg = path.join(HOME, '.claude.json');
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(cfg, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.warn(`[claude] could not read workspace trust for ${trustedCwd}:`, error.message);
+      return;
+    }
+  }
+  const projects = isJsonRecord(settings.projects) ? settings.projects : {};
+  const current = isJsonRecord(projects[trustedCwd]) ? projects[trustedCwd] : {};
+  if (current.hasTrustDialogAccepted === true) return;
+  const next = {
+    ...settings,
+    projects: {
+      ...projects,
+      [trustedCwd]: { ...current, hasTrustDialogAccepted: true },
+    },
+  };
+  const temporary = `${cfg}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(next), { mode: 0o600 });
+    fs.renameSync(temporary, cfg);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    console.warn(`[claude] could not trust workspace ${trustedCwd}:`, error.message);
+  }
+}
+
 function shellQuote(value) {
   return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
 }
@@ -967,6 +1002,7 @@ function spawnSession(id, cwd, agent = 'claude') {
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox'`, cwd);
     adoptNewCodexUuid(id, before, cwd);
   } else {
+    ensureClaudeTrust(cwd);
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
   }
 }
@@ -1054,6 +1090,7 @@ function resumeSession(id, cwd) {
         } catch {}
       }
     }
+    ensureClaudeTrust(sessionCwd);
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, sessionCwd);
   }
 }
@@ -2413,6 +2450,7 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       if (!ompId) throw new Error(`Cannot fork OMP session ${req.params.id}: exact OMP session id not found`);
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}--resume ${ompId} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
     } else {
+      ensureClaudeTrust(req.body?.cwd);
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
     }
     res.json({ ok: true, tmux: forkName });
