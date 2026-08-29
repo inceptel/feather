@@ -20,6 +20,7 @@ import { resolveOmpModel, resolveOmpThinking, ompModelFlags, sanitizeOmpModel } 
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
+import { listWikiPages, readWikiPage } from './lib/room-wiki.js';
 import { parseFrictionNotes } from './lib/friction.js';
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 
@@ -1814,7 +1815,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/files$/,
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
-  /^\/api\/rooms\/[^/]+\/(updates|friction)$/,
+  /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page)$/,
 ];
 
 function readOnlyRequestAllowed(req) {
@@ -3505,6 +3506,27 @@ app.post('/api/rooms/:name/updates', (req, res) => {
     roomSnapshotCache.update((rooms) => rooms.map((room) =>
       room.name === name ? { ...room, updates: roomUpdatesSummary(name) } : room));
     res.json({ ok: true, update: entry });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Room wiki: curated Markdown under <room>/wiki/. Read-only surface — agents
+// (and the caretaker) write via the filesystem, Feather only serves it, so
+// both routes are allowlisted in read-only canary mode.
+app.get('/api/rooms/:name/wiki', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    res.json({ pages: listWikiPages(path.join(ROOMS_HOME_DIR, name, 'wiki')) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+app.get('/api/rooms/:name/wiki/page', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const page = readWikiPage(path.join(ROOMS_HOME_DIR, name, 'wiki'), String(req.query.name || ''));
+    if (!page) throw httpError(404, 'no such wiki page');
+    res.json(page);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

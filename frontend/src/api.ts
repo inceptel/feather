@@ -219,6 +219,21 @@ export async function fetchRoomUpdates(room: string): Promise<RoomUpdate[]> {
   return (await r.json()).updates
 }
 
+export interface RoomWikiPageMeta { name: string, size: number, updatedAt: string }
+export interface RoomWikiPage { name: string, content: string, updatedAt: string }
+
+export async function fetchRoomWiki(room: string): Promise<RoomWikiPageMeta[]> {
+  const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/wiki`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return (await r.json()).pages
+}
+
+export async function fetchRoomWikiPage(room: string, page: string): Promise<RoomWikiPage> {
+  const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/wiki/page?name=${encodeURIComponent(page)}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
+
 export interface FrictionComplaint {
   id: string
   timestamp: string

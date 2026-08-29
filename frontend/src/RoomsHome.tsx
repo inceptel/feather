@@ -1,5 +1,6 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomMain, setRoomPulse, fetchRoomUpdates, fetchRoomFriction, RoomInfo, SessionMeta, RoomUpdate, FrictionComplaint } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomMain, setRoomPulse, fetchRoomUpdates, fetchRoomFriction, fetchRoomWiki, fetchRoomWikiPage, RoomInfo, SessionMeta, RoomUpdate, FrictionComplaint, RoomWikiPageMeta } from './api'
+import { renderMarkdown } from './components/MessageView'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -82,7 +83,12 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   const [attachError, setAttachError] = createSignal<string | null>(null)
   const [attachQuery, setAttachQuery] = createSignal('')
   const [seen, setSeen] = createSignal<Record<string, number>>(loadSeen())
-  const [updatesRoom, setUpdatesRoom] = createSignal<string | null>(null)
+  const [wikiRoom, setWikiRoom] = createSignal<string | null>(null)
+  const [wikiPages, setWikiPages] = createSignal<RoomWikiPageMeta[]>([])
+  const [wikiSelected, setWikiSelected] = createSignal<string | null>(null) // page name or 'updates'
+  const [wikiContent, setWikiContent] = createSignal<string>('')
+  const [wikiLoading, setWikiLoading] = createSignal(false)
+  const [wikiError, setWikiError] = createSignal<string | null>(null)
   const [updatesList, setUpdatesList] = createSignal<RoomUpdate[]>([])
   const [updatesLoading, setUpdatesLoading] = createSignal(false)
   const [updatesError, setUpdatesError] = createSignal<string | null>(null)
@@ -202,11 +208,37 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     setSeen(next); saveSeen(next)
   }
 
-  async function openUpdates(room: RoomInfo, event: MouseEvent) {
+  // Wiki panel: curated pages from <room>/wiki plus the virtual Updates page
+  // (the append-only briefing feed presented inside the wiki, not stored in it).
+  async function openWiki(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
     setFrictionRoom(null)
-    if (updatesRoom() === room.name) { setUpdatesRoom(null); return }
-    setUpdatesRoom(room.name)
+    if (wikiRoom() === room.name) { setWikiRoom(null); return }
+    setWikiRoom(room.name)
+    setWikiSelected(null)
+    setWikiContent('')
+    setWikiError(null)
+    setWikiLoading(true)
+    try {
+      const pages = await fetchRoomWiki(room.name)
+      setWikiPages(pages)
+      if (pages.some((p) => p.name === 'Home')) await selectWikiPage(room, 'Home')
+      else await openWikiUpdates(room)
+    } catch (e: any) { setWikiError(e.message); setWikiPages([]) }
+    finally { setWikiLoading(false) }
+  }
+
+  async function selectWikiPage(room: RoomInfo, name: string) {
+    setWikiSelected(name)
+    setWikiError(null)
+    setWikiLoading(true)
+    try { setWikiContent((await fetchRoomWikiPage(room.name, name)).content) }
+    catch (e: any) { setWikiError(e.message); setWikiContent('') }
+    finally { setWikiLoading(false) }
+  }
+
+  async function openWikiUpdates(room: RoomInfo) {
+    setWikiSelected('updates')
     setUpdatesError(null)
     markSeen(room)
     setUpdatesLoading(true)
@@ -215,10 +247,26 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     finally { setUpdatesLoading(false) }
   }
 
+  // Relative .md links between wiki pages stay inside the panel; external
+  // links open a new tab. Rendered HTML is DOMPurify-sanitized upstream.
+  function wikiLinkClick(room: RoomInfo, event: MouseEvent) {
+    const anchor = (event.target as HTMLElement).closest('a')
+    if (!anchor) return
+    const href = anchor.getAttribute('href') || ''
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
+      anchor.setAttribute('target', '_blank')
+      anchor.setAttribute('rel', 'noopener noreferrer')
+      return
+    }
+    event.preventDefault()
+    const target = decodeURIComponent(href.replace(/^\.\//, '').replace(/[#?].*$/, '').replace(/\.md$/i, ''))
+    if (target) selectWikiPage(room, target)
+  }
+
   async function openFriction(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
     if (frictionRoom() === room.name) { setFrictionRoom(null); return }
-    setUpdatesRoom(null)
+    setWikiRoom(null)
     setFrictionRoom(room.name)
     setFrictionError(null)
     setFrictionLoading(true)
@@ -323,11 +371,11 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                       {room.pulse.enabled ? 'Keep working' : 'Paused'}
                     </button>
                     <span style={{ color: room.pulse.status === 'error' ? '#d48166' : '#666', 'font-size': '11px' }}>{pulseLabel(room)}</span>
-                    <button data-testid={`updates-${room.name}`} onClick={(event) => openUpdates(room, event)}
-                      aria-label={`Updates for #${room.name}`}
-                      style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: updatesRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                      Updates
-                      <Show when={unreadCount(room) > 0} fallback={<span style={{ color: '#555', 'font-weight': '500' }}>{room.updates?.count || 0}</span>}>
+                    <button data-testid={`wiki-${room.name}`} onClick={(event) => openWiki(room, event)}
+                      aria-label={`Wiki for #${room.name}`}
+                      style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: wikiRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                      Wiki
+                      <Show when={unreadCount(room) > 0}>
                         <span style={{ background: '#c0392b', color: '#fff', 'border-radius': '999px', padding: '0 6px', 'font-size': '10px', 'line-height': '16px' }}>{unreadCount(room)} new</span>
                       </Show>
                     </button>
@@ -338,23 +386,57 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                     </button>
                   </div>
                 </div>
-                <Show when={updatesRoom() === room.name}>
-                  <div data-testid={`updates-panel-${room.name}`} style={{ 'border-top': '1px solid #16161f', padding: '8px 16px 12px', background: '#0a0d13' }}>
-                    <Show when={updatesError()}>
-                      <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{updatesError()}</div>
+                <Show when={wikiRoom() === room.name}>
+                  <div data-testid={`wiki-panel-${room.name}`} style={{ 'border-top': '1px solid #16161f', padding: '8px 16px 12px', background: '#0a0d13' }}>
+                    <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '6px', padding: '2px 0 8px' }}>
+                      <For each={wikiPages()}>{(page) => (
+                        <button data-testid={`wiki-page-${room.name}-${page.name}`} onClick={() => selectWikiPage(room, page.name)}
+                          style={{ background: wikiSelected() === page.name ? '#1a1f2e' : 'transparent', border: '1px solid #262d3d', color: wikiSelected() === page.name ? '#cdd6e4' : '#8a94a4', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                          {page.name}
+                        </button>
+                      )}</For>
+                      <button data-testid={`wiki-updates-${room.name}`} onClick={() => openWikiUpdates(room)}
+                        style={{ background: wikiSelected() === 'updates' ? '#1a1f2e' : 'transparent', border: '1px solid #262d3d', color: wikiSelected() === 'updates' ? '#cdd6e4' : '#8a94a4', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', display: 'flex', 'align-items': 'center', gap: '5px' }}>
+                        Updates
+                        <Show when={unreadCount(room) > 0} fallback={<span style={{ color: '#555', 'font-weight': '500' }}>{room.updates?.count || 0}</span>}>
+                          <span style={{ background: '#c0392b', color: '#fff', 'border-radius': '999px', padding: '0 6px', 'font-size': '10px', 'line-height': '16px' }}>{unreadCount(room)} new</span>
+                        </Show>
+                      </button>
+                    </div>
+                    <Show when={wikiError()}>
+                      <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{wikiError()}</div>
                     </Show>
-                    <Show when={updatesLoading()}>
-                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading updates…</div>
+                    <Show when={wikiLoading()}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading…</div>
                     </Show>
-                    <Show when={!updatesLoading() && !updatesError() && updatesList().length === 0}>
-                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No updates yet. Agents post here with <code style={{ color: '#e0a050' }}>room update</code> when something worth knowing happens.</div>
+                    <Show when={!wikiLoading() && !wikiError() && wikiPages().length === 0 && wikiSelected() !== 'updates'}>
+                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No wiki yet. The room caretaker builds pages under <code style={{ color: '#e0a050' }}>wiki/</code> as knowledge stabilizes.</div>
                     </Show>
-                    <For each={[...updatesList()].reverse()}>{(u) => (
-                      <div style={{ padding: '9px 0', 'border-bottom': '1px solid #14141c' }}>
-                        <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(u.ts)}</div>
-                        <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
+                    <Show when={wikiSelected() && wikiSelected() !== 'updates' && !wikiLoading() && !wikiError()}>
+                      <div data-testid={`wiki-content-${room.name}`} class="markdown wiki-markdown"
+                        onClick={(event) => wikiLinkClick(room, event)}
+                        style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.55', 'word-break': 'break-word', 'max-height': '60vh', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}
+                        innerHTML={renderMarkdown(wikiContent())} />
+                    </Show>
+                    <Show when={wikiSelected() === 'updates'}>
+                      <Show when={updatesError()}>
+                        <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{updatesError()}</div>
+                      </Show>
+                      <Show when={updatesLoading()}>
+                        <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading updates…</div>
+                      </Show>
+                      <Show when={!updatesLoading() && !updatesError() && updatesList().length === 0}>
+                        <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No updates yet. Agents post here with <code style={{ color: '#e0a050' }}>room update</code> when something worth knowing happens.</div>
+                      </Show>
+                      <div style={{ 'max-height': '60vh', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+                        <For each={[...updatesList()].reverse()}>{(u) => (
+                          <div style={{ padding: '9px 0', 'border-bottom': '1px solid #14141c' }}>
+                            <div style={{ 'font-size': '10px', color: '#5a6472', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(u.ts)}</div>
+                            <div style={{ 'font-size': '13px', color: '#d0d4da', 'line-height': '1.5', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{u.text}</div>
+                          </div>
+                        )}</For>
                       </div>
-                    )}</For>
+                    </Show>
                   </div>
                 </Show>
                 <Show when={frictionRoom() === room.name}>
