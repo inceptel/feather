@@ -108,7 +108,7 @@ const marked = new Marked(
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
 
-function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string): string {
   const cached = mdCache.get(text)
   if (cached !== undefined) return cached
   const html = marked.parse(text.trimEnd()) as string
