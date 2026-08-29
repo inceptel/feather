@@ -16,7 +16,7 @@ import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
-import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from './lib/omp.js';
+import { resolveOmpModel, resolveOmpThinking, ompModelFlags, sanitizeOmpModel } from './lib/omp.js';
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
@@ -946,6 +946,13 @@ function ensureOmpCouncilDiscovery() {
 
 
 
+
+// Per-session OMP model override: persisted in session meta (ompModel) so
+// spawn, resume, fork, pulse, and bridge migration all keep the same model.
+function ompSessionModel(id) {
+  const stored = sanitizeOmpModel(readMeta()[id]?.ompModel || '');
+  return stored || OMP_MODEL;
+}
 function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
   if (!resume) resetOmpBridgeSessionState(id);
   const sessionDir = path.join(OMP_SESSIONS, id);
@@ -969,7 +976,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   fs.chmodSync(path.join(sessionDir, '.feather-bridge.json'), 0o600);
   const args = [
     'omp',
-    ompModelFlags(OMP_MODEL, OMP_THINKING).trim(),
+    ompModelFlags(ompSessionModel(id), OMP_THINKING).trim(),
     resume ? `--resume ${shellQuote(ompId)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
     bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
@@ -986,10 +993,11 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   launchInTmux(tmuxName(id), command, cwd);
 }
 
-function spawnSession(id, cwd, agent = 'claude') {
+function spawnSession(id, cwd, agent = 'claude', { ompModel = '' } = {}) {
   const name = tmuxName(id);
-  // Persist agent type in metadata
-  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent } }));
+  // Persist agent type (and any OMP model override) in metadata
+  const model = agent === 'omp' ? sanitizeOmpModel(ompModel) : '';
+  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent, ...(model ? { ompModel: model } : {}) } }));
 
   if (agent === 'omp') {
     launchOmpSession(id, cwd);
@@ -2344,7 +2352,7 @@ app.get('/api/sessions/:id/stream', sessionStreamHandler);
 app.post('/api/sessions', (req, res) => {
   try {
     const agent = req.body.agent || 'claude';
-    spawnSession(req.body.id, req.body.cwd, agent);
+    spawnSession(req.body.id, req.body.cwd, agent, { ompModel: req.body.model || '' });
     res.json({ id: req.body.id, status: 'starting', agent });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2448,7 +2456,7 @@ app.post('/api/sessions/:id/fork', (req, res) => {
       const sessionDir = path.join(OMP_SESSIONS, req.params.id);
       const ompId = getOmpSessionId(req.params.id);
       if (!ompId) throw new Error(`Cannot fork OMP session ${req.params.id}: exact OMP session id not found`);
-      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(OMP_MODEL, OMP_THINKING)}--resume ${ompId} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
+      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(ompSessionModel(req.params.id), OMP_THINKING)}--resume ${ompId} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
     } else {
       ensureClaudeTrust(req.body?.cwd);
       launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
