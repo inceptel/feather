@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveOmpModel, resolveOmpThinking, ompModelFlags } from '../../lib/omp.js'
+import { resolveOmpModel, resolveOmpThinking, ompModelFlags, sanitizeOmpModel } from '../../lib/omp.js'
 
 describe('omp launch config', () => {
   it('defaults the model to gpt-5.6-sol and honors a valid override', () => {
@@ -23,6 +23,15 @@ describe('omp launch config', () => {
     assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'high' }), 'high')
     assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'bogus' }), 'xhigh')
     assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: '' }), 'xhigh')
+  })
+
+  it('sanitizes per-session model overrides: valid id or empty, never a fallback', () => {
+    assert.equal(sanitizeOmpModel('anthropic/claude-opus-5'), 'anthropic/claude-opus-5')
+    assert.equal(sanitizeOmpModel(' opus '), 'opus')
+    assert.equal(sanitizeOmpModel(''), '')
+    assert.equal(sanitizeOmpModel(undefined), '')
+    assert.equal(sanitizeOmpModel("sol'; rm -rf /"), '')
+    assert.equal(sanitizeOmpModel('has space'), '')
   })
 
   it('builds the flag prefix, omitting empty parts', () => {
