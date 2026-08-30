@@ -388,8 +388,8 @@ export async function createSession(cwd?: string, agent?: string, room?: { name:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, cwd, agent, roomName: room?.name, roomRole: room?.role }),
   })
-  await responseJson(r)
-  return id
+  const created = await responseJson<{ id: string }>(r)
+  return created.id
 }
 
 export const resumeSession = (id: string, cwd?: string) =>
