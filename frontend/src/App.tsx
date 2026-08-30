@@ -6,8 +6,8 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchProtocolRuns } from './api'
+import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, fetchSidecar, subscribeSidecar, createSidecar, fetchSessionRoom, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -16,6 +16,7 @@ import { localFileUrl } from './lib/localMedia.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, todoSnapshotFromDetails, todoSnapshotFromMessage } from './lib/ompTodo.js'
 import { createOmpMirrorState, reduceOmpMirrorState } from './lib/ompMirror.js'
+import { mergeRoomThreadMessages } from './lib/roomThread.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
 
 interface QuickLink { label: string; url: string }
@@ -145,6 +146,8 @@ export default function App() {
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
+  const [roomSidecarId, setRoomSidecarId] = createSignal<string | null>(null)
+  const [roomThread, setRoomThread] = createSignal<SidecarMessage[]>([])
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
@@ -358,7 +361,7 @@ export default function App() {
   // A group belongs to the session that drives it (the non-spawned member),
   // matched by 8-char tmux prefix so CLI- and GUI-created groups both attach.
   const sidecarsForSession = (sid: string) =>
-    sidecars().filter(g => g.status === 'active' && g.members.some(m => !m.spawned && m.sessionId.slice(0, 8) === sid.slice(0, 8)))
+    sidecars().filter(g => g.kind !== 'room' && g.status === 'active' && g.members.some(m => !m.spawned && m.sessionId.slice(0, 8) === sid.slice(0, 8)))
   async function spawnSidecarFor(sid: string) {
     const task = prompt('Task / opening message for the sidecar (optional):') ?? ''
     const agent = (prompt('Agent for the peer (claude / codex):', 'claude') || 'claude').trim()
@@ -1421,6 +1424,47 @@ export default function App() {
   })
   const activeTodo = () => ompMirror().parent.todo || todoSnapshot()
   const activeSubagents = () => ompMirror().childOrder.map(id => ompMirror().children[id]).filter(Boolean)
+
+  function mergeRoomThreadMessage(message: SidecarMessage) {
+    setRoomThread((current) => {
+      const existing = current.findIndex((candidate) => candidate.seq === message.seq)
+      if (existing >= 0) {
+        const next = [...current]
+        next[existing] = message
+        return next
+      }
+      return [...current, message].sort((a, b) => a.seq - b.seq)
+    })
+  }
+
+  let roomThreadGeneration = 0
+  createEffect(() => {
+    const id = currentId()
+    const generation = ++roomThreadGeneration
+    let unsubscribe: (() => void) | undefined
+    let disposed = false
+    setRoomSidecarId(null)
+    setRoomThread([])
+    onCleanup(() => {
+      disposed = true
+      unsubscribe?.()
+    })
+    if (!id || isRemoteBox()) return
+    fetchSessionRoom(id).then((roomName) => {
+      if (!roomName || disposed || generation !== roomThreadGeneration) return
+      const groupId = `room-${roomName}`
+      return fetchSidecar(groupId).then(({ group, thread }) => {
+        if (disposed || generation !== roomThreadGeneration || group?.kind !== 'room') return
+        if (group.members.find((member) => member.role === 'leader')?.sessionId !== id) return
+        setRoomSidecarId(groupId)
+        setRoomThread(thread)
+        unsubscribe = subscribeSidecar(groupId, mergeRoomThreadMessage)
+      })
+    }).catch(() => {})
+  })
+
+  const roomChatMessages = createMemo<Message[]>(() =>
+    mergeRoomThreadMessages(messages(), roomThread(), roomSidecarId()) as Message[])
   // The Wiki is Room-owned. Resolve the current session's Room only when the
   // tab opens; RoomWikiView then reads curated pages, never raw updates/traces.
   let wikiRoomGeneration = 0
@@ -1749,7 +1793,7 @@ export default function App() {
           }>
             <div data-testid="chat-panel" style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView
-                messages={messages()}
+                messages={roomChatMessages()}
                 loading={loading()}
                 hasMore={hasMore()}
                 loadingMore={loadingMore()}

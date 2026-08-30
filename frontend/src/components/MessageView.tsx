@@ -1518,7 +1518,7 @@ export function MessageView(props: MessageViewProps) {
                   }}</For>
                   {(() => {
                     const display = hasAttachments ? cleanText : (textBlock?.text || '')
-                    return display ? <div class="markdown" innerHTML={renderMarkdown(display)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} /> : null
+                    return display ? <div class="markdown" innerHTML={msg.passive ? renderWikiMarkdown(display) : renderMarkdown(display)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} /> : null
                   })()}
                   {metadataRow}
                 </div>
@@ -1574,7 +1574,7 @@ export function MessageView(props: MessageViewProps) {
                         )
                       }}</For>
                       {bText.trim() && (
-                        <div class="markdown" innerHTML={renderMarkdown(bText)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} />
+                        <div class="markdown" innerHTML={msg.passive ? renderWikiMarkdown(bText) : renderMarkdown(bText)} ref={(el) => queueMicrotask(() => enhanceMarkdown(el, setLightbox, openExpandedTable))} />
                       )}
                     </div>
                   )
