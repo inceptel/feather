@@ -18,7 +18,7 @@ function sessionLine(id, cwd, text) {
 }
 
 describe('Room keep-working scheduler', () => {
-  it('skips a live room and launches exactly one autonomous OMP run for a due idle room', async () => {
+  it('ignores live residents, skips live user work, and launches due idle rooms', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-pulse-'))
     roots.push(root)
     const home = path.join(root, 'home')
@@ -26,7 +26,8 @@ describe('Room keep-working scheduler', () => {
     const binDir = path.join(root, 'bin')
     const tmuxLog = path.join(root, 'tmux.log')
     const activeId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-    const rooms = ['active', 'idle', 'broken']
+    const residentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    const rooms = ['active', 'resident', 'idle', 'broken']
     fs.mkdirSync(path.join(home, '.feather'), { recursive: true })
     fs.mkdirSync(stateDir, { recursive: true })
     fs.mkdirSync(binDir, { recursive: true })
@@ -39,9 +40,16 @@ describe('Room keep-working scheduler', () => {
     const activeProject = path.join(home, '.claude/projects', encodeProjectPath(path.join(home, 'rooms/active')))
     fs.mkdirSync(activeProject, { recursive: true })
     fs.writeFileSync(path.join(activeProject, `${activeId}.jsonl`), sessionLine(activeId, path.join(home, 'rooms/active'), 'still working'))
+    const residentProject = path.join(home, '.claude/projects', encodeProjectPath(path.join(home, 'rooms/resident')))
+    fs.mkdirSync(residentProject, { recursive: true })
+    fs.writeFileSync(path.join(residentProject, `${residentId}.jsonl`),
+      sessionLine(residentId, path.join(home, 'rooms/resident'), 'waiting for resident work'))
+    fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
+      resident: { caretaker: { sessionId: residentId } },
+    }))
     const due = (sessionId = null) => ({ enabled: true, status: 'waiting', lastRunAt: null, nextRunAtMs: 1, sessionId, error: null })
-    fs.writeFileSync(path.join(home, '.feather/room-pulses.json'), JSON.stringify({ active: due(), idle: due(), broken: due() }))
-    fs.writeFileSync(path.join(binDir, 'tmux'), `#!/bin/sh\nif [ "$1" = list-sessions ]; then printf 'feather-aaaaaaaa|%s\\n' "$(date +%s)"; exit 0; fi\nif [ "$1" = has-session ] && [ "$3" = feather-aaaaaaaa ]; then exit 0; fi\nif [ "$1" = new-session ]; then case "$*" in *rooms/broken*) exit 1;; esac; printf '%s\\n' "$*" >>"$TMUX_TEST_LOG"; exit 0; fi\nexit 1\n`)
+    fs.writeFileSync(path.join(home, '.feather/room-pulses.json'), JSON.stringify({ active: due(), resident: due(), idle: due(), broken: due() }))
+    fs.writeFileSync(path.join(binDir, 'tmux'), `#!/bin/sh\nif [ "$1" = list-sessions ]; then now="$(date +%s)"; printf 'feather-aaaaaaaa|%s\\nfeather-cccccccc|%s\\n' "$now" "$now"; exit 0; fi\nif [ "$1" = has-session ] && { [ "$3" = feather-aaaaaaaa ] || [ "$3" = feather-cccccccc ]; }; then exit 0; fi\nif [ "$1" = new-session ]; then case "$*" in *rooms/broken*) exit 1;; esac; printf '%s\\n' "$*" >>"$TMUX_TEST_LOG"; exit 0; fi\nif [ "$1" = set-option ]; then exit 0; fi\nexit 1\n`)
     fs.chmodSync(path.join(binDir, 'tmux'), 0o755)
 
     const port = 29_000 + (process.pid % 1000)
@@ -56,22 +64,28 @@ describe('Room keep-working scheduler', () => {
     })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr += chunk })
+    const readLaunches = () => {
+      try { return fs.readFileSync(tmuxLog, 'utf8').trim().split('\n').filter(Boolean) } catch { return [] }
+    }
     try {
       let state
       for (let attempt = 0; attempt < 100; attempt++) {
         try { state = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-pulses.json'), 'utf8')) } catch {}
-        if (state?.idle?.status === 'working' && state?.broken?.status === 'error' && state?.active?.nextRunAtMs > Date.now() && fs.existsSync(tmuxLog)) break
+        if (state?.resident?.status === 'working' && state?.idle?.status === 'working' && state?.broken?.status === 'error' && state?.active?.nextRunAtMs > Date.now() && readLaunches().length === 2) break
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
       assert.equal(state?.idle?.status, 'working', stderr)
+      assert.equal(state?.resident?.status, 'working', stderr)
       assert.match(state.idle.sessionId, /^[0-9a-f-]{36}$/)
       assert.equal(state.active.status, 'waiting')
       assert.equal(state.broken.status, 'error')
       assert.match(state.broken.error, /Command failed/)
       assert.ok(state.active.nextRunAtMs > Date.now())
-      const launches = fs.readFileSync(tmuxLog, 'utf8').trim().split('\n')
-      assert.equal(launches.length, 1)
-      assert.match(launches[0], /omp .* -p --auto-approve .*pulse\.md/)
+      const launches = readLaunches()
+      assert.equal(launches.length, 2, JSON.stringify({ launches, state }))
+      assert.ok(launches.some((launch) => launch.includes('rooms/idle')))
+      assert.ok(launches.some((launch) => launch.includes('rooms/resident')))
+      assert.ok(launches.every((launch) => /omp .* -p --auto-approve .*pulse\.md/.test(launch)))
       assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-sessions.json'), 'utf8'))[state.idle.sessionId], 'idle')
 
     } finally {
