@@ -122,11 +122,23 @@ describe('portable Room membership', () => {
       timestamp: '2020-01-01T00:00:00Z',
     })
     fs.utimesSync(oldFile, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'))
+
+    const residentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    const residentFile = path.join(ordinaryProject, `${residentId}.jsonl`)
+    writeClaudeSession(residentFile, {
+      id: residentId, cwd: path.join(home, 'ordinary'), title: 'Marriage Caretaker',
+      timestamp: '2021-01-01T00:00:00Z',
+    })
+    fs.utimesSync(residentFile, new Date('2021-01-01T00:00:00Z'), new Date('2021-01-01T00:00:00Z'))
     fs.writeFileSync(path.join(home, '.feather/room-sessions.json'), JSON.stringify({
       [oldId]: 'marriage',
+      [residentId]: 'marriage',
       [movedId]: 'other',
     }))
     fs.writeFileSync(path.join(home, '.feather/room-mains.json'), JSON.stringify({ marriage: oldId }))
+    fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
+      marriage: { caretaker: { sessionId: residentId } },
+    }))
     fs.writeFileSync(path.join(home, '.feather/room-pulses.json'), JSON.stringify({
       marriage: {
         enabled: true, status: 'working', lastRunAt: '2026-08-22T12:00:00Z',
@@ -158,11 +170,15 @@ describe('portable Room membership', () => {
       assert.equal(marriage.pulse.status, 'working')
       assert.equal(marriage.pulse.sessionId, cwdId)
       assert.equal(marriage.leaderSessionId, oldId)
-      assert.deepEqual(marriage.sessions.map((session) => session.id), [oldId, cwdId])
+      assert.deepEqual(marriage.sessions.map((session) => session.id), [residentId, oldId, cwdId])
       const historical = marriage.sessions.find((session) => session.id === oldId)
       assert.equal(historical.title, 'Historical marriage conversation')
       assert.equal(historical.roomAssigned, true)
       assert.deepEqual(rooms.find((room) => room.name === 'other').sessions.map((session) => session.id), [movedId])
+      assert.deepEqual(marriage.residents.map((resident) => [resident.role, resident.sessionId]), [
+        ['leader', oldId],
+        ['caretaker', residentId],
+      ])
 
       const blockedDetach = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -171,6 +187,35 @@ describe('portable Room membership', () => {
       assert.equal(blockedDetach.status, 409)
       assert.match((await blockedDetach.json()).error, /Leader.*cannot be moved or detached/)
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-mains.json'), 'utf8')), { marriage: oldId })
+      const rejectPulseResident = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/residents`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'operator', sessionId: cwdId }),
+      })
+      assert.equal(rejectPulseResident.status, 409)
+      assert.match((await rejectPulseResident.json()).error, /keep-working controller/)
+
+      const blockedResidentDetach = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: residentId, remove: true }),
+      })
+      assert.equal(blockedResidentDetach.status, 409)
+      assert.match((await blockedResidentDetach.json()).error, /resident caretaker.*cannot be moved or detached/)
+
+      const unregisterResident = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/residents/caretaker`, { method: 'DELETE' })
+      assert.equal(unregisterResident.status, 200)
+      const registerResident = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/residents`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'caretaker', sessionId: residentId }),
+      })
+      assert.equal(registerResident.status, 200)
+      assert.deepEqual((await registerResident.json()).residents.map((resident) => resident.role), ['leader', 'caretaker'])
+      const unregisterAgain = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/residents/caretaker`, { method: 'DELETE' })
+      assert.equal(unregisterAgain.status, 200)
+      const detachFormerResident = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: residentId, remove: true }),
+      })
+      assert.equal(detachFormerResident.status, 200)
 
       const wrongRoomDetach = await fetch(`http://127.0.0.1:${port}/api/rooms/marriage/assign`, {
         method: 'POST',

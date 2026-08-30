@@ -90,13 +90,14 @@ test('Room card always opens its durable Leader chat', async ({ page }) => {
     friction: { count: 0, latestAt: null, latest: null },
     pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
     leaderSessionId,
+    residents: [{ role: 'leader', sessionId: leader.id, agent: 'omp', title: leader.title, status: 'waiting' }],
     sessions: [pulse, newer, leader, ...archived],
   }] } }))
 
   await page.goto(BASE)
   await expect(page.getByText('#feather', { exact: true })).toBeVisible()
   await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
-  await expect(page.getByTestId(`leader-${leader.id}`)).toBeVisible()
+  await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toHaveCount(0)
   await page.getByText('#feather', { exact: true }).click()
   await expect(page).toHaveURL(/#leader-human-chat$/)
@@ -105,9 +106,9 @@ test('Room card always opens its durable Leader chat', async ({ page }) => {
   await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
   await page.getByTestId('manage-chats-feather').click()
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toBeVisible()
-  await expect(page.getByTestId(`leader-${leader.id}`)).toBeVisible()
+  await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
   await expect(page.getByTestId(`detach-${leader.id}`)).toHaveCount(0)
-  await expect(page.locator('[data-testid^="make-leader-"]')).toHaveCount(0)
+  await expect(page.getByTestId('room-card-feather')).toContainText('1 resident')
 })
 
 test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {

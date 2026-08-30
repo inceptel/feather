@@ -185,11 +185,20 @@ export interface ProtocolRunSnapshot {
 }
 
 
+export interface RoomResident {
+  role: string
+  sessionId: string
+  agent: string
+  title: string
+  status: 'working' | 'waiting' | 'offline'
+}
+
 export interface RoomInfo {
   name: string
   cwd: string
   sessions: SessionMeta[]
   leaderSessionId: string | null
+  residents: RoomResident[]
   active: boolean
   latest: { role: string, text: string } | null
   updatedAt: string | null
