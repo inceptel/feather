@@ -89,7 +89,7 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   }
 
   let timer: ReturnType<typeof setInterval>
-  onMount(() => { refresh(); timer = setInterval(refresh, 10000) })
+  onMount(() => { refresh(); timer = setInterval(() => { if (!wikiRoom()) refresh() }, 10000) })
   onCleanup(() => clearInterval(timer))
 
   async function newRoom() {
@@ -184,7 +184,14 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   function openWiki(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
     setFrictionRoom(null)
-    setWikiRoom(wikiRoom() === room.name ? null : room.name)
+    const opening = wikiRoom() !== room.name
+    if (opening) {
+      roomsEpoch++ // discard any in-flight poll that would remount the open reader
+      setWikiRoom(room.name)
+    } else {
+      setWikiRoom(null)
+      refresh()
+    }
   }
 
   async function openFriction(room: RoomInfo, event: MouseEvent) {

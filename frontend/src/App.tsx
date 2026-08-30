@@ -8,7 +8,7 @@ import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchRooms, fetchProtocolRuns } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -144,6 +144,8 @@ export default function App() {
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
+  const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [wikiRetry, setWikiRetry] = createSignal(0)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
@@ -1418,19 +1420,25 @@ export default function App() {
     background: 'none', color: tab() === t ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
     '-webkit-tap-highlight-color': 'transparent', 'flex-shrink': '0',
   })
+  const activeTodo = () => ompMirror().parent.todo || todoSnapshot()
+  const activeSubagents = () => ompMirror().childOrder.map(id => ompMirror().children[id]).filter(Boolean)
   // The Wiki is Room-owned. Resolve the current session's Room only when the
   // tab opens; RoomWikiView then reads curated pages, never raw updates/traces.
   let wikiRoomGeneration = 0
   createEffect(() => {
     const id = currentId()
+    wikiRetry()
     const generation = ++wikiRoomGeneration
     setWikiRoomName(undefined)
+    setWikiLookupState('idle')
     if (tab() !== 'wiki' || !id || isRemoteBox()) return
-    fetchRooms().then((rooms) => {
+    setWikiLookupState('loading')
+    fetchSessionRoom(id).then((room) => {
       if (generation !== wikiRoomGeneration) return
-      setWikiRoomName(rooms.find((room) => room.sessions.some((session) => session.id === id))?.name)
+      setWikiRoomName(room || undefined)
+      setWikiLookupState('ready')
     }).catch(() => {
-      if (generation === wikiRoomGeneration) setWikiRoomName(undefined)
+      if (generation === wikiRoomGeneration) setWikiLookupState('error')
     })
   })
 
@@ -1767,7 +1775,17 @@ export default function App() {
             </div>
             <div data-testid="wiki-panel" style={{ display: tab() === 'wiki' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
               <Show when={tab() === 'wiki'}>
-                <RoomWikiView room={wikiRoomName()} />
+                <Show when={wikiLookupState() === 'loading'}>
+                  <div style={{ color: '#666', 'font-size': '13px', padding: '24px 16px' }}>Finding this chat's Room…</div>
+                </Show>
+                <Show when={wikiLookupState() === 'error'}>
+                  <div style={{ color: '#d45555', 'font-size': '13px', padding: '24px 16px' }}>
+                    Could not load the Room Wiki. <button onClick={() => setWikiRetry((value) => value + 1)} style={{ background: 'none', border: 'none', color: '#73b8ff', padding: '0', cursor: 'pointer' }}>Retry</button>
+                  </div>
+                </Show>
+                <Show when={wikiLookupState() === 'ready'}>
+                  <RoomWikiView room={wikiRoomName()} />
+                </Show>
               </Show>
             </div>
             <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>

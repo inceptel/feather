@@ -365,6 +365,31 @@ describe('GET /api/sessions/:id/messages', () => {
   })
 })
 
+describe('GET /api/sessions/:id/room', () => {
+  it('resolves exact Room membership without depending on the capped Room snapshot', async () => {
+    const missing = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/room`)).json()
+    assert.equal(missing.room, null)
+
+    const roomName = `api-room-${Date.now().toString(36)}`
+    const created = await fetch(`${BASE}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: roomName }),
+    })
+    assert.equal(created.status, 200)
+    const assigned = await fetch(`${BASE}/api/rooms/${roomName}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: TEST_SESSION_ID }),
+    })
+    assert.equal(assigned.status, 200)
+
+    const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/room`)
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { room: roomName })
+  })
+})
+
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions/:id/stream (SSE)', () => {

