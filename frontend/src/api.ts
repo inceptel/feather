@@ -211,6 +211,12 @@ export async function fetchRooms(): Promise<RoomInfo[]> {
   return (await r.json()).rooms
 }
 
+export async function fetchSessionRoom(sessionId: string): Promise<string | null> {
+  const response = await fetch(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}/room`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return (await response.json()).room || null
+}
+
 
 export interface RoomWikiPageMeta { name: string, size: number, updatedAt: string }
 export interface RoomWikiPage { name: string, content: string, updatedAt: string }

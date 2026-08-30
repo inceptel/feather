@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, Show } from 'solid-js'
 import { fetchRoomWiki, fetchRoomWikiPage, RoomWikiPageMeta } from '../api'
-import { renderMarkdown } from './MessageView'
+import { renderWikiMarkdown } from './MessageView'
 
 export function RoomWikiView(props: { room?: string }) {
   const [pages, setPages] = createSignal<RoomWikiPageMeta[]>([])
@@ -9,29 +9,32 @@ export function RoomWikiView(props: { room?: string }) {
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   let generation = 0
+  let pageGeneration = 0
 
   async function selectPage(name: string, room = props.room) {
     if (!room) return
-    const ownGeneration = generation
+    const ownRoomGeneration = generation
+    const ownPageGeneration = ++pageGeneration
     setSelected(name)
     setLoading(true)
     setError(null)
     try {
       const page = await fetchRoomWikiPage(room, name)
-      if (ownGeneration === generation) setContent(page.content)
+      if (ownRoomGeneration === generation && ownPageGeneration === pageGeneration) setContent(page.content)
     } catch (cause) {
-      if (ownGeneration === generation) {
+      if (ownRoomGeneration === generation && ownPageGeneration === pageGeneration) {
         setContent('')
         setError(cause instanceof Error ? cause.message : String(cause))
       }
     } finally {
-      if (ownGeneration === generation) setLoading(false)
+      if (ownRoomGeneration === generation && ownPageGeneration === pageGeneration) setLoading(false)
     }
   }
 
   createEffect(() => {
     const room = props.room
     const ownGeneration = ++generation
+    ++pageGeneration
     setPages([])
     setSelected(null)
     setContent('')
@@ -60,8 +63,20 @@ export function RoomWikiView(props: { room?: string }) {
       anchor.setAttribute('rel', 'noopener noreferrer')
       return
     }
+    if (href.startsWith('#')) return
     event.preventDefault()
-    const target = decodeURIComponent(href.replace(/^\.\//, '').replace(/[#?].*$/, '').replace(/\.md$/i, ''))
+    const raw = decodeURIComponent(href.replace(/[#?].*$/, '').replace(/\.md$/i, ''))
+    const parts = raw.startsWith('/') ? [] : (selected() || '').split('/').slice(0, -1)
+    for (const segment of raw.split('/')) {
+      if (!segment || segment === '.') continue
+      if (segment === '..') {
+        if (parts.length === 0) return
+        parts.pop()
+      } else {
+        parts.push(segment)
+      }
+    }
+    const target = parts.join('/')
     if (target) selectPage(target)
   }
 
@@ -91,7 +106,7 @@ export function RoomWikiView(props: { room?: string }) {
         <Show when={!loading() && !error() && selected()}>
           <article data-testid={`wiki-content-${props.room}`} class="markdown wiki-markdown" onClick={followLink}
             style={{ flex: '1', 'min-height': '0', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '14px 16px 32px', 'font-size': '14px', color: '#d0d4da', 'line-height': '1.6', 'word-break': 'break-word' }}
-            innerHTML={renderMarkdown(content())} />
+            innerHTML={renderWikiMarkdown(content())} />
         </Show>
       </Show>
     </section>

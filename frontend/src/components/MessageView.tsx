@@ -120,6 +120,17 @@ export function renderMarkdown(text: string): string {
   mdCache.set(text, safe)
   return safe
 }
+
+// Wiki pages are agent-authored persistent content, so they use a passive
+// subset of the chat renderer: no forms, embedded browsing contexts, CSS, or
+// automatic network-loading media. DOMPurify remains the final XSS boundary.
+export function renderWikiMarkdown(text: string): string {
+  return DOMPurify.sanitize(renderMarkdown(text), {
+    ADD_ATTR: ['class', 'target', 'rel'],
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'option', 'img', 'picture', 'source', 'video', 'audio', 'track', 'iframe', 'object', 'embed', 'link', 'meta'],
+    FORBID_ATTR: ['style', 'action', 'formaction', 'src', 'srcset', 'background', 'autofocus'],
+  })
+}
 function renderLiveMarkdown(text: string): string {
   const html = marked.parse(text.trimEnd()) as string
   return DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'], FORBID_TAGS: ['img'] })

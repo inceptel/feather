@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { validWikiPageName, listWikiPages, readWikiPage } from '../../lib/room-wiki.js'
+import { validWikiPageName, listWikiPages, readWikiPage, verifiedWikiRoot } from '../../lib/room-wiki.js'
 
 describe('room wiki', () => {
   let root, wiki, outside
@@ -19,6 +19,8 @@ describe('room wiki', () => {
     fs.writeFileSync(path.join(wiki, 'Operations', 'Deploy.md'), '# Deploy\n')
     fs.writeFileSync(path.join(wiki, '_assets', 'ignored.md'), 'asset\n')
     fs.writeFileSync(path.join(wiki, 'notes.txt'), 'not a page\n')
+    fs.writeFileSync(path.join(wiki, 'Bad..md'), 'invalid page name\n')
+    fs.writeFileSync(path.join(wiki, 'Oversized.md'), Buffer.alloc(1024 * 1024 + 1))
     fs.writeFileSync(outside, 'must never be served\n')
     fs.symlinkSync(outside, path.join(wiki, 'Escape.md'))
   })
@@ -46,6 +48,18 @@ describe('room wiki', () => {
 
   it('lists nothing for a room without a wiki', () => {
     assert.deepEqual(listWikiPages(path.join(root, 'nope', 'wiki')), [])
+  })
+
+  it('verifies the exact non-symlinked Room wiki root', () => {
+    assert.equal(verifiedWikiRoot(root, 'room'), fs.realpathSync(wiki))
+    const linkedWikiRoom = path.join(root, 'linked-wiki')
+    fs.mkdirSync(linkedWikiRoom)
+    fs.symlinkSync('../room/wiki', path.join(linkedWikiRoom, 'wiki'))
+    assert.equal(verifiedWikiRoot(root, 'linked-wiki'), null)
+    assert.deepEqual(listWikiPages(path.join(linkedWikiRoom, 'wiki')), [])
+
+    fs.symlinkSync('room', path.join(root, 'linked-room'))
+    assert.equal(verifiedWikiRoot(root, 'linked-room'), null)
   })
 
   it('reads a page with content and mtime', () => {
