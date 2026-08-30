@@ -183,6 +183,7 @@ function reduceScope(scope, event) {
     case 'agent_start':
       return {
         ...scope,
+        todo: null,
         timeline: [],
         activeMessageId: null,
         runStatus: 'running',

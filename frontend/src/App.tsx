@@ -1,6 +1,6 @@
 declare const __BUILD_TIME__: string
 declare const __BUILD_VERSION__: string
-import { createSignal, createEffect, createMemo, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
+import { batch, createSignal, createEffect, createMemo, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
 import { MessageView, renderWikiMarkdown } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
@@ -14,7 +14,7 @@ import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, 
 import { appUrl } from './lib/appPath.js'
 import { localFileUrl } from './lib/localMedia.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
-import { deriveTodoSnapshot, todoSnapshotFromDetails, todoSnapshotFromMessage } from './lib/ompTodo.js'
+import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reduceOmpMirrorState } from './lib/ompMirror.js'
 import { mergeRoomThreadMessages } from './lib/roomThread.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
@@ -266,7 +266,6 @@ export default function App() {
   const [working, setWorking] = createSignal(false)
   const [toolIntentStatus, setToolIntentStatus] = createSignal('')
   const [dragging, setDragging] = createSignal(false)
-  const [toolIntentHistory, setToolIntentHistory] = createSignal<string[]>([])
   const [assistantStream, setAssistantStream] = createSignal<AssistantStream | null>(null)
   const [todoSnapshot, setTodoSnapshot] = createSignal<OmpTodoSnapshot | null>(null)
   const [ompMirror, setOmpMirror] = createSignal<OmpMirrorState>(createOmpMirrorState())
@@ -284,6 +283,18 @@ export default function App() {
     clearTimeout(assistantStreamStaleTimer)
     assistantStreamStaleTimer = undefined
     setAssistantStream(null)
+  }
+  function resetOmpTurn(mirror = reduceOmpMirrorState(ompMirror(), { type: 'agent_start' })) {
+    batch(() => {
+      setTodoSnapshot(null)
+      setOmpMirror(mirror)
+      setOmpNotice(null)
+      setOmpApproval(null)
+      setOmpJobs(current => current.filter(job => job.status === 'running'))
+      setToolIntentStatus('')
+      clearAssistantStream()
+      setWorking(true)
+    })
   }
   function clearOmpLiveSurfaces() {
     setTodoSnapshot(null)
@@ -375,6 +386,7 @@ export default function App() {
   const [agentDropdown, setAgentDropdown] = createSignal(false)
   let cleanupSSE: (() => void) | null = null
   let selectGeneration = 0
+  let lifecycleRevision = 0
   let sessionPoll: ReturnType<typeof setInterval> | undefined
   let versionPoll: ReturnType<typeof setInterval> | undefined
   let bootVersion: string | null = __BUILD_VERSION__ || null
@@ -607,7 +619,7 @@ export default function App() {
       const selectedId = currentId()
       if (selectedId && (working() || toolIntentStatus())) {
         const selected = await findSessionMeta(selectedId, box, r.sessions)
-        if (!selected?.isActive) { setWorking(false); setToolIntentStatus(''); setToolIntentHistory([]); clearAssistantStream() }
+        if (!selected?.isActive) { setWorking(false); setToolIntentStatus(''); clearAssistantStream() }
       }
       if (isPeerBox()) setPeerControl(!!r.control)
     } catch {}
@@ -624,7 +636,6 @@ export default function App() {
     cleanupSSE?.()
     setMessages([])
     setToolIntentStatus('')
-    setToolIntentHistory([])
     clearAssistantStream()
     clearOmpLiveSurfaces()
     clearProtocolRunSurfaces()
@@ -636,6 +647,11 @@ export default function App() {
   }
 
   function handleOmpEvent(event: OmpBridgeEvent) {
+    lifecycleRevision++
+    if (!event.subagentId && event.type === 'agent_start') {
+      resetOmpTurn(reduceOmpMirrorState(ompMirror(), event))
+      return
+    }
     setOmpMirror(current => reduceOmpMirrorState(current, event))
 
     if (event.type === 'subagent_lifecycle' || event.type === 'subagent_progress') return
@@ -706,10 +722,6 @@ export default function App() {
       if (!event.willContinue) setWorking(false)
       return
     }
-    if (event.type === 'agent_start') {
-      setWorking(true)
-      return
-    }
     if (event.type === 'agent_end') {
       if (!event.willContinue) setWorking(false)
       return
@@ -747,7 +759,6 @@ export default function App() {
     setLoading(true)
     setMessages([])
     setToolIntentStatus('')
-    setToolIntentHistory([])
     clearAssistantStream()
     clearOmpLiveSurfaces()
     clearProtocolRunSurfaces()
@@ -769,7 +780,6 @@ export default function App() {
       const inactive = !sessionMeta?.isActive
       setMessages(result.messages)
       setToolIntentStatus(inactive ? '' : toolIntentState.status)
-      setToolIntentHistory(inactive ? [] : toolIntentState.history)
       setTodoSnapshot(deriveTodoSnapshot(result.messages))
       setWorking(inactive ? false : toolIntentState.working)
       setProtocolRunsState(replaceProtocolRuns(runResult.runs))
@@ -783,16 +793,20 @@ export default function App() {
         if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
         setMessages(prevMessages => {
           if (prevMessages.some(m => m.uuid === msg.uuid)) return prevMessages
+          const wasWorking = working()
+          if (msg.role === 'user' && !wasWorking) {
+            lifecycleRevision++
+            resetOmpTurn()
+          }
           const transition = toolIntentTransition({
             status: toolIntentStatus(),
-            history: toolIntentHistory(),
             working: working(),
           }, msg)
           setToolIntentStatus(transition.status)
-          setToolIntentHistory(transition.history)
           setWorking(transition.working)
-          const todo = todoSnapshotFromMessage(msg)
-          if (todo !== undefined) setTodoSnapshot(todo)
+          if (msg.role !== 'user' || !wasWorking) {
+            setTodoSnapshot(current => reduceTodoSnapshot(current, msg))
+          }
           if (isFinalAssistantMessage(msg)) clearAssistantStream()
           if (msg.role === 'user') {
             const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
@@ -844,7 +858,7 @@ export default function App() {
 
   async function handleInterrupt(id: string) {
     await interruptSession(id, currentBox())
-    if (id === currentId()) { setWorking(false); setToolIntentStatus(''); setToolIntentHistory([]); clearAssistantStream() }
+    if (id === currentId()) { setWorking(false); setToolIntentStatus(''); clearAssistantStream() }
   }
 
 
@@ -1289,26 +1303,51 @@ export default function App() {
     const { id: targetId, box: targetBox } = target
     const targetIsCurrent = targetId === currentId() && targetBox === currentBox()
     const targetIsPeer = !!boxes().find(box => box.id === targetBox)?.peer
+    const startsNewTurn = targetIsCurrent && !working()
+    const sendSelection = selectGeneration
+    const sendRevision = targetIsCurrent ? ++lifecycleRevision : 0
+    const previousTurn = startsNewTurn ? {
+      todo: todoSnapshot(),
+      mirror: ompMirror(),
+      notice: ompNotice(),
+      approval: ompApproval(),
+      jobs: ompJobs(),
+      intent: toolIntentStatus(),
+      stream: assistantStream()?.ended ? null : assistantStream(),
+      working: working(),
+    } : null
     let tempId: string | undefined
 
     // No optimistic echo on peer boxes: the owner's server prefixes our name
-    // ([allan] …), so the streamed-back text wouldn't match and we'd show a dupe
+    // ([allan] …), so the streamed-back text wouldn't match and we'd show a dupe.
     if (!targetIsPeer && targetIsCurrent) {
       tempId = `optimistic-${Date.now()}`
       setMessages(prev => [...prev, { uuid: tempId!, role: 'user', timestamp: new Date().toISOString(), content: [{ type: 'text', text: fullText }], delivery: 'sent' }])
     }
+    if (startsNewTurn) resetOmpTurn()
     try { await sendInput(targetId, fullText, targetBox, messageId) }
     catch (error) {
       if (tempId) setMessages(prev => prev.filter(message => message.uuid !== tempId))
+      if (previousTurn
+        && sendSelection === selectGeneration
+        && sendRevision === lifecycleRevision
+        && targetId === currentId()
+        && targetBox === currentBox()) {
+        batch(() => {
+          setTodoSnapshot(previousTurn.todo)
+          setOmpMirror(previousTurn.mirror)
+          setOmpNotice(previousTurn.notice)
+          setOmpApproval(previousTurn.approval)
+          setOmpJobs(previousTurn.jobs)
+          setToolIntentStatus(previousTurn.intent)
+          clearAssistantStream()
+          setAssistantStream(previousTurn.stream)
+          setWorking(previousTurn.working)
+        })
+      }
       throw error
     }
     pushHistory(fullText)
-    if (targetId === currentId() && targetBox === currentBox()) {
-      setToolIntentStatus('')
-      setToolIntentHistory([])
-      clearAssistantStream()
-      setWorking(true)
-    }
   }
 
   function clearComposerText(target: SendTarget, submittedText: string) {
@@ -1365,7 +1404,6 @@ export default function App() {
     if (!loading() && session && !session.isActive) {
       setWorking(false)
       setToolIntentStatus('')
-      setToolIntentHistory([])
       clearAssistantStream()
     }
   })
@@ -1804,7 +1842,6 @@ export default function App() {
                 onToggleStar={(uuid) => { if (currentId()) toggleStar(currentId()!, uuid) }}
                 working={working()}
                 statusText={toolIntentStatus()}
-                intentHistory={toolIntentHistory()}
                 assistantStream={assistantStream()}
                 work={ompMirror().parent}
                 todo={activeTodo()}

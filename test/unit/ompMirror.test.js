@@ -103,9 +103,14 @@ describe('OMP mirror reducer', () => {
       type: 'subagent_lifecycle', id: `child-${index}`, agent: 'scout', status: 'completed', index,
     }))
     const bounded = reduce(events)
+    const withTodo = reduceOmpMirrorState(bounded, {
+      type: 'todo',
+      phases: [{ name: 'Previous turn', tasks: [{ content: 'Must not leak', status: 'completed' }] }],
+    })
     assert.equal(bounded.childOrder.length, OMP_CHILD_LIMIT)
-    const reset = reduceOmpMirrorState(bounded, { type: 'agent_start' })
+    const reset = reduceOmpMirrorState(withTodo, { type: 'agent_start' })
     assert.deepEqual(reset.childOrder, [])
     assert.deepEqual(reset.children, {})
+    assert.equal(reset.parent.todo, null)
   })
 })

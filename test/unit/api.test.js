@@ -673,6 +673,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
     const ctrl = new AbortController()
     const terminalCtrl = new AbortController()
     const continuationCtrl = new AbortController()
+    const nextTurnCtrl = new AbortController()
     try {
       const accepted = await post([{
         type: 'agent_start',
@@ -826,10 +827,18 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       assert.equal(terminalReplay.events.some(event => event.type === 'work_snapshot' && !event.subagentId), false)
       assert.equal(terminalReplay.events.some(event => event.toolCallId === 'parent-tool'), false)
       assert.ok(terminalReplay.events.some(event => event.subagentId === 'child-1' && event.type === 'tool_execution_end'))
+      const nextTurn = await post([{ type: 'agent_start' }])
+      assert.equal(nextTurn.status, 204)
+      const nextTurnStream = await fetch(`${BASE}/api/sessions/${sessionId}/stream`, { signal: nextTurnCtrl.signal })
+      const nextTurnReplay = await readOmpSseEvents(nextTurnStream.body.getReader(), 10)
+      assert.equal(nextTurnReplay.events[0].type, 'agent_start')
+      assert.equal(nextTurnReplay.events.some(event => event.type === 'todo' && !event.subagentId), false)
+      nextTurnCtrl.abort()
     } finally {
       ctrl.abort()
       terminalCtrl.abort()
       continuationCtrl.abort()
+      nextTurnCtrl.abort()
       try { fs.unlinkSync(tokenPath) } catch {}
     }
   })

@@ -99,9 +99,12 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(parentExecution).toBeVisible()
   await expect(parentExecution).toHaveJSProperty('open', false)
   await expect(detailsSummary).toContainText('Testing current execution segment')
+  await expect(detailsSummary).toContainText('Activity')
+  await expect(detailsSummary).not.toContainText('Working')
+  await expect(detailsSummary).not.toContainText('0 steps')
   await expect(parentExecution.getByTestId('omp-todo')).toBeHidden()
   await expect(parentExecution.getByTestId('omp-parent-execution-timeline').getByTestId('omp-tool-card')).toHaveCount(1)
-  await expect(chatPanel.getByTestId('working-indicator')).toHaveCount(0)
+  await expect(chatPanel.getByTestId('thinking-indicator')).toHaveCount(0)
   await page.screenshot({ path: '/tmp/feather-work-details-closed-mobile.png', fullPage: false })
 
   await detailsSummary.click()
@@ -137,9 +140,9 @@ test('mirrors parent and child execution across completion, replay, and responsi
     { type: 'assistant_end', messageId: 'answer-1' },
   ])
   expect(completed.status).toBe(204)
-  await expect(chatPanel.getByTestId('working-indicator')).toHaveCount(0)
+  await expect(chatPanel.getByTestId('thinking-indicator')).toHaveCount(0)
   await expect(parentExecution).toHaveJSProperty('open', false)
-  await expect(detailsSummary).toContainText('Details')
+  await expect(detailsSummary).toContainText('Activity')
   await detailsSummary.click()
   await expect(parentExecution).toHaveJSProperty('open', true)
   await expect(detailedParentExecution.getByTestId('omp-tool-card')).toHaveCount(1)
@@ -185,8 +188,21 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await page.setViewportSize({ width: 1280, height: 800 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '/tmp/feather-work-details-desktop.png', fullPage: false })
+  const directStarted = await postEvents([{ type: 'agent_start' }])
+  expect(directStarted.status).toBe(204)
+  const thinkingIndicator = chatPanel.getByTestId('thinking-indicator')
+  await expect(thinkingIndicator).toContainText('Thinking…')
+  await expect(chatPanel.getByTestId('omp-parent-execution')).toHaveCount(0)
+  await page.screenshot({ path: '/tmp/feather-thinking-direct.png', fullPage: false })
+
+  const reasoningOnly = await postEvents([
+    { type: 'work_snapshot', messageId: 'markdown-stream', blocks: [{ type: 'thinking', thinking: 'Planning the direct answer.' }] },
+  ])
+  expect(reasoningOnly.status).toBe(204)
+  await expect(thinkingIndicator).toContainText('Thinking…')
+  await expect(chatPanel.getByTestId('omp-parent-execution')).toHaveCount(0)
+
   const markdownStarted = await postEvents([
-    { type: 'agent_start' },
     { type: 'assistant_snapshot', messageId: 'markdown-stream', text: '# Live answer\n\nThe **Markdown** is arriving.' },
   ])
   expect(markdownStarted.status).toBe(204)
@@ -202,4 +218,38 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(markdownStream.locator('li')).toHaveCount(2)
   await expect(markdownStream.locator('code')).toHaveText('inline code')
   await page.screenshot({ path: '/tmp/feather-streaming-markdown.png', fullPage: false })
+
+  writeLine({
+    type: 'assistant', uuid: `native-direct-final-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
+    message: { role: 'assistant', content: [
+      { type: 'thinking', thinking: 'Planning the direct answer.' },
+      { type: 'text', text: '# Live answer\n\nThe **Markdown** arrived.\n\n- First item\n- Second item\n\n`inline code`' },
+    ] },
+  })
+  const directCompleted = await postEvents([{ type: 'assistant_end', messageId: 'markdown-stream' }])
+  expect(directCompleted.status).toBe(204)
+  await expect(page.getByText('The Markdown arrived.')).toBeVisible()
+  await expect(thinkingIndicator).toHaveCount(0)
+  await expect(chatPanel.getByTestId('omp-parent-execution')).toHaveCount(0)
+  const directBubble = page.locator('.asst-bubble').filter({ hasText: 'The Markdown arrived.' })
+  await expect(directBubble.getByTestId('work-log-summary')).toHaveCount(0)
+
+  const jobsStarted = await postEvents([{
+    type: 'async_jobs',
+    running: [
+      { id: 'job-1', type: 'task', label: 'First background check', status: 'running', startTime: Date.now() },
+      { id: 'job-2', type: 'task', label: 'Second background check', status: 'running', startTime: Date.now() },
+    ],
+    recent: [],
+  }])
+  expect(jobsStarted.status).toBe(204)
+  const backgroundActivity = chatPanel.getByTestId('omp-parent-execution')
+  await expect(backgroundActivity.getByTestId('omp-parent-execution-summary')).toContainText('First background check')
+  await expect(backgroundActivity.locator('.execution-status')).toHaveAttribute('aria-label', 'Running')
+  await backgroundActivity.getByTestId('omp-parent-execution-summary').click()
+  await expect(backgroundActivity.getByTestId('omp-jobs')).toContainText('2 running')
+
+  const jobsCompleted = await postEvents([{ type: 'async_jobs', running: [], recent: [] }])
+  expect(jobsCompleted.status).toBe(204)
+  await expect(backgroundActivity).toHaveCount(0)
 })

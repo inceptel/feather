@@ -726,13 +726,6 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
   border-radius: 9px; background: var(--bg-secondary); font-size: 13px; line-height: 1.5;
 }
 .work-log-meta { margin-bottom: 8px; color: var(--text-ghost); font-size: 10px; }
-.work-log-reasoning {
-  margin: 2px 0 4px; padding-left: 8px; border-left: 1px solid rgba(192,132,252,0.3);
-  color: var(--text-secondary); font-size: 12px; line-height: 1.4;
-}
-.work-log-reasoning p { margin: 0 0 4px; }
-.work-log-reasoning p:last-child { margin-bottom: 0; }
-.work-log-reasoning ul, .work-log-reasoning ol { margin: 2px 0 4px; }
 
 
 /* OMP mirror: one quiet disclosure, then a bounded chronological run rail */
@@ -790,13 +783,13 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
   .agent-rail > li { flex-basis: 100%; max-width: none; }
   .agent-inspector { max-height: none; overflow: visible; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-medium); border-left: none; }
 }
-.work-details { width: 100%; max-width: 960px; margin: 0 auto 10px; color: var(--text-secondary); }
+.work-details { width: min(100%, 78ch); margin: 0 0 8px; color: var(--text-secondary); }
 .work-details > .execution-detail { max-height: min(58vh, 520px); overflow: auto; }
 .work-details > summary::-webkit-details-marker { display: none; }
-.work-details > .execution-summary { min-height: 34px; padding: 0 2px; border: 0; background: transparent; }
-.work-details[open] > .execution-summary { border-bottom: 1px solid var(--border-subtle); }
+.work-details > .execution-summary { min-height: 40px; padding: 0 11px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-surface); }
+.work-details[open] > .execution-summary { border-radius: 10px 10px 0 0; border-bottom-color: transparent; }
 .work-details[open] > .execution-summary .execution-chevron { transform: rotate(90deg); }
-.work-details > .execution-detail { padding: 5px 0 0; border: 0; }
+.work-details > .execution-detail { padding: 8px 10px; border: 1px solid var(--border-subtle); border-top: 0; border-radius: 0 0 10px 10px; background: var(--bg-surface); }
 .work-details .execution-item { padding: 0 0 2px 14px; }
 .work-details .execution-item:not(:last-child)::before { left: 3px; top: 14px; bottom: -2px; background: var(--border-subtle); }
 .work-details .execution-node { left: 0; top: 12px; width: 7px; height: 7px; border: 0; }
@@ -812,6 +805,8 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .work-details .execution-title { color: var(--text-muted); font-weight: 600; }
 .work-details .execution-active { flex: 0 1 auto; max-width: 75%; color: var(--text-primary); }
 .work-details .execution-status { margin-left: 2px; }
+.thinking-indicator { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: min(100%, 78ch); min-height: 44px; margin: 0 0 10px; padding: 10px 14px; box-sizing: border-box; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; background: #1e1e1e; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
+.thinking-indicator-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--info); animation: typing-bounce 1.2s ease-in-out infinite; }
 /* highlight.js theme — uses CSS variables for theme switching */
 .hljs { color: var(--code-text); }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link { color: var(--hljs-keyword); }
@@ -867,7 +862,6 @@ type MessageViewProps = {
   onViewRaw?: (msg: Message) => void
   working?: boolean
   statusText?: string | null
-  intentHistory?: string[]
   assistantStream?: { text: string; ended: boolean } | null
   work?: OmpWorkScope | null
   todo?: OmpTodoSnapshot | null
@@ -1160,18 +1154,36 @@ export function MessageView(props: MessageViewProps) {
     )
   }
   function renderParentExecution(scope: () => OmpWorkScope) {
-    const timeline = createMemo(() => scope().timeline.filter(item => !hideParentOrchestration(item)))
+    const timeline = createMemo(() => scope().timeline.filter(isParentActivity))
     const visibleScope = () => ({ ...scope(), timeline: timeline() })
-    const summary = () => activeOmpStep(visibleScope()) || `${timeline().length} steps`
+    const runningSubagent = () => (props.subagents || []).find(agent => executionStatusLabel(agent.status) === 'Running')
+    const runningJobs = () => (props.jobs || []).filter(job => job.status === 'running')
+    const runningJob = () => runningJobs()[0]
+    const activityStatus = () => scope().runStatus === 'running' || runningSubagent() || runningJob() ? 'running' : scope().runStatus
+    const actionCount = () => timeline().length + (props.subagents?.length || 0) + runningJobs().length
+    const summary = () => {
+      if (activityStatus() === 'running') {
+        return activeOmpStep(visibleScope())
+          || props.todo?.active
+          || runningSubagent()?.assignment
+          || runningSubagent()?.task
+          || runningJob()?.label
+          || runningJob()?.type
+          || 'In progress'
+      }
+      if (actionCount() > 0) return `${actionCount()} action${actionCount() === 1 ? '' : 's'}`
+      if ((props.todo?.total || 0) > 0) return `${props.todo!.completed}/${props.todo!.total} planned`
+      return 'Complete'
+    }
     const hasWork = () => timeline().length > 0 || (props.todo?.total || 0) > 0 || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
     return (
       <Show when={hasWork()}>
         <details class="work-details" data-testid="omp-parent-execution" data-segment={scope().segment}>
           <summary class="execution-summary" data-testid="omp-parent-execution-summary">
             <span class="execution-chevron">›</span>
-            <span class="execution-title">{scope().runStatus === 'running' ? 'Working' : 'Details'}</span>
+            <span class="execution-title">Activity</span>
             <span class="execution-active">{summary()}</span>
-            <span class="execution-status" aria-label={executionStatusLabel(scope().runStatus)} title={executionStatusLabel(scope().runStatus)} style={{ color: executionStatusColor(scope().runStatus) }}>{executionStatusMark(scope().runStatus)}</span>
+            <span class="execution-status" aria-label={executionStatusLabel(activityStatus())} title={executionStatusLabel(activityStatus())} style={{ color: executionStatusColor(activityStatus()) }}>{executionStatusMark(activityStatus())}</span>
           </summary>
           <div class="execution-detail">
             <Show when={(props.todo?.total || 0) > 0}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
@@ -1187,35 +1199,22 @@ export function MessageView(props: MessageViewProps) {
 
 
   function renderWorkLog(messages: () => Message[], live = false) {
-    const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(block =>
-      block.type === 'thinking' || block.type === 'tool_use' || block.type === 'tool_result'
-    ))
+    const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(isActivityBlock))
     const last = createMemo(() => messages().at(-1))
     return (
       <details class="work-log">
         <summary class="work-log-summary" data-testid="work-log-summary">
           <span class="work-log-chevron">›</span>
-          <span style={{ color: 'var(--text-muted)', 'font-weight': '600' }}>Details</span>
+          <span style={{ color: 'var(--text-muted)', 'font-weight': '600' }}>Activity</span>
           <Show when={live && props.statusText}><span class="work-log-active">{props.statusText}</span><span class="work-log-live-dot" aria-label="Running" /></Show>
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
           <div class="work-log-meta">
             {traceBlocks().length} execution step{traceBlocks().length === 1 ? '' : 's'} · {formatTime(last()?.timestamp || '')}
           </div>
-          <For each={messages()}>{(message) => (
-            <For each={message.content}>{(block) => {
-              if (block.type === 'thinking' && block.thinking) {
-                return (
-                  <div
-                    class="markdown work-log-reasoning"
-                    innerHTML={live ? renderLiveMarkdown(block.thinking) : renderMarkdown(block.thinking)}
-                    ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))}
-                  />
-                )
-              }
-              return renderBlock(block, setLightbox, getResult, openExpandedTable)
-            }}</For>
-          )}</For>
+          <For each={traceBlocks()}>{(block) =>
+            renderBlock(block, setLightbox, getResult, openExpandedTable)
+          }</For>
         </div>
       </details>
     )
@@ -1239,14 +1238,29 @@ export function MessageView(props: MessageViewProps) {
       (b.type === 'text' && !b.text?.trim())
     ) && m.content.some(b => b.type === 'tool_result')
   }
+  function isActivityBlock(block: ContentBlock) {
+    return block.type === 'tool_result' || (block.type === 'tool_use' && !isQuestionBlock(block))
+  }
+  function messageHasActivity(message: Message) {
+    return (message.content || []).some(isActivityBlock)
+  }
+  function messagesHaveActivity(messages: Message[]) {
+    return messages.some(messageHasActivity)
+  }
+  function isParentActivity(item: OmpTimelineItem) {
+    return item.kind === 'tool' && !hideParentOrchestration(item)
+  }
   const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
   const hasCurrentWork = createMemo(() => !!props.work && (
-    props.work.timeline.length > 0 ||
+    props.work.timeline.some(isParentActivity) ||
     (props.todo?.total || 0) > 0 ||
     (props.subagents?.length || 0) > 0 ||
     (props.jobs || []).some(job => job.status === 'running')
   ))
-  const liveLegacyWork = createMemo(() => props.working && !hasCurrentWork() && renderItems().at(-1)?.kind === 'chain')
+  const liveLegacyWork = createMemo(() => {
+    const latest = renderItems().at(-1)
+    return props.working && !hasCurrentWork() && latest?.kind === 'chain' && messagesHaveActivity(latest.messages)
+  })
   const workAttachedToAnswer = createMemo(() => {
     if (!hasCurrentWork()) return false
     const latest = renderItems().at(-1)
@@ -1429,25 +1443,22 @@ export function MessageView(props: MessageViewProps) {
         const mirroredCurrentTurn = createMemo(() => hasCurrentWork() && isLatestItem())
         if (item.kind === 'chain') {
           return (
-            <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working && !currentProtocolOwnsWork() && !hasCurrentWork()}>
+            <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working && !currentProtocolOwnsWork() && !hasCurrentWork() && messagesHaveActivity(item.messages)}>
               {renderProvisionalWork(() => item.messages, 'live-work-turn', true)}
             </Show>
           )
         }
 
         const msg = item.msg
-        const turnTrace = createMemo(() => item.kind === 'turn' && !mirroredCurrentTurn() ? item.trace : [])
+        const turnTrace = createMemo(() => item.kind === 'turn' && !mirroredCurrentTurn()
+          ? item.trace.filter(messageHasActivity)
+          : [])
         // Extract images from text blocks
         const textBlock = msg.content?.find(b => b.type === 'text' && b.text)
         const { cleanText, images, files } = textBlock?.text ? extractImages(textBlock.text) : { cleanText: textBlock?.text || '', images: [], files: [] }
         const hasAttachments = images.length > 0 || files.length > 0
-        const inlineTraceBlocks = createMemo(() => mirroredCurrentTurn() ? [] : (msg.content || []).filter(block =>
-          block.type === 'thinking' ||
-          block.type === 'tool_result' ||
-          (block.type === 'tool_use' && !isQuestionBlock(block))
-        ))
-        const workLogMessages = createMemo(() => inlineTraceBlocks().length > 0
-          ? [...turnTrace(), { ...msg, content: inlineTraceBlocks() }]
+        const workLogMessages = createMemo(() => messageHasActivity(msg)
+          ? [...turnTrace(), msg]
           : turnTrace())
 
         // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
@@ -1639,7 +1650,7 @@ export function MessageView(props: MessageViewProps) {
       </Show>
       <Show when={props.assistantStream?.text}>
         <div data-testid="assistant-stream" aria-live="polite" style={{ display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
-          <div style={{ 'max-width': '100%', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word' }}>
+          <div class="asst-bubble" style={{ width: 'fit-content', 'max-width': 'min(100%, 78ch)', 'min-height': '44px', padding: '10px 14px', 'border-radius': '12px', background: '#1e1e1e', border: '1px solid rgba(255,255,255,0.06)', color: 'var(--text-primary)', 'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word', 'box-sizing': 'border-box' }}>
             <div class="markdown" innerHTML={renderLiveMarkdown(props.assistantStream!.text)} ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, openExpandedTable))} />
           </div>
         </div>
@@ -1667,23 +1678,10 @@ export function MessageView(props: MessageViewProps) {
 
 
 
-      <Show when={props.working && !currentProtocolOwnsWork() && !hasCurrentWork() && !liveLegacyWork()}>
-        <div style={{ display: 'flex', 'align-items': 'flex-start', 'margin-bottom': '10px' }}>
-          <div role="status" data-testid="working-indicator" aria-live="polite" style={{ padding: '9px 12px', 'border-radius': '16px 16px 16px 4px', background: 'var(--bg-surface)', display: 'flex', gap: '6px', 'align-items': 'center', 'max-width': '92%' }}>
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out infinite', 'flex-shrink': '0' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.2s infinite', 'flex-shrink': '0' }} />
-            <span style={{ width: '6px', height: '6px', 'border-radius': '50%', background: 'var(--text-secondary)', 'animation': 'typing-bounce 1.2s ease-in-out 0.4s infinite', 'flex-shrink': '0' }} />
-            <Show when={props.statusText}>
-              <Show when={(props.intentHistory?.length || 0) > 1} fallback={<span style={{ 'margin-left': '6px', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</span>}>
-                <details style={{ 'margin-left': '6px' }}>
-                  <summary style={{ cursor: 'pointer', 'font-size': '12px', color: 'var(--text-secondary)', 'line-height': '1.35', 'word-break': 'break-word' }}>{props.statusText}</summary>
-                  <div style={{ 'margin-top': '6px', padding: '6px 8px', 'border-left': '1px solid var(--border-medium)', color: 'var(--text-muted)', 'font-size': '10px', 'line-height': '1.45' }}>
-                    <For each={(props.intentHistory || []).slice(0, -1)}>{(intent) => <div>{intent}</div>}</For>
-                  </div>
-                </details>
-              </Show>
-            </Show>
-          </div>
+      <Show when={props.working && !currentProtocolOwnsWork() && !hasCurrentWork() && !liveLegacyWork() && !props.assistantStream?.text}>
+        <div role="status" data-testid="thinking-indicator" aria-live="polite" class="thinking-indicator">
+          <span class="thinking-indicator-dot" aria-hidden="true" />
+          <span>{props.statusText || 'Thinking…'}</span>
         </div>
       </Show>
     </div>

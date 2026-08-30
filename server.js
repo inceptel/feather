@@ -1577,7 +1577,7 @@ function rememberOmpBridgeEvent(sessionId, event) {
 
   if (event.type === 'agent_start' && !event.subagentId) {
     deleteReplayEntries(store, candidate => isParentTransientReplayEvent(candidate)
-      || (!candidate.subagentId && (candidate.type === 'assistant_end' || candidate.type === 'assistant_cancel')));
+      || (!candidate.subagentId && (candidate.type === 'todo' || candidate.type === 'assistant_end' || candidate.type === 'assistant_cancel')));
     pruneSettledSubagentReplay(store);
   }
 

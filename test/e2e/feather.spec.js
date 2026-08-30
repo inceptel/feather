@@ -267,40 +267,30 @@ test.describe('Message rendering', () => {
     expect(page.url()).toBe(chatUrl)
   })
 
-  test('assistant reasoning is folded into quiet Details while the final answer stays visible', async ({ page }) => {
-    await expect(page.getByText(/Feather uses .*marked.* with GFM support/)).toBeVisible()
-    const details = page.getByTestId('work-log-summary').first()
-    await expect(details).toBeVisible()
-    await expect(details).toContainText('Details')
-    await expect(details).not.toContainText('execution step')
+  test('reasoning-only direct answers have no completed Activity disclosure', async ({ page }) => {
+    const bubble = page.locator('.asst-bubble').filter({ hasText: /Feather uses .*marked.* with GFM support/ }).first()
+    await expect(bubble).toBeVisible()
+    await expect(bubble.getByTestId('work-log-summary')).toHaveCount(0)
     await expect(page.getByText('Planning the markdown pipeline.')).not.toBeVisible()
-
-    await details.click()
-    const workLogDetail = page.getByTestId('work-log-detail').first()
-    await expect(workLogDetail).toContainText('1 execution step')
-    await expect(workLogDetail).toContainText('Planning the markdown pipeline.')
-    await expect(workLogDetail.locator('strong')).toHaveText('Planning')
-    await expect(workLogDetail).not.toContainText('**Planning**')
-    await expect(workLogDetail).not.toContainText('Reasoning')
   })
 
-  test('Details precedes the final answer in chronological turn order', async ({ page }) => {
-    const bubble = page.locator('.asst-bubble').filter({ hasText: 'Feather uses marked with GFM support.' }).first()
+  test('Activity precedes a tool-using final answer in chronological turn order', async ({ page }) => {
+    const bubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' }).first()
     const chronological = await bubble.evaluate(element => {
-      const details = element.querySelector('.work-log')
-      const answer = [...element.querySelectorAll('.markdown')].find(node => node.textContent?.includes('Feather uses marked with GFM support.'))
-      return !!(details && answer && (details.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING))
+      const activity = element.querySelector('.work-log')
+      const answer = [...element.querySelectorAll('.markdown')].find(node => node.textContent?.includes('Tool work complete.'))
+      return !!(activity && answer && (activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING))
     })
     expect(chronological).toBe(true)
   })
 
-  test('tool_use block is preserved inside Details', async ({ page }) => {
+  test('tool_use block is preserved inside Activity', async ({ page }) => {
     const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
     await toolBubble.getByTestId('work-log-summary').click()
     await expect(toolBubble.getByText('Read').first()).toBeVisible()
   })
 
-  test('tool_result output is revealed from Details and the tool call', async ({ page }) => {
+  test('tool_result output is revealed from Activity and the tool call', async ({ page }) => {
     const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
     await toolBubble.getByTestId('work-log-summary').click()
     const summary = toolBubble.locator('summary', { hasText: 'MessageView.tsx' })
@@ -309,10 +299,10 @@ test.describe('Message rendering', () => {
     await expect(toolBubble.getByText('export function MessageView')).toBeVisible()
   })
 
-  test('failed work error remains reachable inside Details', async ({ page }) => {
+  test('failed work error remains reachable inside Activity', async ({ page }) => {
     const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
     const workLog = toolBubble.getByTestId('work-log-summary')
-    await expect(workLog).toHaveText(/Details/)
+    await expect(workLog).toHaveText(/Activity/)
     await workLog.click()
     const summary = toolBubble.locator('summary', { hasText: 'missing.txt' })
     await expect(summary).toBeVisible()
@@ -555,9 +545,9 @@ test.describe('Live updates', () => {
     })
     const liveWork = page.getByTestId('live-work-turn')
     await expect(liveWork).toBeVisible()
-    await expect(liveWork.getByTestId('work-log-summary')).toContainText('Details')
+    await expect(liveWork.getByTestId('work-log-summary')).toContainText('Activity')
     await expect(liveWork.getByTestId('work-log-summary')).toContainText('Inspecting upload recovery.')
-    await expect(page.getByTestId('working-indicator')).toHaveCount(0)
+    await expect(page.getByTestId('thinking-indicator')).toHaveCount(0)
 
     writeLine({
       type: 'assistant', uuid: `e2e-status-2-${Date.now()}`, timestamp: '2025-06-15T14:06:05Z',

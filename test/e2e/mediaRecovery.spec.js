@@ -104,6 +104,48 @@ test('an acknowledged send preserves composer edits typed while the request is i
   await expect.poll(() => page.evaluate(id => localStorage.getItem(`feather-draft-${id}`), sessionId)).toBe('newer unsent thought')
 })
 
+test('a failed send restores the prior Activity without leaking it into the pending turn', async ({ page }) => {
+  fs.appendFileSync(sessionPath, JSON.stringify({
+    type: 'assistant', uuid: `media-prior-todo-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
+    message: { role: 'assistant', content: [{
+      type: 'tool_result', name: 'todo',
+      details: { phases: [{ name: 'Prior turn', tasks: [{ content: 'Preserve on failure', status: 'completed' }] }] },
+    }] },
+  }) + '\n')
+  let releaseSend
+  const sendGate = new Promise(resolve => { releaseSend = resolve })
+  await page.route(`**/api/sessions/${sessionId}/send`, async route => {
+    await sendGate
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary send failure' }) })
+  })
+
+  await page.goto(`/#${sessionId}`, { waitUntil: 'domcontentloaded' })
+  const activity = page.getByTestId('omp-parent-execution')
+  await expect(activity).toContainText('Preserve on failure')
+  const composer = page.locator('textarea')
+  await composer.fill('this send will fail')
+  await page.locator('button[title="Send"]').last().click()
+  await expect(page.getByTestId('thinking-indicator')).toContainText('Thinking…')
+  await expect(activity).toHaveCount(0)
+  releaseSend()
+  await expect(activity).toContainText('Preserve on failure')
+  await expect(page.getByTestId('thinking-indicator')).toHaveCount(0)
+  await expect(composer).toHaveValue('this send will fail')
+  await expect(page.locator('.msg-row').filter({ hasText: 'this send will fail' })).toHaveCount(0)
+
+  fs.appendFileSync(sessionPath, JSON.stringify({
+    type: 'user', uuid: `media-reset-todo-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
+    message: { role: 'user', content: 'reset prior Todo for later tests' },
+  }) + '\n')
+  await expect(activity).toHaveCount(0)
+  await expect(page.getByTestId('thinking-indicator')).toContainText('Thinking…')
+  fs.appendFileSync(sessionPath, JSON.stringify({
+    type: 'assistant', uuid: `media-reset-complete-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
+    message: { role: 'assistant', content: [{ type: 'text', text: 'reset complete' }] },
+  }) + '\n')
+  await expect(page.getByTestId('thinking-indicator')).toHaveCount(0)
+})
+
 test('an in-flight attachment send does not block another room and clears the acknowledged origin draft', async ({ page }) => {
   let releaseSend
   let sendReceived = false
@@ -140,7 +182,7 @@ test('an in-flight attachment send does not block another room and clears the ac
 
   releaseSend()
   await expect.poll(() => sendAcknowledged).toBe(true)
-  await expect(page.getByTestId('working-indicator')).toHaveCount(0)
+  await expect(page.getByTestId('thinking-indicator')).toHaveCount(0)
   await expect(secondComposer).toHaveValue('work in the second room')
 
   await page.locator('button').first().click()
