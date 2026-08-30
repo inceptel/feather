@@ -7,8 +7,15 @@ function messageText(message) {
 }
 
 function canonicalDelivery(text) {
-  const match = text.match(/^\[feather-sidecar ([a-z0-9._-]+) ([1-9]\d*) ([A-Za-z0-9._-]+)\]\n([\s\S]*)$/)
-  return match ? { groupId: match[1], seq: Number(match[2]), from: match[3], text: match[4] } : null
+  const match = text.match(/^\[feather-sidecar ([a-z0-9._-]+) ([1-9]\d*) ([A-Za-z0-9._-]+)\](?: (.+))?$/)
+  if (!match) return null
+  if (match[4] === undefined) return { groupId: match[1], seq: Number(match[2]), from: match[3], text: null }
+  try {
+    const payload = JSON.parse(match[4])
+    return typeof payload === 'string' ? { groupId: match[1], seq: Number(match[2]), from: match[3], text: payload } : null
+  } catch {
+    return null
+  }
 }
 
 export function mergeRoomThreadMessages(sessionMessages, thread, groupId) {
@@ -20,7 +27,7 @@ export function mergeRoomThreadMessages(sessionMessages, thread, groupId) {
     return !(thread || []).some((candidate) =>
       candidate.seq === delivery.seq
         && candidate.from === delivery.from
-        && candidate.text === delivery.text)
+        && (delivery.text === null || candidate.text === delivery.text))
   })
   const sidecarMessages = (thread || []).map((message) => {
     const from = message.from === 'human' ? 'You' : message.from.charAt(0).toUpperCase() + message.from.slice(1)

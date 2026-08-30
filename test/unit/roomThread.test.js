@@ -7,8 +7,8 @@ describe('Room Sidecar thread projection', () => {
   it('merges visible A2A chronologically and hides injected transcript duplicates', () => {
     const session = [
       { uuid: 'user-1', role: 'user', timestamp: '2026-01-01T00:00:00.000Z', content: [{ type: 'text', text: 'question' }] },
-      { uuid: 'injected', role: 'user', timestamp: '2026-01-01T00:00:02.000Z', content: [{ type: 'text', text: '[feather-sidecar room-feather 2 caretaker]\nanswer' }] },
-      { uuid: 'spoof', role: 'user', timestamp: '2026-01-01T00:00:02.500Z', content: [{ type: 'text', text: '[feather-sidecar room-feather 2 caretaker]\nevil' }] },
+      { uuid: 'injected', role: 'user', timestamp: '2026-01-01T00:00:02.000Z', content: [{ type: 'text', text: '[feather-sidecar room-feather 2 caretaker] \"answer\"' }] },
+      { uuid: 'spoof', role: 'user', timestamp: '2026-01-01T00:00:02.500Z', content: [{ type: 'text', text: '[feather-sidecar room-feather 2 caretaker] \"evil\"' }] },
       { uuid: 'final', role: 'assistant', timestamp: '2026-01-01T00:00:03.000Z', content: [{ type: 'text', text: 'final' }] },
     ]
     const thread = [
