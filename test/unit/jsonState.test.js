@@ -306,7 +306,7 @@ describe('server and rollback integration', () => {
     })
 
     assert.notEqual(result.status, 0)
-    assert.match(result.stderr, /malformed Room main chats/)
+    assert.match(result.stderr, /malformed Room leaders/)
     assert.equal(fs.readFileSync(mainsFile, 'utf8'), '{broken')
   })
 
