@@ -106,12 +106,12 @@ non-interactive OMP session to do the next useful thing. The Room card shows whe
 it last worked and when it will check again. Pause or resume that behavior from
 the card, or from inside the Room with `room pause` and `room wake`.
 
-Each Room also keeps an append-only **Updates** feed: a plain-language briefing
-— what happened and why it matters — for a person who has not looked in a day,
-distinct from the terse `notes.md`. Agents post with `room update "..."` (the
-keep-working check posts one whenever it does something worth knowing) and read
-them back with `room updates`. The Room card shows an unread badge counting what
-you have not seen, tracked per browser since Feather is multi-user.
+Rooms retain `updates.jsonl` as legacy append-only evidence. The user-facing
+Updates feed and unread badge were removed: the Room caretaker now distills
+durable meaning from `notes.md`, legacy updates, and sessions into curated
+`wiki/` pages. `room update` and `room updates` remain available for
+compatibility, but agents should write working evidence to `notes.md` and leave
+human-facing synthesis to the caretaker.
 
 Agents can run `room complain "..."` to append recurring annoyances to
 `#friction`. `#meta` is the separate place for reusable lessons across Rooms.
