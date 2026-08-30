@@ -205,14 +205,14 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     if (managingRoom() !== next) setManagingRoom(null)
   }
 
-  function orderedRoomSessions(room: RoomInfo) {
-    const leader = leaderRoomSession(room)
-    return leader ? [leader, ...room.sessions.filter((session) => session.id !== leader.id)] : room.sessions
+  function otherRoomSessions(room: RoomInfo) {
+    const residentIds = new Set((room.residents || []).map((resident) => resident.sessionId))
+    return room.sessions.filter((session) => !residentIds.has(session.id))
   }
 
   function visibleRoomSessions(room: RoomInfo) {
-    const ordered = orderedRoomSessions(room)
-    return managingRoom() === room.name ? ordered : ordered.slice(0, 5)
+    const sessions = otherRoomSessions(room)
+    return managingRoom() === room.name ? sessions : sessions.slice(0, 5)
   }
 
   const agentColor = (a?: string) => a === 'codex' ? '#c084fc' : a === 'omp' ? '#e0a050' : '#73b8ff'
@@ -262,7 +262,7 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                     <span style={{ width: '10px', height: '10px', 'border-radius': '50%', background: room.active ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
                     <span style={{ 'font-size': '16px', 'font-weight': '700', color: '#e5e5e5' }}>#{room.name}</span>
                     <Show when={leaderRoomSession(room)} fallback={<span style={{ 'font-size': '11px', color: '#806f55' }}>No Leader</span>}>
-                      {(leader) => <span style={{ 'font-size': '11px', color: '#69c77f' }}>Leader · {leader().agent}</span>}
+                      {(leader) => <span style={{ 'font-size': '11px', color: '#69c77f' }}>Leader · {leader().agent} · {room.residents?.length || 1} resident{(room.residents?.length || 1) === 1 ? '' : 's'}</span>}
                     </Show>
                     <span style={{ 'margin-left': 'auto', 'font-size': '11px', color: '#555', 'font-family': 'monospace' }}>{timeAgo(room.updatedAt)}</span>
                     <button onClick={(e) => { e.stopPropagation(); toggleExpand(room.name) }}
@@ -318,11 +318,22 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                   </div>
                 </Show>
                 <Show when={expanded() === room.name}>
+                  <div data-testid={`residents-${room.name}`} style={{ 'border-top': '1px solid #16161f', padding: '7px 16px 9px 28px' }}>
+                    <div style={{ color: '#596373', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', 'margin-bottom': '5px' }}>Residents</div>
+                    <For each={room.residents || []}>{(resident) => (
+                      <div data-testid={`resident-${room.name}-${resident.role}`} style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '5px 0' }}>
+                        <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: resident.status === 'working' ? '#4aba6a' : resident.status === 'waiting' ? '#596373' : '#5c3333', 'flex-shrink': '0' }} />
+                        <span style={{ color: resident.role === 'leader' ? '#69c77f' : '#b6bfcc', 'font-size': '12px', 'font-weight': '650', 'text-transform': 'capitalize' }}>{resident.role}</span>
+                        <span style={{ color: agentColor(resident.agent), 'font-size': '9px', 'font-weight': '600' }}>{resident.agent}</span>
+                        <span style={{ color: '#555f6d', 'font-size': '10px', 'margin-left': 'auto' }}>{resident.status}</span>
+                      </div>
+                    )}</For>
+                  </div>
                   <For each={visibleRoomSessions(room)}>{(s) => sessionRow(room, s)}</For>
-                  <Show when={room.sessions.length > 1 || room.sessions.some((session) => session.roomAssigned)}>
+                  <Show when={otherRoomSessions(room).length > 0}>
                     <button data-testid={`manage-chats-${room.name}`} onClick={() => setManagingRoom(managingRoom() === room.name ? null : room.name)}
                       style={{ width: '100%', background: 'none', border: 'none', 'border-top': '1px solid #16161f', color: '#7f8996', 'font-size': '11px', 'font-weight': '600', padding: '8px 28px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}>
-                      {managingRoom() === room.name ? 'Done managing' : room.sessions.length > 1 ? `Manage ${room.sessions.length - 1} other chat${room.sessions.length === 2 ? '' : 's'}` : 'Manage chat'}
+                      {managingRoom() === room.name ? 'Done managing' : `Manage ${otherRoomSessions(room).length} other chat${otherRoomSessions(room).length === 1 ? '' : 's'}`}
                     </button>
                   </Show>
                   <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '10px 16px 12px 28px', 'border-top': '1px solid #16161f' }}>

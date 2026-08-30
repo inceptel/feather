@@ -834,9 +834,12 @@ function validateFreshSessionId(id) {
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw httpError(400, 'session id must be a UUID');
   const assignments = readRoomAssignments();
   const leaders = ROOM_LEADERS_STATE.read();
+  const residentIds = Object.values(ROOM_RESIDENTS_STATE.read())
+    .flatMap((residents) => Object.values(residents).map((resident) => resident.sessionId));
   if (readMeta()[id]
     || assignments[id]
     || Object.values(leaders).includes(id)
+    || residentIds.includes(id)
     || tmuxIsActive(id)
     || fs.existsSync(path.join(OMP_SESSIONS, id))
     || findJsonlPath(id)) {
@@ -1868,7 +1871,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/files$/,
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
-  /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page)$/,
+  /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page|residents)$/,
 ];
 
 function readOnlyRequestAllowed(req) {
@@ -2420,7 +2423,11 @@ app.post('/api/sessions', (req, res) => {
       }
       assignmentsBefore = readRoomAssignments();
       leadersBefore = ROOM_LEADERS_STATE.read();
-      appointRoomLeader(roomName, id, { assign: true });
+      const existingLeaderId = leadersBefore[roomName] || null;
+      const staleLeaderId = existingLeaderId && !validRoomLeaderDesignation(roomName, existingLeaderId)
+        ? existingLeaderId
+        : null;
+      appointRoomLeader(roomName, id, { assign: true, replaceStale: staleLeaderId });
     }
     spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '' });
     if (roomRole === 'leader') roomSnapshotCache.invalidate();
@@ -3197,6 +3204,7 @@ function httpError(status, message) {
 const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
 const ROOM_LEADERS_FILE = STATE_PATHS.coordination.roomLeadersFile;
+const ROOM_RESIDENTS_FILE = STATE_PATHS.coordination.roomResidentsFile;
 const ROOM_PULSES_FILE = STATE_PATHS.coordination.roomPulsesFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
@@ -3211,6 +3219,25 @@ function isRoomLeaderState(value) {
 const ROOM_LEADERS_STATE = createJsonState({
   file: ROOM_LEADERS_FILE, root: path.dirname(ROOM_LEADERS_FILE), document: 'Room leaders',
   defaultValue: {}, validate: isRoomLeaderState,
+});
+const ROOM_RESIDENT_ROLE_RE = /^[a-z][a-z0-9-]{0,31}$/;
+function isRoomResidentState(value) {
+  if (!isJsonRecord(value)) return false;
+  const sessionIds = new Set();
+  for (const [roomName, residents] of Object.entries(value)) {
+    if (!ROOM_NAME_RE.test(roomName) || !isJsonRecord(residents)) return false;
+    for (const [role, resident] of Object.entries(residents)) {
+      if (role === 'leader' || !ROOM_RESIDENT_ROLE_RE.test(role) || !isJsonRecord(resident)) return false;
+      if (typeof resident.sessionId !== 'string' || !UUID_RE.test(resident.sessionId)) return false;
+      if (sessionIds.has(resident.sessionId)) return false;
+      sessionIds.add(resident.sessionId);
+    }
+  }
+  return true;
+}
+const ROOM_RESIDENTS_STATE = createJsonState({
+  file: ROOM_RESIDENTS_FILE, root: path.dirname(ROOM_RESIDENTS_FILE), document: 'Room residents',
+  defaultValue: {}, validate: isRoomResidentState,
 });
 const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
 function isRoomPulseState(value) {
@@ -3261,12 +3288,29 @@ function readRoomAssignments() {
   return ROOM_ASSIGN_STATE.read();
 }
 
-function appointRoomLeader(name, sessionId, { assign = false } = {}) {
+function validRoomLeaderDesignation(name, sessionId) {
+  if (!UUID_RE.test(sessionId)) return false;
+  if (ROOM_PULSES_STATE.read()[name]?.sessionId === sessionId) return false;
+  const assignments = readRoomAssignments();
+  const meta = readMeta();
+  if (assignments[sessionId] === name
+    && ['omp', 'claude'].includes(meta[sessionId]?.agent)
+    && (tmuxIsActive(sessionId) || fs.existsSync(path.join(OMP_SESSIONS, sessionId)))) {
+    return true;
+  }
+  const session = discoverSessions(0, null, [sessionId]).find((candidate) => candidate.id === sessionId);
+  return !!session
+    && session.agent !== 'codex'
+    && roomNameForSession(sessionId) === name
+    && !String(session.title || '').startsWith('Keep working: #');
+}
+
+function appointRoomLeader(name, sessionId, { assign = false, replaceStale = null } = {}) {
   if (assign) {
     ROOM_ASSIGN_STATE.update((current) => ({ ...current, [sessionId]: name }));
   }
   ROOM_LEADERS_STATE.update((current) => {
-    if (current[name] && current[name] !== sessionId) {
+    if (current[name] && current[name] !== sessionId && current[name] !== replaceStale) {
       throw httpError(409, `#${name} already has a Leader`);
     }
     if (Object.entries(current).some(([roomName, currentLeaderId]) => roomName !== name && currentLeaderId === sessionId)) {
@@ -3403,9 +3447,13 @@ function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
   const leaders = ROOM_LEADERS_STATE.read();
+  const residentState = ROOM_RESIDENTS_STATE.read();
+  const sessionMeta = readMeta();
   const pulseState = ROOM_PULSES_STATE.read();
   const pulseSessionIds = Object.values(pulseState).map((pulse) => pulse?.sessionId).filter(Boolean);
-  const requiredSessionIds = [...new Set([...Object.keys(assignments), ...Object.values(leaders), ...pulseSessionIds])];
+  const residentSessionIds = Object.values(residentState)
+    .flatMap((residents) => Object.values(residents).map((resident) => resident.sessionId));
+  const requiredSessionIds = [...new Set([...Object.keys(assignments), ...Object.values(leaders), ...residentSessionIds, ...pulseSessionIds])];
   const all = discoverSessions(300, null, requiredSessionIds);
   const byRoom = groupRoomSessions({
     roomNames: names,
@@ -3425,6 +3473,26 @@ function buildRoomsSnapshot() {
     const leaderSessionId = sessions.find((session) => session.id === requestedLeaderSessionId && isEligibleLeader(session))?.id
       || null;
     const leaderSession = sessions.find((session) => session.id === leaderSessionId) || null;
+    const residents = [];
+    if (leaderSession) {
+      residents.push({
+        role: 'leader',
+        sessionId: leaderSession.id,
+        agent: leaderSession.agent,
+        title: leaderSession.title,
+        status: leaderSession.isActive ? 'working' : 'waiting',
+      });
+    }
+    for (const [role, configured] of Object.entries(residentState[name] || {}).sort(([a], [b]) => a.localeCompare(b))) {
+      const session = sessions.find((candidate) => candidate.id === configured.sessionId);
+      residents.push({
+        role,
+        sessionId: configured.sessionId,
+        agent: session?.agent || sessionMeta[configured.sessionId]?.agent || 'unknown',
+        title: session?.title || role,
+        status: session ? (session.isActive ? 'working' : 'waiting') : 'offline',
+      });
+    }
     let latest = leaderSession ? lastMessageSnippet(leaderSession.id, leaderSession.agent || 'omp') : null;
     let updatedAt = leaderSession?.updatedAt || null;
     if (!latest) {
@@ -3441,6 +3509,7 @@ function buildRoomsSnapshot() {
       cwd: path.join(ROOMS_HOME_DIR, name),
       sessions,
       leaderSessionId,
+      residents,
       active: sessions.some((s) => s.isActive),
       pulse,
       latest,
@@ -3482,6 +3551,82 @@ app.get('/api/sessions/:id/room', (req, res) => {
 app.get('/api/rooms', (_req, res) => {
   try { res.json({ rooms: roomSnapshotCache.get() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/rooms/:name/residents', (req, res) => {
+  try {
+    const room = roomSnapshotCache.get().find((candidate) => candidate.name === req.params.name);
+    if (!room) throw httpError(404, 'no such room');
+    res.json({ residents: room.residents });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/rooms/:name/residents', (req, res) => {
+  try {
+    const { name } = req.params;
+    const role = String(req.body?.role || '').trim();
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    if (role === 'leader' || !ROOM_RESIDENT_ROLE_RE.test(role)) throw httpError(400, 'bad resident role');
+    if (!UUID_RE.test(sessionId)) throw httpError(400, 'sessionId must be a UUID');
+    const residentState = ROOM_RESIDENTS_STATE.read();
+    if (residentState[name]?.[role]?.sessionId === sessionId) {
+      roomSnapshotCache.refresh();
+      const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
+      return res.json({ ok: true, residents: room?.residents || [] });
+    }
+    if (roomNameForSession(sessionId) !== name) throw httpError(409, `session does not belong to #${name}`);
+    if (Object.values(ROOM_LEADERS_STATE.read()).includes(sessionId)) throw httpError(409, 'Leader already has a reserved resident role');
+    const session = discoverSessions(0, null, [sessionId]).find((candidate) => candidate.id === sessionId);
+    if (!session) throw httpError(409, 'session is not discoverable');
+    const pulseRoom = Object.entries(ROOM_PULSES_STATE.read())
+      .find(([, pulse]) => pulse?.sessionId === sessionId)?.[0] || null;
+    if (pulseRoom) throw httpError(409, `keep-working controller of #${pulseRoom} cannot be a resident`);
+
+    ROOM_RESIDENTS_STATE.update((current) => {
+      for (const [roomName, residents] of Object.entries(current)) {
+        for (const [residentRole, resident] of Object.entries(residents)) {
+          if (resident.sessionId === sessionId && (roomName !== name || residentRole !== role)) {
+            throw httpError(409, `session is already resident ${residentRole} of #${roomName}`);
+          }
+        }
+      }
+      const roomResidents = { ...(current[name] || {}) };
+      if (roomResidents[role] && roomResidents[role].sessionId !== sessionId) {
+        throw httpError(409, `#${name} already has resident role ${role}`);
+      }
+      roomResidents[role] = { sessionId };
+      return { ...current, [name]: roomResidents };
+    });
+    roomSnapshotCache.refresh();
+    const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
+    res.json({ ok: true, residents: room?.residents || [] });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/rooms/:name/residents/:role', (req, res) => {
+  try {
+    const { name, role } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    if (role === 'leader' || !ROOM_RESIDENT_ROLE_RE.test(role)) throw httpError(400, 'bad resident role');
+    ROOM_RESIDENTS_STATE.update((current) => {
+      if (!current[name]?.[role]) throw httpError(404, 'no such resident');
+      const roomResidents = { ...current[name] };
+      delete roomResidents[role];
+      const next = { ...current };
+      if (Object.keys(roomResidents).length) next[name] = roomResidents;
+      else delete next[name];
+      return next;
+    });
+    roomSnapshotCache.refresh();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 app.get('/api/rooms/:name/friction', (req, res) => {
@@ -3533,6 +3678,17 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     if (leaderRoom && leaderRoom !== targetRoom) {
       throw httpError(409, `the Leader of #${leaderRoom} cannot be moved or detached`);
     }
+    const pulseRoom = Object.entries(ROOM_PULSES_STATE.read())
+      .find(([, pulse]) => pulse?.sessionId === sid)?.[0] || null;
+    if (pulseRoom && pulseRoom !== targetRoom) {
+      throw httpError(409, `keep-working controller of #${pulseRoom} cannot be moved or detached`);
+    }
+    const residentMatch = Object.entries(ROOM_RESIDENTS_STATE.read()).flatMap(([roomName, residents]) =>
+      Object.entries(residents).map(([role, resident]) => ({ roomName, role, sessionId: resident.sessionId })))
+      .find((resident) => resident.sessionId === sid);
+    if (residentMatch && residentMatch.roomName !== targetRoom) {
+      throw httpError(409, `resident ${residentMatch.role} of #${residentMatch.roomName} cannot be moved or detached`);
+    }
     const assignments = ROOM_ASSIGN_STATE.update((current) => {
       const next = { ...current };
       if (req.body?.remove) {
@@ -3542,8 +3698,7 @@ app.post('/api/rooms/:name/assign', (req, res) => {
       else next[sid] = name;
       return next;
     });
-    // Leader membership cannot reach this point for a move/detach; replacing
-    // the Leader is an explicit /leader operation, never an assignment side effect.
+    // Leader and resident membership are durable roles, never assignment side effects.
     roomSnapshotCache.refresh();
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -3707,6 +3862,7 @@ for (const state of [
   ROOM_ASSIGN_STATE,
   ROOM_LEADERS_STATE,
   ROOM_PULSES_STATE,
+  ROOM_RESIDENTS_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();
 if (!READ_ONLY_MODE) await reconcileProtocolRunOwners();
