@@ -125,45 +125,43 @@ test('Room card and explicit promotion use the durable main human chat', async (
   await expect(page).toHaveURL(/#newer-human-chat$/)
 })
 
-test('surfaces an unread Updates badge, opens the feed, and marks it read per-device', async ({ page }) => {
+test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const updates = [
-    { id: 'u1', ts: '2026-08-22T12:00:00Z', text: 'First briefing. Why it matters: the herd is gone.' },
-    { id: 'u2', ts: '2026-08-22T13:30:00Z', text: 'Second briefing.\nA new paragraph that must keep its line break.' },
-  ]
+  let updateRequests = 0
   await page.route('**/api/rooms', async (route) => {
     await route.fulfill({ json: { rooms: [{
-      name: 'meta', cwd: '/srv/rooms/meta', active: false, latest: null, updatedAt: updates[1].ts,
-      updates: { count: updates.length, latestAt: updates[1].ts, latest: 'Second briefing. A new paragraph that must keep its line break.' },
+      name: 'meta', cwd: '/srv/rooms/meta', active: false, latest: null, updatedAt: '2026-08-22T13:30:00Z',
+      updates: { count: 2, latestAt: '2026-08-22T13:30:00Z', latest: 'RAW COPIED TWEET' },
       friction: { count: 0, latestAt: null, latest: null },
       pulse: { enabled: true, status: 'waiting', lastRunAt: null, nextRunAt: '2026-08-22T13:45:00Z', sessionId: null },
       sessions: [],
     }] } })
   })
-  await page.route('**/api/rooms/meta/updates', async (route) => {
-    await route.fulfill({ json: { updates } })
+  await page.route('**/api/rooms/meta/wiki', async (route) => {
+    await route.fulfill({ json: { pages: [{ name: 'Home', size: 80, updatedAt: '2026-08-22T14:00:00Z' }] } })
   })
-  // Start from a clean per-device seen state so the badge shows unread.
-  await page.addInitScript(() => { try { localStorage.removeItem('feather:roomUpdatesSeen') } catch {} })
+  await page.route('**/api/rooms/meta/wiki/page?name=Home', async (route) => {
+    await route.fulfill({ json: {
+      name: 'Home',
+      content: '# Meta knowledge\\n\\nThe caretaker synthesized the evidence into this durable conclusion.',
+      updatedAt: '2026-08-22T14:00:00Z',
+    } })
+  })
+  await page.route('**/api/rooms/meta/updates', async (route) => {
+    updateRequests++
+    await route.fulfill({ json: { updates: [{ id: 'u1', ts: null, text: 'RAW COPIED TWEET' }] } })
+  })
 
   await page.goto(BASE)
-  const pill = page.getByTestId('updates-meta')
-  await expect(pill).toBeVisible()
-  await expect(pill).toContainText('2 new')
-
-  await pill.click()
-  const panel = page.getByTestId('updates-panel-meta')
-  await expect(panel).toBeVisible()
-  await expect(panel).toContainText('First briefing. Why it matters: the herd is gone.')
-  await expect(panel).toContainText('A new paragraph that must keep its line break.')
-
-  // Opening the feed marks it read: the badge drops to the plain count.
-  await expect(pill).not.toContainText('new')
-  await expect(pill).toContainText('2')
-
-  // Unread is remembered per-device (localStorage), not server-side.
-  const seen = await page.evaluate(() => localStorage.getItem('feather:roomUpdatesSeen'))
-  expect(JSON.parse(seen)).toMatchObject({ meta: 2 })
+  const wiki = page.getByTestId('wiki-meta')
+  await expect(wiki).toBeVisible()
+  await expect(wiki).not.toContainText('new')
+  await wiki.click()
+  const panel = page.getByTestId('wiki-panel-meta')
+  await expect(panel).toContainText('The caretaker synthesized the evidence')
+  await expect(panel).not.toContainText('RAW COPIED TWEET')
+  await expect(panel.getByRole('button', { name: 'Updates', exact: true })).toHaveCount(0)
+  expect(updateRequests).toBe(0)
 })
 
 test('shows friction only on the Room that reported it', async ({ page }) => {

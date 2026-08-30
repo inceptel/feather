@@ -88,8 +88,8 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(page.getByTestId('live-work-turn')).toHaveCount(0)
   expect(started.status).toBe(204)
 
-  const promptsTab = page.getByRole('button', { name: 'Prompts', exact: true })
-  await expect(promptsTab).toBeVisible()
+  const wikiTab = page.getByRole('button', { name: 'Wiki', exact: true })
+  await expect(wikiTab).toBeVisible()
   await expect(page.getByRole('button', { name: /Todos/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Agents/ })).toHaveCount(0)
 

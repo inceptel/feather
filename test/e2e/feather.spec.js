@@ -461,18 +461,10 @@ test.describe('Tab switching', () => {
     await expect(page.locator('.markdown').first()).toBeVisible()
   })
 
-  test('prompts tab lists only the user inputs, hiding assistant turns and composer', async ({ page }) => {
-    await page.locator('button:has-text("Prompts")').click()
-    await page.waitForTimeout(400)
-    const panel = page.getByTestId('prompts-panel')
-    await expect(panel).toBeVisible()
-    // Both user prompts appear (rendered as raw text, markdown not parsed).
-    await expect(panel.getByText('Thanks, that makes sense!')).toBeVisible()
-    await expect(panel.getByText(/rendering works in .*Feather/)).toBeVisible()
-    // Assistant/tool content is not part of the prompts feed.
-    await expect(panel.getByText(/marked/)).toHaveCount(0)
-    // The composer is hidden while viewing prompts.
-    await expect(page.locator('textarea[placeholder="Send a message..."]')).not.toBeVisible()
+  test('navigation keeps curated Wiki and removes raw Prompts and Updates feeds', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Wiki', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Prompts', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveCount(0)
   })
 
 })
