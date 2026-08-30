@@ -21,6 +21,7 @@ import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } 
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
+import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes } from './lib/friction.js';
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 
@@ -829,9 +830,25 @@ function tmuxIsActive(id) {
   catch { return false; }
 }
 
+function validateFreshSessionId(id) {
+  if (typeof id !== 'string' || !UUID_RE.test(id)) throw httpError(400, 'session id must be a UUID');
+  const assignments = readRoomAssignments();
+  const leaders = ROOM_LEADERS_STATE.read();
+  if (readMeta()[id]
+    || assignments[id]
+    || Object.values(leaders).includes(id)
+    || tmuxIsActive(id)
+    || fs.existsSync(path.join(OMP_SESSIONS, id))
+    || findJsonlPath(id)) {
+    throw httpError(409, 'session id already exists');
+  }
+  return id;
+}
+
 function launchInTmux(name, cmd, cwd) {
   try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execSync(`tmux new-session -d -s ${name} -c "${cwd || HOME}" "${cmd}" \\; set-option -t ${name} prefix M-a`, { stdio: 'ignore' });
+  execFileSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd || HOME, cmd], { stdio: 'ignore' });
+  execFileSync('tmux', ['set-option', '-t', name, 'prefix', 'M-a'], { stdio: 'ignore' });
   for (const delay of [3000, 5000, 8000]) {
     setTimeout(() => {
       try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter'], { stdio: 'ignore' }); } catch {}
@@ -955,10 +972,27 @@ function ompSessionModel(id) {
   const stored = sanitizeOmpModel(readMeta()[id]?.ompModel || '');
   return stored || OMP_MODEL;
 }
+
+function roomLeaderNameForSession(id) {
+  const leaders = ROOM_LEADERS_STATE.read();
+  return Object.entries(leaders).find(([, sessionId]) => sessionId === id)?.[0] || null;
+}
+
+function writeRoomLeaderPrompt(id, roomName) {
+  if (!roomName) return null;
+  const promptDir = path.join(HOME, '.feather', 'room-leader-prompts');
+  fs.mkdirSync(promptDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(promptDir, 0o700);
+  const promptPath = path.join(promptDir, `${id}-v${ROOM_LEADER_PROMPT_VERSION}.md`);
+  fs.writeFileSync(promptPath, roomLeaderPrompt(roomName), { mode: 0o600 });
+  fs.chmodSync(promptPath, 0o600);
+  return promptPath;
+}
 function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
   if (!resume) resetOmpBridgeSessionState(id);
   const sessionDir = path.join(OMP_SESSIONS, id);
   fs.mkdirSync(sessionDir, { recursive: true });
+  const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
   watchOmpSessionDir(sessionDir, id);
   const ompId = resume ? getOmpSessionId(id) : null;
   if (resume && !ompId) throw new Error(`Cannot resume OMP session ${id}: exact OMP session id not found`);
@@ -980,6 +1014,7 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
     'omp',
     ompModelFlags(ompSessionModel(id), OMP_THINKING).trim(),
     resume ? `--resume ${shellQuote(ompId)}` : '',
+    leaderPromptFile ? `--append-system-prompt ${shellQuote(leaderPromptFile)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
     bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
     `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
@@ -1013,7 +1048,15 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '' } = {}) {
     adoptNewCodexUuid(id, before, cwd);
   } else {
     ensureClaudeTrust(cwd);
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --session-id ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, cwd);
+    const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
+    const args = [
+      'claude',
+      `--session-id ${shellQuote(id)}`,
+      leaderPromptFile ? `--append-system-prompt-file ${shellQuote(leaderPromptFile)}` : '',
+      '--dangerously-skip-permissions',
+      '--disallowed-tools AskUserQuestion',
+    ].filter(Boolean).join(' ');
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd);
   }
 }
 
@@ -1101,7 +1144,15 @@ function resumeSession(id, cwd) {
       }
     }
     ensureClaudeTrust(sessionCwd);
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'claude --resume ${id} --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, sessionCwd);
+    const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
+    const args = [
+      'claude',
+      `--resume ${shellQuote(id)}`,
+      leaderPromptFile ? `--append-system-prompt-file ${shellQuote(leaderPromptFile)}` : '',
+      '--dangerously-skip-permissions',
+      '--disallowed-tools AskUserQuestion',
+    ].filter(Boolean).join(' ');
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, sessionCwd);
   }
 }
 
@@ -2353,11 +2404,34 @@ function sessionStreamHandler(req, res) {
 app.get('/api/sessions/:id/stream', sessionStreamHandler);
 
 app.post('/api/sessions', (req, res) => {
+  const agent = req.body.agent || 'claude';
+  const roomRole = req.body.roomRole || null;
+  const roomName = String(req.body.roomName || '').trim();
+  let assignmentsBefore = null;
+  let leadersBefore = null;
   try {
-    const agent = req.body.agent || 'claude';
-    spawnSession(req.body.id, req.body.cwd, agent, { ompModel: req.body.model || '' });
-    res.json({ id: req.body.id, status: 'starting', agent });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const id = validateFreshSessionId(req.body.id);
+    if (roomRole && roomRole !== 'leader') throw httpError(400, 'unsupported Room role');
+    if (roomRole === 'leader') {
+      if (agent !== 'omp') throw httpError(409, 'new Room Leaders currently require OMP');
+      if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
+      if (path.resolve(String(req.body.cwd || '')) !== path.join(ROOMS_HOME_DIR, roomName)) {
+        throw httpError(409, `leader cwd must be #${roomName}`);
+      }
+      assignmentsBefore = readRoomAssignments();
+      leadersBefore = ROOM_LEADERS_STATE.read();
+      appointRoomLeader(roomName, id, { assign: true });
+    }
+    spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '' });
+    if (roomRole === 'leader') roomSnapshotCache.invalidate();
+    res.json({ id, status: 'starting', agent, roomRole });
+  } catch (e) {
+    if (assignmentsBefore && leadersBefore) {
+      ROOM_ASSIGN_STATE.update(() => assignmentsBefore);
+      ROOM_LEADERS_STATE.update(() => leadersBefore);
+    }
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 app.post('/api/sessions/:id/send', async (req, res) => {
@@ -3122,20 +3196,21 @@ function httpError(status, message) {
 
 const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
-const ROOM_MAINS_FILE = STATE_PATHS.coordination.roomMainsFile;
+const ROOM_LEADERS_FILE = STATE_PATHS.coordination.roomLeadersFile;
 const ROOM_PULSES_FILE = STATE_PATHS.coordination.roomPulsesFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
   defaultValue: {}, validate: isJsonRecord,
 });
-function isRoomMainState(value) {
+const ROOM_NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+function isRoomLeaderState(value) {
   return isJsonRecord(value) && Object.entries(value).every(([name, sessionId]) =>
-    name.length > 0 && name.length <= 255
-      && typeof sessionId === 'string' && sessionId.length > 0 && sessionId.length <= 512);
+    ROOM_NAME_RE.test(name) && typeof sessionId === 'string' && UUID_RE.test(sessionId));
 }
-const ROOM_MAINS_STATE = createJsonState({
-  file: ROOM_MAINS_FILE, root: path.dirname(ROOM_MAINS_FILE), document: 'Room main chats',
-  defaultValue: {}, validate: isRoomMainState,
+const ROOM_LEADERS_STATE = createJsonState({
+  file: ROOM_LEADERS_FILE, root: path.dirname(ROOM_LEADERS_FILE), document: 'Room leaders',
+  defaultValue: {}, validate: isRoomLeaderState,
 });
 const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
 function isRoomPulseState(value) {
@@ -3186,15 +3261,34 @@ function readRoomAssignments() {
   return ROOM_ASSIGN_STATE.read();
 }
 
-// Only folders with an AGENTS.md count as rooms; `_doctrine.md` and Buzz-era
-// leftovers without one are skipped.
+function appointRoomLeader(name, sessionId, { assign = false } = {}) {
+  if (assign) {
+    ROOM_ASSIGN_STATE.update((current) => ({ ...current, [sessionId]: name }));
+  }
+  ROOM_LEADERS_STATE.update((current) => {
+    if (current[name] && current[name] !== sessionId) {
+      throw httpError(409, `#${name} already has a Leader`);
+    }
+    if (Object.entries(current).some(([roomName, currentLeaderId]) => roomName !== name && currentLeaderId === sessionId)) {
+      throw httpError(409, 'session is already Leader of another Room');
+    }
+    return { ...current, [name]: sessionId };
+  });
+}
+
+// Only canonical, non-symlinked folders with an AGENTS.md count as Rooms.
 function listRoomDirs() {
   try {
+    const realRoomsRoot = fs.realpathSync(ROOMS_HOME_DIR);
     return fs.readdirSync(ROOMS_HOME_DIR).filter((name) => {
-      if (name.startsWith('_') || name.startsWith('.')) return false;
+      if (!ROOM_NAME_RE.test(name)) return false;
       try {
-        return fs.statSync(path.join(ROOMS_HOME_DIR, name)).isDirectory()
-          && fs.existsSync(path.join(ROOMS_HOME_DIR, name, 'AGENTS.md'));
+        const roomPath = path.join(ROOMS_HOME_DIR, name);
+        const roomEntry = fs.lstatSync(roomPath);
+        if (roomEntry.isSymbolicLink() || !roomEntry.isDirectory()) return false;
+        if (path.dirname(fs.realpathSync(roomPath)) !== realRoomsRoot) return false;
+        const agentsEntry = fs.lstatSync(path.join(roomPath, 'AGENTS.md'));
+        return !agentsEntry.isSymbolicLink() && agentsEntry.isFile();
       } catch { return false; }
     }).sort();
   } catch { return []; }
@@ -3308,9 +3402,11 @@ function roomFrictionSummary(name, complaints) {
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
-  const mains = ROOM_MAINS_STATE.read();
+  const leaders = ROOM_LEADERS_STATE.read();
   const pulseState = ROOM_PULSES_STATE.read();
-  const all = discoverSessions(300, null, [...new Set([...Object.keys(assignments), ...Object.values(mains)])]);
+  const pulseSessionIds = Object.values(pulseState).map((pulse) => pulse?.sessionId).filter(Boolean);
+  const requiredSessionIds = [...new Set([...Object.keys(assignments), ...Object.values(leaders), ...pulseSessionIds])];
+  const all = discoverSessions(300, null, requiredSessionIds);
   const byRoom = groupRoomSessions({
     roomNames: names,
     roomsRoot: ROOMS_HOME_DIR,
@@ -3321,15 +3417,16 @@ function buildRoomsSnapshot() {
   const rooms = names.map((name) => {
     const sessions = byRoom.get(name); // activity-sorted by discoverSessions
     const pulse = roomPulse(name, Date.now(), pulseState);
-    const requestedMainSessionId = mains[name];
-    const isHumanChat = (session) =>
-      session.id !== pulse.sessionId && !String(session.title || '').startsWith('Keep working: #');
-    const mainSessionId = sessions.find((session) => session.id === requestedMainSessionId && isHumanChat(session))?.id
-      || sessions.find(isHumanChat)?.id
+    const requestedLeaderSessionId = leaders[name];
+    const isEligibleLeader = (session) =>
+      session.agent !== 'codex'
+        && session.id !== pulse.sessionId
+        && !String(session.title || '').startsWith('Keep working: #');
+    const leaderSessionId = sessions.find((session) => session.id === requestedLeaderSessionId && isEligibleLeader(session))?.id
       || null;
-    const newest = sessions[0] || null;
-    let latest = newest ? lastMessageSnippet(newest.id, newest.agent || 'claude') : null;
-    let updatedAt = newest?.updatedAt || null;
+    const leaderSession = sessions.find((session) => session.id === leaderSessionId) || null;
+    let latest = leaderSession ? lastMessageSnippet(leaderSession.id, leaderSession.agent || 'omp') : null;
+    let updatedAt = leaderSession?.updatedAt || null;
     if (!latest) {
       // Room with no visible chat yet: fall back to the last notes.md line.
       try {
@@ -3343,7 +3440,7 @@ function buildRoomsSnapshot() {
       name,
       cwd: path.join(ROOMS_HOME_DIR, name),
       sessions,
-      mainSessionId,
+      leaderSessionId,
       active: sessions.some((s) => s.isActive),
       pulse,
       latest,
@@ -3402,7 +3499,7 @@ app.get('/api/rooms/:name/friction', (req, res) => {
 app.post('/api/rooms', (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
-    if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(name)) throw httpError(400, 'bad room name (lowercase, digits, dashes)');
+    if (!ROOM_NAME_RE.test(name)) throw httpError(400, 'bad room name (lowercase, digits, dashes)');
     const dir = path.join(ROOMS_HOME_DIR, name);
     if (fs.existsSync(dir)) throw httpError(409, 'room exists');
     fs.mkdirSync(dir, { recursive: true });
@@ -3430,6 +3527,12 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     const sid = String(req.body?.sessionId || '').trim();
     if (!sid) throw httpError(400, 'sessionId required');
     if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const targetRoom = req.body?.remove ? null : name;
+    const leaderRoom = Object.entries(ROOM_LEADERS_STATE.read())
+      .find(([, leaderSessionId]) => leaderSessionId === sid)?.[0] || null;
+    if (leaderRoom && leaderRoom !== targetRoom) {
+      throw httpError(409, `the Leader of #${leaderRoom} cannot be moved or detached`);
+    }
     const assignments = ROOM_ASSIGN_STATE.update((current) => {
       const next = { ...current };
       if (req.body?.remove) {
@@ -3439,53 +3542,13 @@ app.post('/api/rooms/:name/assign', (req, res) => {
       else next[sid] = name;
       return next;
     });
-    const targetRoom = req.body?.remove ? null : name;
-    ROOM_MAINS_STATE.update((current) => {
-      const next = { ...current };
-      for (const [roomName, mainSessionId] of Object.entries(current)) {
-        if (mainSessionId === sid && roomName !== targetRoom) delete next[roomName];
-      }
-      return next;
-    });
+    // Leader membership cannot reach this point for a move/detach; replacing
+    // the Leader is an explicit /leader operation, never an assignment side effect.
     roomSnapshotCache.refresh();
     res.json({ ok: true, assignments });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-app.post('/api/rooms/:name/main', (req, res) => {
-  try {
-    const { name } = req.params;
-    const sessionId = String(req.body?.sessionId || '').trim();
-    if (!sessionId) throw httpError(400, 'sessionId required');
-    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
-    const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
-    const session = room?.sessions.find((candidate) => candidate.id === sessionId);
-    if (!session) throw httpError(409, `session does not belong to #${name}`);
-    if (String(session.title || '').startsWith('Keep working: #')) {
-      throw httpError(409, 'Keep-working chats cannot be a Room main chat');
-    }
-    ROOM_MAINS_STATE.update((current) => ({ ...current, [name]: sessionId }));
-    if (sessionId === room.pulse.sessionId) {
-      const now = Date.now();
-      ROOM_PULSES_STATE.update((current) => {
-        const enabled = current[name]?.enabled !== false;
-        return {
-          ...current,
-          [name]: pulseRecord(current[name], {
-            status: enabled ? 'waiting' : 'paused',
-            nextRunAtMs: enabled ? now + ROOM_PULSE_INTERVAL_MS : null,
-            sessionId: null,
-            error: null,
-          }),
-        };
-      });
-    }
-    roomSnapshotCache.refresh();
-    res.json({ ok: true, mainSessionId: sessionId, pulse: roomPulse(name, Date.now()) });
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
-  }
-});
 
 app.post('/api/rooms/:name/pulse', (req, res) => {
   try {
@@ -3642,7 +3705,7 @@ for (const state of [
   LINKS_STATE,
   STARRED_STATE,
   ROOM_ASSIGN_STATE,
-  ROOM_MAINS_STATE,
+  ROOM_LEADERS_STATE,
   ROOM_PULSES_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();

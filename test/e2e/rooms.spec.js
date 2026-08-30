@@ -63,14 +63,14 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
 })
 
-test('Room card and explicit promotion use the durable main human chat', async ({ page }) => {
+test('Room card always opens its durable Leader chat', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const pulse = {
     id: 'pulse-chat', title: 'Human continued this pulse chat', updatedAt: '2026-08-24T01:00:00Z',
     isActive: true, agent: 'omp', roomAssigned: true,
   }
-  const main = {
-    id: 'main-human-chat', title: '#feather main', updatedAt: '2026-08-23T23:00:00Z',
+  const leader = {
+    id: 'leader-human-chat', title: '#feather Leader', updatedAt: '2026-08-23T23:00:00Z',
     isActive: false, agent: 'omp', roomAssigned: true,
   }
   const newer = {
@@ -81,48 +81,33 @@ test('Room card and explicit promotion use the durable main human chat', async (
     id: `archived-${index}`, title: `Archived chat ${index}`, updatedAt: `2026-08-22T0${index}:00:00Z`,
     isActive: false, agent: 'codex', roomAssigned: true,
   }))
-  let mainSessionId = main.id
-  let pulseSessionId = pulse.id
+  const leaderSessionId = leader.id
+  const pulseSessionId = pulse.id
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
     name: 'feather', cwd: '/home/user/rooms/feather', active: true,
-    latest: { role: 'assistant', text: 'Pulse finished work.' }, updatedAt: pulse.updatedAt,
+    latest: { role: 'assistant', text: 'Leader finished work.' }, updatedAt: leader.updatedAt,
     updates: { count: 0, latestAt: null, latest: null },
     friction: { count: 0, latestAt: null, latest: null },
     pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
-    mainSessionId,
-    sessions: [pulse, newer, main, ...archived],
+    leaderSessionId,
+    sessions: [pulse, newer, leader, ...archived],
   }] } }))
-  await page.route('**/api/rooms/feather/main', async route => {
-    const body = JSON.parse(route.request().postData() || '{}')
-    mainSessionId = body.sessionId
-    if (mainSessionId === pulseSessionId) pulseSessionId = null
-    await route.fulfill({ json: {
-      ok: true,
-      mainSessionId,
-      pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
-    } })
-  })
 
   await page.goto(BASE)
   await expect(page.getByText('#feather', { exact: true })).toBeVisible()
-  await page.locator('button:has-text("›")').click()
-  await expect(page.getByTestId(`main-${main.id}`)).toBeVisible()
+  await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
+  await expect(page.getByTestId(`leader-${leader.id}`)).toBeVisible()
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toHaveCount(0)
-  await expect(page.getByTestId(`make-main-${newer.id}`)).toHaveCount(0)
   await page.getByText('#feather', { exact: true }).click()
-  await expect(page).toHaveURL(/#main-human-chat$/)
+  await expect(page).toHaveURL(/#leader-human-chat$/)
 
   await page.goto(BASE)
-  await page.locator('button:has-text("›")').click()
+  await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
   await page.getByTestId('manage-chats-feather').click()
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toBeVisible()
-  await expect(page.getByTestId(`make-main-${pulse.id}`)).toBeVisible()
-  await page.getByTestId(`make-main-${pulse.id}`).click()
-  await expect(page.getByTestId(`main-${pulse.id}`)).toBeVisible()
-  await page.getByTestId(`make-main-${newer.id}`).click()
-  await expect(page.getByTestId(`main-${newer.id}`)).toBeVisible()
-  await page.getByText('#feather', { exact: true }).click()
-  await expect(page).toHaveURL(/#newer-human-chat$/)
+  await expect(page.getByTestId(`leader-${leader.id}`)).toBeVisible()
+  await expect(page.getByTestId(`detach-${leader.id}`)).toHaveCount(0)
+  await expect(page.locator('[data-testid^="make-leader-"]')).toHaveCount(0)
 })
 
 test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {

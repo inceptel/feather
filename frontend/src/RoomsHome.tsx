@@ -1,5 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomMain, setRoomPulse, fetchRoomFriction, RoomInfo, SessionMeta, FrictionComplaint } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomFriction, RoomInfo, SessionMeta, FrictionComplaint } from './api'
 import { RoomWikiView } from './components/RoomWikiView'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
@@ -51,13 +51,8 @@ function updateTimeLabel(iso: string | null) {
   return ago && ago !== 'now' ? `${when} · ${ago} ago` : `${when} · just now`
 }
 
-function primaryRoomSession(room: RoomInfo) {
-  if (room.mainSessionId !== undefined) {
-    return room.sessions.find(session => session.id === room.mainSessionId) || null
-  }
-  return room.sessions.find(session =>
-    session.id !== room.pulse.sessionId && !session.title.startsWith('Keep working: #')
-  ) || null
+function leaderRoomSession(room: RoomInfo) {
+  return room.sessions.find((session) => session.id === room.leaderSessionId) || null
 }
 
 export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void }) {
@@ -101,13 +96,14 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     finally { setBusy(false) }
   }
 
-  async function newChat(room: RoomInfo, agent?: string) {
+  async function newChat(room: RoomInfo, agent?: string, asLeader = false) {
     setBusy(true)
     try {
-      const id = await createSession(room.cwd, agent)
-      // Belt and braces: cwd-derived grouping covers claude immediately, but
-      // codex/omp transcripts appear later — pin the membership explicitly.
-      await assignSessionToRoom(room.name, id).catch(() => {})
+      const id = await createSession(room.cwd, asLeader ? 'omp' : agent, asLeader ? { name: room.name, role: 'leader' } : undefined)
+      // Leader creation assigns membership atomically before OMP launches so
+      // its first system prompt already carries the role. Other harnesses are
+      // grouped after launch as before.
+      if (!asLeader) await assignSessionToRoom(room.name, id).catch(() => {})
       props.onSessionsChanged?.()
       props.onOpen(id)
     } catch (e: any) { alert(e.message) }
@@ -155,21 +151,6 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     finally { setBusy(false) }
   }
 
-  async function makeMain(room: RoomInfo, session: SessionMeta, event: MouseEvent) {
-    event.stopPropagation()
-    setBusy(true)
-    const epoch = ++roomsEpoch
-    try {
-      const { mainSessionId, pulse } = await setRoomMain(room.name, session.id)
-      if (epoch !== roomsEpoch) return
-      setRooms((current) => current?.map((item) =>
-        item.name === room.name ? { ...item, mainSessionId, pulse } : item) || null)
-    } catch (error) {
-      if (epoch === roomsEpoch) alert(error instanceof Error ? error.message : String(error))
-    } finally {
-      if (epoch === roomsEpoch) setBusy(false)
-    }
-  }
 
   async function togglePulse(room: RoomInfo, event: MouseEvent) {
     event.stopPropagation()
@@ -210,13 +191,13 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
     }
   }
 
-  // Tap the card → open the designated main chat, never whichever session
-  // happened to speak most recently. Rooms without a designation fall back
-  // to the newest human-facing chat; pulse-only Rooms create their first chat.
+  // A Room has one canonical user-facing conversation owned by its Leader.
+  // If no Leader exists yet, opening the Room creates an OMP Leader atomically.
   function openRoom(room: RoomInfo) {
-    const primary = primaryRoomSession(room)
-    if (primary) props.onOpen(primary.id)
-    else newChat(room, 'omp')
+    if (busy()) return
+    const leader = leaderRoomSession(room)
+    if (leader) props.onOpen(leader.id)
+    else newChat(room, 'omp', true)
   }
   function toggleExpand(name: string) {
     const next = expanded() === name ? null : name
@@ -225,8 +206,8 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   }
 
   function orderedRoomSessions(room: RoomInfo) {
-    const main = primaryRoomSession(room)
-    return main ? [main, ...room.sessions.filter((session) => session.id !== main.id)] : room.sessions
+    const leader = leaderRoomSession(room)
+    return leader ? [leader, ...room.sessions.filter((session) => session.id !== leader.id)] : room.sessions
   }
 
   function visibleRoomSessions(room: RoomInfo) {
@@ -242,16 +223,11 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
       style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '9px 16px 9px 28px', 'border-top': '1px solid #16161f', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
       <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: s.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
       <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: agentBg(s.agent), color: agentColor(s.agent), 'flex-shrink': '0', 'font-weight': '600' }}>{s.agent || 'claude'}</span>
-      <Show when={primaryRoomSession(room)?.id === s.id}>
-        <span data-testid={`main-${s.id}`} style={{ 'font-size': '9px', color: '#69c77f', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Main</span>
+      <Show when={leaderRoomSession(room)?.id === s.id}>
+        <span data-testid={`leader-${s.id}`} style={{ 'font-size': '9px', color: '#69c77f', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>Leader</span>
       </Show>
       <span style={{ flex: '1', 'font-size': '13px', color: '#ccc', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{s.title}</span>
-      <Show when={managingRoom() === room.name && primaryRoomSession(room)?.id !== s.id && !s.title.startsWith('Keep working: #')}>
-        <button data-testid={`make-main-${s.id}`} aria-label={`Make ${s.title} the main chat for #${room.name}`} disabled={busy()}
-          onClick={(event) => makeMain(room, s, event)}
-          style={{ background: 'none', border: 'none', color: '#69c77f', 'font-size': '10px', 'font-weight': '600', padding: '3px 4px', cursor: 'pointer', 'flex-shrink': '0', 'white-space': 'nowrap' }}>Make main</button>
-      </Show>
-      <Show when={managingRoom() === room.name && s.roomAssigned}>
+      <Show when={managingRoom() === room.name && s.roomAssigned && leaderRoomSession(room)?.id !== s.id}>
         <button data-testid={`detach-${s.id}`} aria-label={`Detach ${s.title} from #${room.name}`} disabled={busy()}
           onClick={(event) => detachSession(room, s, event)}
           style={{ background: 'none', border: 'none', color: '#777', 'font-size': '11px', padding: '3px 5px', cursor: 'pointer', 'flex-shrink': '0' }}>Detach</button>
@@ -280,13 +256,13 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
             </div>
           }>
             <For each={rooms()!}>{(room) => (
-              <div style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'margin-bottom': '10px', overflow: 'hidden' }}>
+              <div data-testid={`room-card-${room.name}`} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'margin-bottom': '10px', overflow: 'hidden' }}>
                 <div onClick={() => openRoom(room)} style={{ padding: '12px 16px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
                     <span style={{ width: '10px', height: '10px', 'border-radius': '50%', background: room.active ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
                     <span style={{ 'font-size': '16px', 'font-weight': '700', color: '#e5e5e5' }}>#{room.name}</span>
-                    <Show when={room.sessions.length > 1}>
-                      <span style={{ 'font-size': '11px', color: '#666' }}>{room.sessions.length} chats</span>
+                    <Show when={leaderRoomSession(room)} fallback={<span style={{ 'font-size': '11px', color: '#806f55' }}>No Leader</span>}>
+                      {(leader) => <span style={{ 'font-size': '11px', color: '#69c77f' }}>Leader · {leader().agent}</span>}
                     </Show>
                     <span style={{ 'margin-left': 'auto', 'font-size': '11px', color: '#555', 'font-family': 'monospace' }}>{timeAgo(room.updatedAt)}</span>
                     <button onClick={(e) => { e.stopPropagation(); toggleExpand(room.name) }}

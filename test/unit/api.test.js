@@ -836,6 +836,18 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
 
 })
 
+describe('POST /api/sessions', () => {
+  it('rejects non-UUID session ids before they reach tmux or filesystem paths', async () => {
+    const response = await fetch(`${BASE}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: '../;touch-pwned', cwd: fixtureHome, agent: 'omp' }),
+    })
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /session id must be a UUID/)
+  })
+})
+
 // ── Error handling ──────────────────────────────────────────────────────────
 
 describe('POST /api/sessions/:id/send', () => {
