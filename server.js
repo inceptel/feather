@@ -3468,9 +3468,9 @@ function readRoomUpdates(name) {
   return updates; // file order == chronological, since we only ever append
 }
 
-// Compact summary for the rooms snapshot: total count drives the client's
-// unread badge (count is monotonic because the feed is append-only), and the
-// newest entry supplies a one-line preview for the room card.
+// Compatibility summary retained in the rooms snapshot for older clients and
+// external readers. Count and latest entry remain monotonic because the legacy
+// evidence file is append-only.
 function roomUpdatesSummary(name) {
   const updates = readRoomUpdates(name);
   const newest = updates[updates.length - 1] || null;
