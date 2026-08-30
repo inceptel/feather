@@ -1,8 +1,7 @@
 declare const __BUILD_TIME__: string
 declare const __BUILD_VERSION__: string
 import { createSignal, createEffect, createMemo, onMount, onCleanup, Show, For, lazy, Suspense } from 'solid-js'
-import { marked } from 'marked'
-import { MessageView } from './components/MessageView'
+import { MessageView, renderWikiMarkdown } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
@@ -1937,7 +1936,7 @@ export default function App() {
                       <iframe src={fileUrl} style={{ width: '100%', height: '80vh', border: 'none', background: '#fff' }} />
                     </Show>
                     <Show when={v.kind === 'md' && !v.error && v.content}>
-                      <div class="prose" style={{ padding: '4px 24px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={marked.parse(v.content) as string} />
+                      <div class="prose" style={{ padding: '4px 24px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={renderWikiMarkdown(v.content)} />
                     </Show>
                     <Show when={v.kind === 'text' && !v.error && v.content}>
                       <pre style={{ margin: '0', padding: '16px 20px', color: '#d0d0d0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{v.content}</pre>
