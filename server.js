@@ -2425,6 +2425,7 @@ app.post('/api/sessions', (req, res) => {
       leadersBefore = ROOM_LEADERS_STATE.read();
       const existingLeaderId = leadersBefore[roomName] || null;
       if (existingLeaderId && validRoomLeaderDesignation(roomName, existingLeaderId)) {
+        syncRoomSidecar(roomName);
         return res.json({ id: existingLeaderId, status: 'existing', agent: getAgentForSession(existingLeaderId), roomRole });
       }
       const staleLeaderId = existingLeaderId && !validRoomLeaderDesignation(roomName, existingLeaderId)
@@ -2433,7 +2434,10 @@ app.post('/api/sessions', (req, res) => {
       appointRoomLeader(roomName, id, { assign: true, replaceStale: staleLeaderId });
     }
     spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '' });
-    if (roomRole === 'leader') roomSnapshotCache.invalidate();
+    if (roomRole === 'leader') {
+      syncRoomSidecar(roomName);
+      roomSnapshotCache.invalidate();
+    }
     res.json({ id, status: 'starting', agent, roomRole });
   } catch (e) {
     if (assignmentsBefore && leadersBefore) {
@@ -2553,6 +2557,8 @@ app.post('/api/sessions/:id/fork', (req, res) => {
 });
 
 // ── Sidecar API: paired agent threads with a chat channel ──────────────────
+const SIDECAR_MESSAGE_MAX_CHARS = 16_000;
+
 // See docs/plans/2026-06-27-001-feature-sidecar-plan.md
 
 const sidecarClients = new Map(); // groupId -> Set<res>
@@ -2573,6 +2579,7 @@ function sidecarGcIfDriverGone(group) {
   if (READ_ONLY_MODE) return false;
   const driver = group.members.find(m => !m.spawned);
   if (!driver || tmuxIsActive(driver.sessionId)) return false;
+  if (group.kind === 'room') return false;
   for (const m of group.members) {
     if (m.spawned) { try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {} }
   }
@@ -2592,7 +2599,7 @@ function sidecarDeliver(group, fromRole, to, text) {
   // HTTP caller isn't blocked on the ~6s resume-if-dormant path. The per-session
   // lock serializes concurrent fan-in into any one session.
   for (const t of targets) {
-    sendInput(t.sessionId, sidecar.formatInbound(fromRole, text))
+    sendInput(t.sessionId, sidecar.formatInbound(group.id, msg))
       .catch(e => console.warn('[sidecar] route failed:', e.message));
   }
   return { ok: true, message: msg };
@@ -2656,14 +2663,26 @@ app.post('/api/sidecar', (req, res) => {
 app.post('/api/sidecar/post', (req, res) => {
   try {
     const { group: groupId, fromPrefix, from, to, text } = req.body || {};
-    if (!to || !text) return res.status(400).json({ error: 'to and text required' });
+    if (typeof to !== 'string' || !to || typeof text !== 'string' || !text) return res.status(400).json({ error: 'string to and text required' });
+    if (text.length > SIDECAR_MESSAGE_MAX_CHARS) return res.status(413).json({ error: 'sidecar message exceeds 16000 characters' });
+    const residentSessionId = String(req.get('X-Feather-Session-ID') || '');
+    const lookupPrefix = residentSessionId ? residentSessionId.slice(0, 8) : fromPrefix;
     const group = groupId ? sidecar.getGroup(groupId)
-      : (fromPrefix ? sidecar.groupForSenderAndRole(fromPrefix, to) : null);
+      : (lookupPrefix ? sidecar.groupForSenderAndRole(lookupPrefix, to) : null);
     if (!group || group.status !== 'active') {
       return res.status(404).json({ error: 'no active sidecar group for sender (you may be in several — pass --group)' });
     }
     if (sidecarGcIfDriverGone(group)) return res.status(410).json({ error: 'driver gone; group torn down' });
-    const fromRole = from || (fromPrefix ? sidecar.roleForPrefix(group, fromPrefix) : null) || 'unknown';
+    const inferredRole = lookupPrefix ? sidecar.roleForPrefix(group, lookupPrefix) : null;
+    let authenticatedRoomRole = null;
+    if (group.kind === 'room') {
+      const member = group.members.find((candidate) => candidate.sessionId === residentSessionId);
+      if (!member || !bridgeTokenValid(residentSessionId, req.get('X-Feather-Bridge-Token'))) {
+        return res.status(403).json({ error: 'invalid Room resident capability' });
+      }
+      authenticatedRoomRole = member.role;
+    }
+    const fromRole = group.kind === 'room' ? authenticatedRoomRole : (from || inferredRole || 'unknown');
     const out = sidecarDeliver(group, fromRole, to, text);
     if (out.error) return res.status(400).json(out);
     res.json({ ok: true, group: group.id, seq: out.message.seq });
@@ -2674,9 +2693,11 @@ app.post('/api/sidecar/post', (req, res) => {
 app.post('/api/sidecar/:id/post', (req, res) => {
   try {
     const { from, to, text } = req.body || {};
-    if (!to || !text) return res.status(400).json({ error: 'to and text required' });
+    if (typeof to !== 'string' || !to || typeof text !== 'string' || !text) return res.status(400).json({ error: 'string to and text required' });
+    if (text.length > SIDECAR_MESSAGE_MAX_CHARS) return res.status(413).json({ error: 'sidecar message exceeds 16000 characters' });
     const group = sidecar.getGroup(req.params.id);
     if (!group || group.status !== 'active') return res.status(404).json({ error: 'no active sidecar group' });
+    if (group.kind === 'room') return res.status(403).json({ error: 'Human Room messages go through the Leader chat' });
     if (sidecarGcIfDriverGone(group)) return res.status(410).json({ error: 'driver gone; group torn down' });
     const out = sidecarDeliver(group, from || 'driver', to, text);
     if (out.error) return res.status(400).json(out);
@@ -2689,6 +2710,7 @@ app.post('/api/sidecar/:id/peers', (req, res) => {
   try {
     const g = sidecar.getGroup(req.params.id);
     if (!g || g.status !== 'active') return res.status(404).json({ error: 'no active group' });
+    if (g.kind === 'room') return res.status(409).json({ error: 'Room group membership is managed by the resident registry' });
     const { role = 'peer', agent = g.agent || 'claude', cwd, task = '' } = req.body || {};
     const pid = randomUUID();
     sidecar.addMember(g.id, { sessionId: pid, role, spawned: true });
@@ -2704,6 +2726,7 @@ app.post('/api/sidecar/:id/peers/:role/delete', (req, res) => {
   try {
     const g = sidecar.getGroup(req.params.id);
     if (!g) return res.status(404).json({ error: 'not found' });
+    if (g.kind === 'room') return res.status(409).json({ error: 'Room group membership is managed by the resident registry' });
     const m = g.members.find(x => x.role === req.params.role);
     if (!m) return res.status(404).json({ error: `no member with role ${req.params.role}` });
     if (!m.spawned) return res.status(400).json({ error: 'not a removable peer (the driver is not spawned)' });
@@ -2717,6 +2740,7 @@ app.post('/api/sidecar/:id/delete', (req, res) => {
   try {
     const g = sidecar.getGroup(req.params.id);
     if (!g) return res.status(404).json({ error: 'not found' });
+    if (g.kind === 'room') return res.status(409).json({ error: 'Room groups are durable' });
     for (const m of g.members) {
       if (m.spawned) { try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {} }
     }
@@ -3341,6 +3365,46 @@ function listRoomDirs() {
   } catch { return []; }
 }
 
+function syncRoomSidecar(name, { primeNewResidents = false } = {}) {
+  const leaderId = ROOM_LEADERS_STATE.read()[name] || null;
+  if (!leaderId || !validRoomLeaderDesignation(name, leaderId)) return null;
+  const configured = ROOM_RESIDENTS_STATE.read()[name] || {};
+  const members = [
+    { sessionId: leaderId, role: 'leader' },
+    ...Object.entries(configured).map(([role, resident]) => ({ sessionId: resident.sessionId, role })),
+  ];
+  const id = sidecar.roomGroupId(name);
+  const previous = sidecar.getGroup(id);
+  const primedMembers = new Set(previous?.primedMembers || []);
+  const group = sidecar.syncRoomGroup({ roomName: name, members });
+  if (primeNewResidents) {
+    for (const member of members) {
+      const memberKey = `${member.role}:${member.sessionId}`;
+      if (member.role === 'leader' || primedMembers.has(memberKey)) continue;
+      const groupFlag = `--group ${id}`;
+      const prime = [
+        `You are the permanent ${member.role} resident of Room #${name}. Other residents: ${members.filter((candidate) => candidate.role !== member.role).map((candidate) => candidate.role).join(', ')}.`,
+        `Explicit Sidecar messages are visible to the human. Contribute only your distinct expertise; no status chatter.`,
+        `Post: sidecar post ${groupFlag} --to <role|all> \"...\"`,
+        `Read: sidecar read ${groupFlag}`,
+        `Wait: sidecar wait ${groupFlag} --from <role|all> --count <N>`,
+        'Wait for a message and reply through this Room Sidecar group.',
+      ].join('\n');
+      sendInput(member.sessionId, prime)
+        .then(() => sidecar.markMembersPrimed(id, [memberKey]))
+        .catch((error) => console.warn(`[room sidecar] could not prime ${member.role} in #${name}:`, error.message));
+    }
+  }
+  return group;
+}
+
+function syncAllRoomSidecars(options) {
+  for (const name of listRoomDirs()) {
+    try { syncRoomSidecar(name, options); }
+    catch (error) { console.warn(`[room sidecar] #${name}:`, error.message); }
+  }
+}
+
 // Last real user/assistant text in a session, read from the tail (growing
 // like ACTIVITY_TAILS so idle bookkeeping lines can't hide it). Rooms-home
 // snippet only — not a full parse.
@@ -3513,6 +3577,7 @@ function buildRoomsSnapshot() {
       sessions,
       leaderSessionId,
       residents,
+      sidecarGroupId: leaderSessionId ? sidecar.roomGroupId(name) : null,
       active: sessions.some((s) => s.isActive),
       pulse,
       latest,
@@ -3560,77 +3625,12 @@ app.get('/api/rooms/:name/residents', (req, res) => {
   try {
     const room = roomSnapshotCache.get().find((candidate) => candidate.name === req.params.name);
     if (!room) throw httpError(404, 'no such room');
-    res.json({ residents: room.residents });
+    res.json({ residents: room.residents, sidecarGroupId: room.sidecarGroupId });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
 });
 
-app.post('/api/rooms/:name/residents', (req, res) => {
-  try {
-    const { name } = req.params;
-    const role = String(req.body?.role || '').trim();
-    const sessionId = String(req.body?.sessionId || '').trim();
-    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
-    if (role === 'leader' || !ROOM_RESIDENT_ROLE_RE.test(role)) throw httpError(400, 'bad resident role');
-    if (!UUID_RE.test(sessionId)) throw httpError(400, 'sessionId must be a UUID');
-    const residentState = ROOM_RESIDENTS_STATE.read();
-    if (residentState[name]?.[role]?.sessionId === sessionId) {
-      roomSnapshotCache.refresh();
-      const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
-      return res.json({ ok: true, residents: room?.residents || [] });
-    }
-    if (roomNameForSession(sessionId) !== name) throw httpError(409, `session does not belong to #${name}`);
-    if (Object.values(ROOM_LEADERS_STATE.read()).includes(sessionId)) throw httpError(409, 'Leader already has a reserved resident role');
-    const session = discoverSessions(0, null, [sessionId]).find((candidate) => candidate.id === sessionId);
-    if (!session) throw httpError(409, 'session is not discoverable');
-    const pulseRoom = Object.entries(ROOM_PULSES_STATE.read())
-      .find(([, pulse]) => pulse?.sessionId === sessionId)?.[0] || null;
-    if (pulseRoom) throw httpError(409, `keep-working controller of #${pulseRoom} cannot be a resident`);
-
-    ROOM_RESIDENTS_STATE.update((current) => {
-      for (const [roomName, residents] of Object.entries(current)) {
-        for (const [residentRole, resident] of Object.entries(residents)) {
-          if (resident.sessionId === sessionId && (roomName !== name || residentRole !== role)) {
-            throw httpError(409, `session is already resident ${residentRole} of #${roomName}`);
-          }
-        }
-      }
-      const roomResidents = { ...(current[name] || {}) };
-      if (roomResidents[role] && roomResidents[role].sessionId !== sessionId) {
-        throw httpError(409, `#${name} already has resident role ${role}`);
-      }
-      roomResidents[role] = { sessionId };
-      return { ...current, [name]: roomResidents };
-    });
-    roomSnapshotCache.refresh();
-    const room = roomSnapshotCache.get().find((candidate) => candidate.name === name);
-    res.json({ ok: true, residents: room?.residents || [] });
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
-  }
-});
-
-app.delete('/api/rooms/:name/residents/:role', (req, res) => {
-  try {
-    const { name, role } = req.params;
-    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
-    if (role === 'leader' || !ROOM_RESIDENT_ROLE_RE.test(role)) throw httpError(400, 'bad resident role');
-    ROOM_RESIDENTS_STATE.update((current) => {
-      if (!current[name]?.[role]) throw httpError(404, 'no such resident');
-      const roomResidents = { ...current[name] };
-      delete roomResidents[role];
-      const next = { ...current };
-      if (Object.keys(roomResidents).length) next[name] = roomResidents;
-      else delete next[name];
-      return next;
-    });
-    roomSnapshotCache.refresh();
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.message });
-  }
-});
 
 app.get('/api/rooms/:name/friction', (req, res) => {
   try {
@@ -3868,6 +3868,7 @@ for (const state of [
   ROOM_RESIDENTS_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();
+if (!READ_ONLY_MODE) syncAllRoomSidecars();
 if (!READ_ONLY_MODE) await reconcileProtocolRunOwners();
 
 const server = http.createServer(app);
@@ -3998,6 +3999,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Feather v2 on http://0.0.0.0:${PORT}`);
   // Warm the expensive Rooms snapshot before the first interactive request.
   setTimeout(() => { try { roomSnapshotCache.get(); } catch {} }, 0);
+  if (!READ_ONLY_MODE) setTimeout(() => syncAllRoomSidecars({ primeNewResidents: true }), 1000);
+  // Durable Room Sidecars are synchronized before listen; no startup 404 window.
   if (ROOM_PULSES_ENABLED) {
     setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));
     setInterval(checkRoomPulses, ROOM_PULSE_CHECK_MS);

@@ -81,6 +81,7 @@ export interface Message {
   timestamp: string
   content: ContentBlock[]
   delivery?: 'sent' | 'delivered'
+  passive?: boolean
 }
 
 export type ProtocolRunStatus =
@@ -199,6 +200,7 @@ export interface RoomInfo {
   sessions: SessionMeta[]
   leaderSessionId: string | null
   residents: RoomResident[]
+  sidecarGroupId: string | null
   active: boolean
   latest: { role: string, text: string } | null
   updatedAt: string | null
@@ -468,10 +470,12 @@ export async function deletePath(path: string): Promise<void> {
 
 // ── Sidecar: paired agent threads ───────────────────────────────────────────
 
-export interface SidecarMessage { ts: number; from: string; to: string; text: string }
+export interface SidecarMessage { ts: number; seq: number; from: string; to: string; text: string }
 export interface SidecarMember { sessionId: string; role: string; spawned?: boolean }
 export interface SidecarGroup {
   id: string
+  kind?: 'sidecar' | 'room'
+  roomName?: string
   members: SidecarMember[]
   agent: string
   task: string
@@ -491,8 +495,10 @@ export const createSidecar = (
 ): Promise<{ group: SidecarGroup; peerSessionId: string }> =>
   fetch(`${BASE}/api/sidecar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ driverSessionId, ...opts }) }).then(r => r.json())
 
-export const postSidecar = (id: string, to: string, text: string, from = 'driver') =>
-  fetch(`${BASE}/api/sidecar/${id}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, text }) }).then(r => r.json())
+export async function postSidecar(id: string, to: string, text: string, from = 'driver') {
+  const response = await fetch(`${BASE}/api/sidecar/${id}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, text }) })
+  return responseJson<{ ok: true, group: string, seq: number }>(response)
+}
 
 export const deleteSidecar = (id: string) =>
   fetch(`${BASE}/api/sidecar/${id}/delete`, { method: 'POST' }).then(r => r.json())
