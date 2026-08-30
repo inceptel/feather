@@ -5,7 +5,7 @@ set -Eeuo pipefail
 SELF="$(readlink -f "$0")"
 REPO_ROOT="$(CDPATH= cd -- "$(dirname -- "$SELF")/.." && pwd)"
 CAPABILITY_SKILLS=(feather sidecar)
-CAPABILITY_CLIS=(room sidecar refeather)
+CAPABILITY_CLIS=(room sidecar refeather feather-instance)
 CAPABILITY_OMP_SKILLS=(council)
 CAPABILITY_OMP_EXTENSIONS=(feather-protocol-tools.js)
 RETIRED_CAPABILITY_SKILLS=(looper)
@@ -311,7 +311,7 @@ install_capabilities_impl() {
     dest="${destinations[$index]}"; target="${targets[$index]}"
     [ -L "$dest" ] || ln -s "$target" "$dest"
   done
-  note "installed Feather and Sidecar for Claude and Codex; installed Council and Feather protocol tools for OMP; installed room, sidecar, and refeather CLIs"
+  note "installed Feather and Sidecar for Claude and Codex; installed Council and Feather protocol tools for OMP; installed room, sidecar, refeather, and feather-instance CLIs"
 }
 
 cmd_install_capabilities() {
