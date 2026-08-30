@@ -2401,7 +2401,16 @@ function sessionStreamHandler(req, res) {
   const hb = setInterval(() => {
     if (!writeSse(sid, sseClients.get(sid) || new Set(), res, 'event: heartbeat\ndata: {}\n\n', true)) clearInterval(hb);
   }, 15000);
-  res.on('close', () => { clearInterval(hb); sseClients.get(sid)?.delete(res); ssePeerAuth.delete(res); });
+  // fs.watch can coalesce a burst and leave the final append unread until the
+  // next write. Reconcile active streams cheaply so live work never stalls.
+  const streamPath = findJsonlPath(sid);
+  const reconcile = streamPath ? setInterval(() => processFileChange(streamPath, sid), 1000) : null;
+  res.on('close', () => {
+    clearInterval(hb);
+    clearInterval(reconcile);
+    sseClients.get(sid)?.delete(res);
+    ssePeerAuth.delete(res);
+  });
 }
 
 app.get('/api/sessions/:id/stream', sessionStreamHandler);
@@ -3033,7 +3042,7 @@ app.get('/api/file', (req, res) => {
     const stat = fs.statSync(fpath);
     if (!stat.isFile()) return res.status(400).json({ error: 'not a file' });
     if (stat.size > 100 * 1024 * 1024) return res.status(413).json({ error: 'file too large' });
-    res.sendFile(fpath);
+    res.sendFile(fpath, { dotfiles: 'allow' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

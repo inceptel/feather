@@ -686,7 +686,18 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
     es = source
     armWatchdog()
 
-    source.addEventListener('connected', () => { if (myGen !== gen) return; retries = 0; armWatchdog(); onStatus?.('connected') })
+    source.addEventListener('connected', () => {
+      if (myGen !== gen) return
+      retries = 0
+      armWatchdog()
+      onStatus?.('connected')
+      // Close the initial GET/EventSource registration gap and reconcile every
+      // reconnect. App deduplicates this bounded latest page by message UUID.
+      fetchMessages(id, 0, box).then(({ messages }) => {
+        if (closed || myGen !== gen || source !== es) return
+        for (const message of messages) onMessage(message)
+      }).catch(() => {})
+    })
     source.addEventListener('heartbeat', () => { if (myGen === gen) armWatchdog() })
     source.addEventListener('message', (e) => {
       if (myGen !== gen) return
