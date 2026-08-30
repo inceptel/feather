@@ -3705,6 +3705,16 @@ app.post('/api/transcribe', async (req, res) => {
 // being mistaken for successful SPA navigation.
 app.all(['/api', '/api/{*path}'], (_req, res) => res.status(404).json({ error: 'not found' }));
 
+// Missing hashed assets must 404, not fall through to index.html — a stale
+// client fetching a pre-deploy bundle would get HTML as JS and white-screen.
+app.use('/assets', (req, res, next) => {
+  const assetPath = path.join(STATIC_DIR, 'assets', path.normalize(req.path));
+  if (!assetPath.startsWith(path.join(STATIC_DIR, 'assets')) || !fs.existsSync(assetPath)) {
+    return res.status(404).type('text/plain').send('asset not found');
+  }
+  next();
+});
+
 app.use(express.static(STATIC_DIR, {
   maxAge: '0',
   setHeaders(res, filePath) {
