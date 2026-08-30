@@ -3440,11 +3440,10 @@ function lastMessageSnippet(sessionId, agent) {
   return null;
 }
 
-// ── Room updates: an append-only, human-facing feed ──────────────────────────
-// notes.md is the agent's terse working memory. updates.jsonl is the briefing
-// for a human who walks in cold: what happened and why it matters, one JSON
-// entry per line {id, ts, text}, only ever appended. Each append is a single
-// write() through an O_APPEND handle, which Linux serializes per inode, so
+// ── Room updates: legacy append-only evidence ───────────────────────────────
+// Curated wiki pages replaced the user-facing Updates feed. updates.jsonl
+// remains readable as caretaker evidence and for backward compatibility. Each
+// entry is one JSON line {id, ts, text}, appended through an O_APPEND handle so
 // concurrent writers (CLI + API) never interleave a partial line.
 const ROOM_UPDATE_MAX_CHARS = 4000;
 function roomUpdatesFile(name) { return path.join(ROOMS_HOME_DIR, name, 'updates.jsonl'); }
@@ -3729,8 +3728,8 @@ app.post('/api/rooms/:name/pulse', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Human-facing briefing feed for a room. GET is allowed in read-only canary
-// mode (see READ_ONLY_API_ROUTES); POST is a mutation and is blocked there.
+// Legacy evidence API. GET is allowed in read-only canary mode (see
+// READ_ONLY_API_ROUTES); POST is a mutation and is blocked there.
 app.get('/api/rooms/:name/updates', (req, res) => {
   try {
     const { name } = req.params;

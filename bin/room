@@ -11,8 +11,8 @@
 #   room new <name>                    scaffold a room folder
 #   room list                          list rooms
 #   room note TEXT|--stdin|--file PATH   append durable working memory
-#   room update TEXT|--stdin|--file PATH post a human-facing briefing
-#   room updates                         list this room's updates feed
+#   room update TEXT|--stdin|--file PATH append legacy evidence
+#   room updates                         list legacy evidence
 #   room complain "<text>"             add an annoyance to #friction
 #   room pause                          stop automatic checks for this room
 #   room wake                           resume automatic checks for this room
@@ -181,9 +181,9 @@ cmd_note() {
 cmd_update() {
   resolve_room
   read_room_text update "$@"
-  # Human-facing briefing feed (updates.jsonl), distinct from notes.md working
-  # memory. One JSON entry per line, append-only; O_APPEND keeps concurrent
-  # writers from interleaving. The server reads the same file for the UI.
+  # Legacy evidence feed (updates.jsonl), retained for compatibility and
+  # caretaker input. One JSON entry per line, append-only; O_APPEND keeps
+  # concurrent writers from interleaving.
   local line
   line=$(python3 -c 'import json,sys,uuid,datetime; print(json.dumps({"id":uuid.uuid4().hex,"ts":datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),"text":sys.argv[1]}))' "$ROOM_TEXT") \
     || die "could not encode update"
