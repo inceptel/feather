@@ -211,13 +211,6 @@ export async function fetchRooms(): Promise<RoomInfo[]> {
   return (await r.json()).rooms
 }
 
-export interface RoomUpdate { id: string | null, ts: string | null, text: string }
-
-export async function fetchRoomUpdates(room: string): Promise<RoomUpdate[]> {
-  const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/updates`)
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return (await r.json()).updates
-}
 
 export interface RoomWikiPageMeta { name: string, size: number, updatedAt: string }
 export interface RoomWikiPage { name: string, content: string, updatedAt: string }
