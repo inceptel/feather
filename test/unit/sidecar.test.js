@@ -157,7 +157,7 @@ describe('sidecar store (v1 + v2 multi-peer)', () => {
     assert.deepEqual(sc.getGroup(first.id).primedMembers, ['caretaker:33333333-3333-4333-8333-333333333333'])
     assert.equal(
       sc.formatInbound(first.id, { seq: 1, from: 'leader', text: 'maintain wiki' }),
-      '[feather-sidecar room-feather 1 leader]\nmaintain wiki',
+      '[feather-sidecar room-feather 1 leader] \"maintain wiki\"',
     )
   })
 
