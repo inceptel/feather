@@ -3530,7 +3530,7 @@ app.get('/api/rooms/:name/wiki/page', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did and any open thread to notes.md. If you did something a person walking in cold would care about, also post a human-facing briefing: room update "<what happened and why it matters>". Write that update for a busy, sharp executive who has not seen this room in a day — plain language, lead with the outcome and why they should care, a few sentences over terseness; notes.md stays your terse working memory. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
+const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did, the evidence, and any open thread to notes.md. Do not post an Updates feed and do not copy raw source material into the wiki; the Room caretaker will synthesize raw notes and sessions into curated knowledge. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
 function launchRoomPulse(name) {
   try {
     const now = Date.now();
