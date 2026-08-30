@@ -19,7 +19,7 @@ for skill in feather sidecar council; do
   printf -- '---\nname: %s\n---\n' "$skill" >"$release/skills/$skill/SKILL.md"
 done
 printf 'export default function () {}\n' >"$release/omp-tools/feather-protocol-tools.js"
-for cli in room sidecar refeather; do printf '#!/bin/sh\n' >"$release/bin/$cli"; chmod +x "$release/bin/$cli"; done
+for cli in room sidecar refeather feather-instance; do printf '#!/bin/sh\n' >"$release/bin/$cli"; chmod +x "$release/bin/$cli"; done
 ln -s "$release" "$current"
 mkdir -p "$claude" "$codex"
 ln -s "$current/skills/looper" "$claude/looper"
@@ -41,7 +41,7 @@ done
 [ ! -e "$codex/looper" ] && [ ! -L "$codex/looper" ]
 [ "$(readlink "$omp_skills/council")" = "$current/skills/council" ]
 [ "$(readlink "$omp_extensions/feather-protocol-tools.js")" = "$current/omp-tools/feather-protocol-tools.js" ]
-for cli in room sidecar refeather; do [ "$(readlink "$bindir/$cli")" = "$current/bin/$cli" ]; done
+for cli in room sidecar refeather feather-instance; do [ "$(readlink "$bindir/$cli")" = "$current/bin/$cli" ]; done
 
 rm "$claude/feather"
 printf 'user-owned skill\n' >"$claude/feather"

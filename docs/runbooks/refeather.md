@@ -70,19 +70,32 @@ bin/refeather install-capabilities \
 ```
 
 This installs Feather and Sidecar into `~/.claude/skills` and `~/.codex/skills`,
-Council plus Feather protocol tools into `~/.omp/agent`, and `room`, `sidecar`, plus `refeather` into `~/.local/bin`. Existing
-correct links are left alone. A file or foreign link is copied into a conflict
-evidence directory and causes a full preflight abort; nothing is overwritten.
-Promotion runs the same preflight by default before stopping the service.
+Council plus Feather protocol tools into `~/.omp/agent`, and `room`, `sidecar`,
+`refeather`, plus `feather-instance` into `~/.local/bin`. Existing correct links
+are left alone. A file or foreign link is copied into a conflict evidence
+directory and causes a full preflight abort; nothing is overwritten. Managed
+links that still point at an older immutable release also appear as conflicts:
+pre-remove only the exact stale links named by the failed preflight, retaining
+the conflict evidence. Promotion runs the same preflight by default before
+stopping the service.
 
 Set `FEATHER_URL` to the exact public or loopback mounted base used by the
 instance. CLI fallback probes `FEATHER_PORT` (or legacy `PORT` when
 `FEATHER_PORT` is unset), 4870, and 3300 and refuses zero or multiple
-Feather-shaped responses.
+Feather-shaped responses. This discovery fallback is not deploy targeting. On
+the primary host, public production is Supervisor program `feather` on `:3300`;
+never deploy or restart the hub-managed `feather-live` duplicate on `:4870`.
 
 ## 3. Promote as the sole writer
 
 Run any canary/backup gate through `--pre-promote-check` before quiescing:
+
+The canary gate must own its process lifecycle. Record the canary PID, install a
+termination trap, and verify that both the recorded process and listener are
+gone before promotion. Stopping an SSH or hub session is not cleanup: detached
+read-only canaries have survived it. After an interrupted gate, identify the
+canary by its recorded PID and command line before terminating it; never kill an
+unverified PID.
 
 ```bash
 sudo -E bin/refeather promote \

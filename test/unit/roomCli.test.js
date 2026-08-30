@@ -8,6 +8,19 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 
 const run = promisify(execFile)
+
+const runWithInput = (file, args, options, input) => new Promise((resolve, reject) => {
+  const child = execFile(file, args, options, (error, stdout, stderr) => {
+    if (error) {
+      error.stdout = stdout
+      error.stderr = stderr
+      reject(error)
+    } else {
+      resolve({ stdout, stderr })
+    }
+  })
+  child.stdin.end(input)
+})
 const roots = []
 
 afterEach(() => {
@@ -161,5 +174,51 @@ describe('room assignment CLI', () => {
       run(cli, ['complain', '--source', 'bad source', 'Nope'], { cwd: outsideDir, env }),
       /invalid complaint source/,
     )
+  })
+
+  it('preserves literal note and update text from stdin or a file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-literal-input-'))
+    roots.push(root)
+    const roomsDir = path.join(root, 'rooms')
+    const roomDir = path.join(roomsDir, 'space')
+    fs.mkdirSync(roomDir, { recursive: true })
+    fs.writeFileSync(path.join(roomDir, 'AGENTS.md'), '# Room: #space\n')
+    fs.writeFileSync(path.join(roomDir, 'notes.md'), '# notes\n')
+    const env = { ...process.env, HOME: root, ROOMS_DIR: roomsDir }
+    const cli = path.resolve(import.meta.dirname, '../../bin/room')
+    const literal = 'Feel the Heat $250; `Gateway` $69\nkeep $(date) literal\n'
+
+    await runWithInput(cli, ['note', '--stdin'], { cwd: roomDir, env }, literal)
+    const notesPath = path.join(roomDir, 'notes.md')
+    assert.match(fs.readFileSync(notesPath, 'utf8'), new RegExp(
+      literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    ))
+
+    const textFile = path.join(root, 'briefing.txt')
+    fs.writeFileSync(textFile, literal)
+    await run(cli, ['update', '--file', textFile], { cwd: roomDir, env })
+    const updatesPath = path.join(roomDir, 'updates.jsonl')
+    const updates = fs.readFileSync(updatesPath, 'utf8')
+      .trim().split('\n').map((line) => JSON.parse(line))
+    assert.equal(updates[0].text, literal)
+
+    await run(cli, ['note', '--', '--stdin'], { cwd: roomDir, env })
+    assert.match(fs.readFileSync(notesPath, 'utf8'), /--stdin/)
+    const notesBeforeRejectedInput = fs.readFileSync(notesPath, 'utf8')
+    const updatesBeforeRejectedInput = fs.readFileSync(updatesPath, 'utf8')
+    await assert.rejects(
+      run(cli, ['note', '--stdin', 'ambiguous'], { cwd: roomDir, env }),
+      /cannot combine|usage/,
+    )
+    await assert.rejects(
+      run(cli, ['update', '--file', textFile, 'ambiguous'], { cwd: roomDir, env }),
+      /no positional text/,
+    )
+    await assert.rejects(
+      run(cli, ['note', 'split', 'text'], { cwd: roomDir, env }),
+      /usage/,
+    )
+    assert.equal(fs.readFileSync(notesPath, 'utf8'), notesBeforeRejectedInput)
+    assert.equal(fs.readFileSync(updatesPath, 'utf8'), updatesBeforeRejectedInput)
   })
 })
