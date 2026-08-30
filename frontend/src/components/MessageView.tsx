@@ -112,7 +112,10 @@ export function renderMarkdown(text: string): string {
   const cached = mdCache.get(text)
   if (cached !== undefined) return cached
   const html = marked.parse(text.trimEnd()) as string
-  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'] })
+  // FORBID_TAGS style: DOMPurify's default allowlist permits <style>, so a
+  // message quoting <style>body{display:none}</style> defaces the whole app.
+  // The style *attribute* stays allowed — KaTeX output depends on it.
+  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'], FORBID_TAGS: ['style'] })
   if (mdCache.size >= MD_CACHE_MAX) {
     const first = mdCache.keys().next().value!
     mdCache.delete(first)
@@ -133,7 +136,7 @@ export function renderWikiMarkdown(text: string): string {
 }
 function renderLiveMarkdown(text: string): string {
   const html = marked.parse(text.trimEnd()) as string
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'], FORBID_TAGS: ['img'] })
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'], FORBID_TAGS: ['img', 'style'] })
 }
 
 
@@ -327,10 +330,13 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
 }
 
-// Render ANSI escape sequences as inline-styled HTML. Anser escapes entities.
+// Render ANSI escape sequences as inline-styled HTML. Tool output is plain
+// text: escape markup first (Anser does NOT escape by default), so quoted
+// HTML like <style>body{display:none}</style> renders as text instead of
+// becoming live DOM. DOMPurify stays as the backstop.
 function ansiToSafeHtml(raw: string): string {
-  const html = Anser.ansiToHtml(raw)
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['style'] })
+  const html = Anser.ansiToHtml(Anser.escapeForHtml(raw))
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['style'], FORBID_TAGS: ['style'] })
 }
 
 type DiffKind = 'meta' | 'hunk' | 'add' | 'del' | 'ctx'
