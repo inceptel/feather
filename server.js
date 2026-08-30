@@ -2424,6 +2424,9 @@ app.post('/api/sessions', (req, res) => {
       assignmentsBefore = readRoomAssignments();
       leadersBefore = ROOM_LEADERS_STATE.read();
       const existingLeaderId = leadersBefore[roomName] || null;
+      if (existingLeaderId && validRoomLeaderDesignation(roomName, existingLeaderId)) {
+        return res.json({ id: existingLeaderId, status: 'existing', agent: getAgentForSession(existingLeaderId), roomRole });
+      }
       const staleLeaderId = existingLeaderId && !validRoomLeaderDesignation(roomName, existingLeaderId)
         ? existingLeaderId
         : null;
