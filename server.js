@@ -2519,7 +2519,8 @@ app.post('/api/sessions/:id/send', async (req, res) => {
     return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId));
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
-const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab']);
+const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab', 'AgentHub']);
+const TMUX_TERMINAL_KEYS = { AgentHub: 'M-a' };
 
 function validatedTerminalKeys(value) {
   return Array.isArray(value) && value.length > 0 && value.length <= 20 && value.every(key => TERMINAL_KEYS.has(key))
@@ -2528,7 +2529,7 @@ function validatedTerminalKeys(value) {
 }
 
 function sendTerminalKeys(sessionId, keys) {
-  execFileSync('tmux', ['send-keys', '-t', tmuxName(sessionId), ...keys], { stdio: 'ignore' });
+  execFileSync('tmux', ['send-keys', '-t', tmuxName(sessionId), ...keys.map(key => TMUX_TERMINAL_KEYS[key] || key)], { stdio: 'ignore' });
 }
 
 app.post('/api/sessions/:id/keys', (req, res) => {
@@ -3091,7 +3092,7 @@ app.get('/api/file', (req, res) => {
     const stat = fs.statSync(fpath);
     if (!stat.isFile()) return res.status(400).json({ error: 'not a file' });
     if (stat.size > 100 * 1024 * 1024) return res.status(413).json({ error: 'file too large' });
-    res.sendFile(fpath);
+    res.sendFile(fpath, { dotfiles: 'allow' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3338,7 +3339,7 @@ function isRoomPulseState(value) {
   });
 }
 const ROOM_PULSES_STATE = createJsonState({
-  file: ROOM_PULSES_FILE, root: path.dirname(ROOM_PULSES_FILE), document: 'Room keep-working state',
+  file: ROOM_PULSES_FILE, root: path.dirname(ROOM_PULSES_FILE), document: 'Room status state',
   defaultValue: {}, validate: isRoomPulseState,
 });
 
@@ -3387,7 +3388,7 @@ function validRoomLeaderDesignation(name, sessionId) {
   return !!session
     && session.agent !== 'codex'
     && roomNameForSession(sessionId) === name
-    && !String(session.title || '').startsWith('Keep working: #');
+    && !/^(Keep working|Status): #/.test(String(session.title || ''));
 }
 
 function appointRoomLeader(name, sessionId, { assign = false, replaceStale = null } = {}) {
@@ -3593,7 +3594,7 @@ function buildRoomsSnapshot() {
     const isEligibleLeader = (session) =>
       session.agent !== 'codex'
         && session.id !== pulse.sessionId
-        && !String(session.title || '').startsWith('Keep working: #');
+        && !/^(Keep working|Status): #/.test(String(session.title || ''));
     const leaderSessionId = sessions.find((session) => session.id === requestedLeaderSessionId && isEligibleLeader(session))?.id
       || null;
     const leaderSession = sessions.find((session) => session.id === leaderSessionId) || null;
@@ -3668,8 +3669,24 @@ function roomNameForSession(id) {
   return names.find((name) => grouped.get(name).some((candidate) => candidate.id === id)) || null;
 }
 
+function roomSessionContext(id) {
+  const room = roomNameForSession(id);
+  if (!room) return { room: null, kind: null, role: null, label: null };
+  const leaderId = ROOM_LEADERS_STATE.read()[room] || null;
+  if (leaderId === id) return { room, kind: 'main', role: 'leader', label: 'Main' };
+  const resident = Object.entries(ROOM_RESIDENTS_STATE.read()[room] || {})
+    .find(([, configured]) => configured.sessionId === id);
+  if (resident) return { room, kind: 'resident', role: resident[0], label: resident[0] };
+  const pulseId = ROOM_PULSES_STATE.read()[room]?.sessionId || null;
+  if (pulseId === id) return { room, kind: 'status', role: 'status', label: 'Status' };
+  const metaTitle = readMeta()[id]?.title;
+  if (metaTitle) return { room, kind: 'chat', role: null, label: metaTitle };
+  const session = discoverSessions(0, null, [id]).find(candidate => candidate.id === id);
+  return { room, kind: 'chat', role: null, label: session?.title || 'Chat' };
+}
+
 app.get('/api/sessions/:id/room', (req, res) => {
-  try { res.json({ room: roomNameForSession(req.params.id) }); }
+  try { res.json(roomSessionContext(req.params.id)); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
@@ -3741,7 +3758,7 @@ app.post('/api/rooms/:name/assign', (req, res) => {
     const pulseRoom = Object.entries(ROOM_PULSES_STATE.read())
       .find(([, pulse]) => pulse?.sessionId === sid)?.[0] || null;
     if (pulseRoom && pulseRoom !== targetRoom) {
-      throw httpError(409, `keep-working controller of #${pulseRoom} cannot be moved or detached`);
+      throw httpError(409, `status reporter of #${pulseRoom} cannot be moved or detached`);
     }
     const residentMatch = Object.entries(ROOM_RESIDENTS_STATE.read()).flatMap(([roomName, residents]) =>
       Object.entries(residents).map(([role, resident]) => ({ roomName, role, sessionId: resident.sessionId })))
@@ -3832,7 +3849,11 @@ app.get('/api/rooms/:name/wiki/page', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-const ROOM_PULSE_PROMPT = `Keep working on this room. Read AGENTS.md, notes.md, and the recent chats in this room. Then do the next useful thing fully autonomously. Do not ask the user to choose routine steps. Use tools and agents if useful. Append what you did, the evidence, and any open thread to notes.md. Do not post an Updates feed and do not copy raw source material into the wiki; the Room caretaker will synthesize raw notes and sessions into curated knowledge. If you hit a recurring annoyance, run: room complain "describe it plainly". If this room genuinely has no useful next action, run: room pause. Then stop.`;
+const ROOM_PULSE_PROMPT = `You are the status reporter for this Room. Answer one question: What is everyone working on?
+
+Read AGENTS.md, the Room Wiki, notes.md, and the recent chats assigned to this Room. Produce a concise executive rollup grouped by named chat or resident role. For each group report: current objective, last material progress, blocker or decision needed, next action, and how fresh the evidence is. Distinguish observed facts from inference and say unknown when evidence is stale or absent.
+
+Status collection only. Do not perform project work, edit code, change live systems, launch or delegate agents, make decisions, update the Wiki, append notes, or ask the user routine questions. Your final answer is the durable status report. Then stop.`;
 function launchRoomPulse(name) {
   try {
     const now = Date.now();
@@ -3850,25 +3871,21 @@ function launchRoomPulse(name) {
         lastRunAt: new Date(now).toISOString(), nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS, error: null,
       }),
     }));
-    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title: `Keep working: #${name}` } }));
+    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title: `Status: #${name}` } }));
     ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: name }));
     const continuing = !!findOmpJsonlPath(id);
     launchOmpSession(id, cwd, { resume: continuing, promptFile, autoApprove: true });
+    return true;
   } catch (error) {
     ROOM_PULSES_STATE.update((current) => ({
       ...current,
       [name]: pulseRecord(current[name], { enabled: true, status: 'error', error: error.message, nextRunAtMs: Date.now() + ROOM_PULSE_INTERVAL_MS }),
     }));
     console.warn(`[room pulse] #${name}:`, error.message);
+    return false;
   }
 }
 
-function hasBlockingRoomActivity(room) {
-  return room.sessions.some((session) =>
-    session.isActive
-      && !room.residents.some((resident) =>
-        resident.role !== 'leader' && resident.sessionId === session.id));
-}
 
 function checkRoomPulses() {
   if (!ROOM_PULSES_ENABLED) return;
@@ -3898,16 +3915,14 @@ function checkRoomPulses() {
   const rooms = new Map(roomSnapshotCache.refresh().map((room) => [room.name, room]));
   for (const { name } of due) {
     const room = rooms.get(name);
-    if (!room || hasBlockingRoomActivity(room)) {
+    if (!room) {
       ROOM_PULSES_STATE.update((current) => ({ ...current, [name]: pulseRecord(current[name], { enabled: true, status: 'waiting', nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS }) }));
       continue;
     }
-    // Cap simultaneous autonomous runs: many rooms coming due together must not
-    // spawn one agent each at once. Deferred rooms stay due and launch on later
-    // ticks, which also desynchronizes their schedules over time.
+    // Cap simultaneous status collectors. Deferred rooms stay due and launch
+    // on later ticks, which also desynchronizes their schedules over time.
     if (inFlight >= ROOM_PULSE_MAX_CONCURRENT) continue;
-    launchRoomPulse(name);
-    inFlight++;
+    if (launchRoomPulse(name)) inFlight++;
   }
   const latestPulseState = ROOM_PULSES_STATE.read();
   roomSnapshotCache.update((snapshot) => snapshot.map((room) => ({

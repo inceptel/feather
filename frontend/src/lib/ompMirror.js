@@ -339,4 +339,47 @@ export function reduceOmpMirrorState(state, event) {
   })
 }
 
+export function reconcileSubagentRuntime(child, jobs = []) {
+  if (!child || !['running', 'started', 'working'].includes(child.status)) return child
+  const identities = [child.id, child.description, child.intent, child.task, child.assignment]
+    .filter(value => typeof value === 'string' && value.trim())
+    .map(value => value.trim().toLowerCase())
+  const job = jobs.find(candidate => {
+    if (!candidate || candidate.status === 'running') return false
+    const candidates = [candidate.id, candidate.label]
+      .filter(value => typeof value === 'string' && value.trim())
+      .map(value => value.trim().toLowerCase())
+    return candidates.some(value => identities.includes(value))
+  })
+  if (!job) return child
+  const status = job.status === 'completed' || job.status === 'succeeded' ? 'parked' : job.status
+  const scopeStatus = status === 'parked' ? 'success'
+    : status === 'failed' || status === 'error' ? 'error'
+      : status === 'cancelled' || status === 'canceled' || status === 'aborted' ? 'cancelled'
+        : child.runStatus
+  return {
+    ...child,
+    status,
+    activeMessageId: null,
+    runStatus: scopeStatus,
+    assistantEnded: child.assistantText ? true : child.assistantEnded,
+    timeline: (child.timeline || []).map(item => item.status === 'running' ? { ...item, status: scopeStatus } : item),
+  }
+}
+
+export function reconcileOmpRuntimeJobs(state, jobs = []) {
+  if (!state?.childOrder?.length) return state
+  let changed = false
+  const children = { ...state.children }
+  for (const id of state.childOrder) {
+    const current = children[id]
+    const next = reconcileSubagentRuntime(current, jobs)
+    if (next !== current) {
+      children[id] = next
+      changed = true
+    }
+  }
+  return changed ? { ...state, children } : state
+}
+
 export { CHILD_LIMIT as OMP_CHILD_LIMIT, WORK_LIMIT as OMP_WORK_LIMIT }

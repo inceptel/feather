@@ -346,6 +346,12 @@ describe('server-enforced read-only canary', () => {
       body: JSON.stringify({ keys: ['Home', 'Down', 'Enter'] }),
     })
     assert.equal(sharedKeys.status, 200)
+    const agentHubKeys = await fetch(`${running.base}/api/share/sessions/${fx.sessionId}/keys`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer read-only-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: ['AgentHub'] }),
+    })
+    assert.equal(agentHubKeys.status, 200)
     const invalidSharedKeys = await fetch(`${running.base}/api/share/sessions/${fx.sessionId}/keys`, {
       method: 'POST',
       headers: { Authorization: 'Bearer read-only-token', 'Content-Type': 'application/json' },
@@ -358,6 +364,7 @@ describe('server-enforced read-only canary', () => {
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l legacy retry').length, 2)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l [viewer] peer deliver once').length, 1)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly Home Down Enter').length, 1)
+    assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly M-a').length, 1)
     const receiptsFile = path.join(fx.state, 'uploads/.message-receipts.json')
     const stored = JSON.parse(fs.readFileSync(receiptsFile, 'utf8'))
     assert.deepEqual(stored[fx.sessionId]['voice-recovery-0001'].response, firstReceipt)

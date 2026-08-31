@@ -882,6 +882,10 @@ type MessageViewProps = {
   jobs?: MessageViewJob[]
   runtime?: MessageViewRuntime | null
   protocolRuns?: ProtocolRunSnapshot[]
+  highLevel?: boolean
+  onOpenAgentHub?: () => void
+  roomRole?: string
+  onOpenRoomRole?: (role: string) => void
 }
 
 export function MessageView(props: MessageViewProps) {
@@ -1137,6 +1141,12 @@ export function MessageView(props: MessageViewProps) {
                     </div>
                     <Show when={agent().sessionFile}><div>Session · {agent().sessionFile}</div></Show>
                   </div>
+                  <Show when={props.onOpenAgentHub}>
+                    <button type="button" data-testid="open-agent-hub" onClick={() => props.onOpenAgentHub?.()}
+                      style={{ margin: '8px 0 2px', background: 'var(--bg-secondary)', border: '1px solid var(--border-medium)', color: 'var(--link)', padding: '6px 10px', 'border-radius': '6px', 'font-size': '11px', 'font-weight': '650', cursor: 'pointer' }}>
+                      Open Agent Hub to steer
+                    </button>
+                  </Show>
                   <Show when={agent().assistantText}>
                     <section class="agent-answer" data-testid="omp-subagent-answer" aria-live={agent().assistantEnded ? 'off' : 'polite'}>
                       <div class="agent-answer-label">Answer{agent().assistantEnded ? '' : ' · streaming'}</div>
@@ -1241,6 +1251,7 @@ export function MessageView(props: MessageViewProps) {
     const last = createMemo(() => messages().at(-1))
     const summary = createMemo(() => {
       if (live && props.statusText) return props.statusText
+      if (props.highLevel && !live) return ''
       const block = toolUses().at(-1)
       return block ? activityDescription(block.name || '', block.input || {}, block.intent || '') : ''
     })
@@ -1552,6 +1563,11 @@ export function MessageView(props: MessageViewProps) {
           const txt = (msg.content || []).map(b => b.type === 'text' ? (b.text || '') : '').join('\n').trim()
           if (txt) navigator.clipboard?.writeText(txt).catch(() => {})
         }
+        const roomJumpRole = () => {
+          if (!props.roomRole || !msg.roomFrom || !msg.roomTo) return null
+          const role = msg.roomFrom === props.roomRole ? msg.roomTo : msg.roomFrom
+          return role && role !== 'human' && role !== props.roomRole ? role : null
+        }
         const metadataRow = (
           <div class="msg-meta" style={{
             display: 'flex', 'align-items': 'center', 'justify-content': 'space-between',
@@ -1566,6 +1582,12 @@ export function MessageView(props: MessageViewProps) {
                   {msg.delivery === 'delivered' ? '\u2713\u2713' : '\u2713'}
                 </span>
               )}
+              <Show when={roomJumpRole()}>
+                {(role) => <button class="msg-action" data-testid={`open-room-role-${role()}`} title={`Open ${role().replaceAll('-', ' ')}`} onClick={() => props.onOpenRoomRole?.(role())}
+                  style={{ background: 'none', border: '1px solid var(--border-subtle)', 'border-radius': '5px', cursor: 'pointer', padding: '2px 6px', color: 'var(--link)', 'font-size': '10px', 'font-weight': '650' }}>
+                  Open {role().replaceAll('-', ' ')}
+                </button>}
+              </Show>
               <button class="msg-action" title="Copy message" onClick={copyMsgText}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--text-faint)', display: 'inline-flex', 'align-items': 'center', opacity: '0.6' }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>

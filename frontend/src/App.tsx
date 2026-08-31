@@ -6,8 +6,8 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, fetchSidecar, subscribeSidecar, createSidecar, fetchSessionRoom, fetchProtocolRuns } from './api'
+import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, fetchSidecar, subscribeSidecar, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchRoomResidents, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -15,7 +15,7 @@ import { appUrl } from './lib/appPath.js'
 import { localFileUrl } from './lib/localMedia.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
-import { createOmpMirrorState, reduceOmpMirrorState } from './lib/ompMirror.js'
+import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
 import { mergeRoomThreadMessages } from './lib/roomThread.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
 
@@ -148,6 +148,7 @@ export default function App() {
   const [wikiRetry, setWikiRetry] = createSignal(0)
   const [roomSidecarId, setRoomSidecarId] = createSignal<string | null>(null)
   const [roomThread, setRoomThread] = createSignal<SidecarMessage[]>([])
+  const [roomContext, setRoomContext] = createSignal<RoomSessionContext | null>(null)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
   const [browseLoading, setBrowseLoading] = createSignal(false)
@@ -684,7 +685,9 @@ export default function App() {
     }
     if (event.type === 'async_jobs' && event.running && event.recent) {
       const seen = new Set(event.running.map(job => job.id))
-      setOmpJobs([...event.running, ...event.recent.filter(job => !seen.has(job.id))].slice(0, 20))
+      const jobs = [...event.running, ...event.recent.filter(job => !seen.has(job.id))].slice(0, 20)
+      setOmpJobs(jobs)
+      setOmpMirror(current => reconcileOmpRuntimeJobs(current, jobs))
       return
     }
     if (event.type === 'session_state') {
@@ -967,6 +970,9 @@ export default function App() {
     const title = renameText().trim()
     if (!title) { setRenaming(false); return }
     await renameSession(id, title)
+    if (currentId() === id) {
+      setRoomContext(current => current?.kind === 'chat' ? { ...current, label: title } : current)
+    }
     setRenaming(false)
     setMenuOpen(false)
     await refreshSessions()
@@ -1563,7 +1569,34 @@ export default function App() {
     '-webkit-tap-highlight-color': 'transparent', 'flex-shrink': '0',
   })
   const activeTodo = () => ompMirror().parent.todo || todoSnapshot()
-  const activeSubagents = () => ompMirror().childOrder.map(id => ompMirror().children[id]).filter(Boolean)
+  const activeSubagents = () => {
+    const jobs = ompJobs()
+    return ompMirror().childOrder
+      .map(id => ompMirror().children[id])
+      .filter(Boolean)
+      .map(child => reconcileSubagentRuntime(child, jobs))
+  }
+
+  function openAgentHub() {
+    const id = currentId()
+    if (!id || isRemoteBox()) return
+    setTab('terminal')
+    sendSessionKeys(id, ['AgentHub'], currentBox()).catch(error => console.error('Could not open Agent Hub', error))
+  }
+
+  async function openRoomRole(role: string) {
+    const sourceId = currentId()
+    const generation = selectGeneration
+    const context = roomContext()
+    if (!sourceId || !context?.room || role === 'human') return
+    try {
+      const resident = (await fetchRoomResidents(context.room)).find(candidate => candidate.role === role)
+      if (generation !== selectGeneration || currentId() !== sourceId || roomContext()?.room !== context.room) return
+      if (resident) select(resident.sessionId)
+    } catch (error) {
+      console.error('Could not open Room resident', error)
+    }
+  }
 
   function mergeRoomThreadMessage(message: SidecarMessage) {
     setRoomThread((current) => {
@@ -1576,6 +1609,17 @@ export default function App() {
       return [...current, message].sort((a, b) => a.seq - b.seq)
     })
   }
+
+  let roomContextGeneration = 0
+  createEffect(() => {
+    const id = currentId()
+    const generation = ++roomContextGeneration
+    setRoomContext(null)
+    if (!id || isRemoteBox()) return
+    fetchSessionRoomContext(id).then(context => {
+      if (generation === roomContextGeneration) setRoomContext(context)
+    }).catch(() => {})
+  })
 
   let roomThreadGeneration = 0
   createEffect(() => {
@@ -1859,7 +1903,15 @@ export default function App() {
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <Show when={renaming()} fallback={
-                <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '14px', 'font-weight': '600' }}>{s().title}</span>
+                <div style={{ 'min-width': '0', overflow: 'hidden' }}>
+                  <Show when={roomContext()?.room}>
+                    <button data-testid="room-chat-breadcrumb" onClick={goHome}
+                      style={{ display: 'block', background: 'none', border: 'none', padding: '0', color: '#8792a2', 'font-size': '10px', 'font-weight': '650', cursor: 'pointer', 'text-align': 'left', 'text-transform': 'capitalize' }}>
+                      #{roomContext()!.room} / {roomContext()!.label?.replaceAll('-', ' ') || 'Chat'}
+                    </button>
+                  </Show>
+                  <span style={{ display: 'block', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': roomContext()?.room ? '12px' : '14px', 'font-weight': '600', color: roomContext()?.room ? '#aeb6c2' : '#e5e5e5' }}>{s().title}</span>
+                </div>
               }>
                 <input
                   value={renameText()}
@@ -1954,6 +2006,10 @@ export default function App() {
                 jobs={ompJobs()}
                 runtime={ompRuntime()}
                 protocolRuns={protocolRuns()}
+                highLevel={roomContext()?.kind === 'main'}
+                onOpenAgentHub={isRemoteBox() ? undefined : openAgentHub}
+                roomRole={roomContext()?.role || undefined}
+                onOpenRoomRole={openRoomRole}
               />
             </div>
             <div data-testid="wiki-panel" style={{ display: tab() === 'wiki' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>

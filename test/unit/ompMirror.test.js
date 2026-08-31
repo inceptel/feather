@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { OMP_CHILD_LIMIT, OMP_WORK_LIMIT, createOmpMirrorState, reduceOmpMirrorState } from '../../frontend/src/lib/ompMirror.js'
+import { OMP_CHILD_LIMIT, OMP_WORK_LIMIT, createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from '../../frontend/src/lib/ompMirror.js'
 
 function reduce(events) {
   return events.reduce(reduceOmpMirrorState, createOmpMirrorState())
@@ -123,5 +123,53 @@ describe('OMP mirror reducer', () => {
     assert.equal(reset.parent.todo, null)
     assert.deepEqual(reset.parent.timeline, [])
     assert.notEqual(reset.parent.invocationId, withTimeline.parent.invocationId)
+  })
+})
+
+describe('delegated agent runtime reconciliation', () => {
+  it('stops presenting a settled reviewer as running', () => {
+    const child = {
+      id: 'child-7',
+      agent: 'reviewer',
+      description: 'PrRemainderReview',
+      status: 'started',
+    }
+    const parked = reconcileSubagentRuntime(child, [{
+      id: 'PrRemainderReview',
+      type: 'task',
+      status: 'completed',
+      startTime: 1,
+    }])
+    assert.equal(parked.status, 'parked')
+    assert.equal(parked.assistantEnded, undefined)
+    const state = {
+      parent: {},
+      childOrder: [child.id],
+      children: {
+        [child.id]: {
+          ...child,
+          assistantText: 'Review complete',
+          assistantEnded: false,
+          runStatus: 'running',
+          activeMessageId: 'answer',
+          timeline: [{ key: 'tool:review', kind: 'tool', status: 'running' }],
+        },
+      },
+    }
+    const settled = reconcileOmpRuntimeJobs(state, [{
+      id: 'PrRemainderReview', type: 'task', status: 'completed', startTime: 1,
+    }])
+    assert.equal(settled.children[child.id].status, 'parked')
+    assert.equal(settled.children[child.id].assistantEnded, true)
+    assert.equal(settled.children[child.id].runStatus, 'success')
+    assert.equal(settled.children[child.id].timeline[0].status, 'success')
+    assert.equal(child.status, 'started')
+  })
+
+  it('does not guess when no authoritative settled job matches', () => {
+    const child = { id: 'child-8', agent: 'reviewer', description: 'CurrentReview', status: 'started' }
+    assert.equal(reconcileSubagentRuntime(child, [{
+      id: 'OtherReview', type: 'task', status: 'completed', startTime: 1,
+    }]), child)
   })
 })

@@ -405,7 +405,7 @@ describe('GET /api/sessions/:id/messages', () => {
 describe('GET /api/sessions/:id/room', () => {
   it('resolves exact Room membership without depending on the capped Room snapshot', async () => {
     const missing = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/room`)).json()
-    assert.equal(missing.room, null)
+    assert.deepEqual(missing, { room: null, kind: null, role: null, label: null })
 
     const roomName = `api-room-${Date.now().toString(36)}`
     const created = await fetch(`${BASE}/api/rooms`, {
@@ -423,7 +423,11 @@ describe('GET /api/sessions/:id/room', () => {
 
     const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/room`)
     assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { room: roomName })
+    const context = await response.json()
+    assert.equal(context.room, roomName)
+    assert.equal(context.kind, 'chat')
+    assert.equal(context.role, null)
+    assert.equal(typeof context.label, 'string')
   })
 })
 

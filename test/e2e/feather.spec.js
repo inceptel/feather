@@ -477,7 +477,12 @@ test('Room Sidecar A2A is visible and passively rendered in the canonical Leader
     await route.abort()
   })
   await page.route(`**/api/sessions/${TEST_SESSION_ID}/room`, route =>
-    route.fulfill({ json: { room: 'feather' } }))
+    route.fulfill({ json: { room: 'feather', kind: 'main', role: 'leader', label: 'Main' } }))
+  await page.route('**/api/rooms/feather/residents', route =>
+    route.fulfill({ json: { residents: [
+      { role: 'leader', sessionId: TEST_SESSION_ID, agent: 'omp', title: 'Main', status: 'working' },
+      { role: 'caretaker', sessionId: 'caretaker-session', agent: 'omp', title: 'Caretaker', status: 'waiting' },
+    ] } }))
   await page.route('**/api/sidecar/room-feather/stream', route =>
     route.fulfill({
       status: 200,
@@ -505,6 +510,11 @@ test('Room Sidecar A2A is visible and passively rendered in the canonical Leader
   await expect(page.getByText(/\[feather-sidecar room-feather/)).toHaveCount(0)
   await expect(page.getByTestId('chat-panel').locator('form, input[name="password"], img[src*="attacker.example"]')).toHaveCount(0)
   expect(remoteMediaRequests).toBe(0)
+  await expect(page.getByTestId('chat-panel').locator('.work-log-active')).toHaveCount(0)
+  const openCaretaker = page.getByTestId('open-room-role-caretaker').first()
+  await expect(openCaretaker).toBeVisible()
+  await openCaretaker.click()
+  await expect(page).toHaveURL(/#caretaker-session$/)
 })
 
 // ── Live SSE updates in the browser ─────────────────────────────────────────

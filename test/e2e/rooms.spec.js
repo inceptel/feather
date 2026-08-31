@@ -39,10 +39,10 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
 
   await page.goto(BASE)
   await expect(page.getByText('#marriage')).toBeVisible()
-  await expect(page.getByTestId('pulse-marriage')).toHaveText('Keep working')
+  await expect(page.getByTestId('pulse-marriage')).toHaveText('Status on')
   await page.getByTestId('pulse-marriage').click()
-  await expect(page.getByTestId('pulse-marriage')).toHaveText('Paused')
-  await expect(page.getByText('Paused', { exact: true })).toHaveCount(1)
+  await expect(page.getByTestId('pulse-marriage')).toHaveText('Status off')
+  await expect(page.getByText('Status off', { exact: true })).toHaveCount(1)
   await page.locator('button:has-text("›")').click()
   await page.getByTestId('attach-existing-marriage').click()
   await expect(page.getByTestId('attach-picker-marriage')).toBeVisible()
@@ -63,21 +63,73 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
 })
 
+test('creates a named organizational chat inside a Room', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const createdId = '11111111-2222-4333-8444-555555555555'
+  let assignedRoom = ''
+  let renamedTitle = ''
+  let created = false
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
+    name: 'trading', cwd: '/home/user/rooms/trading', active: false,
+    latest: null, updatedAt: null, leaderSessionId: null, residents: [], sessions: [],
+    updates: { count: 0, latestAt: null, latest: null },
+    friction: { count: 0, latestAt: null, latest: null },
+    pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
+  }] } }))
+  await page.route('**/api/sessions', async route => {
+    if (route.request().method() === 'POST') {
+      created = true
+      return route.fulfill({ json: { id: createdId } })
+    }
+    return route.fulfill({ json: { sessions: created ? [{
+      id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true,
+    }] : [] } })
+  })
+  await page.route('**/api/sessions?*', route => route.fulfill({ json: { sessions: created ? [{
+    id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true,
+  }] : [] } }))
+  await page.route(`**/api/sessions/${createdId}/room`, route => route.fulfill({
+    json: { room: 'trading', kind: 'chat', role: null, label: 'RL' },
+  }))
+  await page.route('**/api/rooms/trading/assign', async route => {
+    assignedRoom = JSON.parse(route.request().postData() || '{}').sessionId
+    await route.fulfill({ json: { ok: true, assignments: { [createdId]: 'trading' } } })
+  })
+  await page.route(`**/api/sessions/${createdId}/rename`, async route => {
+    renamedTitle = JSON.parse(route.request().postData() || '{}').title
+    await route.fulfill({ json: { ok: true } })
+  })
+
+  const answers = ['RL', 'omp']
+  page.on('dialog', dialog => dialog.accept(answers.shift() || ''))
+  await page.goto(BASE)
+  await page.getByTestId('room-card-trading').locator('button:has-text(\"›\")').click()
+  await page.getByRole('button', { name: '+ Named chat' }).click()
+  await expect(page).toHaveURL(new RegExp(`#${createdId}$`))
+  expect(assignedRoom).toBe(createdId)
+  expect(renamedTitle).toBe('RL')
+  await expect(page.getByTestId('room-chat-breadcrumb')).toContainText('#trading / RL')
+})
+
 test('Room card always opens its durable Leader chat', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const pulse = {
-    id: 'pulse-chat', title: 'Human continued this pulse chat', updatedAt: '2026-08-24T01:00:00Z',
+    id: 'pulse-chat', title: 'Status: #feather', updatedAt: '2026-08-24T01:00:00Z',
     isActive: true, agent: 'omp', roomAssigned: true,
   }
   const leader = {
     id: 'leader-human-chat', title: '#feather Leader', updatedAt: '2026-08-23T23:00:00Z',
     isActive: false, agent: 'omp', roomAssigned: true,
   }
+  const operator = {
+    id: 'operator-chat', title: 'Feather Operator', updatedAt: '2026-08-23T23:30:00Z',
+    isActive: false, agent: 'omp', roomAssigned: true,
+  }
   const newer = {
     id: 'newer-human-chat', title: 'A newer human chat', updatedAt: '2026-08-24T00:30:00Z',
     isActive: false, agent: 'claude', roomAssigned: true,
   }
-  const archived = Array.from({ length: 4 }, (_, index) => ({
+  const archived = Array.from({ length: 5 }, (_, index) => ({
     id: `archived-${index}`, title: `Archived chat ${index}`, updatedAt: `2026-08-22T0${index}:00:00Z`,
     isActive: false, agent: 'codex', roomAssigned: true,
   }))
@@ -90,14 +142,25 @@ test('Room card always opens its durable Leader chat', async ({ page }) => {
     friction: { count: 0, latestAt: null, latest: null },
     pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
     leaderSessionId,
-    residents: [{ role: 'leader', sessionId: leader.id, agent: 'omp', title: leader.title, status: 'waiting' }],
-    sessions: [pulse, newer, leader, ...archived],
+    residents: [
+      { role: 'leader', sessionId: leader.id, agent: 'omp', title: leader.title, status: 'waiting' },
+      { role: 'operator', sessionId: operator.id, agent: 'omp', title: operator.title, status: 'waiting' },
+    ],
+    sessions: [pulse, newer, leader, operator, ...archived],
   }] } }))
 
   await page.goto(BASE)
   await expect(page.getByText('#feather', { exact: true })).toBeVisible()
   await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
   await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
+  await expect(page.getByText('Main', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('People', { exact: true })).toBeVisible()
+  await expect(page.getByText('Chats', { exact: true })).toBeVisible()
+  await expect(page.getByText('Status', { exact: true }).first()).toBeVisible()
+  await page.getByTestId('resident-feather-operator').click()
+  await expect(page).toHaveURL(/#operator-chat$/)
+  await page.goto(BASE)
+  await page.getByTestId('room-card-feather').locator('button:has-text(\"›\")').click()
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toHaveCount(0)
   await page.getByText('#feather', { exact: true }).click()
   await expect(page).toHaveURL(/#leader-human-chat$/)
@@ -108,7 +171,9 @@ test('Room card always opens its durable Leader chat', async ({ page }) => {
   await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toBeVisible()
   await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
   await expect(page.getByTestId(`detach-${leader.id}`)).toHaveCount(0)
-  await expect(page.getByTestId('room-card-feather')).toContainText('1 resident')
+  await expect(page.getByTestId(`detach-${operator.id}`)).toHaveCount(0)
+  await expect(page.getByTestId(`detach-${pulse.id}`)).toHaveCount(0)
+  await expect(page.getByTestId('room-card-feather')).toContainText('2 residents')
 })
 
 test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {

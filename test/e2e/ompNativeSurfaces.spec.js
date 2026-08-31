@@ -50,6 +50,11 @@ test.afterAll(() => {
 })
 
 test('mirrors parent and child execution across completion, replay, and responsive layouts', async ({ page }) => {
+  let agentHubKeys = null
+  await page.route(`**/api/sessions/${SESSION_ID}/keys`, async route => {
+    agentHubKeys = JSON.parse(route.request().postData() || '{}').keys
+    await route.fulfill({ json: { ok: true } })
+  })
   await page.goto(`${BASE}/#${SESSION_ID}`)
   await expect(page.getByText('Ready for deterministic bridge events.')).toBeVisible()
   const health = await (await fetch(`${BASE}/api/health`)).json()
@@ -144,6 +149,10 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(inspector).toContainText('gpt-5.6-mini')
   await expect(inspector).toContainText('Inspect nested bridge events')
   await expect(inspector.getByTestId('omp-subagent-todo')).toContainText('Trace nested tool')
+  await inspector.getByTestId('open-agent-hub').click()
+  expect(agentHubKeys).toEqual(['AgentHub'])
+  await expect(page.getByTestId('chat-panel')).not.toBeVisible()
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
   await expect(inspector.getByTestId('omp-subagent-execution')).toContainText('Child-only reasoning stays in the inspector.')
   await expect(inspector.getByTestId('omp-subagent-execution')).toContainText('Tracing nested event routing')
   await expect(inspector.getByTestId('omp-subagent-execution').locator('.execution-active')).toHaveText('Reasoning')

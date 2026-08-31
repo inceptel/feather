@@ -82,6 +82,8 @@ export interface Message {
   content: ContentBlock[]
   delivery?: 'sent' | 'delivered'
   passive?: boolean
+  roomFrom?: string
+  roomTo?: string
 }
 
 export type ProtocolRunStatus =
@@ -216,16 +218,33 @@ export interface RoomInfo {
   }
 }
 
+export interface RoomSessionContext {
+  room: string | null
+  kind: 'main' | 'resident' | 'status' | 'chat' | null
+  role: string | null
+  label: string | null
+}
+
 export async function fetchRooms(): Promise<RoomInfo[]> {
   const r = await fetch(`${BASE}/api/rooms`)
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return (await r.json()).rooms
 }
 
-export async function fetchSessionRoom(sessionId: string): Promise<string | null> {
+export async function fetchSessionRoomContext(sessionId: string): Promise<RoomSessionContext> {
   const response = await fetch(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}/room`)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return (await response.json()).room || null
+  return response.json()
+}
+
+export async function fetchSessionRoom(sessionId: string): Promise<string | null> {
+  return (await fetchSessionRoomContext(sessionId)).room
+}
+
+export async function fetchRoomResidents(room: string): Promise<RoomResident[]> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/residents`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return (await response.json()).residents || []
 }
 
 
@@ -435,8 +454,14 @@ export async function transcribeAudio(blob: Blob, signal?: AbortSignal): Promise
 export const deleteSession = (id: string) =>
   fetch(`${BASE}/api/sessions/${id}/delete`, { method: 'POST' }).then(r => r.json())
 
-export const renameSession = (id: string, title: string) =>
-  fetch(`${BASE}/api/sessions/${id}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(r => r.json())
+export async function renameSession(id: string, title: string): Promise<void> {
+  const response = await fetch(`${BASE}/api/sessions/${id}/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  await responseJson(response)
+}
 
 export const forkSession = (id: string, cwd?: string) =>
   fetch(`${BASE}/api/sessions/${id}/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd }) }).then(r => r.json())
