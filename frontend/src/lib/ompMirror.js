@@ -167,7 +167,6 @@ function beginSegment(scope, messageId) {
   if (!scope.continuationPending && !scope.assistantEnded && !changedMessage) return scope
   return {
     ...scope,
-    timeline: [],
     activeMessageId: null,
     runStatus: 'running',
     assistantText: '',
@@ -331,12 +330,4 @@ export function reduceOmpMirrorState(state, event) {
   })
 }
 
-export function activeOmpStep(scope) {
-  if (!scope || !Array.isArray(scope.timeline)) return ''
-  const running = [...scope.timeline].reverse().find(item => item.status === 'running')
-  const latest = running || scope.timeline.at(-1)
-  if (!latest) return ''
-  if (latest.kind === 'thinking') return 'Reasoning'
-  return latest.intent || latest.toolName || 'Tool'
-}
 export { CHILD_LIMIT as OMP_CHILD_LIMIT, WORK_LIMIT as OMP_WORK_LIMIT }

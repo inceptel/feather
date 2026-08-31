@@ -23,6 +23,7 @@ import sql from 'highlight.js/lib/languages/sql'
 import yaml from 'highlight.js/lib/languages/yaml'
 import markdown from 'highlight.js/lib/languages/markdown'
 import {
+  activityDescription,
   commandText,
   patchText,
   stdinText,
@@ -32,7 +33,6 @@ import {
 } from '../lib/toolPresentation.js'
 import { localFilePath, localFileUrl } from '../lib/localMedia.js'
 import { extractImages } from '../lib/attachments.js'
-import { activeOmpStep } from '../lib/ompMirror.js'
 import { ProtocolRunCard } from './ProtocolRunCard'
 import { runsForInvocation } from '../lib/protocolRuns.js'
 
@@ -567,6 +567,17 @@ function timelineToolPresentation(item: Extract<OmpTimelineItem, { kind: 'tool' 
   return toolPresentation(item.toolName, args)
 }
 
+function timelineActivityDescription(item: Extract<OmpTimelineItem, { kind: 'tool' }>) {
+  const args = item.args && typeof item.args === 'object' && !Array.isArray(item.args) ? item.args as Record<string, unknown> : {}
+  return activityDescription(item.toolName, args, item.intent)
+}
+
+function latestActivityDescription(scope: OmpWorkScope) {
+  const latest = [...scope.timeline].reverse().find(item => item.status === 'running') || scope.timeline.at(-1)
+  if (!latest) return ''
+  return latest.kind === 'thinking' ? 'Reasoning' : timelineActivityDescription(latest)
+}
+
 // ── Execution-trace grouping ────────────────────────────────────────────────
 // Any assistant message containing reasoning or tool activity is implementation
 // detail, even when it also contains a text preamble ("Let me check…"). Group
@@ -748,8 +759,8 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .execution-thinking { padding: 8px 10px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
 .execution-thinking-label { margin-bottom: 4px; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .execution-tool > summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 38px; padding: 0 10px; cursor: pointer; list-style: none; }
-.execution-tool-name { flex-shrink: 0; color: var(--text-primary); font: 600 11px 'SF Mono', Menlo, monospace; }
-.execution-tool-intent { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; }
+.execution-tool-name { min-width: 0; max-width: 30%; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px 'SF Mono', Menlo, monospace; }
+.execution-tool-intent { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 11px; font-weight: 600; }
 .execution-payload { padding: 8px 10px; border-top: 1px solid var(--border-subtle); }
 .execution-payload-label { margin-bottom: 4px; color: var(--text-faint); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
 .execution-payload pre { max-height: 220px; overflow: auto; margin: 0; color: var(--text-secondary); font: 10px/1.45 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -779,6 +790,7 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .agents-hub-view .agent-surface-heading { margin-bottom: 14px; color: var(--text-primary); font-size: 16px; }
 @media (max-width: 520px) {
   .execution-tool > summary { min-height: 44px; }
+  .execution-tool-name { display: none; }
   .agent-layout.is-open { display: block; }
   .agent-rail > li { flex-basis: 100%; max-width: none; }
   .agent-inspector { max-height: none; overflow: visible; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--border-medium); border-left: none; }
@@ -954,14 +966,11 @@ export function MessageView(props: MessageViewProps) {
     )
   }
 
-  function ExecutionEntry(entryProps: { item: OmpTimelineItem; summaryIntent?: string }) {
+  function ExecutionEntry(entryProps: { item: OmpTimelineItem }) {
     const thinking = createMemo(() => entryProps.item.kind === 'thinking' ? entryProps.item : null)
     const tool = createMemo(() => entryProps.item.kind === 'tool' ? entryProps.item : null)
     const presentation = createMemo(() => tool() ? timelineToolPresentation(tool()!) : null)
-    const intent = createMemo(() => {
-      const value = tool()?.intent || presentation()?.summary || ''
-      return value === entryProps.summaryIntent ? '' : value
-    })
+    const description = createMemo(() => tool() ? timelineActivityDescription(tool()!) : '')
     const input = createMemo(() => executionValue(tool()?.args))
     const output = createMemo(() => executionValue(tool()?.result !== undefined ? tool()?.result : tool()?.partialResult))
     return (
@@ -970,8 +979,8 @@ export function MessageView(props: MessageViewProps) {
         <Show when={thinking()} fallback={
           <details class="execution-card execution-tool" open={tool()?.status === 'error'} data-testid="omp-tool-card" data-tool-call-id={tool()?.toolCallId} data-status={tool()?.status}>
             <summary>
+              <span class="execution-tool-intent">{description()}</span>
               <span class="execution-tool-name">{presentation()?.name || tool()?.toolName}</span>
-              <Show when={intent()}><span class="execution-tool-intent">{intent()}</span></Show>
               <span class="execution-tool-chevron" aria-hidden="true">›</span>
               <span class="execution-status">{executionStatusMark(tool()?.status || '')} {executionStatusLabel(tool()?.status || '')}</span>
             </summary>
@@ -1007,10 +1016,10 @@ export function MessageView(props: MessageViewProps) {
     return op === 'wait' || op === 'jobs' || op === 'inbox' || op === 'list'
   }
 
-  function renderTimelineItems(timeline: () => OmpTimelineItem[], summaryIntent?: () => string) {
+  function renderTimelineItems(timeline: () => OmpTimelineItem[]) {
     return (
       <ol class="execution-timeline">
-        <Index each={timeline()}>{(item) => <ExecutionEntry item={item()} summaryIntent={summaryIntent?.()} />}</Index>
+        <Index each={timeline()}>{(item) => <ExecutionEntry item={item()} />}</Index>
       </ol>
     )
   }
@@ -1018,7 +1027,7 @@ export function MessageView(props: MessageViewProps) {
   function renderExecutionTimeline(scope: () => OmpWorkScope, testId: string, inspector = false) {
     const visibleTimeline = createMemo(() => inspector ? scope().timeline : scope().timeline.filter(item => !hideParentOrchestration(item)))
     const visibleScope = () => ({ ...scope(), timeline: visibleTimeline() })
-    const summary = () => activeOmpStep(visibleScope())
+    const summary = () => latestActivityDescription(visibleScope())
     let executionDetails: HTMLDetailsElement | undefined
     let renderedSegment = scope().segment
     createEffect(() => {
@@ -1161,15 +1170,19 @@ export function MessageView(props: MessageViewProps) {
     const runningJob = () => runningJobs()[0]
     const activityStatus = () => scope().runStatus === 'running' || runningSubagent() || runningJob() ? 'running' : scope().runStatus
     const actionCount = () => timeline().length + (props.subagents?.length || 0) + runningJobs().length
+    const latestDescription = () => latestActivityDescription(visibleScope())
     const summary = () => {
       if (activityStatus() === 'running') {
-        return activeOmpStep(visibleScope())
+        return latestDescription()
           || props.todo?.active
           || runningSubagent()?.assignment
           || runningSubagent()?.task
           || runningJob()?.label
           || runningJob()?.type
           || 'In progress'
+      }
+      if (latestDescription()) {
+        return actionCount() > 1 ? `${latestDescription()} · ${actionCount()} actions` : latestDescription()
       }
       if (actionCount() > 0) return `${actionCount()} action${actionCount() === 1 ? '' : 's'}`
       if ((props.todo?.total || 0) > 0) return `${props.todo!.completed}/${props.todo!.total} planned`
@@ -1188,7 +1201,7 @@ export function MessageView(props: MessageViewProps) {
           <div class="execution-detail">
             <Show when={(props.todo?.total || 0) > 0}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
             <Show when={timeline().length > 0}>
-              <div data-testid="omp-parent-execution-timeline">{renderTimelineItems(timeline, summary)}</div>
+              <div data-testid="omp-parent-execution-timeline">{renderTimelineItems(timeline)}</div>
             </Show>
             {renderWorkAuxiliarySurfaces()}
           </div>
