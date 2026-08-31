@@ -199,16 +199,18 @@ function processFileChange(filePath) {
     const buf = Buffer.alloc(stat.size - currentOffset);
     fs.readSync(fd, buf, 0, buf.length, currentOffset);
     fs.closeSync(fd);
-    const content = buf.toString('utf8');
-    const lastNL = content.lastIndexOf('\n');
-    if (lastNL < 0) return;
-    const complete = content.substring(0, lastNL + 1);
-    let offset = currentOffset;
-    for (const line of complete.split('\n').filter(Boolean)) {
-      offset += Buffer.byteLength(line + '\n');
-      broadcast(sessionId, line, offset);
+    const lastNewline = buf.lastIndexOf(10);
+    if (lastNewline < 0) return;
+    const complete = buf.subarray(0, lastNewline + 1);
+    let start = 0;
+    while (start < complete.length) {
+      const newline = complete.indexOf(10, start);
+      const line = complete.subarray(start, newline).toString('utf8');
+      const offset = currentOffset + newline + 1;
+      if (line) broadcast(sessionId, line, offset);
+      start = newline + 1;
     }
-    fileOffsets.set(sessionId, currentOffset + Buffer.byteLength(complete));
+    fileOffsets.set(sessionId, currentOffset + complete.length);
   } catch {}
 }
 

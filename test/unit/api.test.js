@@ -981,6 +981,76 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
 
 })
 
+describe('remote server stream parity', () => {
+  it('uses complete byte offsets for live messages after blank JSONL records', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-remote-stream-'))
+    const sessionId = `remote-stream-${Date.now()}`
+    const projectDir = path.join(root, '.claude', 'projects', 'fixture')
+    const sessionPath = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.mkdirSync(projectDir, { recursive: true })
+    fs.writeFileSync(sessionPath, `${JSON.stringify({
+      type: 'user', uuid: 'remote-initial', timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'Initial' },
+    })}\n`)
+    const port = await allocatePort()
+    const remote = spawn(process.execPath, [path.join(REPO_ROOT, 'remote-server.js')], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, HOME: root, PORT: String(port) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let output = ''
+    remote.stdout.on('data', chunk => { output += chunk })
+    remote.stderr.on('data', chunk => { output += chunk })
+    const wait = (milliseconds) => {
+      const gate = Promise.withResolvers()
+      setTimeout(gate.resolve, milliseconds)
+      return gate.promise
+    }
+    const ctrl = new AbortController()
+    try {
+      let ready = false
+      for (let attempt = 0; attempt < 80; attempt++) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(250) })
+          if (response.ok) {
+            ready = true
+            break
+          }
+        } catch {}
+        if (remote.exitCode !== null) throw new Error(`remote server exited early\n${output}`)
+        await wait(50)
+      }
+      assert.equal(ready, true, `remote server did not start\n${output}`)
+
+      const response = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/stream`, { signal: ctrl.signal })
+      const reader = response.body.getReader()
+      await reader.read()
+      const uuid = `remote-live-${Date.now()}`
+      const line = JSON.stringify({
+        type: 'user', uuid, timestamp: new Date().toISOString(),
+        isSidechain: false, isMeta: false, message: { role: 'user', content: 'Remote live' },
+      })
+      fs.appendFileSync(sessionPath, `\n${line}\n`)
+      const expectedOffset = fs.statSync(sessionPath).size
+      const deliveryTimeout = Promise.withResolvers()
+      const deliveryTimer = setTimeout(() => deliveryTimeout.reject(new Error('remote live message was not delivered')), 5000)
+      let payload = ''
+      while (!payload.includes(uuid)) {
+        const { value, done } = await Promise.race([reader.read(), deliveryTimeout.promise])
+        if (done || !value) break
+        payload += new TextDecoder().decode(value)
+      }
+      clearTimeout(deliveryTimer)
+      assert.ok(payload.includes(uuid), payload)
+      assert.match(payload, new RegExp(`id: ${expectedOffset}`))
+    } finally {
+      ctrl.abort()
+      remote.kill()
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('POST /api/sessions', () => {
   it('rejects non-UUID session ids before they reach tmux or filesystem paths', async () => {
     const response = await fetch(`${BASE}/api/sessions`, {
