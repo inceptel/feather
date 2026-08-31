@@ -267,11 +267,18 @@ test.describe('Message rendering', () => {
     expect(page.url()).toBe(chatUrl)
   })
 
-  test('reasoning-only direct answers have no completed Activity disclosure', async ({ page }) => {
+  test('reasoning between actions stays in nested collapsible Activity', async ({ page }) => {
     const bubble = page.locator('.asst-bubble').filter({ hasText: /Feather uses .*marked.* with GFM support/ }).first()
-    await expect(bubble).toBeVisible()
-    expect(await bubble.evaluate(element => element.parentElement?.previousElementSibling?.getAttribute('data-testid'))).not.toBe('turn-activity')
-    await expect(page.getByText('Planning the markdown pipeline.')).not.toBeVisible()
+    const activity = bubble.locator('xpath=../preceding-sibling::*[1]')
+    await expect(activity).toBeVisible()
+    const outer = activity.locator('details.work-log')
+    await expect(outer).toHaveJSProperty('open', false)
+    await activity.getByTestId('work-log-summary').click()
+    const reasoning = activity.locator('details').filter({ hasText: 'Reasoning' }).last()
+    await expect(reasoning).toBeVisible()
+    await expect(reasoning).toHaveJSProperty('open', false)
+    await reasoning.locator('summary').click()
+    await expect(reasoning).toContainText('Planning')
   })
 
   test('Activity precedes a tool-using final answer in chronological turn order', async ({ page }) => {
@@ -798,6 +805,44 @@ test.describe('Live updates', () => {
     expect(Math.abs((completedBox?.width || 0) - (liveBox?.width || 0))).toBeLessThanOrEqual(1)
     const finalBubble = page.locator('.asst-bubble').filter({ hasText: 'Status lifecycle complete.' })
     await expect(finalBubble.getByTestId('work-log-summary')).toHaveCount(0)
+  })
+
+  test('reasoning stays chronologically between tool calls inside Activity', async ({ page }) => {
+    await page.goto(BASE)
+    await page.waitForLoadState('networkidle')
+    await selectTestSession(page)
+    const stamp = Date.now()
+    writeLine({
+      type: 'assistant', uuid: `e2e-reason-tool-1-${stamp}`, timestamp: '2025-06-15T14:06:20Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: `reason-tool-1-${stamp}`, name: 'read', input: { path: '/tmp/first' }, intent: 'Reading first evidence' }] },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-reasoning-${stamp}`, timestamp: '2025-06-15T14:06:21Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'The first result changes what the second check should inspect.' }] },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-reason-tool-2-${stamp}`, timestamp: '2025-06-15T14:06:22Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: `reason-tool-2-${stamp}`, name: 'grep', input: { pattern: 'second' }, intent: 'Checking second evidence' }] },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-reason-final-${stamp}`, timestamp: '2025-06-15T14:06:23Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: 'Reasoning chronology complete.' },
+    })
+
+    const activity = page.getByTestId('turn-activity').filter({ hasText: 'Reading first evidence' })
+    await expect(activity).toBeVisible({ timeout: 10000 })
+    await activity.getByTestId('work-log-summary').click()
+    const order = await activity.locator('.work-log-detail > details').evaluateAll(nodes =>
+      nodes.map(node => node.textContent || ''))
+    expect(order).toHaveLength(3)
+    expect(order[0]).toContain('Reading first evidence')
+    expect(order[1]).toContain('The first result changes what the second check should inspect.')
+    expect(order[2]).toContain('Checking second evidence')
+    await expect(activity.getByTestId('work-log-detail')).toContainText('2 actions · 1 reasoning')
   })
 
   test('multiple Activity groups in one user turn keep independent disclosure state', async ({ page }) => {

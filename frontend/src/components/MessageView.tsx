@@ -414,9 +414,9 @@ function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => voi
           <span style={{ color: '#c084fc' }}>Reasoning</span>
           <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px' }}>▸</span>
         </summary>
-        <div style={{ 'margin-top': '6px', 'margin-left': '4px', padding: '10px 14px', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', 'border-radius': '10px', color: 'var(--text-secondary)', 'font-size': '12px', 'white-space': 'pre-wrap', 'max-height': '400px', 'overflow-y': 'auto', 'line-height': '1.55', 'box-shadow': '0 1px 3px rgba(0,0,0,0.15)' }}>
-          {block.thinking}
-        </div>
+        <div class="markdown" style={{ 'margin-top': '6px', 'margin-left': '4px', padding: '10px 14px', background: 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.12)', 'border-radius': '10px', color: 'var(--text-secondary)', 'font-size': '12px', 'max-height': '400px', 'overflow-y': 'auto', 'line-height': '1.55', 'box-shadow': '0 1px 3px rgba(0,0,0,0.15)' }}
+          innerHTML={renderLiveMarkdown(block.thinking)}
+          ref={(element) => queueMicrotask(() => enhanceMarkdown(element, setLightbox, setExpandedTable))} />
       </details>
     )
   }
@@ -1243,6 +1243,7 @@ export function MessageView(props: MessageViewProps) {
   function renderWorkLog(messages: () => Message[], live: boolean, activityId: string) {
     const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(isActivityBlock))
     const toolUses = createMemo(() => traceBlocks().filter(block => block.type === 'tool_use'))
+    const reasoning = createMemo(() => traceBlocks().filter(block => block.type === 'thinking' && block.thinking))
     const failed = createMemo(() =>
       traceBlocks().some(block => block.type === 'tool_result' && block.is_error)
       || toolUses().some(block => !!(block.id && getResult(block.id)?.is_error)))
@@ -1272,7 +1273,9 @@ export function MessageView(props: MessageViewProps) {
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
           <div class="work-log-meta">
-            {toolUses().length} action{toolUses().length === 1 ? '' : 's'} · {formatTime(last()?.timestamp || '')}
+            {toolUses().length} action{toolUses().length === 1 ? '' : 's'}
+            {reasoning().length > 0 ? ` · ${reasoning().length} reasoning` : ''}
+            {' · '}{formatTime(last()?.timestamp || '')}
           </div>
           <For each={traceBlocks()}>{(block) =>
             renderBlock(block, setLightbox, getResult, openExpandedTable)
@@ -1301,7 +1304,9 @@ export function MessageView(props: MessageViewProps) {
     ) && m.content.some(b => b.type === 'tool_result')
   }
   function isActivityBlock(block: ContentBlock) {
-    return block.type === 'tool_result' || (block.type === 'tool_use' && !isQuestionBlock(block))
+    return (block.type === 'thinking' && !!block.thinking)
+      || block.type === 'tool_result'
+      || (block.type === 'tool_use' && !isQuestionBlock(block))
   }
   function messageHasActivity(message: Message) {
     return (message.content || []).some(isActivityBlock)
