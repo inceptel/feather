@@ -119,6 +119,11 @@ describe('parseMessage: filtering', () => {
     assert.equal(parseMessage(line), null)
   })
 
+  it('filters internal Room Sidecar delivery envelopes', () => {
+    const line = jsonl({ message: { role: 'user', content: '[feather-sidecar room-feather 42 operator] \"internal coordination\"' } })
+    assert.equal(parseMessage(line), null)
+  })
+
   it('filters out empty string content', () => {
     assert.equal(parseMessage(lines[18]), null)
   })
