@@ -674,6 +674,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
     const terminalCtrl = new AbortController()
     const continuationCtrl = new AbortController()
     const nextTurnCtrl = new AbortController()
+    const overflowCtrl = new AbortController()
     try {
       const accepted = await post([{
         type: 'agent_start',
@@ -778,6 +779,8 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       const replay = await readOmpSseEvents(stream.body.getReader(), 14)
       assert.equal(replay.events.length, 14)
       assert.equal(replay.events[0].type, 'agent_start')
+      const invocationId = replay.events[0].invocationId
+      assert.match(invocationId, /^[0-9a-f-]{36}$/)
       assert.ok(replay.events.some(event => event.type === 'assistant_snapshot' && event.messageId === 'parent-message'))
       assert.ok(replay.events.some(event => event.type === 'work_snapshot' && !event.subagentId))
       const parentTool = replay.events.find(event => event.toolCallId === 'parent-tool')
@@ -812,6 +815,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       assert.equal(continued.status, 204)
       const continuationStream = await fetch(`${BASE}/api/sessions/${sessionId}/stream`, { signal: continuationCtrl.signal })
       const continuationReplay = await readOmpSseEvents(continuationStream.body.getReader(), 13)
+      assert.equal(continuationReplay.events[0].invocationId, invocationId)
       const priorSegmentTool = continuationReplay.events.find(event => event.toolCallId === 'parent-tool')
       assert.equal(priorSegmentTool.type, 'tool_execution_end')
       assert.equal(priorSegmentTool.isError, false)
@@ -834,13 +838,32 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       const nextTurnStream = await fetch(`${BASE}/api/sessions/${sessionId}/stream`, { signal: nextTurnCtrl.signal })
       const nextTurnReplay = await readOmpSseEvents(nextTurnStream.body.getReader(), 10)
       assert.equal(nextTurnReplay.events[0].type, 'agent_start')
+      const nextInvocationId = nextTurnReplay.events[0].invocationId
+      assert.notEqual(nextInvocationId, invocationId)
       assert.equal(nextTurnReplay.events.some(event => event.type === 'todo' && !event.subagentId), false)
       nextTurnCtrl.abort()
+
+      const overflowEvents = Array.from({ length: 140 }, (_, index) => ({
+        type: 'tool_execution_start',
+        toolCallId: `overflow-${index}`,
+        toolName: 'read',
+        args: { path: `/tmp/overflow-${index}` },
+      }))
+      for (let offset = 0; offset < overflowEvents.length; offset += 50) {
+        const response = await post(overflowEvents.slice(offset, offset + 50))
+        assert.equal(response.status, 204)
+      }
+      const overflowStream = await fetch(`${BASE}/api/sessions/${sessionId}/stream`, { signal: overflowCtrl.signal })
+      const overflowReplay = await readOmpSseEvents(overflowStream.body.getReader(), 128)
+      assert.equal(overflowReplay.events[0].type, 'agent_start')
+      assert.equal(overflowReplay.events[0].invocationId, nextInvocationId)
+      overflowCtrl.abort()
     } finally {
       ctrl.abort()
       terminalCtrl.abort()
       continuationCtrl.abort()
       nextTurnCtrl.abort()
+      overflowCtrl.abort()
       try { fs.unlinkSync(tokenPath) } catch {}
     }
   })

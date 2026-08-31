@@ -109,7 +109,7 @@ test('a failed send restores the prior Activity without leaking it into the pend
     type: 'assistant', uuid: `media-prior-todo-${Date.now()}`, timestamp: new Date().toISOString(), isSidechain: false, isMeta: false,
     message: { role: 'assistant', content: [{
       type: 'tool_result', name: 'todo',
-      details: { phases: [{ name: 'Prior turn', tasks: [{ content: 'Preserve on failure', status: 'completed' }] }] },
+      details: { phases: [{ name: 'Prior turn', tasks: [{ content: 'Preserve on failure', status: 'in_progress' }] }] },
     }] },
   }) + '\n')
   let releaseSend

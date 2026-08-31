@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { activityDescription, toolImagePath, toolPresentation } from '../../frontend/src/lib/toolPresentation.js'
+import { activityDescription, toolImagePath, toolInputDisplay, toolOutputDisplay, toolPresentation } from '../../frontend/src/lib/toolPresentation.js'
 
 describe('Codex tool presentation', () => {
   it('identifies web weather calls even when Codex stores the tool as run', () => {
@@ -63,5 +63,28 @@ describe('Codex tool presentation', () => {
       activityDescription('bash', { command: 'git status' }, 'Checking repository state'),
       'Checking repository state',
     )
+  })
+
+  it('formats common Activity inputs as readable evidence instead of transport JSON', () => {
+    assert.equal(toolInputDisplay('bash', { command: 'printf ok' }), 'printf ok')
+    assert.equal(toolInputDisplay('grep', { pattern: 'launch', path: 'notes.md' }), 'Pattern: launch\nPath: notes.md')
+    assert.equal(toolInputDisplay('read', { path: 'AGENTS.md', offset: 5, limit: 20 }), 'Path: AGENTS.md\nStart: 5\nLimit: 20')
+    assert.equal(toolInputDisplay('glob', { pattern: '*.ts', path: 'frontend/src' }), 'Pattern: *.ts\nPath: frontend/src')
+    assert.equal(toolInputDisplay('eval', { language: 'py', title: 'Check state', code: 'print(state)' }), 'Language: py\nPurpose: Check state\n\nprint(state)')
+    assert.equal(toolInputDisplay('write', { path: 'state.txt', content: 'ready' }), 'Path: state.txt\n\nready')
+    assert.equal(
+      toolInputDisplay('exec', { raw: 'await tools.exec_command({\"cmd\":\"git status --short\"})' }),
+      'git status --short',
+    )
+  })
+
+  it('unwraps common tool output envelopes', () => {
+    assert.equal(toolOutputDisplay({ output: 'calculation=144' }), 'calculation=144')
+    assert.equal(toolOutputDisplay({ text: 'found launch' }), 'found launch')
+    assert.equal(toolOutputDisplay({ content: [{ type: 'text', text: 'wrapped output' }] }), 'wrapped output')
+    assert.equal(toolOutputDisplay({
+      content: [{ type: 'text', text: '[file#tag]\\n1:raw output' }],
+      details: { displayContent: { text: 'clean output' } },
+    }), 'clean output')
   })
 })

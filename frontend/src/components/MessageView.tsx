@@ -28,7 +28,8 @@ import {
   patchText,
   stdinText,
   toolImagePath,
-  toolInputText,
+  toolInputDisplay,
+  toolOutputDisplay,
   toolPresentation,
 } from '../lib/toolPresentation.js'
 import { localFilePath, localFileUrl } from '../lib/localMedia.js'
@@ -396,7 +397,7 @@ function renderToolResultInner(block: ContentBlock, setLightbox?: (v: string | n
           <img src={`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`} style={{ 'max-width': '100%', 'max-height': '400px', 'border-radius': '6px', cursor: setLightbox ? 'zoom-in' : 'default' }} onClick={() => setLightbox?.(`data:${img.source.media_type || 'image/png'};base64,${img.source.data}`)} />
         </div>
       ))}
-      {rawContent && <div style={{ padding: '6px 12px', 'font-size': '11px', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-secondary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'word-break': 'break-all' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} ref={linkifyRef} />}
+      {rawContent && <div style={{ margin: '0 10px 10px', padding: '8px 10px', 'border-radius': '6px', background: 'var(--bg-secondary)', 'font-size': '11px', 'line-height': '1.55', 'font-family': "'SF Mono', Menlo, monospace", color: isErr ? 'var(--error)' : 'var(--text-primary)', 'white-space': 'pre-wrap', 'max-height': '300px', overflow: 'auto', 'overflow-wrap': 'anywhere' }} innerHTML={ansiToSafeHtml(rawContent.length > 3000 ? rawContent.slice(0, 3000) + '\n… (truncated)' : rawContent)} ref={linkifyRef} />}
     </div>
   )
 }
@@ -423,15 +424,16 @@ function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => voi
     const inp = block.input || {}
     const presentation = toolPresentation(block.name || '', inp)
     const name = presentation.name
-    const summary = presentation.summary || block.intent || ''
+    const summary = activityDescription(block.name || '', inp, block.intent || '')
     const color = TOOL_COLORS[name] || 'var(--info)'
     const icon = TOOL_ICONS[name] || '⚙'
     const result = block.id && getResult ? getResult(block.id) : undefined
     const imagePath = toolImagePath(block.name || '', inp)
     const imageUrl = imagePath ? localFileUrl(imagePath)! : ''
-    const genericInput = SPECIAL_TOOL_DETAILS.has(name) ? '' : toolInputText(inp)
+    const readableInput = toolInputDisplay(block.name || '', inp)
+    const genericInput = SPECIAL_TOOL_DETAILS.has(name) ? '' : readableInput
     const hasDetail = SPECIAL_TOOL_DETAILS.has(name) || !!genericInput || !!imagePath || !!result
-    const pre = 'white-space:pre-wrap;font-size:11px;font-family:SF Mono,Menlo,monospace;padding:8px 12px;max-height:200px;overflow:auto;margin:0;word-break:break-all;'
+    const pre = 'white-space:pre-wrap;font:11px/1.55 SF Mono,Menlo,monospace;padding:10px 12px;max-height:280px;overflow:auto;margin:0;overflow-wrap:anywhere;'
     const isErr = result?.is_error
     const statusColor = isErr ? 'var(--error)' : result ? 'var(--success)' : 'var(--warning)'
     const statusIcon = isErr ? '✗' : result ? '✓' : '●'
@@ -439,8 +441,8 @@ function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => voi
       <details style={{ margin: '4px 0', 'border-left': '2px solid var(--border-medium)', 'padding-left': '12px' }}>
         <summary style={{ display: 'flex', 'align-items': 'center', gap: '6px', 'font-size': '12px', color: 'var(--text-muted)', cursor: hasDetail ? 'pointer' : 'default', 'list-style': 'none', 'user-select': 'none', padding: '2px 0' }}>
           <span style={{ color: statusColor, 'font-size': '11px', 'line-height': '1', display: 'inline-flex', 'align-items': 'center', width: '12px', 'flex-shrink': '0' }}>{statusIcon}</span>
-          <span style={{ color, 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px', 'flex-shrink': '0' }}>{icon} {name}</span>
-          {summary && <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1', 'min-width': '0', 'font-family': "'SF Mono', Menlo, monospace", 'font-size': '11px' }}>{summary}</span>}
+          {summary && <span class="execution-tool-intent">{summary}</span>}
+          <span class="execution-tool-name" style={{ color }}>{icon} {name}</span>
           {hasDetail && <span style={{ 'margin-left': 'auto', color: 'var(--text-ghost)', 'font-size': '10px', 'flex-shrink': '0' }}>▸</span>}
         </summary>
         <div style={{ 'margin-top': '6px', 'margin-left': '4px', background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', 'border-radius': '10px', overflow: 'hidden', 'box-shadow': '0 1px 3px rgba(0,0,0,0.2)' }}>
@@ -453,16 +455,16 @@ function renderBlock(block: ContentBlock, setLightbox: (v: string | null) => voi
             </For>
           </div>
         )}
-        {name === 'Bash' && commandText(inp) && <pre style={`${pre}color:var(--tool-bash);`} ref={linkifyRef}>{commandText(inp)}</pre>}
+        {name === 'Bash' && readableInput && <pre style={`${pre}color:var(--tool-bash);`} ref={linkifyRef}>{readableInput}</pre>}
         {name === 'Patch' && patchText(inp) && <pre style={`${pre}color:var(--tool-edit);`} ref={linkifyRef}>{patchText(inp).slice(0, 2000)}{patchText(inp).length > 2000 ? '\n…' : ''}</pre>}
         {name === 'Input' && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{stdinText(inp).replace(/\u0003/g, '^C') || '(empty stdin)'}{inp.session_id != null ? `\n\nsession: ${inp.session_id}` : ''}</pre>}
-        {name === 'Write' && inp.content && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`} ref={linkifyRef}>{(inp.content as string).slice(0, 500)}{(inp.content as string).length > 500 ? '…' : ''}</pre>}
+        {name === 'Write' && readableInput && <pre style={`${pre}color:var(--diff-add-text);background:var(--diff-add-bg);`} ref={linkifyRef}>{readableInput.slice(0, 2000)}{readableInput.length > 2000 ? '…' : ''}</pre>}
         {name === 'Agent' && <>
           {inp.subagent_type && <div style={{ padding: '6px 12px', 'font-size': '11px', color: 'var(--text-secondary)' }}>Type: <span style={{ color: 'var(--warning)' }}>{inp.subagent_type}</span></div>}
           {inp.prompt && <pre style={`${pre}color:var(--tool-agent);`} ref={linkifyRef}>{(inp.prompt as string).slice(0, 800)}{(inp.prompt as string).length > 800 ? '…' : ''}</pre>}
         </>}
-        {name === 'Grep' && inp.pattern && <pre style={`${pre}color:var(--tool-grep);`}>/{inp.pattern}/{inp.path ? ` in ${inp.path}` : ''}</pre>}
-        {name === 'Read' && (inp.file_path || inp.path) && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{(inp.file_path || inp.path) as string}{inp.offset ? ` (L${inp.offset})` : ''}</pre>}
+        {name === 'Grep' && readableInput && <pre style={`${pre}color:var(--tool-grep);`}>{readableInput}</pre>}
+        {name === 'Read' && readableInput && <pre style={`${pre}color:var(--tool-read);`} ref={linkifyRef}>{readableInput}</pre>}
         {imagePath && (
           <button
             type="button"
@@ -555,12 +557,6 @@ function executionStatusMark(status: string) {
   return '○'
 }
 
-function executionValue(value: unknown) {
-  if (value === undefined || value === null) return ''
-  if (typeof value === 'string') return value
-  try { return JSON.stringify(value, null, 2) }
-  catch { return String(value) }
-}
 
 function timelineToolPresentation(item: Extract<OmpTimelineItem, { kind: 'tool' }>) {
   const args = item.args && typeof item.args === 'object' && !Array.isArray(item.args) ? item.args as Record<string, unknown> : {}
@@ -607,8 +603,8 @@ function canAttachTraceToMessage(m: Message): boolean {
 
 type RenderItem =
   | { kind: 'msg'; msg: Message }
-  | { kind: 'chain'; messages: Message[] }
-  | { kind: 'turn'; msg: Message; trace: Message[] }
+  | { kind: 'chain'; messages: Message[]; activityId: string }
+  | { kind: 'turn'; msg: Message; trace: Message[]; activityId: string }
 
 function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) => boolean): RenderItem[] {
   const out: RenderItem[] = []
@@ -628,10 +624,10 @@ function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) =>
       }
       const next = messages[j]
       if (next && canAttachTraceToMessage(next) && !isTraceAssistantMsg(next)) {
-        out.push({ kind: 'turn', msg: next, trace: chain })
+        out.push({ kind: 'turn', msg: next, trace: chain, activityId: next.uuid })
         i = j + 1
       } else {
-        out.push({ kind: 'chain', messages: chain })
+        out.push({ kind: 'chain', messages: chain, activityId: chain[0].uuid })
         i = j
       }
     } else {
@@ -731,6 +727,8 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .live-work-disclosure .work-log-summary { width: 100%; min-height: 34px; }
 .work-log-active { min-width: 0; flex: 0 1 auto; max-width: 75%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 12px; }
 .work-log-live-dot { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--info); }
+.work-log-live-dot.is-complete { background: var(--success); }
+.work-log-live-dot.is-error { background: var(--error); }
 .live-work-disclosure .work-log-detail { max-height: min(58vh, 520px); overflow: auto; margin-top: 2px; padding: 8px 10px; border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; background: transparent; }
 .work-log-detail {
   margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border-subtle);
@@ -761,9 +759,9 @@ div:hover > div > .star-btn { opacity: 0.6 !important; }
 .execution-tool > summary { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 38px; padding: 0 10px; cursor: pointer; list-style: none; }
 .execution-tool-name { min-width: 0; max-width: 30%; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px 'SF Mono', Menlo, monospace; }
 .execution-tool-intent { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font-size: 11px; font-weight: 600; }
-.execution-payload { padding: 8px 10px; border-top: 1px solid var(--border-subtle); }
-.execution-payload-label { margin-bottom: 4px; color: var(--text-faint); font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-.execution-payload pre { max-height: 220px; overflow: auto; margin: 0; color: var(--text-secondary); font: 10px/1.45 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.execution-payload { padding: 10px 12px; border-top: 1px solid var(--border-subtle); background: rgba(255,255,255,0.018); }
+.execution-payload-label { margin-bottom: 6px; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.execution-payload pre { max-height: 280px; overflow: auto; margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font: 11px/1.55 'SF Mono', Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .execution-status { flex-shrink: 0; color: currentColor; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
 .omp-todo-surface { max-width: 960px; overflow: visible; margin: 0 auto 10px; padding: 0 11px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--bg-surface); }
 .omp-todo-surface > summary { padding: 8px 0; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; }
@@ -862,6 +860,7 @@ type MessageViewRuntime = {
 
 
 type MessageViewProps = {
+  scopeId: string
   messages: Message[]
   loading: boolean
   hasMore?: boolean
@@ -890,6 +889,25 @@ export function MessageView(props: MessageViewProps) {
   const [pdfViewer, setPdfViewer] = createSignal<string | null>(null)
   const [expandedTable, setExpandedTable] = createSignal<string | null>(null)
   const [selectedSubagentId, setSelectedSubagentId] = createSignal<string | null>(null)
+  const [openActivities, setOpenActivities] = createSignal<Set<string>>(new Set())
+  const activityIdentityByMessage = new Map<string, string>()
+  const activityIsOpen = (id: string) => openActivities().has(id)
+  function rememberActivityOpen(id: string, open: boolean) {
+    setOpenActivities(current => {
+      if (current.has(id) === open) return current
+      const next = new Set(current)
+      if (open) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+  let openActivityScope = props.scopeId
+  createEffect(() => {
+    if (props.scopeId === openActivityScope) return
+    openActivityScope = props.scopeId
+    activityIdentityByMessage.clear()
+    setOpenActivities(new Set())
+  })
   let tableReturnFocus: HTMLElement | null = null
   let tableModal: HTMLDivElement | undefined
 
@@ -971,8 +989,8 @@ export function MessageView(props: MessageViewProps) {
     const tool = createMemo(() => entryProps.item.kind === 'tool' ? entryProps.item : null)
     const presentation = createMemo(() => tool() ? timelineToolPresentation(tool()!) : null)
     const description = createMemo(() => tool() ? timelineActivityDescription(tool()!) : '')
-    const input = createMemo(() => executionValue(tool()?.args))
-    const output = createMemo(() => executionValue(tool()?.result !== undefined ? tool()?.result : tool()?.partialResult))
+    const input = createMemo(() => tool() ? toolInputDisplay(tool()!.toolName, tool()!.args) : '')
+    const output = createMemo(() => toolOutputDisplay(tool()?.result !== undefined ? tool()?.result : tool()?.partialResult))
     return (
       <li class="execution-item" style={{ color: executionStatusColor(entryProps.item.status) }} data-status={entryProps.item.status}>
         <span class="execution-node" aria-hidden="true" />
@@ -992,7 +1010,7 @@ export function MessageView(props: MessageViewProps) {
             </Show>
             <Show when={output()}>
               <div class="execution-payload">
-                <div class="execution-payload-label">{tool()?.result !== undefined ? 'Result' : 'Latest output'}</div>
+                <div class="execution-payload-label">{tool()?.result !== undefined ? 'Output' : 'Live output'}</div>
                 <pre ref={linkifyRef}>{output().slice(0, 3000)}{output().length > 3000 ? '\n… (truncated)' : ''}</pre>
               </div>
             </Show>
@@ -1028,13 +1046,6 @@ export function MessageView(props: MessageViewProps) {
     const visibleTimeline = createMemo(() => inspector ? scope().timeline : scope().timeline.filter(item => !hideParentOrchestration(item)))
     const visibleScope = () => ({ ...scope(), timeline: visibleTimeline() })
     const summary = () => latestActivityDescription(visibleScope())
-    let executionDetails: HTMLDetailsElement | undefined
-    let renderedSegment = scope().segment
-    createEffect(() => {
-      const segment = scope().segment
-      if (!inspector && executionDetails && segment !== renderedSegment) executionDetails.open = false
-      renderedSegment = segment
-    })
     if (inspector) {
       return (
         <section class="execution-log" data-testid={testId} aria-label="Agent execution timeline">
@@ -1052,7 +1063,7 @@ export function MessageView(props: MessageViewProps) {
     }
     return (
       <Show when={visibleTimeline().length > 0}>
-        <details ref={executionDetails} class="execution-log" data-testid={testId} data-segment={scope().segment}>
+        <details class="execution-log" data-testid={testId} data-segment={scope().segment}>
           <summary class="execution-summary" data-testid={`${testId}-summary`}>
             <span class="execution-chevron">›</span>
             <span class="execution-title">Execution</span>
@@ -1162,10 +1173,13 @@ export function MessageView(props: MessageViewProps) {
       </>
     )
   }
+  const todoNeedsAttention = () => !!props.todo
+    && ((props.todo.active || '') !== '' || props.todo.completed < props.todo.total)
   function renderParentExecution(scope: () => OmpWorkScope) {
     const timeline = createMemo(() => scope().timeline.filter(isParentActivity))
     const visibleScope = () => ({ ...scope(), timeline: timeline() })
     const runningSubagent = () => (props.subagents || []).find(agent => executionStatusLabel(agent.status) === 'Running')
+    const activityId = () => `${props.scopeId}:native:${scope().invocationId}`
     const runningJobs = () => (props.jobs || []).filter(job => job.status === 'running')
     const runningJob = () => runningJobs()[0]
     const activityStatus = () => scope().runStatus === 'running' || runningSubagent() || runningJob() ? 'running' : scope().runStatus
@@ -1188,10 +1202,17 @@ export function MessageView(props: MessageViewProps) {
       if ((props.todo?.total || 0) > 0) return `${props.todo!.completed}/${props.todo!.total} planned`
       return 'Complete'
     }
-    const hasWork = () => timeline().length > 0 || (props.todo?.total || 0) > 0 || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
+    const hasWork = () => timeline().length > 0 || todoNeedsAttention() || (props.subagents?.length || 0) > 0 || (props.jobs || []).some(job => job.status === 'running')
     return (
       <Show when={hasWork()}>
-        <details class="work-details" data-testid="omp-parent-execution" data-segment={scope().segment}>
+        <details
+          class="work-details"
+          data-testid="omp-parent-execution"
+          data-segment={scope().segment}
+          data-activity-id={activityId()}
+          open={activityIsOpen(activityId())}
+          onToggle={(event) => rememberActivityOpen(activityId(), event.currentTarget.open)}
+        >
           <summary class="execution-summary" data-testid="omp-parent-execution-summary">
             <span class="execution-chevron">›</span>
             <span class="execution-title">Activity</span>
@@ -1199,7 +1220,7 @@ export function MessageView(props: MessageViewProps) {
             <span class="execution-status" aria-label={executionStatusLabel(activityStatus())} title={executionStatusLabel(activityStatus())} style={{ color: executionStatusColor(activityStatus()) }}>{executionStatusMark(activityStatus())}</span>
           </summary>
           <div class="execution-detail">
-            <Show when={(props.todo?.total || 0) > 0}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
+            <Show when={todoNeedsAttention()}>{renderTodo(() => props.todo!, 'omp-todo')}</Show>
             <Show when={timeline().length > 0}>
               <div data-testid="omp-parent-execution-timeline">{renderTimelineItems(timeline)}</div>
             </Show>
@@ -1211,19 +1232,38 @@ export function MessageView(props: MessageViewProps) {
   }
 
 
-  function renderWorkLog(messages: () => Message[], live = false) {
+  function renderWorkLog(messages: () => Message[], live: boolean, activityId: string) {
     const traceBlocks = createMemo(() => messages().flatMap(message => message.content || []).filter(isActivityBlock))
+    const toolUses = createMemo(() => traceBlocks().filter(block => block.type === 'tool_use'))
+    const failed = createMemo(() =>
+      traceBlocks().some(block => block.type === 'tool_result' && block.is_error)
+      || toolUses().some(block => !!(block.id && getResult(block.id)?.is_error)))
     const last = createMemo(() => messages().at(-1))
+    const summary = createMemo(() => {
+      if (live && props.statusText) return props.statusText
+      const block = toolUses().at(-1)
+      return block ? activityDescription(block.name || '', block.input || {}, block.intent || '') : ''
+    })
     return (
-      <details class="work-log">
+      <details
+        class="work-log"
+        data-activity-id={activityId}
+        open={activityIsOpen(activityId)}
+        onToggle={(event) => rememberActivityOpen(activityId, event.currentTarget.open)}
+      >
         <summary class="work-log-summary" data-testid="work-log-summary">
           <span class="work-log-chevron">›</span>
           <span style={{ color: 'var(--text-muted)', 'font-weight': '600' }}>Activity</span>
-          <Show when={live && props.statusText}><span class="work-log-active">{props.statusText}</span><span class="work-log-live-dot" aria-label="Running" /></Show>
+          <Show when={summary()}><span class="work-log-active">{summary()}</span></Show>
+          <span
+            class="work-log-live-dot"
+            classList={{ 'is-complete': !live && !failed(), 'is-error': !live && failed() }}
+            aria-label={live ? 'Running' : failed() ? 'Failed' : 'Complete'}
+          />
         </summary>
         <div class="work-log-detail" data-testid="work-log-detail">
           <div class="work-log-meta">
-            {traceBlocks().length} execution step{traceBlocks().length === 1 ? '' : 's'} · {formatTime(last()?.timestamp || '')}
+            {toolUses().length} action{toolUses().length === 1 ? '' : 's'} · {formatTime(last()?.timestamp || '')}
           </div>
           <For each={traceBlocks()}>{(block) =>
             renderBlock(block, setLightbox, getResult, openExpandedTable)
@@ -1232,11 +1272,11 @@ export function MessageView(props: MessageViewProps) {
       </details>
     )
   }
-  function renderProvisionalWork(messages: () => Message[], testId: string, live = false) {
+  function renderProvisionalWork(messages: () => Message[], testId: string, live: boolean, activityId: string) {
     return (
       <div class="msg-row" data-testid={testId} style={{ width: '100%', display: 'flex', 'justify-content': 'flex-start', 'margin-bottom': '10px' }}>
         <div class="live-work-disclosure">
-          {renderWorkLog(messages, live)}
+          {renderWorkLog(messages, live, activityId)}
         </div>
       </div>
     )
@@ -1263,10 +1303,41 @@ export function MessageView(props: MessageViewProps) {
   function isParentActivity(item: OmpTimelineItem) {
     return item.kind === 'tool' && !hideParentOrchestration(item)
   }
-  const renderItems = createMemo(() => buildRenderItems(props.messages, isPureToolResultMsg))
+  function reconcileActivityIdentities(items: RenderItem[]) {
+    if (props.loading && items.length === 0) return items
+    const visibleMessages = new Set<string>()
+    const reconciled = items.map(item => {
+      if (item.kind === 'msg') return item
+      const messages = item.kind === 'chain' ? item.messages : item.trace
+      for (const message of messages) visibleMessages.add(message.uuid)
+      const existing = messages.map(message => activityIdentityByMessage.get(message.uuid)).find(Boolean)
+      const activityId = existing || item.activityId
+      for (const message of messages) activityIdentityByMessage.set(message.uuid, activityId)
+      return activityId === item.activityId ? item : { ...item, activityId }
+    })
+    for (const messageId of activityIdentityByMessage.keys()) {
+      if (!visibleMessages.has(messageId)) activityIdentityByMessage.delete(messageId)
+    }
+    return reconciled
+  }
+  const renderItems = createMemo(() => reconcileActivityIdentities(buildRenderItems(props.messages, isPureToolResultMsg)))
+  const renderableActivityIds = createMemo(() => new Set(renderItems().flatMap(item =>
+    item.kind === 'chain' || item.kind === 'turn' ? [item.activityId] : [])))
+  createEffect(() => {
+    if (props.loading) return
+    const allowed = renderableActivityIds()
+    const nativePrefix = `${props.scopeId}:native:`
+    const invocationId = props.work?.invocationId
+    const nativeId = invocationId && invocationId !== '0' ? `${nativePrefix}${invocationId}` : null
+    setOpenActivities(current => {
+      const next = new Set([...current].filter(id =>
+        id.startsWith(nativePrefix) ? !nativeId || id === nativeId : allowed.has(id)))
+      return next.size === current.size ? current : next
+    })
+  })
   const hasCurrentWork = createMemo(() => !!props.work && (
     props.work.timeline.some(isParentActivity) ||
-    (props.todo?.total || 0) > 0 ||
+    todoNeedsAttention() ||
     (props.subagents?.length || 0) > 0 ||
     (props.jobs || []).some(job => job.status === 'running')
   ))
@@ -1457,7 +1528,7 @@ export function MessageView(props: MessageViewProps) {
         if (item.kind === 'chain') {
           return (
             <Show when={isLatestItem() && !mirroredCurrentTurn() && props.working && !currentProtocolOwnsWork() && !hasCurrentWork() && messagesHaveActivity(item.messages)}>
-              {renderProvisionalWork(() => item.messages, 'live-work-turn', true)}
+              {renderProvisionalWork(() => item.messages, 'live-work-turn', true, item.activityId)}
             </Show>
           )
         }
@@ -1473,6 +1544,7 @@ export function MessageView(props: MessageViewProps) {
         const workLogMessages = createMemo(() => messageHasActivity(msg)
           ? [...turnTrace(), msg]
           : turnTrace())
+        const activityId = item.kind === 'turn' ? item.activityId : msg.uuid
 
         // Metadata row \u2014 rendered INSIDE the bubble with a subtle top-border divider,
         // matching pi-dashboard's style: timestamp on the left, action icons on the right.
@@ -1557,6 +1629,9 @@ export function MessageView(props: MessageViewProps) {
         // Assistant message: single wide bubble containing all blocks (text, tool_use, thinking) + metadata inside.
         return (
           <>
+          <Show when={!mirroredCurrentTurn() && workLogMessages().length > 0}>
+            {renderProvisionalWork(() => workLogMessages(), 'turn-activity', false, activityId)}
+          </Show>
           <Show when={mirroredCurrentTurn()}>
             {renderParentExecution(() => props.work!)}
           </Show>
@@ -1569,7 +1644,6 @@ export function MessageView(props: MessageViewProps) {
               color: 'var(--text-primary)', overflow: 'hidden',
               'font-size': '14px', 'line-height': '1.55', 'word-break': 'break-word',
             }}>
-              <Show when={workLogMessages().length > 0}>{renderWorkLog(() => workLogMessages())}</Show>
               <For each={msg.content}>{(block) => {
                 if (
                   block.type === 'thinking' ||

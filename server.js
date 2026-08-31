@@ -1632,6 +1632,7 @@ function rememberOmpBridgeEvent(sessionId, event) {
     let oldestKey;
     let oldestUpdatedSequence = Infinity;
     for (const [candidateKey, entry] of store.entries) {
+      if (candidateKey === 'run:parent') continue;
       if (entry.updatedSequence < oldestUpdatedSequence) {
         oldestKey = candidateKey;
         oldestUpdatedSequence = entry.updatedSequence;
@@ -2293,8 +2294,11 @@ app.post('/api/internal/sessions/:id/events', async (req, res) => {
   const bridgeVersion = Number.isSafeInteger(req.body?.version) ? req.body.version : 0;
   ompBridgeLastSeen.set(id, { seenAt: Date.now(), version: bridgeVersion });
   for (const event of normalized) {
-    rememberOmpBridgeEvent(id, event);
-    broadcastNamedEvent(id, 'omp_event', event);
+    const delivered = event.type === 'agent_start' && !event.subagentId
+      ? { ...event, invocationId: randomUUID() }
+      : event;
+    rememberOmpBridgeEvent(id, delivered);
+    broadcastNamedEvent(id, 'omp_event', delivered);
   }
   try {
     for (const ownerExecutionId of terminalOwners) {

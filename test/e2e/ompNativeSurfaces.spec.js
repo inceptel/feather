@@ -111,6 +111,17 @@ test('mirrors parent and child execution across completion, replay, and responsi
 
   await detailsSummary.click()
   await expect(parentExecution).toHaveJSProperty('open', true)
+  const continuedWhileOpen = await postEvents([{
+    type: 'work_snapshot', messageId: 'answer-2', blocks: [{ type: 'thinking', thinking: 'Continuing while Activity is open.' }],
+  }])
+  expect(continuedWhileOpen.status).toBe(204)
+  await expect(parentExecution).toHaveJSProperty('open', true)
+  const invocationActivityId = await parentExecution.getAttribute('data-activity-id')
+  await page.locator('button').first().click()
+  await page.getByText('Mirror the parent and child OMP work.', { exact: true }).first().click()
+  await expect(parentExecution).toBeVisible()
+  await expect(parentExecution).toHaveAttribute('data-activity-id', invocationActivityId || '')
+  await expect(parentExecution).toHaveJSProperty('open', true)
   await expect(parentExecution.getByTestId('omp-todo')).toContainText('Verify child inspector')
   await expect(parentExecution.getByTestId('omp-todo')).toContainText('1/2')
   const detailedParentExecution = parentExecution.getByTestId('omp-parent-execution-timeline')
@@ -122,6 +133,10 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(currentTool.locator('.execution-tool-name')).toBeHidden()
   await currentTool.click()
   await expect(detailedParentExecution).toContainText('Current segment is running.')
+  const currentPayloads = currentTool.locator('.execution-payload pre')
+  await expect(currentPayloads.nth(0)).toHaveText('printf current')
+  await expect(currentPayloads.nth(0)).not.toContainText('\"command\"')
+  await expect(currentPayloads.nth(1)).toContainText('Current segment is running.')
   const childCard = parentExecution.getByTestId('omp-subagent-child-1')
   await expect(childCard).toContainText('scout')
   await childCard.click()
@@ -144,7 +159,7 @@ test('mirrors parent and child execution across completion, replay, and responsi
     { type: 'assistant_snapshot', subagentId: 'child-1', messageId: 'child-answer-2', text: 'Child answer is complete.' },
     { type: 'assistant_end', subagentId: 'child-1', messageId: 'child-answer-2' },
     { type: 'subagent_progress', id: 'child-1', agent: 'scout', status: 'completed', index: 0, resolvedModel: 'gpt-5.6-mini', toolCount: 1, requests: 2, tokens: 840, durationMs: 12400 },
-    { type: 'assistant_end', messageId: 'answer-1' },
+    { type: 'assistant_end', messageId: 'answer-2' },
   ])
   expect(completed.status).toBe(204)
   await expect(chatPanel.getByTestId('thinking-indicator')).toHaveCount(0)
@@ -240,6 +255,13 @@ test('mirrors parent and child execution across completion, replay, and responsi
   await expect(chatPanel.getByTestId('omp-parent-execution')).toHaveCount(0)
   const directBubble = page.locator('.asst-bubble').filter({ hasText: 'The Markdown arrived.' })
   await expect(directBubble.getByTestId('work-log-summary')).toHaveCount(0)
+
+  const staleTodo = await postEvents([{
+    type: 'todo',
+    phases: [{ name: 'Old work', tasks: [{ content: 'Must stay hidden', status: 'completed' }] }],
+  }])
+  expect(staleTodo.status).toBe(204)
+  await expect(chatPanel.getByTestId('omp-parent-execution')).toHaveCount(0)
 
   const jobsStarted = await postEvents([{
     type: 'async_jobs',

@@ -560,6 +560,7 @@ export interface OmpWorkScope {
   assistantEnded: boolean
   continuationPending: boolean
   segment: number
+  invocationId: string
 }
 
 export interface OmpSubagentState extends OmpWorkScope {
@@ -591,6 +592,7 @@ export interface OmpMirrorState {
 
 export interface OmpBridgeEvent {
   type: string
+  invocationId?: string
   messageId?: string
   text?: string
   reason?: string

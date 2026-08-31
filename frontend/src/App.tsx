@@ -647,11 +647,15 @@ export default function App() {
   }
 
   function handleOmpEvent(event: OmpBridgeEvent) {
-    lifecycleRevision++
     if (!event.subagentId && event.type === 'agent_start') {
-      resetOmpTurn(reduceOmpMirrorState(ompMirror(), event))
+      const current = ompMirror()
+      const next = reduceOmpMirrorState(current, event)
+      if (next === current) return
+      lifecycleRevision++
+      resetOmpTurn(next)
       return
     }
+    lifecycleRevision++
     setOmpMirror(current => reduceOmpMirrorState(current, event))
 
     if (event.type === 'subagent_lifecycle' || event.type === 'subagent_progress') return
@@ -1831,6 +1835,7 @@ export default function App() {
           }>
             <div data-testid="chat-panel" style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView
+                scopeId={currentId()!}
                 messages={roomChatMessages()}
                 loading={loading()}
                 hasMore={hasMore()}

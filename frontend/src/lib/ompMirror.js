@@ -11,6 +11,7 @@ function emptyScope() {
     assistantEnded: false,
     continuationPending: false,
     segment: 0,
+    invocationId: '0',
   }
 }
 
@@ -179,7 +180,11 @@ function beginSegment(scope, messageId) {
 
 function reduceScope(scope, event) {
   switch (event.type) {
-    case 'agent_start':
+    case 'agent_start': {
+      const invocationId = typeof event.invocationId === 'string' && event.invocationId
+        ? event.invocationId
+        : String((Number.parseInt(scope.invocationId, 10) || 0) + 1)
+      if (event.invocationId && invocationId === scope.invocationId) return scope
       return {
         ...scope,
         todo: null,
@@ -189,8 +194,10 @@ function reduceScope(scope, event) {
         assistantText: '',
         assistantEnded: false,
         continuationPending: false,
+        invocationId,
         segment: scope.segment + 1,
       }
+    }
     case 'agent_end':
       return { ...settleScope(scope, event.success === false ? 'error' : 'success'), continuationPending: false }
     case 'todo':
@@ -283,6 +290,7 @@ function upsertChildMetadata(state, event) {
     assistantEnded: restarting ? false : previous.assistantEnded,
     continuationPending: restarting ? false : previous.continuationPending,
     segment: restarting ? previous.segment + 1 : previous.segment,
+    invocationId: restarting ? String((Number.parseInt(previous.invocationId, 10) || 0) + 1) : previous.invocationId,
   }
   const settled = workStatus === 'success' || workStatus === 'error' || workStatus === 'cancelled'
     ? { ...next, ...settleScope(next, workStatus) }
@@ -303,6 +311,7 @@ function boundChildren(state) {
 export function reduceOmpMirrorState(state, event) {
   const current = state || createOmpMirrorState()
   if (!event || typeof event.type !== 'string') return current
+  if (!event.subagentId && event.type === 'agent_start' && event.invocationId === current.parent.invocationId) return current
   if (!event.subagentId && event.type === 'agent_start') {
     const childOrder = current.childOrder
       .filter(id => childStatus(current.children[id]?.status) === 'running')

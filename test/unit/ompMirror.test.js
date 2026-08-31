@@ -48,6 +48,11 @@ describe('OMP mirror reducer', () => {
     assert.deepEqual(continued.parent.timeline.map(item => item.key), ['thinking:segment-1:0', 'tool:tool-1', 'tool:tool-2'])
     assert.equal(continued.parent.todo.active, 'Preserve Todo')
     assert.equal(continued.parent.segment, settled.parent.segment + 1)
+    assert.equal(continued.parent.invocationId, running.parent.invocationId)
+    const replayedStart = reduceOmpMirrorState(continued, {
+      type: 'agent_start', invocationId: continued.parent.invocationId,
+    })
+    assert.equal(replayedStart, continued)
 
     const toolEnded = reduceOmpMirrorState(continued, { type: 'tool_execution_end', toolCallId: 'tool-2', toolName: 'bash', result: 'done' })
     const reasoning = reduceOmpMirrorState(toolEnded, { type: 'work_snapshot', messageId: 'segment-2', blocks: [{ type: 'thinking', thinking: 'Current segment' }] })
@@ -117,5 +122,6 @@ describe('OMP mirror reducer', () => {
     assert.deepEqual(reset.children, {})
     assert.equal(reset.parent.todo, null)
     assert.deepEqual(reset.parent.timeline, [])
+    assert.notEqual(reset.parent.invocationId, withTimeline.parent.invocationId)
   })
 })

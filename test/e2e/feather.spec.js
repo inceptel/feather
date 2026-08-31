@@ -270,44 +270,50 @@ test.describe('Message rendering', () => {
   test('reasoning-only direct answers have no completed Activity disclosure', async ({ page }) => {
     const bubble = page.locator('.asst-bubble').filter({ hasText: /Feather uses .*marked.* with GFM support/ }).first()
     await expect(bubble).toBeVisible()
-    await expect(bubble.getByTestId('work-log-summary')).toHaveCount(0)
+    expect(await bubble.evaluate(element => element.parentElement?.previousElementSibling?.getAttribute('data-testid'))).not.toBe('turn-activity')
     await expect(page.getByText('Planning the markdown pipeline.')).not.toBeVisible()
   })
 
   test('Activity precedes a tool-using final answer in chronological turn order', async ({ page }) => {
+    const activity = page.getByTestId('turn-activity').filter({ hasText: 'MessageView.tsx' }).first()
     const bubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' }).first()
-    const chronological = await bubble.evaluate(element => {
-      const activity = element.querySelector('.work-log')
-      const answer = [...element.querySelectorAll('.markdown')].find(node => node.textContent?.includes('Tool work complete.'))
-      return !!(activity && answer && (activity.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING))
+    await expect(activity).toBeVisible()
+    const chronological = await page.evaluate(() => {
+      const activityRow = [...document.querySelectorAll('[data-testid=\"turn-activity\"]')]
+        .find(element => element.textContent?.includes('MessageView.tsx'))
+      const answerBubble = [...document.querySelectorAll('.asst-bubble')]
+        .find(element => element.textContent?.includes('Tool work complete.'))
+      const answerRow = answerBubble?.parentElement
+      return !!(activityRow && answerRow && (activityRow.compareDocumentPosition(answerRow) & Node.DOCUMENT_POSITION_FOLLOWING))
     })
     expect(chronological).toBe(true)
   })
 
   test('tool_use block is preserved inside Activity', async ({ page }) => {
-    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
-    await toolBubble.getByTestId('work-log-summary').click()
-    await expect(toolBubble.getByText('Read').first()).toBeVisible()
+    const activity = page.getByTestId('turn-activity').filter({ hasText: 'MessageView.tsx' }).first()
+    await activity.getByTestId('work-log-summary').click()
+    await expect(activity.getByText('Read').first()).toBeVisible()
   })
 
   test('tool_result output is revealed from Activity and the tool call', async ({ page }) => {
-    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
-    await toolBubble.getByTestId('work-log-summary').click()
-    const summary = toolBubble.locator('summary', { hasText: 'MessageView.tsx' })
+    const activity = page.getByTestId('turn-activity').filter({ hasText: 'MessageView.tsx' }).first()
+    await activity.getByTestId('work-log-summary').click()
+    const summary = activity.locator('summary', { hasText: 'MessageView.tsx' })
     await expect(summary).toBeVisible()
     await summary.click()
-    await expect(toolBubble.getByText('export function MessageView')).toBeVisible()
+    await expect(activity.getByText('export function MessageView')).toBeVisible()
   })
 
   test('failed work error remains reachable inside Activity', async ({ page }) => {
-    const toolBubble = page.locator('.asst-bubble').filter({ hasText: 'Tool work complete.' })
-    const workLog = toolBubble.getByTestId('work-log-summary')
+    const activity = page.getByTestId('turn-activity').filter({ hasText: 'missing.txt' }).first()
+    const workLog = activity.getByTestId('work-log-summary')
     await expect(workLog).toHaveText(/Activity/)
+    await expect(workLog.locator('.work-log-live-dot')).toHaveAttribute('aria-label', 'Failed')
     await workLog.click()
-    const summary = toolBubble.locator('summary', { hasText: 'missing.txt' })
+    const summary = activity.locator('summary', { hasText: 'missing.txt' }).last()
     await expect(summary).toBeVisible()
     await summary.click()
-    await expect(toolBubble.getByText('ENOENT: no such file')).toBeVisible()
+    await expect(activity.getByText('ENOENT: no such file')).toBeVisible()
   })
 
   test('timestamps are displayed on messages', async ({ page }) => {
@@ -530,7 +536,7 @@ test.describe('Live updates', () => {
     expect(afterCount).toBeGreaterThan(beforeCount)
   })
 
-  test('native OMP tool intent replaces live status and a final answer clears it', async ({ page }) => {
+  test('opened Activity stays open and keeps its layout through the final answer', async ({ page }) => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
     await selectTestSession(page)
@@ -545,9 +551,7 @@ test.describe('Live updates', () => {
     })
     const liveWork = page.getByTestId('live-work-turn')
     await expect(liveWork).toBeVisible()
-    await expect(liveWork.getByTestId('work-log-summary')).toContainText('Activity')
     await expect(liveWork.getByTestId('work-log-summary')).toContainText('Inspecting upload recovery.')
-    await expect(page.getByTestId('thinking-indicator')).toHaveCount(0)
 
     writeLine({
       type: 'assistant', uuid: `e2e-status-2-${Date.now()}`, timestamp: '2025-06-15T14:06:05Z',
@@ -559,7 +563,11 @@ test.describe('Live updates', () => {
     })
     const currentStatus = liveWork.getByTestId('work-log-summary')
     await expect(currentStatus).toContainText('Testing the repaired upload.', { timeout: 10000 })
-    await expect(currentStatus).not.toContainText('Inspecting upload recovery.')
+    await currentStatus.click()
+    const liveDetails = liveWork.locator('details.work-log')
+    await expect(liveDetails).toHaveJSProperty('open', true)
+    const activityId = await liveDetails.getAttribute('data-activity-id')
+    const liveBox = await liveWork.locator('.live-work-disclosure').boundingBox()
 
     writeLine({
       type: 'assistant', uuid: `e2e-status-final-${Date.now()}`, timestamp: '2025-06-15T14:06:10Z',
@@ -567,10 +575,54 @@ test.describe('Live updates', () => {
       message: { role: 'assistant', content: 'Status lifecycle complete.' },
     })
     await expect(page.getByText('Status lifecycle complete.')).toBeVisible({ timeout: 10000 })
-    await expect(currentStatus).not.toBeVisible()
     await expect(liveWork).toHaveCount(0)
+    const completed = page.getByTestId('turn-activity').filter({ hasText: 'Testing the repaired upload.' })
+    const completedDetails = completed.locator('details.work-log')
+    await expect(completedDetails).toHaveJSProperty('open', true)
+    await expect(completedDetails).toHaveAttribute('data-activity-id', activityId || '')
+    const completedBox = await completed.locator('.live-work-disclosure').boundingBox()
+    expect(Math.abs((completedBox?.x || 0) - (liveBox?.x || 0))).toBeLessThanOrEqual(1)
+    expect(Math.abs((completedBox?.width || 0) - (liveBox?.width || 0))).toBeLessThanOrEqual(1)
     const finalBubble = page.locator('.asst-bubble').filter({ hasText: 'Status lifecycle complete.' })
-    await expect(finalBubble.getByTestId('work-log-summary')).toBeVisible()
+    await expect(finalBubble.getByTestId('work-log-summary')).toHaveCount(0)
+  })
+
+  test('multiple Activity groups in one user turn keep independent disclosure state', async ({ page }) => {
+    await page.goto(BASE)
+    await page.waitForLoadState('networkidle')
+    await selectTestSession(page)
+    const stamp = Date.now()
+    writeLine({
+      type: 'user', uuid: `e2e-multi-user-${stamp}`, timestamp: '2025-06-15T14:07:00Z',
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'Run two grouped checks.' },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-multi-tool-1-${stamp}`, timestamp: '2025-06-15T14:07:01Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: `multi-tool-1-${stamp}`, name: 'read', input: { path: '/tmp/one' }, intent: 'First grouped activity' }] },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-multi-final-1-${stamp}`, timestamp: '2025-06-15T14:07:02Z',
+      isSidechain: false, isMeta: false, message: { role: 'assistant', content: 'First group complete.' },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-multi-tool-2-${stamp}`, timestamp: '2025-06-15T14:07:03Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: `multi-tool-2-${stamp}`, name: 'grep', input: { pattern: 'two' }, intent: 'Second grouped activity' }] },
+    })
+    writeLine({
+      type: 'assistant', uuid: `e2e-multi-final-2-${stamp}`, timestamp: '2025-06-15T14:07:04Z',
+      isSidechain: false, isMeta: false, message: { role: 'assistant', content: 'Second group complete.' },
+    })
+    await expect(page.getByText('Second group complete.')).toBeVisible({ timeout: 10000 })
+    const first = page.getByTestId('turn-activity').filter({ hasText: 'First grouped activity' })
+    const second = page.getByTestId('turn-activity').filter({ hasText: 'Second grouped activity' })
+    const firstDetails = first.locator('details.work-log')
+    const secondDetails = second.locator('details.work-log')
+    expect(await firstDetails.getAttribute('data-activity-id')).not.toBe(await secondDetails.getAttribute('data-activity-id'))
+    await first.getByTestId('work-log-summary').click()
+    await expect(firstDetails).toHaveJSProperty('open', true)
+    await expect(secondDetails).toHaveJSProperty('open', false)
   })
 })
 
