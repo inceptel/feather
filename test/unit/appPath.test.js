@@ -12,15 +12,15 @@ describe('mounted application paths', () => {
   it('preserves production and canary mount prefixes', () => {
     assert.equal(appBasePath('/feather2/'), '/feather2')
     assert.equal(appUrl('/api/file?path=x', '/feather2/'), '/feather2/api/file?path=x')
-    assert.equal(appUrl('/api/rooms', '/canary-legacy-user/'), '/canary-legacy-user/api/rooms')
+    assert.equal(appUrl('/api/rooms', '/canary-preview/'), '/canary-preview/api/rooms')
   })
 
   it('builds a prefixed websocket URL from the current origin', () => {
     assert.equal(appWebSocketUrl('/api/terminal', {
-      protocol: 'https:', host: 'legacy-user.feather-cloud.dev', pathname: '/feather2/',
-    }), 'wss://legacy-user.feather-cloud.dev/feather2/api/terminal')
+      protocol: 'https:', host: 'viewer.example', pathname: '/feather2/',
+    }), 'wss://viewer.example/feather2/api/terminal')
     assert.equal(appWebSocketUrl('/api/shell', {
-      protocol: 'http:', host: '127.0.0.1:9000', pathname: '/canary-legacy-user/',
-    }), 'ws://127.0.0.1:9000/canary-legacy-user/api/shell')
+      protocol: 'http:', host: '127.0.0.1:9000', pathname: '/canary-preview/',
+    }), 'ws://127.0.0.1:9000/canary-preview/api/shell')
   })
 })

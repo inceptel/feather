@@ -53,7 +53,7 @@ Depends on how feather is running:
 ```bash
 release=$(bin/refeather stage --source path/to/clean/feather --releases-dir /opt/feather/releases)
 sudo bin/refeather promote --release "$release" --current-link /opt/feather/current \
-  --program feather-legacy-user --supervisor-socket unix:///run/supervisor.sock \
+  --program feather-prod --supervisor-socket unix:///run/supervisor.sock \
   --health-url http://127.0.0.1:8123/feather2/api/health
 ```
 

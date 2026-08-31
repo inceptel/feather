@@ -77,7 +77,7 @@ esac
 SH
 chmod +x "$fake_curl"
 
-[ "$(FEATHER_URL='https://legacy-user.example/feather2/' FEATHER_CURL=/missing "$ROOT/bin/feather-instance")" = 'https://legacy-user.example/feather2' ]
+[ "$(FEATHER_URL='https://viewer.example/feather2/' FEATHER_CURL=/missing "$ROOT/bin/feather-instance")" = 'https://viewer.example/feather2' ]
 [ "$(FEATHER_CURL="$fake_curl" FEATHER_FAKE_PORTS=4870 "$ROOT/bin/feather-instance")" = 'http://127.0.0.1:4870' ]
 [ "$(FEATHER_CURL="$fake_curl" FEATHER_FAKE_PORTS=3300 FEATHER_PORT=3300 "$ROOT/bin/sidecar" url)" = 'http://127.0.0.1:3300' ]
 [ "$(FEATHER_CURL="$fake_curl" FEATHER_FAKE_PORTS=3300 PORT=3300 "$ROOT/bin/feather-instance")" = 'http://127.0.0.1:3300' ]

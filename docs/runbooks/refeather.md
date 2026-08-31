@@ -13,7 +13,7 @@ export REFEATHER_RELEASES_DIR=/opt/feather/releases
 export REFEATHER_CURRENT_LINK=/opt/feather/current
 export REFEATHER_JOURNAL_DIR=/var/lib/feather/refeather
 export REFEATHER_LOCK_FILE=/var/lock/feather-refeather.lock
-export REFEATHER_SUPERVISOR_PROGRAM=feather-legacy-user
+export REFEATHER_SUPERVISOR_PROGRAM=feather-prod
 export REFEATHER_SUPERVISOR_SOCKET=unix:///run/supervisor.sock
 export REFEATHER_HEALTH_URL=http://127.0.0.1:8123/feather2/api/health
 ```

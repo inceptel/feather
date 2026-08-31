@@ -30,7 +30,7 @@ describe('room wiki', () => {
   it('validates page names: segments only, no traversal or hidden entries', () => {
     assert.equal(validWikiPageName('Home'), true)
     assert.equal(validWikiPageName('Operations/Deploy'), true)
-    assert.equal(validWikiPageName('legacy-user repair 2026'), true)
+    assert.equal(validWikiPageName('Legacy repair 2026'), true)
     assert.equal(validWikiPageName('../notes'), false)
     assert.equal(validWikiPageName('a/../../b'), false)
     assert.equal(validWikiPageName('.hidden'), false)

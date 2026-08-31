@@ -27,7 +27,7 @@ afterEach(() => {
 describe('state path classification', () => {
   it('preserves every checkout-local path when FEATHER_STATE_DIR is unset', () => {
     const releaseDir = '/opt/feather/current'
-    const homeDir = '/home/legacy-user'
+    const homeDir = '/home/tester'
     const paths = resolveStatePaths({ releaseDir, homeDir })
 
     assert.equal(paths.instance.external, false)
@@ -45,22 +45,22 @@ describe('state path classification', () => {
     const paths = resolveStatePaths({
       releaseDir: '/opt/feather/releases/a',
       stateDir: '/srv/feather/state',
-      homeDir: '/home/legacy-user',
+      homeDir: '/home/tester',
     })
 
     assert.equal(paths.instance.external, true)
     assert.equal(paths.instance.metaFile, '/srv/feather/state/session-meta.json')
     assert.equal(paths.instance.uploadsDir, '/srv/feather/state/uploads')
     assert.equal(paths.release.staticDir, '/opt/feather/releases/a/static')
-    assert.equal(paths.coordination.sidecarsDir, '/home/legacy-user/.feather/sidecars')
-    assert.equal(paths.coordination.roomAssignmentsFile, '/home/legacy-user/.feather/room-sessions.json')
-    assert.equal(paths.coordination.roomLeadersFile, '/home/legacy-user/.feather/room-mains.json')
-    assert.equal(paths.coordination.roomResidentsFile, '/home/legacy-user/.feather/room-residents.json')
-    assert.equal(paths.coordination.roomPulsesFile, '/home/legacy-user/.feather/room-pulses.json')
-    assert.equal(paths.harness.claudeProjectsDir, '/home/legacy-user/.claude/projects')
-    assert.equal(paths.harness.ompSessionsDir, '/home/legacy-user/.feather/omp-sessions')
-    assert.equal(paths.harness.codexSessionsDir, '/home/legacy-user/.codex/sessions')
-    assert.equal(paths.workspace.roomsDir, '/home/legacy-user/rooms')
+    assert.equal(paths.coordination.sidecarsDir, '/home/tester/.feather/sidecars')
+    assert.equal(paths.coordination.roomAssignmentsFile, '/home/tester/.feather/room-sessions.json')
+    assert.equal(paths.coordination.roomLeadersFile, '/home/tester/.feather/room-mains.json')
+    assert.equal(paths.coordination.roomResidentsFile, '/home/tester/.feather/room-residents.json')
+    assert.equal(paths.coordination.roomPulsesFile, '/home/tester/.feather/room-pulses.json')
+    assert.equal(paths.harness.claudeProjectsDir, '/home/tester/.claude/projects')
+    assert.equal(paths.harness.ompSessionsDir, '/home/tester/.feather/omp-sessions')
+    assert.equal(paths.harness.codexSessionsDir, '/home/tester/.codex/sessions')
+    assert.equal(paths.workspace.roomsDir, '/home/tester/rooms')
     assert.deepEqual(paths.runtime, { managedExternally: ['process', 'tmux', 'temporary-files'] })
   })
 
@@ -171,7 +171,7 @@ describe('server state integration', () => {
     const homeDir = path.join(base, 'home')
     fs.mkdirSync(stateDir)
     fs.mkdirSync(homeDir)
-    fs.writeFileSync(path.join(stateDir, 'sharing.json'), JSON.stringify({ owner: 'legacy-user' }), { mode: 0o644 })
+    fs.writeFileSync(path.join(stateDir, 'sharing.json'), JSON.stringify({ owner: 'legacy-owner' }), { mode: 0o644 })
 
     const result = spawnSync(process.execPath, ['server.js', '--add-peer', 'migration-test'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
@@ -182,7 +182,7 @@ describe('server state integration', () => {
 
     assert.equal(result.status, 0, result.stderr)
     const sharing = JSON.parse(fs.readFileSync(path.join(stateDir, 'sharing.json'), 'utf8'))
-    assert.equal(sharing.owner, 'legacy-user', 'existing copied state must remain readable')
+    assert.equal(sharing.owner, 'legacy-owner', 'existing copied state must remain readable')
     assert.ok(sharing.peers['migration-test'].token)
     assert.equal(fs.statSync(path.join(stateDir, 'sharing.json')).mode & 0o777, 0o600)
     assert.ok(fs.statSync(path.join(stateDir, 'uploads')).isDirectory())

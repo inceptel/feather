@@ -332,7 +332,7 @@ describe('server and rollback integration', () => {
 
     const sharingFile = path.join(release, 'sharing.json')
     fs.writeFileSync(sharingFile, JSON.stringify({
-      owner: 'legacy-user',
+      owner: 'legacy-owner',
       futureDocumentField: { keep: true },
       peers: { existing: { token: 'existing-token', policy: 'selected', futurePeerField: 7 } },
     }))

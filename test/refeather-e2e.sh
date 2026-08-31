@@ -205,7 +205,7 @@ switch_env=(env REFEATHER_SUPERVISORCTL="$fake_supervisor" REFEATHER_CURL="$fake
   REFEATHER_TEST_CURRENT="$current" REFEATHER_TEST_SERVICE_LOG="$service_log"
   REFEATHER_JOURNAL_DIR="$journal" REFEATHER_LOCK_FILE="$lock" REFEATHER_HEALTH_ATTEMPTS=2 REFEATHER_HEALTH_DELAY=0.01
   REFEATHER_SUPERVISOR_TIMEOUT=0.1s REFEATHER_SUPERVISOR_KILL_AFTER=0.1s)
-switch_args=(--current-link "$current" --program feather-legacy-user --supervisor-socket unix:///tmp/legacy-user-supervisor.sock
+switch_args=(--current-link "$current" --program feather-prod --supervisor-socket unix:///tmp/feather-supervisor.sock
   --health-url http://127.0.0.1:8123/feather2/api/health --skip-capability-install)
 
 # A target changed after staging must be rejected before service mutation.
@@ -247,8 +247,8 @@ wait "$preflight_pid" 2>/dev/null || true
 
 "${switch_env[@]}" "$ROOT/bin/refeather" promote --release "$release" "${switch_args[@]}"
 [ "$(readlink -f "$current")" = "$release" ]
-grep -q '^stop feather-legacy-user ' "$service_log"
-grep -q '^start feather-legacy-user ' "$service_log"
+grep -q '^stop feather-prod ' "$service_log"
+grep -q '^start feather-prod ' "$service_log"
 [ ! -e "$journal/active.json" ]
 
 "${switch_env[@]}" "$ROOT/bin/refeather" rollback --release "$old" "${switch_args[@]}"

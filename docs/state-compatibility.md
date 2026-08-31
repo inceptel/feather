@@ -51,6 +51,6 @@ accepted new writes would discard those writes.
 The automated U9 rehearsal runs the archived pre-U9 release at `601c2dc`
 against a copied v0 sharing fixture containing unknown document and peer fields,
 then verifies that its peer mutation retains them. The other rows are kept
-compatible by retaining their exact v0 root types and mutation shapes; the legacy-user
-cutover still requires the per-document copied-state rehearsal above rather
-than treating this representative unit test as production authorization.
+compatible by retaining their exact v0 root types and mutation shapes; a legacy
+deployment cutover still requires the per-document copied-state rehearsal above
+rather than treating this representative unit test as production authorization.

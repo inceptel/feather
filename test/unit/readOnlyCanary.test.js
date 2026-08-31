@@ -50,7 +50,7 @@ function fixture() {
   fs.writeFileSync(readableFile, 'canary-readable')
   writeJson(path.join(state, 'boxes.json'), {}, 0o600)
   writeJson(path.join(state, 'sharing.json'), {
-    owner: 'legacy-user', peers: { viewer: { token: 'read-only-token', policy: 'selected', control: true } },
+    owner: 'test-owner', peers: { viewer: { token: 'read-only-token', policy: 'selected', control: true } },
   }, 0o600)
   writeJson(path.join(state, 'session-meta.json'), {
     [sessionId]: { agent: 'claude', share: ['viewer'] },

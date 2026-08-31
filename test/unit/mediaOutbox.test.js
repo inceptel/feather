@@ -6,8 +6,8 @@ describe('media outbox scope', () => {
   it('preserves the legacy root database while isolating mounted applications', () => {
     assert.equal(mediaOutboxDatabaseName('/'), 'feather-media-outbox')
     assert.equal(mediaOutboxDatabaseName('/feather2/'), 'feather-media-outbox:%2Ffeather2')
-    assert.equal(mediaOutboxDatabaseName('/canary-legacy-user/'), 'feather-media-outbox:%2Fcanary-legacy-user')
-    assert.notEqual(mediaOutboxDatabaseName('/feather2/'), mediaOutboxDatabaseName('/canary-legacy-user/'))
+    assert.equal(mediaOutboxDatabaseName('/canary-preview/'), 'feather-media-outbox:%2Fcanary-preview')
+    assert.notEqual(mediaOutboxDatabaseName('/feather2/'), mediaOutboxDatabaseName('/canary-preview/'))
   })
 
   it('recognizes delivered audio as terminal recovery state', () => {

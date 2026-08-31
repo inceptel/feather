@@ -24,14 +24,14 @@ function writeClaudeSession(file, { id, cwd, title, timestamp }) {
 describe('portable Room membership', () => {
   it('derives a Room project id from a non-default Rooms root', () => {
     assert.equal(
-      encodeProjectPath('/srv/legacy-user/home/rooms/marriage'),
-      '-srv-legacy-user-home-rooms-marriage',
+      encodeProjectPath('/srv/demo/home/rooms/marriage'),
+      '-srv-demo-home-rooms-marriage',
     )
 
-    const cwdSession = { id: 'cwd-session', projectId: '-srv-legacy-user-home-rooms-marriage', updatedAt: '2026-01-01T00:00:00Z' }
+    const cwdSession = { id: 'cwd-session', projectId: '-srv-demo-home-rooms-marriage', updatedAt: '2026-01-01T00:00:00Z' }
     const grouped = groupRoomSessions({
       roomNames: ['marriage'],
-      roomsRoot: '/srv/legacy-user/home/rooms',
+      roomsRoot: '/srv/demo/home/rooms',
       assignments: {},
       sessions: [cwdSession],
     })
@@ -67,7 +67,7 @@ describe('portable Room membership', () => {
   it('includes a non-default-home Room session and an assigned session older than the discovery limit', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-rooms-portable-'))
     roots.push(root)
-    const home = path.join(root, 'legacy-user-home')
+    const home = path.join(root, 'demo-home')
     const stateDir = path.join(root, 'state')
     const projects = path.join(home, '.claude/projects')
     const roomDir = path.join(home, 'rooms/marriage')

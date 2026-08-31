@@ -11,12 +11,12 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
   }
   const candidate = {
     id: 'ungrouped-chat', title: 'Chat to attach', updatedAt: '2026-08-22T11:00:00Z',
-    isActive: false, agent: 'codex', projectId: '-srv-legacy-user-unrelated',
+    isActive: false, agent: 'codex', projectId: '-srv-demo-unrelated',
   }
 
   await page.route('**/api/rooms', async (route) => {
     await route.fulfill({ json: { rooms: [{
-      name: 'marriage', cwd: '/srv/legacy-user/home/rooms/marriage', active: false,
+      name: 'marriage', cwd: '/srv/demo/home/rooms/marriage', active: false,
       latest: null, updatedAt: seeded.updatedAt,
       pulse: { enabled: true, status: 'waiting', lastRunAt: null, nextRunAt: '2026-08-22T12:15:00Z', sessionId: null },
       sessions: attached ? [seeded, { ...candidate, roomAssigned: true }] : [seeded],
