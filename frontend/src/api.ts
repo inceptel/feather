@@ -82,8 +82,6 @@ export interface Message {
   content: ContentBlock[]
   delivery?: 'sent' | 'delivered'
   passive?: boolean
-  roomFrom?: string
-  roomTo?: string
 }
 
 export type ProtocolRunStatus =
@@ -241,11 +239,6 @@ export async function fetchSessionRoom(sessionId: string): Promise<string | null
   return (await fetchSessionRoomContext(sessionId)).room
 }
 
-export async function fetchRoomResidents(room: string): Promise<RoomResident[]> {
-  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/residents`)
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return (await response.json()).residents || []
-}
 
 
 export interface RoomWikiPageMeta { name: string, size: number, updatedAt: string }

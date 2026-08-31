@@ -6,8 +6,8 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, fetchSidecar, subscribeSidecar, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchRoomResidents, fetchProtocolRuns } from './api'
+import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -16,7 +16,6 @@ import { localFileUrl } from './lib/localMedia.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
-import { mergeRoomThreadMessages } from './lib/roomThread.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
 
 interface QuickLink { label: string; url: string }
@@ -146,8 +145,6 @@ export default function App() {
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
-  const [roomSidecarId, setRoomSidecarId] = createSignal<string | null>(null)
-  const [roomThread, setRoomThread] = createSignal<SidecarMessage[]>([])
   const [roomContext, setRoomContext] = createSignal<RoomSessionContext | null>(null)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
@@ -1584,31 +1581,6 @@ export default function App() {
     sendSessionKeys(id, ['AgentHub'], currentBox()).catch(error => console.error('Could not open Agent Hub', error))
   }
 
-  async function openRoomRole(role: string) {
-    const sourceId = currentId()
-    const generation = selectGeneration
-    const context = roomContext()
-    if (!sourceId || !context?.room || role === 'human') return
-    try {
-      const resident = (await fetchRoomResidents(context.room)).find(candidate => candidate.role === role)
-      if (generation !== selectGeneration || currentId() !== sourceId || roomContext()?.room !== context.room) return
-      if (resident) select(resident.sessionId)
-    } catch (error) {
-      console.error('Could not open Room resident', error)
-    }
-  }
-
-  function mergeRoomThreadMessage(message: SidecarMessage) {
-    setRoomThread((current) => {
-      const existing = current.findIndex((candidate) => candidate.seq === message.seq)
-      if (existing >= 0) {
-        const next = [...current]
-        next[existing] = message
-        return next
-      }
-      return [...current, message].sort((a, b) => a.seq - b.seq)
-    })
-  }
 
   let roomContextGeneration = 0
   createEffect(() => {
@@ -1621,34 +1593,6 @@ export default function App() {
     }).catch(() => {})
   })
 
-  let roomThreadGeneration = 0
-  createEffect(() => {
-    const id = currentId()
-    const generation = ++roomThreadGeneration
-    let unsubscribe: (() => void) | undefined
-    let disposed = false
-    setRoomSidecarId(null)
-    setRoomThread([])
-    onCleanup(() => {
-      disposed = true
-      unsubscribe?.()
-    })
-    if (!id || isRemoteBox()) return
-    fetchSessionRoom(id).then((roomName) => {
-      if (!roomName || disposed || generation !== roomThreadGeneration) return
-      const groupId = `room-${roomName}`
-      return fetchSidecar(groupId).then(({ group, thread }) => {
-        if (disposed || generation !== roomThreadGeneration || group?.kind !== 'room') return
-        if (group.members.find((member) => member.role === 'leader')?.sessionId !== id) return
-        setRoomSidecarId(groupId)
-        setRoomThread(thread)
-        unsubscribe = subscribeSidecar(groupId, mergeRoomThreadMessage)
-      })
-    }).catch(() => {})
-  })
-
-  const roomChatMessages = createMemo<Message[]>(() =>
-    mergeRoomThreadMessages(messages(), roomThread(), roomSidecarId()) as Message[])
   // The Wiki is Room-owned. Resolve the current session's Room only when the
   // tab opens; RoomWikiView then reads curated pages, never raw updates/traces.
   let wikiRoomGeneration = 0
@@ -1986,7 +1930,7 @@ export default function App() {
             <div data-testid="chat-panel" style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView
                 scopeId={currentId()!}
-                messages={roomChatMessages()}
+                messages={messages()}
                 loading={loading()}
                 hasMore={hasMore()}
                 loadingMore={loadingMore()}
@@ -2008,8 +1952,6 @@ export default function App() {
                 protocolRuns={protocolRuns()}
                 highLevel={roomContext()?.kind === 'main'}
                 onOpenAgentHub={isRemoteBox() ? undefined : openAgentHub}
-                roomRole={roomContext()?.role || undefined}
-                onOpenRoomRole={openRoomRole}
               />
             </div>
             <div data-testid="wiki-panel" style={{ display: tab() === 'wiki' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
