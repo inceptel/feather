@@ -6,7 +6,7 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
+import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, SidecarMessage, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo } from './api'
 import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, fetchSidecar, subscribeSidecar, createSidecar, fetchSessionRoom, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
@@ -326,6 +326,7 @@ export default function App() {
   const [tossCalibration, setTossCalibration] = createSignal(false)
   const [tossCalibrationStats, setTossCalibrationStats] = createSignal<TossCalibrationStats>({ maxPeakDps: 0, maxDegrees: 0, hits: 0 })
   const [hasMore, setHasMore] = createSignal(false)
+  const [messageBefore, setMessageBefore] = createSignal(0)
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [renaming, setRenaming] = createSignal(false)
   const [renameText, setRenameText] = createSignal('')
@@ -384,8 +385,9 @@ export default function App() {
   const [expanded, setExpanded] = createSignal(false)
   const [agents, setAgents] = createSignal<AgentInfo[]>([])
   const [agentDropdown, setAgentDropdown] = createSignal(false)
-  let cleanupSSE: (() => void) | null = null
+  let cleanupSSE: MessageSubscription | null = null
   let selectGeneration = 0
+  let paginationStreamOffsets = new Set<number>()
   let lifecycleRevision = 0
   let sessionPoll: ReturnType<typeof setInterval> | undefined
   let versionPoll: ReturnType<typeof setInterval> | undefined
@@ -592,7 +594,7 @@ export default function App() {
     }
     location.reload()
   }
-  onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearAssistantStream(); clearPendingMedia(); cleanupSSE?.(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
+  onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearAssistantStream(); clearPendingMedia(); cleanupSSE?.close(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
 
   const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
   const isRemoteBox = () => currentBox() !== 'local'
@@ -633,7 +635,7 @@ export default function App() {
     setPeerControl(false)
     clearSearch()
     setCurrentId(null)
-    cleanupSSE?.()
+    cleanupSSE?.close()
     setMessages([])
     setToolIntentStatus('')
     clearAssistantStream()
@@ -761,7 +763,10 @@ export default function App() {
     location.hash = box === 'local' ? id : `${box}:${id}`
     setSidebar(false)
     setLoading(true)
+    setSSEStatus('connected')
     setMessages([])
+    setMessageBefore(0)
+    setLoadingMore(false)
     setToolIntentStatus('')
     clearAssistantStream()
     clearOmpLiveSurfaces()
@@ -771,76 +776,155 @@ export default function App() {
     restoreMedia(box, id)
     setHistoryIdx(-1)
     setHistoryOpen(false)
-    cleanupSSE?.()
-    try {
-      const listed = sessions().find(session => session.id === id)
-      const [result, sessionMeta, runResult] = await Promise.all([
-        fetchMessages(id, 0, box),
-        listed ? Promise.resolve(listed) : findSessionMeta(id, box),
-        fetchProtocolRuns(id, box).catch(() => ({ runs: [] })),
-      ])
-      if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
-      const toolIntentState = deriveToolIntentState(result.messages)
-      const inactive = !sessionMeta?.isActive
-      setMessages(result.messages)
-      setToolIntentStatus(inactive ? '' : toolIntentState.status)
-      setTodoSnapshot(deriveTodoSnapshot(result.messages))
-      setWorking(inactive ? false : toolIntentState.working)
-      setProtocolRunsState(replaceProtocolRuns(runResult.runs))
-      setHasMore(result.hasMore)
-    } catch {}
-    if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
-    setLoading(false)
-    setSSEStatus('connected')
-    cleanupSSE = subscribeMessages(id, {
-      onMessage: (msg) => {
-        if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
-        setMessages(prevMessages => {
-          if (prevMessages.some(m => m.uuid === msg.uuid)) return prevMessages
-          const wasWorking = working()
-          if (msg.role === 'user' && !wasWorking) {
-            lifecycleRevision++
-            resetOmpTurn()
+    cleanupSSE?.close()
+
+    type BufferedStreamEvent =
+      | { kind: 'message'; message: Message; offset: number }
+      | { kind: 'omp'; event: OmpBridgeEvent }
+      | { kind: 'protocol'; run: ProtocolRunSnapshot }
+    const buffered: BufferedStreamEvent[] = []
+    let snapshotInstalled = false
+    const isCurrentSelection = () =>
+      generation === selectGeneration && currentId() === id && currentBox() === box
+    paginationStreamOffsets = new Set<number>()
+    let snapshotCursor = 0
+    let paginationInstalled = false
+
+    const applyMessage = (msg: Message, offset?: number) => {
+      if (!isCurrentSelection()) return
+      if (paginationInstalled && offset && offset > snapshotCursor && !paginationStreamOffsets.has(offset)) {
+        paginationStreamOffsets.add(offset)
+        setMessageBefore(current => current + 1)
+      }
+      setMessages(prevMessages => {
+        if (prevMessages.some(message => message.uuid === msg.uuid)) return prevMessages
+        const wasWorking = working()
+        if (msg.role === 'user' && !wasWorking) {
+          lifecycleRevision++
+          resetOmpTurn()
+        }
+        const transition = toolIntentTransition({
+          status: toolIntentStatus(),
+          working: working(),
+        }, msg)
+        setToolIntentStatus(transition.status)
+        setWorking(transition.working)
+        if (msg.role !== 'user' || !wasWorking) {
+          setTodoSnapshot(current => reduceTodoSnapshot(current, msg))
+        }
+        if (isFinalAssistantMessage(msg)) clearAssistantStream()
+        if (msg.role === 'user') {
+          const msgText = msg.content?.find(block => block.type === 'text')?.text || ''
+          const optimisticIndex = prevMessages.findIndex(message =>
+            message.uuid.startsWith('optimistic-')
+            && message.content?.[0]?.text === msgText
+            && Math.abs(new Date(message.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 30000)
+          if (optimisticIndex >= 0) {
+            const updated = [...prevMessages]
+            updated[optimisticIndex] = { ...msg, delivery: 'delivered' }
+            return updated
           }
-          const transition = toolIntentTransition({
-            status: toolIntentStatus(),
-            working: working(),
-          }, msg)
-          setToolIntentStatus(transition.status)
-          setWorking(transition.working)
-          if (msg.role !== 'user' || !wasWorking) {
-            setTodoSnapshot(current => reduceTodoSnapshot(current, msg))
-          }
-          if (isFinalAssistantMessage(msg)) clearAssistantStream()
-          if (msg.role === 'user') {
-            const msgText = msg.content?.find(b => b.type === 'text')?.text || ''
-            const idx = prevMessages.findIndex(m =>
-              m.uuid.startsWith('optimistic-') &&
-              m.content?.[0]?.text === msgText &&
-              Math.abs(new Date(m.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 30000
-            )
-            if (idx >= 0) {
-              const updated = [...prevMessages]
-              updated[idx] = { ...msg, delivery: 'delivered' }
-              return updated
-            }
-          }
-          return [...prevMessages, msg]
-        })
+        }
+        return [...prevMessages, msg]
+      })
+    }
+
+    const subscription = subscribeMessages(id, {
+      onMessage: (message, offset) => {
+        if (!isCurrentSelection()) return
+        if (!snapshotInstalled) {
+          buffered.push({ kind: 'message', message, offset })
+          return
+        }
+        applyMessage(message, offset)
       },
       onStatus: (status) => {
-        if (generation !== selectGeneration || currentId() !== id || currentBox() !== box) return
+        if (!isCurrentSelection()) return
         setSSEStatus(status)
         if (status === 'reconnecting') clearAssistantStream()
       },
       box,
       onOmpEvent: (event) => {
-        if (generation === selectGeneration && currentId() === id && currentBox() === box) handleOmpEvent(event)
+        if (!isCurrentSelection()) return
+        if (!snapshotInstalled) {
+          buffered.push({ kind: 'omp', event })
+          return
+        }
+        handleOmpEvent(event)
       },
       onProtocolRun: (run) => {
-        if (generation === selectGeneration && currentId() === id && currentBox() === box) applyProtocolRun(run)
+        if (!isCurrentSelection()) return
+        if (!snapshotInstalled) {
+          buffered.push({ kind: 'protocol', run })
+          return
+        }
+        applyProtocolRun(run)
       },
     })
+    cleanupSSE = subscription
+
+    const listed = sessions().find(session => session.id === id)
+    const sessionMetaPromise = listed
+      ? Promise.resolve(listed)
+      : findSessionMeta(id, box).catch(() => undefined)
+    const runResultPromise = fetchProtocolRuns(id, box).catch(() => ({ runs: [] }))
+    const connectionTimeout = Promise.withResolvers<void>()
+    const connectionTimeoutId = setTimeout(connectionTimeout.resolve, 5000)
+    await Promise.race([subscription.connected, connectionTimeout.promise])
+    clearTimeout(connectionTimeoutId)
+    if (!isCurrentSelection()) {
+      subscription.close()
+      return
+    }
+    const [result, sessionMeta, runResult] = await Promise.all([
+      fetchMessages(id, 0, box).catch(() => ({ messages: [], hasMore: false, cursor: 0, nextBefore: 0 })),
+      sessionMetaPromise,
+      runResultPromise,
+    ])
+    if (!isCurrentSelection()) {
+      subscription.close()
+      return
+    }
+
+    const snapshotIds = new Set(result.messages.map(message => message.uuid))
+    const messagesBeforeSnapshot: Message[] = []
+    for (const event of buffered) {
+      if (event.kind !== 'message' || event.offset > result.cursor || snapshotIds.has(event.message.uuid)) continue
+      snapshotIds.add(event.message.uuid)
+      paginationStreamOffsets.add(event.offset)
+      messagesBeforeSnapshot.push(event.message)
+    }
+    snapshotCursor = result.cursor
+    paginationInstalled = true
+    const initialMessages = [...messagesBeforeSnapshot, ...result.messages]
+    const toolIntentState = deriveToolIntentState(initialMessages)
+    const inactive = !sessionMeta?.isActive
+    batch(() => {
+      setMessages(initialMessages)
+      setToolIntentStatus(inactive ? '' : toolIntentState.status)
+      setTodoSnapshot(deriveTodoSnapshot(initialMessages))
+      setWorking(inactive ? false : toolIntentState.working)
+      setProtocolRunsState(replaceProtocolRuns(runResult.runs))
+      setHasMore(result.hasMore)
+      setMessageBefore(result.nextBefore + messagesBeforeSnapshot.length)
+    })
+    subscription.setCursor(result.cursor)
+    snapshotInstalled = true
+
+    for (const event of buffered) {
+      if (!isCurrentSelection()) break
+      if (event.kind === 'message') {
+        if (event.offset <= result.cursor) continue
+        applyMessage(event.message, event.offset)
+      } else if (event.kind === 'omp') {
+        handleOmpEvent(event.event)
+      } else {
+        applyProtocolRun(event.run)
+      }
+    }
+    buffered.length = 0
+    if (!isCurrentSelection()) return
+    setLoading(false)
   }
 
   async function handleNew(agent?: string) {
@@ -873,7 +957,7 @@ export default function App() {
     dismissMediaNotice()
     setCurrentId(null)
     location.hash = ''
-    cleanupSSE?.()
+    cleanupSSE?.close()
     setMessages([])
     clearProtocolRunSurfaces()
     await refreshSessions()
@@ -906,7 +990,7 @@ export default function App() {
     setCurrentId(null)
     location.hash = ''
     setSidebar(false)
-    cleanupSSE?.()
+    cleanupSSE?.close()
     setMessages([])
     clearProtocolRunSurfaces()
     clearPendingMedia()
@@ -928,14 +1012,28 @@ export default function App() {
 
   async function loadEarlier() {
     const id = currentId()
+    const box = currentBox()
+    const generation = selectGeneration
     if (!id || loadingMore()) return
+    const before = messageBefore()
     setLoadingMore(true)
     try {
-      const result = await fetchMessages(id, messages().length, currentBox())
-      setMessages(prev => [...result.messages, ...prev])
-      setHasMore(result.hasMore)
-    } catch {}
-    setLoadingMore(false)
+      const result = await fetchMessages(id, before, box)
+      if (generation === selectGeneration && currentId() === id && currentBox() === box) {
+        setMessages(prev => {
+          const existing = new Set(prev.map(message => message.uuid))
+          return [...result.messages.filter(message => !existing.has(message.uuid)), ...prev]
+        })
+        setHasMore(result.hasMore)
+        let liveRowsAfterPage = 0
+        for (const offset of paginationStreamOffsets) {
+          if (offset > result.cursor) liveRowsAfterPage++
+        }
+        setMessageBefore(result.nextBefore + liveRowsAfterPage)
+      }
+    } catch {} finally {
+      if (generation === selectGeneration) setLoadingMore(false)
+    }
   }
 
   async function toggleStar(sessionId: string, msgUuid: string) {

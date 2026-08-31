@@ -201,6 +201,13 @@ describe('server-enforced read-only canary', () => {
     }
     const sharedRead = await fetch(`${base}/api/share/sessions`, { headers: { Authorization: 'Bearer read-only-token' } })
     assert.equal(sharedRead.status, 200)
+    const sharedMessages = await fetch(`${base}/api/share/sessions/${fx.sessionId}/messages`, {
+      headers: { Authorization: 'Bearer read-only-token' },
+    })
+    assert.equal(sharedMessages.status, 200)
+    const sharedSnapshot = await sharedMessages.json()
+    assert.equal(sharedSnapshot.cursor, fs.statSync(fx.sessionFile).size)
+    assert.equal(sharedSnapshot.nextBefore, sharedSnapshot.messages.length)
 
     const mutations = [
       ['GET', '/api/future-side-effect'],

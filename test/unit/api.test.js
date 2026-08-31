@@ -323,6 +323,9 @@ describe('GET /api/sessions/:id/messages', () => {
   it('returns empty array for nonexistent session', async () => {
     const { messages } = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/messages`)).json()
     assert.deepEqual(messages, [])
+    const body = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/messages`)).json()
+    assert.equal(body.cursor, 0)
+    assert.equal(body.nextBefore, 0)
   })
 
   it('returns correct messages for test session', async () => {
@@ -348,14 +351,48 @@ describe('GET /api/sessions/:id/messages', () => {
     // Fourth: tool_result
     assert.equal(messages[3].content[0].type, 'tool_result')
     assert.equal(messages[3].content[0].content, 'forty-two')
+
+    const snapshot = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages`)).json()
+    assert.equal(snapshot.cursor, fs.statSync(testSessionPath).size)
+  })
+
+  it('holds the snapshot cursor at the last complete JSONL line', async () => {
+    const completeSize = fs.statSync(testSessionPath).size
+    fs.appendFileSync(testSessionPath, '{\"partial\":')
+    try {
+      const snapshot = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages`)).json()
+      assert.equal(snapshot.cursor, completeSize)
+      assert.equal(snapshot.messages.length, 4)
+    } finally {
+      fs.truncateSync(testSessionPath, completeSize)
+    }
   })
 
   it('limit parameter truncates from the front', async () => {
-    const { messages } = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages?limit=2`)).json()
-    assert.equal(messages.length, 2)
+    const page = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages?limit=2`)).json()
+    assert.equal(page.messages.length, 2)
+    assert.equal(page.nextBefore, 2)
     // Should be the last 2 messages (tool_use, tool_result)
-    assert.equal(messages[0].uuid, 'api-test-0003')
-    assert.equal(messages[1].uuid, 'api-test-0004')
+    assert.equal(page.messages[0].uuid, 'api-test-0003')
+    assert.equal(page.messages[1].uuid, 'api-test-0004')
+  })
+
+  it('advances pagination independently of duplicate message UUIDs', async () => {
+    const duplicateUuid = `api-duplicate-${Date.now()}`
+    writeLine({
+      type: 'user', uuid: duplicateUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'First duplicate row' },
+    })
+    writeLine({
+      type: 'user', uuid: duplicateUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'Second duplicate row' },
+    })
+    const newest = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages?limit=1`)).json()
+    const previous = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages?limit=1&before=${newest.nextBefore}`)).json()
+    assert.equal(newest.messages[0].uuid, duplicateUuid)
+    assert.equal(previous.messages[0].uuid, duplicateUuid)
+    assert.equal(newest.nextBefore, 1)
+    assert.equal(previous.nextBefore, 2)
   })
 
   it('messages preserve timestamps', async () => {
@@ -413,6 +450,77 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
     }
   })
 
+  it('replays transcript messages after the snapshot cursor', async () => {
+    const snapshot = await (await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/messages`)).json()
+    const replayUuid = `sse-replay-${Date.now()}`
+    fs.appendFileSync(testSessionPath, '\n')
+    writeLine({
+      type: 'user', uuid: replayUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'Replay after cursor' },
+    })
+    const expectedOffset = fs.statSync(testSessionPath).size
+    const ctrl = new AbortController()
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream?lastEventId=${snapshot.cursor}`, {
+        signal: ctrl.signal,
+        headers: { Accept: 'text/event-stream' },
+      })
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let payload = ''
+      for (let attempt = 0; attempt < 5 && !payload.includes(replayUuid); attempt++) {
+        const { value, done } = await reader.read()
+        if (done || !value) break
+        payload += decoder.decode(value)
+      }
+      assert.match(payload, new RegExp(`id: ${expectedOffset}`))
+      assert.match(payload, /event: message/)
+      assert.ok(payload.includes(replayUuid))
+    } finally {
+      ctrl.abort()
+    }
+  })
+
+  it('waits for a complete JSONL line before replaying it', async () => {
+    const completeOffset = fs.statSync(testSessionPath).size
+    const replayUuid = `sse-partial-${Date.now()}`
+    const line = JSON.stringify({
+      type: 'user', uuid: replayUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: 'Complete me first' },
+    })
+    fs.appendFileSync(testSessionPath, line)
+    const ctrl = new AbortController()
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/stream?lastEventId=${completeOffset}`, {
+        signal: ctrl.signal,
+        headers: { Accept: 'text/event-stream' },
+      })
+      const reader = response.body.getReader()
+      await reader.read()
+      const pendingEvent = reader.read()
+      const silence = Promise.withResolvers()
+      const silenceTimer = setTimeout(() => silence.resolve({ silent: true }), 250)
+      const beforeNewline = await Promise.race([
+        pendingEvent.then(result => ({ silent: false, result })),
+        silence.promise,
+      ])
+      clearTimeout(silenceTimer)
+      assert.equal(beforeNewline.silent, true, 'partial JSONL record was replayed')
+
+      fs.appendFileSync(testSessionPath, '\n')
+      const deliveryTimeout = Promise.withResolvers()
+      const deliveryTimer = setTimeout(() => deliveryTimeout.reject(new Error('complete JSONL record was not delivered')), 5000)
+      const { value } = await Promise.race([pendingEvent, deliveryTimeout.promise])
+      clearTimeout(deliveryTimer)
+      const payload = new TextDecoder().decode(value)
+      const expectedOffset = completeOffset + Buffer.byteLength(`${line}\n`)
+      assert.match(payload, new RegExp(`id: ${expectedOffset}`))
+      assert.ok(payload.includes(replayUuid))
+    } finally {
+      ctrl.abort()
+    }
+  })
+
   it('delivers new messages written to JSONL', async () => {
     // Subscribe to SSE
     const ctrl = new AbortController()
@@ -430,11 +538,13 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
 
       // Now append a new message to the JSONL file
       const newUuid = `sse-live-${Date.now()}`
+      fs.appendFileSync(testSessionPath, '\n')
       writeLine({
         type: 'user', uuid: newUuid, timestamp: '2025-06-15T12:01:00Z',
         isSidechain: false, isMeta: false,
         message: { role: 'user', content: 'This message was written during the SSE test' },
       })
+      const expectedOffset = fs.statSync(testSessionPath).size
 
       // Read from SSE — should receive the new message
       const deadline = Date.now() + 5000
@@ -449,6 +559,7 @@ describe('GET /api/sessions/:id/stream (SSE)', () => {
       }
 
       assert.ok(accumulated.includes(newUuid), `SSE did not deliver message. Got: ${accumulated.slice(0, 200)}`)
+      assert.match(accumulated, new RegExp(`id: ${expectedOffset}`))
       assert.ok(accumulated.includes('event: message'))
 
       // Parse the SSE data

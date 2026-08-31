@@ -427,11 +427,39 @@ function updateMeta(mutator) { return META_STATE.update(mutator); }
 
 const MESSAGE_TAIL_CHUNK_BYTES = 1024 * 1024;
 
+function lastCompleteLineOffset(fd, size) {
+  if (size === 0) return 0;
+  const lastByte = Buffer.allocUnsafe(1);
+  fs.readSync(fd, lastByte, 0, 1, size - 1);
+  if (lastByte[0] === 10) return size;
+  let position = size;
+  while (position > 0) {
+    const length = Math.min(MESSAGE_TAIL_CHUNK_BYTES, position);
+    const start = position - length;
+    const chunk = Buffer.allocUnsafe(length);
+    fs.readSync(fd, chunk, 0, length, start);
+    const newline = chunk.lastIndexOf(10);
+    if (newline >= 0) return start + newline + 1;
+    position = start;
+  }
+  return 0;
+}
+
+function completeFileOffset(fpath) {
+  const fd = fs.openSync(fpath, 'r');
+  try {
+    return lastCompleteLineOffset(fd, fs.fstatSync(fd).size);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readLatestMessages(fpath, agent, count) {
   const wanted = Math.max(1, count);
   const reverse = [];
   const fd = fs.openSync(fpath, 'r');
-  let position = fs.fstatSync(fd).size;
+  const cursor = lastCompleteLineOffset(fd, fs.fstatSync(fd).size);
+  let position = cursor;
   let suffix = Buffer.alloc(0);
   try {
     while (position > 0 && reverse.length <= wanted) {
@@ -462,13 +490,14 @@ function readLatestMessages(fpath, agent, count) {
   return {
     messages: reverse.slice(0, wanted).reverse(),
     hasEarlier: reverse.length > wanted,
+    cursor,
   };
 }
 
 function getMessages(sessionId, limit = 100, before = 0) {
   const agent = getAgentForSession(sessionId);
   const fpath = findJsonlPath(sessionId, agent);
-  if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false };
+  if (!fpath || !fs.existsSync(fpath)) return { messages: [], hasMore: false, cursor: 0, nextBefore: 0 };
   const pageSize = Math.max(1, limit);
   const offset = Math.max(0, before);
   const tail = readLatestMessages(fpath, agent, pageSize + offset);
@@ -477,6 +506,8 @@ function getMessages(sessionId, limit = 100, before = 0) {
   return {
     messages: tail.messages.slice(start, end),
     hasMore: tail.hasEarlier || start > 0,
+    cursor: tail.cursor,
+    nextBefore: offset + (end - start),
   };
 }
 
@@ -1118,7 +1149,7 @@ function resumeSession(id, cwd) {
     const meta = readMeta();
     const codexUuid = meta[id]?.codexUuid || (UUID_RE.test(id) ? id : null);
     const fpath = findCodexJsonlPath(id);
-    if (fpath) { fileOffsets.set(id, fs.statSync(fpath).size); watchCodexFile(fpath, id); }
+    if (fpath) { fileOffsets.set(id, completeFileOffset(fpath)); watchCodexFile(fpath, id); }
     // Codex resume writes back to the same jsonl file (no UUID adoption needed).
     // Pass --cd to skip the "choose working directory" picker that appears when
     // the recorded session cwd differs from the launch cwd.
@@ -1667,7 +1698,7 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
     try {
       for (const f of fs.readdirSync(dp)) {
         if (!f.endsWith('.jsonl')) continue;
-        try { fileOffsets.set(f.replace('.jsonl', ''), fs.statSync(path.join(dp, f)).size); } catch {}
+        try { fileOffsets.set(f.replace('.jsonl', ''), completeFileOffset(path.join(dp, f))); } catch {}
       }
     } catch {}
   }
@@ -1721,17 +1752,21 @@ function processFileChange(filePath, sessionIdOverride) {
     const buf = Buffer.alloc(stat.size - currentOffset);
     fs.readSync(fd, buf, 0, buf.length, currentOffset);
     fs.closeSync(fd);
-    const content = buf.toString('utf8');
-    const lastNL = content.lastIndexOf('\n');
-    if (lastNL < 0) return;
-    const complete = content.substring(0, lastNL + 1);
-    let offset = currentOffset;
-    for (const line of complete.split('\n').filter(Boolean)) {
-      offset += Buffer.byteLength(line + '\n');
-      broadcast(sessionId, line, offset);
-      observeOmpTurnBoundary(sessionId, line);
+    const lastNewline = buf.lastIndexOf(10);
+    if (lastNewline < 0) return;
+    const complete = buf.subarray(0, lastNewline + 1);
+    let start = 0;
+    while (start < complete.length) {
+      const newline = complete.indexOf(10, start);
+      const line = complete.subarray(start, newline).toString('utf8');
+      const offset = currentOffset + newline + 1;
+      if (line) {
+        broadcast(sessionId, line, offset);
+        observeOmpTurnBoundary(sessionId, line);
+      }
+      start = newline + 1;
     }
-    fileOffsets.set(sessionId, currentOffset + Buffer.byteLength(complete));
+    fileOffsets.set(sessionId, currentOffset + complete.length);
   } catch {}
 }
 
@@ -1783,7 +1818,7 @@ function watchCodexFile(fpath, featherId) {
   for (const { uuid, fpath } of recent) {
     try {
       const sessionId = resolveCodexWatchId(uuid, meta);
-      fileOffsets.set(sessionId, fs.statSync(fpath).size);
+      fileOffsets.set(sessionId, completeFileOffset(fpath));
       watchCodexFile(fpath, sessionId);
     } catch {}
   }
@@ -1799,7 +1834,7 @@ if (fs.existsSync(OMP_SESSIONS)) {
         if (files.length > 0) {
           files.sort().reverse();
           const fpath = path.join(dirPath, files[0]);
-          try { fileOffsets.set(dir, fs.statSync(fpath).size); } catch {}
+          try { fileOffsets.set(dir, completeFileOffset(fpath)); } catch {}
         }
         watchOmpSessionDir(dirPath, dir);
       }
@@ -2376,8 +2411,8 @@ app.get('/api/sessions/:id/protocol-runs', (req, res) => {
 
 
 app.get('/api/sessions/:id/messages', (req, res) => {
-  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
-  res.json({ messages, hasMore });
+  const { messages, hasMore, cursor, nextBefore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
+  res.json({ messages, hasMore, cursor, nextBefore });
 });
 
 function sessionStreamHandler(req, res) {
@@ -2399,15 +2434,21 @@ function sessionStreamHandler(req, res) {
         const stat = fs.statSync(fpath);
         if (stat.size > lastId) {
           const fd = fs.openSync(fpath, 'r');
-          const buf = Buffer.alloc(stat.size - lastId);
-          fs.readSync(fd, buf, 0, buf.length, lastId);
-          fs.closeSync(fd);
-          let offset = lastId;
-          for (const line of buf.toString('utf8').split('\n').filter(Boolean)) {
-            offset += Buffer.byteLength(line + '\n');
-            const parsed = parseMessageForAgent(line, agent);
-            if (parsed) res.write(`id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`);
+          const replayEnd = lastCompleteLineOffset(fd, stat.size);
+          if (replayEnd > lastId) {
+            const buf = Buffer.alloc(replayEnd - lastId);
+            fs.readSync(fd, buf, 0, buf.length, lastId);
+            let start = 0;
+            while (start < buf.length) {
+              const newline = buf.indexOf(10, start);
+              const line = buf.subarray(start, newline).toString('utf8');
+              const offset = lastId + newline + 1;
+              const parsed = line ? parseMessageForAgent(line, agent) : null;
+              if (parsed) res.write(`id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`);
+              start = newline + 1;
+            }
           }
+          fs.closeSync(fd);
         }
       } catch {}
     }
@@ -2797,8 +2838,8 @@ app.get('/api/share/sessions', (req, res) => {
 });
 
 app.get('/api/share/sessions/:id/messages', requireShareAccess, (req, res) => {
-  const { messages, hasMore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
-  res.json({ messages, hasMore });
+  const { messages, hasMore, cursor, nextBefore } = getMessages(req.params.id, parseInt(req.query.limit) || 100, parseInt(req.query.before) || 0);
+  res.json({ messages, hasMore, cursor, nextBefore });
 });
 
 app.get('/api/share/sessions/:id/stream', requireShareAccess, sessionStreamHandler);

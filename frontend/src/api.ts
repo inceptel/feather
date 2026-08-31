@@ -336,26 +336,31 @@ export async function fetchProjects(): Promise<Project[]> {
 const MESSAGE_PAGE_SIZE = 200
 const INITIAL_MESSAGE_LIMIT = 1000
 
-async function fetchMessagePage(id: string, before: number, box?: string | null): Promise<{ messages: Message[], hasMore: boolean }> {
-  const params = new URLSearchParams({ limit: String(MESSAGE_PAGE_SIZE) })
+export interface MessagePage {
+  messages: Message[]
+  hasMore: boolean
+  cursor: number
+  nextBefore: number
+}
+
+async function fetchMessagePage(id: string, before: number, box?: string | null, limit = MESSAGE_PAGE_SIZE): Promise<MessagePage> {
+  const params = new URLSearchParams({ limit: String(limit) })
   if (before > 0) params.set('before', String(before))
   const response = await fetch(bq(`${BASE}/api/sessions/${id}/messages?${params}`, box))
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return await response.json()
+  const page = await response.json()
+  return {
+    messages: Array.isArray(page.messages) ? page.messages : [],
+    hasMore: !!page.hasMore,
+    cursor: Number.isSafeInteger(page.cursor) && page.cursor >= 0 ? page.cursor : 0,
+    nextBefore: Number.isSafeInteger(page.nextBefore) && page.nextBefore >= 0
+      ? page.nextBefore
+      : before + (Array.isArray(page.messages) ? page.messages.length : 0),
+  }
 }
 
-export async function fetchMessages(id: string, before = 0, box?: string | null): Promise<{ messages: Message[], hasMore: boolean }> {
-  if (before > 0) return fetchMessagePage(id, before, box)
-  let result = await fetchMessagePage(id, 0, box)
-  while (
-    result.hasMore &&
-    result.messages.length < INITIAL_MESSAGE_LIMIT &&
-    !result.messages.some(message => message.role === 'user' && (message.content || []).some(block => block.type === 'text' && block.text?.trim()))
-  ) {
-    const earlier = await fetchMessagePage(id, result.messages.length, box)
-    result = { messages: [...earlier.messages, ...result.messages], hasMore: earlier.hasMore }
-  }
-  return result
+export async function fetchMessages(id: string, before = 0, box?: string | null): Promise<MessagePage> {
+  return fetchMessagePage(id, before, box, before > 0 ? MESSAGE_PAGE_SIZE : INITIAL_MESSAGE_LIMIT)
 }
 
 export async function fetchProtocolRuns(id: string, box?: string | null): Promise<{ runs: ProtocolRunSnapshot[] }> {
@@ -647,21 +652,32 @@ export interface OmpBridgeEvent {
 }
 
 export interface SubscribeMessagesOptions {
-  onMessage: (message: Message) => void
+  onMessage: (message: Message, offset: number) => void
   onStatus?: (status: 'connected' | 'reconnecting') => void
   box?: string | null
   onOmpEvent?: (event: OmpBridgeEvent) => void
   onProtocolRun?: (run: ProtocolRunSnapshot) => void
 }
 
-export function subscribeMessages(id: string, options: SubscribeMessagesOptions): () => void {
+export interface MessageSubscription {
+  connected: Promise<void>
+  close: () => void
+  setCursor: (cursor: number) => void
+}
+
+export function subscribeMessages(id: string, options: SubscribeMessagesOptions): MessageSubscription {
   const { onMessage, onStatus, box, onOmpEvent, onProtocolRun } = options
   let es: EventSource | null = null
   let closed = false
+  let hasConnected = false
   let retries = 0
   let lastEventId = ''
   let gen = 0
   let watchdog: ReturnType<typeof setTimeout> | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  const connectedGate = Promise.withResolvers<void>()
+  const connected = connectedGate.promise
+  const resolveConnected = connectedGate.resolve
   // The server heartbeats every 15s. If even those stop arriving the stream is a
   // zombie — common on mobile, where a network change kills the TCP socket but
   // EventSource never fires onerror, so messages silently stop until a full page
@@ -680,6 +696,11 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
 
   function connect() {
     if (closed) return
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+    try { es?.close() } catch {}
     const myGen = ++gen
     const url = bq(lastEventId
       ? `${BASE}/api/sessions/${id}/stream?lastEventId=${lastEventId}`
@@ -688,13 +709,21 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
     es = source
     armWatchdog()
 
-    source.addEventListener('connected', () => { if (myGen !== gen) return; retries = 0; armWatchdog(); onStatus?.('connected') })
+    source.addEventListener('connected', () => {
+      if (myGen !== gen) return
+      retries = 0
+      hasConnected = true
+      armWatchdog()
+      resolveConnected()
+      onStatus?.('connected')
+    })
     source.addEventListener('heartbeat', () => { if (myGen === gen) armWatchdog() })
     source.addEventListener('message', (e) => {
       if (myGen !== gen) return
       armWatchdog()
-      if (e.lastEventId) lastEventId = e.lastEventId
-      try { onMessage(JSON.parse(e.data)) } catch {}
+      const offset = Number.parseInt(e.lastEventId || '0', 10) || 0
+      if (offset > (Number.parseInt(lastEventId || '0', 10) || 0)) lastEventId = String(offset)
+      try { onMessage(JSON.parse(e.data), offset) } catch {}
     })
     source.addEventListener('omp_event', (e) => {
       if (myGen !== gen) return
@@ -712,10 +741,37 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
       try { source.close() } catch {}
       retries++
       onStatus?.('reconnecting')
-      setTimeout(connect, Math.min(1000 * 2 ** Math.min(retries - 1, 5), 30000))
+      retryTimer = setTimeout(() => {
+        retryTimer = null
+        connect()
+      }, Math.min(1000 * 2 ** Math.min(retries - 1, 5), 30000))
     }
   }
 
   connect()
-  return () => { closed = true; if (watchdog) clearTimeout(watchdog); es?.close(); es = null }
+  return {
+    connected,
+    close: () => {
+      closed = true
+      resolveConnected()
+      if (watchdog) {
+        clearTimeout(watchdog)
+        watchdog = null
+      }
+      if (retryTimer) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+      es?.close()
+      es = null
+    },
+    setCursor: (cursor: number) => {
+      if (!Number.isSafeInteger(cursor) || cursor < 0) return
+      lastEventId = String(Math.max(Number.parseInt(lastEventId || '0', 10) || 0, cursor))
+      if (!hasConnected && !closed) {
+        try { es?.close() } catch {}
+        connect()
+      }
+    },
+  }
 }

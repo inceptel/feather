@@ -510,6 +510,218 @@ test('Room Sidecar A2A is visible and passively rendered in the canonical Leader
 // ── Live SSE updates in the browser ─────────────────────────────────────────
 
 test.describe('Live updates', () => {
+  test('buffers stream messages written after snapshot capture but before installation', async ({ page }) => {
+    const snapshotCaptured = Promise.withResolvers()
+    const gate = Promise.withResolvers()
+    let intercepted = false
+    await page.route(`**/api/sessions/${TEST_SESSION_ID}/messages?**`, async route => {
+      if (intercepted) return route.continue()
+      intercepted = true
+      const response = await route.fetch()
+      snapshotCaptured.resolve()
+      await gate.promise
+      await route.fulfill({ response })
+    })
+
+    await page.goto(BASE)
+    const selecting = selectTestSession(page)
+    await snapshotCaptured.promise
+    const gapText = `Buffered gap message ${Date.now()}`
+    writeLine({
+      type: 'user', uuid: `e2e-gap-${Date.now()}`, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: gapText },
+    })
+    await page.waitForTimeout(200)
+    gate.resolve()
+    await selecting
+    const visibleGap = page.getByTestId('chat-panel').locator('.markdown').filter({ hasText: gapText })
+    await expect(visibleGap).toHaveCount(1)
+  })
+
+  test('keeps buffered messages before a bounded snapshot in transcript order', async ({ page }) => {
+    const snapshotRequested = Promise.withResolvers()
+    const snapshotGate = Promise.withResolvers()
+    const firstUuid = `e2e-bounded-first-${Date.now()}`
+    const secondUuid = `e2e-bounded-second-${Date.now()}`
+    const firstText = `Bounded snapshot first ${Date.now()}`
+    const secondText = `Bounded snapshot second ${Date.now()}`
+    let intercepted = false
+    await page.route(`**/api/sessions/${TEST_SESSION_ID}/messages?**`, async route => {
+      if (intercepted) return route.continue()
+      intercepted = true
+      snapshotRequested.resolve()
+      await snapshotGate.promise
+      const response = await route.fetch()
+      const snapshot = await response.json()
+      await route.fulfill({
+        response,
+        json: { ...snapshot, messages: snapshot.messages.filter(message => message.uuid === secondUuid) },
+      })
+    })
+
+    await page.goto(BASE)
+    const selecting = selectTestSession(page)
+    await snapshotRequested.promise
+    writeLine({
+      type: 'user', uuid: firstUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: firstText },
+    })
+    writeLine({
+      type: 'user', uuid: secondUuid, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: secondText },
+    })
+    await page.waitForTimeout(200)
+    snapshotGate.resolve()
+    await selecting
+
+    const rows = await page.getByTestId('chat-panel').locator('.msg-row').allTextContents()
+    const firstIndex = rows.findIndex(row => row.includes(firstText))
+    const secondIndex = rows.findIndex(row => row.includes(secondText))
+    expect(firstIndex).toBeGreaterThanOrEqual(0)
+    expect(secondIndex).toBeGreaterThan(firstIndex)
+  })
+
+  test('fallback cursor reconnect cancels an outstanding retry', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__eventSourceCount = 0
+      class FailingEventSource extends EventTarget {
+        constructor() {
+          super()
+          this.closed = false
+          window.__eventSourceCount++
+          setTimeout(() => {
+            if (!this.closed && this.onerror) this.onerror(new Event('error'))
+          }, 0)
+        }
+
+        close() {
+          this.closed = true
+        }
+      }
+      window.EventSource = FailingEventSource
+    })
+
+    await page.goto(BASE)
+    await selectTestSession(page)
+    await expect(page.getByText('Explain how markdown rendering works in Feather')).toBeVisible({ timeout: 10000 })
+    await page.waitForTimeout(2500)
+    expect(await page.evaluate(() => window.__eventSourceCount)).toBe(4)
+  })
+
+  test('does not double-count live rows captured by an earlier-page response', async ({ page }) => {
+    const pageRequested = Promise.withResolvers()
+    const pageGate = Promise.withResolvers()
+    const secondPageRequested = Promise.withResolvers()
+    let initialLoaded = false
+    let firstPageLoaded = false
+    let firstNextBefore = 0
+    await page.route(`**/api/sessions/${TEST_SESSION_ID}/messages?**`, async route => {
+      const requestUrl = new URL(route.request().url())
+      const before = Number(requestUrl.searchParams.get('before') || 0)
+      if (!initialLoaded) {
+        initialLoaded = true
+        const response = await route.fetch()
+        const snapshot = await response.json()
+        await route.fulfill({ response, json: { ...snapshot, hasMore: true } })
+        return
+      }
+      if (!firstPageLoaded) {
+        firstPageLoaded = true
+        pageRequested.resolve()
+        await pageGate.promise
+        const response = await route.fetch()
+        const snapshot = await response.json()
+        firstNextBefore = snapshot.nextBefore
+        await route.fulfill({ response, json: { ...snapshot, hasMore: true } })
+        return
+      }
+      const response = await route.fetch()
+      await route.fulfill({ response })
+      secondPageRequested.resolve(before)
+    })
+
+    await page.goto(BASE)
+    await selectTestSession(page)
+    const loadEarlier = page.getByRole('button', { name: 'Load earlier messages' })
+    await expect(loadEarlier).toBeVisible()
+    await loadEarlier.click()
+    await pageRequested.promise
+    const liveText = `Pagination race ${Date.now()}`
+    writeLine({
+      type: 'user', uuid: `e2e-pagination-race-${Date.now()}`, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: liveText },
+    })
+    await expect(page.getByTestId('chat-panel').locator('.markdown').filter({ hasText: liveText })).toBeVisible()
+    pageGate.resolve()
+    await expect(loadEarlier).toBeEnabled()
+    await loadEarlier.click()
+    const secondBefore = await secondPageRequested.promise
+    expect(secondBefore).toBe(firstNextBefore)
+  })
+
+  test('ignores an earlier page from a previous selection generation', async ({ page }) => {
+    const secondaryId = `e2e-secondary-${Date.now()}`
+    const secondaryPath = path.join(path.dirname(testSessionPath), `${secondaryId}.jsonl`)
+    const secondaryText = `Secondary navigation ${Date.now()}`
+    const staleText = `Stale earlier page ${Date.now()}`
+    fs.writeFileSync(secondaryPath, `${JSON.stringify({
+      type: 'user', uuid: `secondary-${Date.now()}`, timestamp: new Date().toISOString(),
+      isSidechain: false, isMeta: false, message: { role: 'user', content: secondaryText },
+    })}\n`)
+    const pageRequested = Promise.withResolvers()
+    const pageGate = Promise.withResolvers()
+    let initialLoaded = false
+    let heldPage = false
+    await page.route(`**/api/sessions/${TEST_SESSION_ID}/messages?**`, async route => {
+      const before = Number(new URL(route.request().url()).searchParams.get('before') || 0)
+      if (!initialLoaded) {
+        initialLoaded = true
+        const response = await route.fetch()
+        const snapshot = await response.json()
+        await route.fulfill({ response, json: { ...snapshot, hasMore: true } })
+        return
+      }
+      if (before > 0 && !heldPage) {
+        heldPage = true
+        pageRequested.resolve()
+        await pageGate.promise
+        await route.fulfill({
+          json: {
+            messages: [{
+              uuid: `stale-${Date.now()}`, role: 'user', timestamp: new Date().toISOString(),
+              content: [{ type: 'text', text: staleText }],
+            }],
+            hasMore: true,
+            cursor: 0,
+            nextBefore: 999,
+          },
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    try {
+      await page.goto(BASE)
+      await selectTestSession(page)
+      const loadEarlier = page.getByRole('button', { name: 'Load earlier messages' })
+      await expect(loadEarlier).toBeVisible()
+      await loadEarlier.click()
+      await pageRequested.promise
+
+      await openSidebar(page)
+      await page.getByText(secondaryText, { exact: true }).click()
+      await expect(page.getByTestId('chat-panel').locator('.markdown').filter({ hasText: secondaryText })).toBeVisible()
+      await selectTestSession(page)
+      pageGate.resolve()
+      await page.waitForTimeout(300)
+      await expect(page.getByTestId('chat-panel').locator('.markdown').filter({ hasText: staleText })).toHaveCount(0)
+    } finally {
+      pageGate.resolve()
+      try { fs.unlinkSync(secondaryPath) } catch {}
+    }
+  })
+
   test('new message appears in real-time via SSE', async ({ page }) => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
