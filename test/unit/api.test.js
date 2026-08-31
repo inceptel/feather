@@ -6,7 +6,7 @@ import os from 'os'
 import net from 'net'
 import { execFileSync, spawn } from 'child_process'
 import { fileURLToPath } from 'url'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
@@ -15,6 +15,7 @@ const EXTERNAL_SERVER = process.env.TEST_PORT !== undefined
 let BASE
 let fixtureRoot
 let fixtureHome
+let fixtureStateDir
 let fixturePath
 let fixtureBin
 let serverProcess
@@ -82,7 +83,6 @@ async function readOmpSseEvents(reader, minimum) {
 
 before(async () => {
   let port
-  let stateDir
   if (EXTERNAL_SERVER) {
     port = Number(process.env.TEST_PORT)
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
@@ -96,7 +96,7 @@ before(async () => {
   } else {
     fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-api-test-'))
     fixtureHome = path.join(fixtureRoot, 'home')
-    stateDir = path.join(fixtureRoot, 'state')
+    fixtureStateDir = path.join(fixtureRoot, 'state')
     port = await allocatePort()
     BASE = `http://127.0.0.1:${port}`
     fs.mkdirSync(fixtureHome, { recursive: true })
@@ -115,7 +115,7 @@ before(async () => {
       env: {
         ...process.env,
         HOME: fixtureHome,
-        FEATHER_STATE_DIR: stateDir,
+        FEATHER_STATE_DIR: fixtureStateDir,
         FEATHER_DEEPGRAM_API_KEY: '',
         PORT: String(port),
         PATH: fixturePath,
@@ -435,6 +435,68 @@ describe('GET /api/sessions/:id/room', () => {
   })
 })
 
+
+describe('POST /api/rooms/:name/send', () => {
+  it('tags and idempotently delivers cross-Room messages to the target Leader', async () => {
+    if (EXTERNAL_SERVER) return
+    const suffix = Date.now().toString(36)
+    const sourceRoom = `source-${suffix}`
+    const targetRoom = `target-${suffix}`
+    let targetCwd = ''
+    for (const name of [sourceRoom, targetRoom]) {
+      const created = await fetch(`${BASE}/api/rooms`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      })
+      assert.equal(created.status, 200)
+      const createdRoom = await created.json()
+      if (name === targetRoom) targetCwd = createdRoom.cwd
+    }
+    const leaderId = randomUUID()
+    const tmuxLog = path.join(fixtureRoot, 'room-send-tmux.log')
+    const tmuxRegistry = path.join(fixtureRoot, 'room-send-tmux.reg')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
+      `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
+      `if [ "$1" = load-buffer ]; then cat "$2" >> ${JSON.stringify(tmuxLog)}; printf '\\n' >> ${JSON.stringify(tmuxLog)}; exit 0; fi`,
+      'case "$1" in paste-buffer|send-keys|set-option) exit 0;; esac',
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    const leader = await fetch(`${BASE}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: leaderId,
+        cwd: targetCwd,
+        agent: 'omp',
+        roomName: targetRoom,
+        roomRole: 'leader',
+      }),
+    })
+    assert.equal(leader.status, 200, await leader.text())
+    const messageId = 'cross-room-message-0001'
+    const deliver = () => fetch(`${BASE}/api/rooms/${targetRoom}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Feather-Message-ID': messageId },
+      body: JSON.stringify({ fromRoom: sourceRoom, text: 'Check the live risk limit.' }),
+    })
+    try {
+      const first = await deliver()
+      const retry = await deliver()
+      assert.equal(first.status, 200)
+      assert.equal(retry.status, 200)
+      assert.deepEqual(await retry.json(), await first.json())
+      const delivered = fs.readFileSync(tmuxLog, 'utf8')
+      assert.equal(delivered.split('[Cross-Room').length - 1, 1)
+      assert.match(delivered, new RegExp(`\\[Cross-Room · #${sourceRoom} → #${targetRoom}\\]`))
+      assert.match(delivered, /Check the live risk limit\./)
+      assert.match(delivered, new RegExp(`room send ${sourceRoom} --stdin`))
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+})
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions/:id/stream (SSE)', () => {

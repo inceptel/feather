@@ -3813,6 +3813,42 @@ app.get('/api/sessions/:id/room', (req, res) => {
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+app.post('/api/rooms/:name/send', async (req, res) => {
+  try {
+    const targetRoom = req.params.name;
+    const sourceRoom = String(req.body?.fromRoom || '').trim().replace(/^#/, '');
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!listRoomDirs().includes(targetRoom)) throw httpError(404, 'no such target room');
+    if (!ROOM_NAME_RE.test(sourceRoom) || !listRoomDirs().includes(sourceRoom)) throw httpError(400, 'invalid source room');
+    if (sourceRoom === targetRoom) throw httpError(400, 'source and target rooms must differ');
+    if (!text) throw httpError(400, 'message text is required');
+    if (text.length > SIDECAR_MESSAGE_MAX_CHARS) throw httpError(413, `message exceeds ${SIDECAR_MESSAGE_MAX_CHARS} characters`);
+    const leaderId = ROOM_LEADERS_STATE.read()[targetRoom] || null;
+    if (!leaderId || !validRoomLeaderDesignation(targetRoom, leaderId)) throw httpError(409, `#${targetRoom} has no available Leader`);
+    if (!tmuxIsActive(leaderId)) {
+      resumeSession(leaderId, path.join(ROOMS_HOME_DIR, targetRoom));
+      for (let attempt = 0; attempt < 30 && !tmuxIsActive(leaderId); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    if (!tmuxIsActive(leaderId)) throw httpError(503, `#${targetRoom} Leader did not become ready`);
+    const requestedId = req.get('X-Feather-Message-ID');
+    const messageId = requestedId || randomUUID().replaceAll('-', '');
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) throw httpError(400, 'invalid message id');
+    const tagged = [
+      `[Cross-Room · #${sourceRoom} → #${targetRoom}]`,
+      '',
+      text,
+      '',
+      `_Reply with: room send ${sourceRoom} --stdin_`,
+    ].join('\n');
+    const receipt = await sendInputIdempotent(leaderId, tagged, messageId);
+    res.json({ ok: true, fromRoom: sourceRoom, room: targetRoom, leaderSessionId: leaderId, sentAt: receipt.sentAt });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 app.get('/api/rooms', (_req, res) => {
   try { res.json({ rooms: roomSnapshotCache.get() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
