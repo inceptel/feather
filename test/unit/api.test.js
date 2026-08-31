@@ -4,7 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import net from 'net'
-import { spawn } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createHash } from 'crypto'
 
@@ -16,6 +16,7 @@ let BASE
 let fixtureRoot
 let fixtureHome
 let fixturePath
+let fixtureBin
 let serverProcess
 let serverOutput = ''
 
@@ -99,7 +100,7 @@ before(async () => {
     port = await allocatePort()
     BASE = `http://127.0.0.1:${port}`
     fs.mkdirSync(fixtureHome, { recursive: true })
-    const fixtureBin = path.join(fixtureRoot, 'bin')
+    fixtureBin = path.join(fixtureRoot, 'bin')
     fs.mkdirSync(fixtureBin)
     fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
     fixturePath = `${fixtureBin}${path.delimiter}${process.env.PATH || ''}`
@@ -405,7 +406,10 @@ describe('GET /api/sessions/:id/messages', () => {
 describe('GET /api/sessions/:id/room', () => {
   it('resolves exact Room membership without depending on the capped Room snapshot', async () => {
     const missing = await (await fetch(`${BASE}/api/sessions/no-such-session-ever/room`)).json()
-    assert.deepEqual(missing, { room: null, kind: null, role: null, label: null })
+    assert.deepEqual(missing, {
+      room: null, kind: null, role: null, label: null,
+      forkOf: null, forkSourceTitle: null, workspaceMode: null, forkBranch: null,
+    })
 
     const roomName = `api-room-${Date.now().toString(36)}`
     const created = await fetch(`${BASE}/api/rooms`, {
@@ -1064,6 +1068,155 @@ describe('POST /api/sessions', () => {
     })
     assert.equal(response.status, 400)
     assert.match((await response.json()).error, /session id must be a UUID/)
+  })
+})
+
+describe('POST /api/sessions/:id/fork', () => {
+  it('launches a distinct Claude fork and preserves Room lineage', async () => {
+    if (EXTERNAL_SERVER) return
+    const tmuxLog = path.join(fixtureRoot, 'fork-tmux.log')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${TEST_SESSION_ID}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Meaning branch', workspaceMode: 'shared' }),
+      })
+      assert.equal(response.status, 200)
+      const forked = await response.json()
+      assert.match(forked.id, /^[0-9a-f-]{36}$/)
+      assert.notEqual(forked.id, TEST_SESSION_ID)
+      assert.equal(forked.workspaceMode, 'shared')
+      const context = await (await fetch(`${BASE}/api/sessions/${forked.id}/room`)).json()
+      assert.equal(context.kind, 'chat')
+      assert.equal(context.label, 'Meaning branch')
+      assert.equal(context.forkOf, TEST_SESSION_ID)
+      assert.equal(context.workspaceMode, 'shared')
+      const calls = fs.readFileSync(tmuxLog, 'utf8')
+      assert.match(calls, /claude/)
+      assert.match(calls, /--fork-session/)
+      assert.match(calls, new RegExp(`--session-id [^\\n]*${forked.id}`))
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+
+  it('creates an isolated Git worktree by default', async () => {
+    if (EXTERNAL_SERVER) return
+    const repo = path.join(fixtureRoot, 'fork-repo')
+    fs.mkdirSync(repo)
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 'fork@test.invalid'], { cwd: repo })
+    execFileSync('git', ['config', 'user.name', 'Fork Test'], { cwd: repo })
+    fs.writeFileSync(path.join(repo, 'README.txt'), 'base\n')
+    execFileSync('git', ['add', 'README.txt'], { cwd: repo })
+    execFileSync('git', ['commit', '-m', 'base'], { cwd: repo, stdio: 'ignore' })
+    const sourceId = '33333333-3333-4333-8333-333333333333'
+    fs.writeFileSync(path.join(testSessionDir, `${sourceId}.jsonl`), `${JSON.stringify({
+      type: 'user', uuid: 'fork-source', cwd: repo, timestamp: new Date().toISOString(),
+      isMeta: false, isSidechain: false, message: { role: 'user', content: 'Fork this repository' },
+    })}\n`)
+    const tmuxLog = path.join(fixtureRoot, 'fork-isolated-tmux.log')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${sourceId}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Isolated branch', workspaceMode: 'isolated' }),
+      })
+      assert.equal(response.status, 200)
+      const forked = await response.json()
+      assert.equal(forked.workspaceMode, 'isolated')
+      assert.ok(forked.workspacePath.startsWith(path.join(fixtureHome, '.feather/fork-worktrees')))
+      assert.equal(fs.readFileSync(path.join(forked.workspacePath, 'README.txt'), 'utf8'), 'base\n')
+      const context = await (await fetch(`${BASE}/api/sessions/${forked.id}/room`)).json()
+      assert.equal(context.workspaceMode, 'isolated')
+      assert.match(context.forkBranch, /^feather\/fork-/)
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+
+  it('uses OMP native --fork with a distinct session directory', async () => {
+    if (EXTERNAL_SERVER) return
+    const sourceId = '44444444-4444-4444-8444-444444444444'
+    const internalId = '55555555-5555-4555-8555-555555555555'
+    const sourceDir = path.join(fixtureHome, '.feather', 'omp-sessions', sourceId)
+    fs.mkdirSync(sourceDir, { recursive: true })
+    fs.writeFileSync(path.join(sourceDir, 'source.jsonl'), [
+      JSON.stringify({ type: 'session', version: 3, id: internalId, cwd: fixtureHome }),
+      JSON.stringify({ type: 'message', id: 'source-message', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Fork OMP' } }),
+      '',
+    ].join('\n'))
+    const tmuxLog = path.join(fixtureRoot, 'fork-omp-tmux.log')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${sourceId}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'OMP branch', workspaceMode: 'shared' }),
+      })
+      assert.equal(response.status, 200)
+      const forked = await response.json()
+      const calls = fs.readFileSync(tmuxLog, 'utf8')
+      assert.match(calls, /omp/)
+      assert.match(calls, new RegExp(`--fork [^\\n]*${internalId}`))
+      assert.ok(fs.existsSync(path.join(fixtureHome, '.feather', 'omp-sessions', forked.id, '.feather-bridge.json')))
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+
+  it('uses Codex native fork with the mapped source UUID', async () => {
+    if (EXTERNAL_SERVER) return
+    const sourceId = '77777777-7777-4777-8777-777777777777'
+    const codexDir = path.join(fixtureHome, '.codex', 'sessions', '2099', '12', '31')
+    const sourcePath = path.join(codexDir, `rollout-source-${sourceId}.jsonl`)
+    fs.mkdirSync(codexDir, { recursive: true })
+    fs.writeFileSync(sourcePath, [
+      JSON.stringify({ timestamp: new Date().toISOString(), type: 'session_meta', payload: { id: sourceId, cwd: fixtureHome } }),
+      JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', id: 'codex-source', role: 'user', content: [{ type: 'input_text', text: 'Fork Codex' }] } }),
+      '',
+    ].join('\n'))
+    const tmuxLog = path.join(fixtureRoot, 'fork-codex-tmux.log')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const response = await fetch(`${BASE}/api/sessions/${sourceId}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Codex branch', workspaceMode: 'shared' }),
+      })
+      assert.equal(response.status, 200)
+      const forked = await response.json()
+      const calls = fs.readFileSync(tmuxLog, 'utf8')
+      assert.match(calls, /codex fork/)
+      assert.match(calls, new RegExp(`codex fork [^\\n]*${sourceId}`))
+      const context = await (await fetch(`${BASE}/api/sessions/${forked.id}/room`)).json()
+      assert.equal(context.forkOf, sourceId)
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      fs.rmSync(path.join(fixtureHome, '.codex'), { recursive: true, force: true })
+    }
   })
 })
 

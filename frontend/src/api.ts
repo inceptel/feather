@@ -221,6 +221,10 @@ export interface RoomSessionContext {
   kind: 'main' | 'resident' | 'status' | 'chat' | null
   role: string | null
   label: string | null
+  forkOf: string | null
+  forkSourceTitle: string | null
+  workspaceMode: 'isolated' | 'shared' | null
+  forkBranch: string | null
 }
 
 export async function fetchRooms(): Promise<RoomInfo[]> {
@@ -456,8 +460,21 @@ export async function renameSession(id: string, title: string): Promise<void> {
   await responseJson(response)
 }
 
-export const forkSession = (id: string, cwd?: string) =>
-  fetch(`${BASE}/api/sessions/${id}/fork`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd }) }).then(r => r.json())
+export async function forkSession(id: string, options: { title: string, workspaceMode: 'isolated' | 'shared' }): Promise<{
+  id: string
+  status: 'starting'
+  room: string | null
+  workspaceMode: 'isolated' | 'shared'
+  workspacePath: string | null
+  notice: string | null
+}> {
+  const response = await fetch(`${BASE}/api/sessions/${id}/fork`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  })
+  return responseJson(response)
+}
 
 export const fetchStarred = (): Promise<Record<string, string[]>> =>
   fetch(`${BASE}/api/starred`).then(r => r.json())

@@ -1022,14 +1022,28 @@ function writeRoomLeaderPrompt(id, roomName) {
   fs.chmodSync(promptPath, 0o600);
   return promptPath;
 }
-function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoApprove = false } = {}) {
+function writeForkRolePrompt(id, roomName, title) {
+  const promptDir = path.join(HOME, '.feather', 'fork-prompts');
+  fs.mkdirSync(promptDir, { recursive: true, mode: 0o700 });
+  const promptPath = path.join(promptDir, `${id}.md`);
+  fs.writeFileSync(promptPath, [
+    `You are the ordinary forked work chat "${title}"${roomName ? ` inside #${roomName}` : ''}.`,
+    'You inherited conversation context, not organizational authority.',
+    'You are not the Room Leader, a durable resident, a status controller, or the canonical writer for shared knowledge.',
+    'Work directly with the user on this branch. Do not impersonate the source role. Wait for the user’s next message.',
+  ].join('\n'), { mode: 0o600 });
+  return promptPath;
+}
+
+function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile = null, appendSystemPromptFile = null, autoApprove = false } = {}) {
+  if (resume && forkFrom) throw new Error('OMP launch cannot resume and fork simultaneously');
   if (!resume) resetOmpBridgeSessionState(id);
   const sessionDir = path.join(OMP_SESSIONS, id);
   fs.mkdirSync(sessionDir, { recursive: true });
   const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
   watchOmpSessionDir(sessionDir, id);
-  const ompId = resume ? getOmpSessionId(id) : null;
-  if (resume && !ompId) throw new Error(`Cannot resume OMP session ${id}: exact OMP session id not found`);
+  const sourceOmpId = resume ? getOmpSessionId(id) : forkFrom ? getOmpSessionId(forkFrom) : null;
+  if ((resume || forkFrom) && !sourceOmpId) throw new Error(`Cannot ${resume ? 'resume' : 'fork'} OMP session ${forkFrom || id}: exact OMP session id not found`);
   const bridgeToken = randomUUID();
   const bridgeUrl = `http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`;
   ompBridgeTokens.set(id, bridgeToken);
@@ -1047,8 +1061,8 @@ function launchOmpSession(id, cwd, { resume = false, promptFile = null, autoAppr
   const args = [
     'omp',
     ompModelFlags(ompSessionModel(id), OMP_THINKING).trim(),
-    resume ? `--resume ${shellQuote(ompId)}` : '',
-    leaderPromptFile ? `--append-system-prompt ${shellQuote(leaderPromptFile)}` : '',
+    resume ? `--resume ${shellQuote(sourceOmpId)}` : forkFrom ? `--fork ${shellQuote(sourceOmpId)}` : '',
+    (appendSystemPromptFile || leaderPromptFile) ? `--append-system-prompt ${shellQuote(appendSystemPromptFile || leaderPromptFile)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
     bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
     `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
@@ -1102,6 +1116,10 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
   // session_meta cwd matches are considered, so two sessions spawned close
   // together can't adopt each other's file.
   let n = 0;
+  const schedule = (delay) => {
+    const timer = setTimeout(tick, delay);
+    timer.unref?.();
+  };
   const tick = () => {
     // Deleting a starting Codex session removes its metadata. Stop its delayed
     // adopter too, or a later unrelated rollout can resurrect a ghost entry.
@@ -1134,10 +1152,10 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
       console.log(`[codex] adopted UUID ${uuid} for feather session ${featherId}`);
       return;
     }
-    if (n < attempts) setTimeout(tick, n < 20 ? 500 : 2000);
+    if (n < attempts) schedule(n < 20 ? 500 : 2000);
     else console.warn(`[codex] failed to adopt UUID for ${featherId} after ${attempts} attempts`);
   };
-  setTimeout(tick, 500);
+  schedule(500);
 }
 
 function resumeSession(id, cwd) {
@@ -2596,23 +2614,119 @@ app.post('/api/sessions/:id/rename', (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+function sessionCwdForFork(id, agent) {
+  if (agent === 'omp') return getOmpSessionCwd(id) || HOME;
+  const fpath = findJsonlPath(id, agent);
+  if (!fpath) return HOME;
+  try {
+    const head = fs.readFileSync(fpath).subarray(0, 256 * 1024);
+    return extractSessionCwd(head, agent) || HOME;
+  } catch {
+    return HOME;
+  }
+}
+
+function createForkWorkspace(sourceCwd, id, requestedMode) {
+  if (requestedMode !== 'isolated') return { cwd: sourceCwd, mode: 'shared', path: null, branch: null, repo: null };
+  let repo;
+  try {
+    repo = execFileSync('git', ['-C', sourceCwd, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  } catch {
+    return { cwd: sourceCwd, mode: 'shared', path: null, branch: null, repo: null, notice: 'Source is not a Git workspace; using the shared workspace.' };
+  }
+  const root = path.join(HOME, '.feather', 'fork-worktrees');
+  const worktree = path.join(root, id);
+  const branch = `feather/fork-${id.slice(0, 8)}`;
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '-b', branch, worktree, 'HEAD'], { stdio: 'ignore' });
+  return { cwd: worktree, mode: 'isolated', path: worktree, branch, repo };
+}
+
+function removeFailedForkWorkspace(workspace) {
+  if (workspace?.mode !== 'isolated' || !workspace.repo || !workspace.path) return;
+  try { execFileSync('git', ['-C', workspace.repo, 'worktree', 'remove', '--force', workspace.path], { stdio: 'ignore' }); } catch {}
+  try { execFileSync('git', ['-C', workspace.repo, 'branch', '-D', workspace.branch], { stdio: 'ignore' }); } catch {}
+}
 
 app.post('/api/sessions/:id/fork', (req, res) => {
+  const sourceId = req.params.id;
+  const newId = randomUUID();
+  let workspace = null;
+  let sourceRoom = null;
   try {
-    const agent = getAgentForSession(req.params.id);
-    const forkName = `feather-f${Date.now().toString(36)}`;
+    const agent = getAgentForSession(sourceId);
+    if (!['claude', 'codex', 'omp'].includes(agent)) throw httpError(400, `unsupported fork agent: ${agent}`);
+    if (!findJsonlPath(sourceId, agent) && agent !== 'omp') throw httpError(404, 'source session not found');
+    if (agent === 'omp' && !findOmpJsonlPath(sourceId)) throw httpError(404, 'source session not found');
+    const title = String(req.body?.title || '').trim();
+    if (!title || title.length > 120) throw httpError(400, 'fork title must be 1-120 characters');
+    const requestedMode = req.body?.workspaceMode === 'shared' ? 'shared' : 'isolated';
+    const sourceCwd = sessionCwdForFork(sourceId, agent);
+    workspace = createForkWorkspace(sourceCwd, newId, requestedMode);
+    sourceRoom = roomNameForSession(sourceId);
+    const sourceMeta = readMeta()[sourceId] || {};
+    const sourceSession = discoverSessions(0, null, [sourceId]).find(candidate => candidate.id === sourceId);
+    const metadata = {
+      agent,
+      title,
+      forkOf: sourceId,
+      forkedAt: new Date().toISOString(),
+      forkSourceTitle: sourceSession?.title || sourceMeta.title || sourceId.slice(0, 8),
+      forkWorkspaceMode: workspace.mode,
+      ...(workspace.path ? { forkWorkspace: workspace.path, forkBranch: workspace.branch } : {}),
+      ...(sourceMeta.ompModel ? { ompModel: sourceMeta.ompModel } : {}),
+    };
+    validateFreshSessionId(newId);
+    updateMeta(meta => ({ ...meta, [newId]: metadata }));
+    if (sourceRoom) ROOM_ASSIGN_STATE.update(current => ({ ...current, [newId]: sourceRoom }));
+    const forkPromptFile = writeForkRolePrompt(newId, sourceRoom, title);
+
     if (agent === 'omp') {
-      // omp doesn't have --fork-session; just resume in a new tmux
-      const sessionDir = path.join(OMP_SESSIONS, req.params.id);
-      const ompId = getOmpSessionId(req.params.id);
-      if (!ompId) throw new Error(`Cannot fork OMP session ${req.params.id}: exact OMP session id not found`);
-      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'omp ${ompModelFlags(ompSessionModel(req.params.id), OMP_THINKING)}--resume ${ompId} --session-dir ${sessionDir} --allow-home'`, req.body?.cwd);
+      launchOmpSession(newId, workspace.cwd, { forkFrom: sourceId, appendSystemPromptFile: forkPromptFile });
+    } else if (agent === 'codex') {
+      const sourceCodexId = sourceMeta.codexUuid || sourceId;
+      const before = new Set(listCodexJsonlFiles().map(file => file.uuid));
+      ensureCodexTrust(workspace.cwd);
+      const command = [
+        'codex fork',
+        shellQuote(sourceCodexId),
+        '-C', shellQuote(workspace.cwd),
+        '-c check_for_update_on_startup=false',
+        '--dangerously-bypass-approvals-and-sandbox',
+        shellQuote(`This is the ordinary forked work chat "${title}"${sourceRoom ? ` inside #${sourceRoom}` : ''}. You inherited context, not Leader/resident/controller authority. Wait for the user’s next message.`),
+      ].join(' ');
+      launchInTmux(tmuxName(newId), `bash --rcfile ~/.bashrc -ic ${shellQuote(command)}`, workspace.cwd);
+      adoptNewCodexUuid(newId, before, workspace.cwd);
     } else {
-      ensureClaudeTrust(req.body?.cwd);
-      launchInTmux(forkName, `bash --rcfile ~/.bashrc -ic 'claude --resume ${req.params.id} --fork-session --dangerously-skip-permissions --disallowed-tools AskUserQuestion'`, req.body?.cwd);
+      ensureClaudeTrust(workspace.cwd);
+      const args = [
+        'claude',
+        `--resume ${shellQuote(sourceId)}`,
+        '--fork-session',
+        `--session-id ${shellQuote(newId)}`,
+        `--append-system-prompt-file ${shellQuote(forkPromptFile)}`,
+        '--dangerously-skip-permissions',
+        '--disallowed-tools AskUserQuestion',
+      ].join(' ');
+      launchInTmux(tmuxName(newId), `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, workspace.cwd);
     }
-    res.json({ ok: true, tmux: forkName });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    roomSnapshotCache.invalidate();
+    res.json({ id: newId, status: 'starting', room: sourceRoom, workspaceMode: workspace.mode, workspacePath: workspace.path, notice: workspace.notice || null });
+  } catch (error) {
+    updateMeta(meta => {
+      if (!(newId in meta)) return meta;
+      const next = { ...meta };
+      delete next[newId];
+      return next;
+    });
+    if (sourceRoom) ROOM_ASSIGN_STATE.update(current => {
+      const next = { ...current };
+      delete next[newId];
+      return next;
+    });
+    removeFailedForkWorkspace(workspace);
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // ── Sidecar API: paired agent threads with a chat channel ──────────────────
@@ -3670,19 +3784,28 @@ function roomNameForSession(id) {
 }
 
 function roomSessionContext(id) {
+  const meta = readMeta()[id] || {};
+  const lineage = {
+    forkOf: meta.forkOf || null,
+    forkSourceTitle: meta.forkSourceTitle || null,
+    workspaceMode: meta.forkWorkspaceMode || null,
+    forkBranch: meta.forkBranch || null,
+  };
   const room = roomNameForSession(id);
-  if (!room) return { room: null, kind: null, role: null, label: null };
+  if (!room) {
+    const session = discoverSessions(0, null, [id]).find(candidate => candidate.id === id);
+    return { room: null, kind: session || meta.title ? 'chat' : null, role: null, label: meta.title || session?.title || null, ...lineage };
+  }
   const leaderId = ROOM_LEADERS_STATE.read()[room] || null;
-  if (leaderId === id) return { room, kind: 'main', role: 'leader', label: 'Main' };
+  if (leaderId === id) return { room, kind: 'main', role: 'leader', label: 'Main', ...lineage };
   const resident = Object.entries(ROOM_RESIDENTS_STATE.read()[room] || {})
     .find(([, configured]) => configured.sessionId === id);
-  if (resident) return { room, kind: 'resident', role: resident[0], label: resident[0] };
+  if (resident) return { room, kind: 'resident', role: resident[0], label: resident[0], ...lineage };
   const pulseId = ROOM_PULSES_STATE.read()[room]?.sessionId || null;
-  if (pulseId === id) return { room, kind: 'status', role: 'status', label: 'Status' };
-  const metaTitle = readMeta()[id]?.title;
-  if (metaTitle) return { room, kind: 'chat', role: null, label: metaTitle };
+  if (pulseId === id) return { room, kind: 'status', role: 'status', label: 'Status', ...lineage };
+  if (meta.title) return { room, kind: 'chat', role: null, label: meta.title, ...lineage };
   const session = discoverSessions(0, null, [id]).find(candidate => candidate.id === id);
-  return { room, kind: 'chat', role: null, label: session?.title || 'Chat' };
+  return { room, kind: 'chat', role: null, label: session?.title || 'Chat', ...lineage };
 }
 
 app.get('/api/sessions/:id/room', (req, res) => {

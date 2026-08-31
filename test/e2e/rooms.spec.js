@@ -66,9 +66,16 @@ test('attaches and detaches an existing chat without duplicate Room rows', async
 test('creates a named organizational chat inside a Room', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const createdId = '11111111-2222-4333-8444-555555555555'
+  const forkedId = '66666666-7777-4888-8999-aaaaaaaaaaaa'
   let assignedRoom = ''
   let renamedTitle = ''
   let created = false
+  let forked = false
+  let forkBody = null
+  const listedSessions = () => created ? [
+    { id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true },
+    ...(forked ? [{ id: forkedId, title: 'RL inventory branch', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true }] : []),
+  ] : []
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
     name: 'trading', cwd: '/home/user/rooms/trading', active: false,
     latest: null, updatedAt: null, leaderSessionId: null, residents: [], sessions: [],
@@ -81,15 +88,25 @@ test('creates a named organizational chat inside a Room', async ({ page }) => {
       created = true
       return route.fulfill({ json: { id: createdId } })
     }
-    return route.fulfill({ json: { sessions: created ? [{
-      id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true,
-    }] : [] } })
+    return route.fulfill({ json: { sessions: listedSessions() } })
   })
-  await page.route('**/api/sessions?*', route => route.fulfill({ json: { sessions: created ? [{
-    id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true,
-  }] : [] } }))
+  await page.route('**/api/sessions?*', route => route.fulfill({ json: { sessions: listedSessions() } }))
   await page.route(`**/api/sessions/${createdId}/room`, route => route.fulfill({
     json: { room: 'trading', kind: 'chat', role: null, label: 'RL' },
+  }))
+  await page.route(`**/api/sessions/${createdId}/fork`, async route => {
+    forkBody = JSON.parse(route.request().postData() || '{}')
+    forked = true
+    await route.fulfill({ json: {
+      id: forkedId, status: 'starting', room: 'trading', workspaceMode: forkBody.workspaceMode,
+      workspacePath: '/tmp/fork-worktree', notice: null,
+    } })
+  })
+  await page.route(`**/api/sessions/${forkedId}/room`, route => route.fulfill({
+    json: {
+      room: 'trading', kind: 'chat', role: null, label: 'RL inventory branch',
+      forkOf: createdId, forkSourceTitle: 'RL', workspaceMode: 'isolated', forkBranch: 'feather/fork-66666666',
+    },
   }))
   await page.route('**/api/rooms/trading/assign', async route => {
     assignedRoom = JSON.parse(route.request().postData() || '{}').sessionId
@@ -109,6 +126,17 @@ test('creates a named organizational chat inside a Room', async ({ page }) => {
   expect(assignedRoom).toBe(createdId)
   expect(renamedTitle).toBe('RL')
   await expect(page.getByTestId('room-chat-breadcrumb')).toContainText('#trading / RL')
+
+  await page.locator('button').filter({ hasText: '⋮' }).click()
+  await page.getByTestId('fork-chat').click()
+  await expect(page.getByTestId('fork-dialog')).toBeVisible()
+  await expect(page.getByTestId('fork-workspace-isolated')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('fork-title').fill('RL inventory branch')
+  await page.screenshot({ path: 'test-results/room-fork-dialog-mobile.png', fullPage: true })
+  await page.getByTestId('fork-submit').click()
+  await expect(page).toHaveURL(new RegExp(`#${forkedId}$`))
+  expect(forkBody).toEqual({ title: 'RL inventory branch', workspaceMode: 'isolated' })
+  await expect(page.getByTestId('fork-lineage')).toContainText('Forked from RL')
 })
 
 test('Room card always opens its durable Leader chat', async ({ page }) => {

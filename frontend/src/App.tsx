@@ -7,7 +7,7 @@ import RoomsHome from './RoomsHome'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns } from './api'
+import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -308,6 +308,11 @@ export default function App() {
 
 
   const [menuOpen, setMenuOpen] = createSignal(false)
+  const [forkOpen, setForkOpen] = createSignal(false)
+  const [forkTitle, setForkTitle] = createSignal('')
+  const [forkWorkspaceMode, setForkWorkspaceMode] = createSignal<'isolated' | 'shared'>('isolated')
+  const [forkBusy, setForkBusy] = createSignal(false)
+  const [forkError, setForkError] = createSignal('')
   const [historyIdx, setHistoryIdx] = createSignal(-1)
   const [historyOpen, setHistoryOpen] = createSignal(false)
   const [sseStatus, setSSEStatus] = createSignal<'connected' | 'reconnecting'>('connected')
@@ -986,6 +991,45 @@ export default function App() {
     if (unknown.length) { alert(`Unknown peer(s): ${unknown.join(', ')}`); return }
     await setSessionShare(id, peers)
     await refreshSessions()
+  }
+
+  function openForkDialog(title: string) {
+    const source = roomContext()?.label || title || 'Chat'
+    setForkTitle(`${source} branch`)
+    setForkWorkspaceMode('isolated')
+    setForkError('')
+    setMenuOpen(false)
+    setForkOpen(true)
+  }
+
+  async function submitFork() {
+    const id = currentId()
+    const title = forkTitle().trim()
+    if (!id || !title || forkBusy()) return
+    setForkBusy(true)
+    setForkError('')
+    try {
+      const forked = await forkSession(id, { title, workspaceMode: forkWorkspaceMode() })
+      setForkOpen(false)
+      await refreshSessions()
+      select(forked.id)
+      if (forked.notice) setTimeout(() => alert(forked.notice), 0)
+    } catch (error) {
+      setForkError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setForkBusy(false)
+    }
+  }
+
+  function shareForkOutcome() {
+    const sourceId = roomContext()?.forkOf
+    if (!sourceId) return
+    const outcome = prompt('Outcome to bring back to the source chat:')
+    if (outcome === null || !outcome.trim()) return
+    const label = roomContext()?.label || cur()?.title || 'Fork'
+    saveDraft(sourceId, `[Outcome from ${label}]\n\n${outcome.trim()}`)
+    setMenuOpen(false)
+    select(sourceId)
   }
 
   function goHome() {
@@ -1838,6 +1882,47 @@ export default function App() {
         </div>
       </Show>
 
+      <Show when={forkOpen()}>
+        <style>{`.fork-dialog-backdrop{align-items:flex-end}@media (min-width:700px){.fork-dialog-backdrop{align-items:center}}`}</style>
+        <div class="fork-dialog-backdrop" data-testid="fork-dialog-backdrop" role="presentation" onClick={() => !forkBusy() && setForkOpen(false)}
+          style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.68)', 'z-index': '240', display: 'flex', 'justify-content': 'center', padding: '16px' }}>
+          <section data-testid="fork-dialog" role="dialog" aria-modal="true" aria-label="Fork chat" onClick={(event) => event.stopPropagation()}
+            style={{ width: 'min(480px, 100%)', background: '#11151d', border: '1px solid #2b3442', 'border-radius': '14px', padding: '16px', 'box-shadow': '0 18px 60px rgba(0,0,0,0.55)' }}>
+            <div style={{ 'font-size': '16px', 'font-weight': '750', color: '#edf1f6' }}>Fork this chat</div>
+            <div style={{ 'font-size': '12px', color: '#7f8996', 'line-height': '1.45', margin: '4px 0 14px' }}>
+              Copy the saved conversation into a new independent chat. Future messages do not sync.
+            </div>
+            <label style={{ display: 'block', color: '#aeb6c2', 'font-size': '11px', 'font-weight': '650', 'margin-bottom': '5px' }}>Name</label>
+            <input data-testid="fork-title" value={forkTitle()} onInput={(event) => setForkTitle(event.currentTarget.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') submitFork(); if (event.key === 'Escape') setForkOpen(false) }}
+              ref={(element) => setTimeout(() => element.focus(), 0)}
+              style={{ width: '100%', 'box-sizing': 'border-box', background: '#090d12', border: '1px solid #343d4b', color: '#edf1f6', padding: '9px 10px', 'border-radius': '8px', 'font-size': '14px', outline: 'none' }} />
+            <div style={{ color: '#aeb6c2', 'font-size': '11px', 'font-weight': '650', margin: '14px 0 6px' }}>Workspace</div>
+            <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '8px' }}>
+              <button data-testid="fork-workspace-isolated" type="button" onClick={() => setForkWorkspaceMode('isolated')}
+                aria-pressed={forkWorkspaceMode() === 'isolated'}
+                style={{ background: forkWorkspaceMode() === 'isolated' ? '#17281d' : '#0c1016', border: `1px solid ${forkWorkspaceMode() === 'isolated' ? '#3d7550' : '#29313d'}`, color: '#d6dde7', padding: '9px', 'border-radius': '8px', cursor: 'pointer', 'text-align': 'left' }}>
+                <strong style={{ display: 'block', 'font-size': '12px' }}>Isolated</strong><span style={{ color: '#7f8996', 'font-size': '10px' }}>New Git worktree</span>
+              </button>
+              <button data-testid="fork-workspace-shared" type="button" onClick={() => setForkWorkspaceMode('shared')}
+                aria-pressed={forkWorkspaceMode() === 'shared'}
+                style={{ background: forkWorkspaceMode() === 'shared' ? '#272117' : '#0c1016', border: `1px solid ${forkWorkspaceMode() === 'shared' ? '#78643b' : '#29313d'}`, color: '#d6dde7', padding: '9px', 'border-radius': '8px', cursor: 'pointer', 'text-align': 'left' }}>
+                <strong style={{ display: 'block', 'font-size': '12px' }}>Shared</strong><span style={{ color: '#7f8996', 'font-size': '10px' }}>Same files, edit carefully</span>
+              </button>
+            </div>
+            <Show when={forkError()}><div role="alert" style={{ color: '#df7b72', 'font-size': '11px', margin: '10px 0 0' }}>{forkError()}</div></Show>
+            <div style={{ display: 'flex', 'justify-content': 'flex-end', gap: '8px', margin: '16px 0 0' }}>
+              <button type="button" onClick={() => setForkOpen(false)} disabled={forkBusy()}
+                style={{ background: 'transparent', border: '1px solid #333c49', color: '#9ca7b5', padding: '7px 12px', 'border-radius': '7px', cursor: 'pointer' }}>Cancel</button>
+              <button data-testid="fork-submit" type="button" onClick={submitFork} disabled={forkBusy() || !forkTitle().trim()}
+                style={{ background: '#4aba6a', border: 'none', color: '#07110a', padding: '7px 13px', 'border-radius': '7px', 'font-weight': '750', cursor: 'pointer' }}>
+                {forkBusy() ? 'Forking…' : 'Fork and open'}
+              </button>
+            </div>
+          </section>
+        </div>
+      </Show>
+
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
         {/* Header */}
@@ -1852,6 +1937,13 @@ export default function App() {
                     <button data-testid="room-chat-breadcrumb" onClick={goHome}
                       style={{ display: 'block', background: 'none', border: 'none', padding: '0', color: '#8792a2', 'font-size': '10px', 'font-weight': '650', cursor: 'pointer', 'text-align': 'left', 'text-transform': 'capitalize' }}>
                       #{roomContext()!.room} / {roomContext()!.label?.replaceAll('-', ' ') || 'Chat'}
+                    </button>
+                  </Show>
+                  <Show when={roomContext()?.forkOf}>
+                    <button data-testid="fork-lineage" onClick={() => select(roomContext()!.forkOf!)}
+                      style={{ display: 'block', background: 'none', border: 'none', padding: '1px 0 0', color: '#6f7b8b', 'font-size': '9px', cursor: 'pointer', 'text-align': 'left' }}>
+                      Forked from {roomContext()!.forkSourceTitle || roomContext()!.forkOf!.slice(0, 8)}
+                      {roomContext()!.workspaceMode === 'isolated' ? ` · ${roomContext()!.forkBranch || 'isolated'}` : ' · shared workspace'}
                     </button>
                   </Show>
                   <span style={{ display: 'block', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': roomContext()?.room ? '12px' : '14px', 'font-weight': '600', color: roomContext()?.room ? '#aeb6c2' : '#e5e5e5' }}>{s().title}</span>
@@ -1886,6 +1978,12 @@ export default function App() {
                     <Show when={!isRemoteBox()}>
                       <button onClick={() => { setRenameText(s().title); setRenaming(true); setMenuOpen(false) }}
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
+                      <button data-testid="fork-chat" onClick={() => openForkDialog(s().title)}
+                        style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork chat</button>
+                      <Show when={roomContext()?.forkOf}>
+                        <button data-testid="share-fork-outcome" onClick={shareForkOutcome}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#8bc99c', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Bring outcome back…</button>
+                      </Show>
                     </Show>
                     <Show when={!isRemoteBox() && sharingPeers().length > 0}>
                       <button onClick={() => handleShare(s().id)}
