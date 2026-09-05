@@ -34,7 +34,13 @@ describe('Super Feed API', () => {
       fs.writeFileSync(path.join(room, 'notes.md'), `# #${name} — notes\n`)
     }
     fs.appendFileSync(path.join(rooms, 'health/notes.md'), '- 2026-09-05 12:00 PRIVATE RAW NOTE.\n')
-    fs.appendFileSync(path.join(rooms, 'friction/notes.md'), '- 2026-09-05 12:30 [id:calendar-auth] Complaint from #health: Calendar login loop | Evidence: OAuth returned 401\n')
+    fs.appendFileSync(path.join(rooms, 'friction/notes.md'), [
+      '- 2026-09-05 23:17 Complaint from #x-bookmarks: --stdin',
+      '- 2026-09-05 23:20 Complaint from #feather: --stdin',
+      '- 2026-09-05 23:20 Complaint from #x-bookmarks: --stdin',
+      '- 2026-09-05 23:21 [id:calendar-auth] Complaint from #health: Calendar login loop | Evidence: OAuth returned 401',
+      '',
+    ].join('\n'))
     const leaderId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const healthRoom = path.join(rooms, 'health')
     const projectDir = path.join(home, '.claude/projects', encodeProjectPath(healthRoom))
@@ -78,6 +84,8 @@ describe('Super Feed API', () => {
       assert.equal(serialized.includes('Health review completed.'), true)
       assert.equal(serialized.includes('PRIVATE RAW NOTE'), false)
       assert.equal(serialized.includes('PRIVATE SIDECAR TEXT'), false)
+      assert.equal(serialized.includes('friction:legacy-'), false)
+      assert.equal(serialized.includes('--stdin'), false)
 
       const current = await fetch(`${base}/api/feed`)
       const etag = current.headers.get('etag')

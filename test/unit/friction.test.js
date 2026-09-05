@@ -13,10 +13,12 @@ describe('parseFrictionNotes', () => {
     assert.deepEqual(parseFrictionNotes(notes), [
       {
         id: 'abc123', timestamp: '2026-08-23T12:00:00Z', source: 'feather',
+        hasStableId: true,
         summary: 'Browser stalled', evidence: 'pthread unavailable',
       },
       {
         id: 'legacy-0', timestamp: '2026-08-23T12:02:00Z', source: 'health',
+        hasStableId: false,
         summary: 'Calendar login loop', evidence: null,
       },
     ])

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from '../../lib/super-feed.js'
+import { parseFrictionNotes } from '../../lib/friction.js'
 
 describe('Super Feed projection', () => {
   it('orders Room outcomes, failures, and friction in one stable timeline', () => {
@@ -16,7 +17,7 @@ describe('Super Feed projection', () => {
         pulse: { status: 'error', error: 'Calendar token expired', lastRunAt: '2026-09-05T12:30:00Z' },
       }],
       complaints: [{
-        id: 'calendar-auth', source: 'health', timestamp: '2026-09-05T13:00:00Z',
+        id: 'calendar-auth', hasStableId: true, source: 'health', timestamp: '2026-09-05T13:00:00Z',
         summary: 'Calendar auth repeatedly expires.', evidence: '401 from provider',
       }],
     })
@@ -78,5 +79,52 @@ describe('Super Feed projection', () => {
     assert.equal(merged[0].sourceHref, '/#old-leader')
     assert.equal(merged[0].sourceState, 'stale')
     assert.equal(merged[0].summary, 'Historical outcome')
+  })
+
+  it('publishes only explicitly keyed friction records', () => {
+    const complaints = parseFrictionNotes([
+      '- 2026-09-05 23:17 Complaint from #x-bookmarks: --stdin',
+      '- 2026-09-05 23:20 Complaint from #feather: --stdin',
+      '- 2026-09-05 23:20 Complaint from #x-bookmarks: --stdin',
+      '- 2026-09-05 23:21 [id:real-complaint] Complaint from #feather: Durable failure',
+    ].join('\n'))
+    const items = buildSuperFeed({
+      rooms: [{ name: 'feather' }, { name: 'x-bookmarks' }],
+      complaints,
+    })
+
+    assert.deepEqual(items.map(item => item.evidenceId), ['friction:real-complaint'])
+    assert.equal(JSON.stringify(items).includes('--stdin'), false)
+  })
+
+  it('removes a recovered pulse failure from Review', () => {
+    const failedRoom = {
+      name: 'health', leaderSessionId: 'leader-health', updatedAt: '2026-09-05T12:00:00Z',
+      latest: null, sessions: [{ id: 'leader-health' }],
+      pulse: { status: 'error', error: 'Calendar token expired', lastRunAt: '2026-09-05T12:30:00Z' },
+    }
+    const recoveredRoom = {
+      ...failedRoom,
+      pulse: { status: 'waiting', lastRunAt: '2026-09-05T12:31:00Z' },
+    }
+    const previous = buildSuperFeed({ rooms: [failedRoom] })
+    const current = buildSuperFeed({ rooms: [recoveredRoom] })
+    const merged = mergeSuperFeed(previous, current, [recoveredRoom])
+
+    assert.equal(merged.some(item => item.kind === 'alert'), false)
+    assert.equal(merged.some(item => item.needsReview), false)
+  })
+
+  it('bounds agent-writable complaint fields in the projection', () => {
+    const [item] = buildSuperFeed({
+      rooms: [{ name: 'health' }],
+      complaints: [{
+        id: 'oversized', hasStableId: true, source: 'health', timestamp: '2026-09-05T13:00:00Z',
+        summary: 's'.repeat(601), evidence: 'e'.repeat(1_201),
+      }],
+    })
+
+    assert.equal(item.summary, 's'.repeat(600))
+    assert.equal(item.detail, 'e'.repeat(1_200))
   })
 })

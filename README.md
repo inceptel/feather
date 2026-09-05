@@ -114,14 +114,24 @@ compatibility, but agents should write working evidence to `notes.md` and leave
 human-facing synthesis to the caretaker.
 
 The Rooms home starts with **Super Feed**, a read-only projection of canonical
-Leader-chat outcomes, Room status failures, and structured `#friction` records.
-**Latest**, **Review**, **Following**, and **Friction** are views over the same
-stable evidence identities; following only changes selection. Cards link back
-to their source, retain stale locators when a source disappears, and never
-expose raw notes, legacy Updates, Sidecar traffic, or tool activity. Complaint
-status remains unknown unless a canonical resolution event proves otherwise.
-The client conditionally polls with ETags and preserves its last-good view on a
-transient failure.
+Leader-chat outcomes, active Room status failures, and explicitly keyed,
+structured `#friction` records. **Latest**, **Review**, **Following**, and
+**Friction** are views over the same stable evidence identities; following only
+changes selection. Review currently means an explicit active system alert:
+user-message rows may say `asked`, but they do not claim unresolved human
+attention without durable approval or decision evidence. Cards link back to
+their source, retain stale locators when a source disappears, and never expose
+raw notes, unkeyed legacy complaints, legacy Updates, Sidecar traffic, or tool
+activity. Complaint status remains unknown unless a canonical resolution event
+proves otherwise, and complaint summary/evidence fields are bounded in the
+projection.
+
+The client conditionally polls with ETags every 10 seconds and preserves its
+last-good view on a transient failure. The Room and feed projections each use a
+10-second stale-while-refresh cache, so that polling interval is not a hard
+freshness bound. Feed history beyond the latest eight reconstructed Leader
+messages per Room is process-local best effort and resets on server restart;
+stable evidence IDs do not make that older membership durable.
 
 `room note` records evidence but does not wake another session. For actionable
 cross-session work, use a stable delivery id:
