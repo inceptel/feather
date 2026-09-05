@@ -932,11 +932,11 @@ export default function App() {
     setLoading(false)
   }
 
-  async function handleNew(agent?: string) {
+  async function handleNew(agent?: string, mode?: 'ralph') {
     setCreating(true)
     setAgentDropdown(false)
     try {
-      const id = await createSession(undefined, agent)
+      const id = await createSession(undefined, agent, undefined, mode)
       select(id)
       refreshSessions()
     } catch (e) { console.error(e) }
@@ -1729,14 +1729,14 @@ export default function App() {
                 <button onClick={() => handleNew('claude')} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                   {creating() ? 'Starting...' : '+ New Session'}
                 </button>
-                <Show when={agents().filter(a => a.available).length > 1}>
+                <Show when={agents().some(a => a.available)}>
                   <button onClick={() => setAgentDropdown(!agentDropdown())} disabled={creating()} style={{ width: '36px', background: creating() ? '#1a1a2e' : agentDropdown() ? '#3a9a5a' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-left': '1px solid rgba(0,0,0,0.15)', cursor: creating() ? 'wait' : 'pointer', 'font-size': '12px', '-webkit-tap-highlight-color': 'transparent' }}>
                     &#9662;
                   </button>
                 </Show>
               </div>
               <Show when={agentDropdown()}>
-                <div style={{ position: 'absolute', top: '52px', left: '16px', right: '16px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'z-index': '100', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: '52px', left: '16px', right: '16px', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'z-index': '100', overflow: 'hidden', 'box-shadow': '0 8px 24px rgba(0,0,0,0.45)' }}>
                   <For each={agents().filter(a => a.available)}>{(agent) =>
                     <button onClick={() => handleNew(agent.id)} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
                       onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
@@ -1744,6 +1744,16 @@ export default function App() {
                     >
                       <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: agent.id === 'omp' ? '#ff7b00' : agent.id === 'codex' ? '#c084fc' : '#4aba6a', 'flex-shrink': '0' }} />
                       <span style={{ flex: '1' }}>{agent.label}</span>
+                    </button>
+                  }</For>
+                  <div style={{ padding: '8px 14px 5px', color: '#ffb347', 'font-size': '10px', 'font-weight': '700', 'letter-spacing': '0.08em', 'text-transform': 'uppercase', background: '#151522' }}>Long-running Ralph</div>
+                  <For each={agents().filter(a => a.available)}>{(agent) =>
+                    <button onClick={() => handleNew(agent.id, 'ralph')} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                    >
+                      <span style={{ width: '8px', height: '8px', 'border-radius': '2px', background: '#ffb347', 'flex-shrink': '0', transform: 'rotate(45deg)' }} />
+                      <span style={{ flex: '1' }}>Ralph · {agent.label}</span>
                     </button>
                   }</For>
                 </div>
@@ -1809,6 +1819,7 @@ export default function App() {
                           <span style={{ 'font-size': '13px', 'font-weight': '500', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{s.title}</span>
                           <Show when={s.agent === 'omp'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2200', color: '#ff7b00', 'flex-shrink': '0', 'font-weight': '600' }}>omp</span></Show>
                           <Show when={s.agent === 'codex'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#2a1e3a', color: '#c084fc', 'flex-shrink': '0', 'font-weight': '600' }}>codex</span></Show>
+                          <Show when={s.mode === 'ralph'}><span title={s.ralph?.blockedReason || s.ralph?.completionReason || s.ralph?.error || `Ralph ${s.ralph?.status || 'waiting'}`} style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2b12', color: '#ffb347', 'flex-shrink': '0', 'font-weight': '700' }}>ralph</span></Show>
                           <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                         </div>
                         <Show when={s.projectLabel}>
@@ -1958,17 +1969,22 @@ export default function App() {
                   style={{ background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '6px', padding: '2px 8px', color: '#e5e5e5', 'font-size': '14px', 'font-weight': '600', outline: 'none', flex: '1', 'min-width': '0' }}
                 />
               </Show>
+              <Show when={s().mode === 'ralph'}>
+                <span title={s().ralph?.blockedReason || s().ralph?.completionReason || s().ralph?.error || ''} style={{ 'font-size': '10px', color: s().ralph?.status === 'error' ? '#ff7777' : s().ralph?.status === 'complete' ? '#76d895' : s().ralph?.status === 'blocked' ? '#ffb347' : '#d7a85a', background: '#2b2215', border: '1px solid #4d3920', 'border-radius': '10px', padding: '2px 8px', 'flex-shrink': '0', 'text-transform': 'capitalize' }}>
+                  Ralph · {s().ralph?.status || 'waiting'} · {s().ralph?.iteration || 0}
+                </span>
+              </Show>
               <div style={{ flex: '1' }} />
               <Show when={isPeerBox()}>
                 <span style={{ 'font-size': '11px', color: '#888', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '10px', padding: '2px 8px', 'flex-shrink': '0' }}>
                   @{boxes().find(b => b.id === currentBox())?.label || currentBox()}{peerControl() ? '' : ' \u00B7 view only'}
                 </span>
               </Show>
-              <Show when={s().isActive && canSend()}>
-                <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Stop</button>
+              <Show when={(s().mode === 'ralph' ? s().ralph?.enabled : s().isActive) && canSend()}>
+                <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{s().mode === 'ralph' ? 'Stop Ralph' : 'Stop'}</button>
               </Show>
-              <Show when={!s().isActive && !isRemoteBox()}>
-                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
+              <Show when={(s().mode === 'ralph' ? !s().ralph?.enabled : !s().isActive) && !isRemoteBox()}>
+                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{s().mode === 'ralph' ? 'Resume Ralph' : 'Resume'}</button>
               </Show>
               <div style={{ position: 'relative' }}>
                 <button onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>

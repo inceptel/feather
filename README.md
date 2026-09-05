@@ -125,6 +125,29 @@ For finite autonomous work in Codex, the recommended path is `$goal-prep` follow
 by `/goal`: prepare a bounded, verifiable goal, then let the Codex goal session run
 it. This is not a cross-harness replacement for detached, indefinite loops.
 
+## Ralph — cross-harness long-running agents
+
+Open the **New Session** menu, then choose **Ralph · Claude Code**, **Ralph ·
+Codex**, or **Ralph · OMP**. Feather installs the same autonomous-owner system
+instructions on every launch and resume. At each verified turn completion,
+Feather reads the harness's native JSONL boundary and delivers an internal
+continuation callback, so the loop survives ordinary turn exits and tmux
+restarts without harness-specific stop hooks.
+
+Ralph state is durable per session: the UI shows waiting, working, scheduled,
+blocked, complete, stopped, or error status plus the completed callback
+iteration. **Stop Ralph** disables pending callbacks; **Resume Ralph** restarts
+them. An agent pauses at a true human boundary with `RALPH_BLOCKED: <smallest
+concrete unblock request>`, or finishes a fully exhausted objective with
+`RALPH_COMPLETE: <completed outcome>`. Callback delivery retries four times
+with bounded backoff, then stops in a visible error state instead of looping
+silently.
+
+The built-in callback only continues the selected session. It does not execute
+arbitrary callback commands or webhooks; external, destructive, privileged,
+financial, credential, and production actions remain subject to the authority
+and safety limits in the Ralph system instructions.
+
 ## Agent capabilities
 
 Install the promoted Feather and Sidecar skills for both Claude and Codex, plus the
@@ -257,6 +280,23 @@ existing state. Defaults and rollback compatibility are recorded in
 - **Two-phase session discovery.** Stat-only scan + sort by mtime → read first 4KB of top N for titles. 7000+ sessions in 75ms.
 - **Byte-offset SSE IDs.** Enables resumable streams and gap-free message delivery.
 - **Mobile-first.** `--vh` viewport fix, safe-area insets, `-webkit-overflow-scrolling: touch`, PWA meta tags.
+
+## X bookmark intake
+
+`bin/x-bookmark-dispatcher --loop` polls the authenticated read-only `x`
+wrapper every 15 minutes. It normalizes new bookmarks, resolves only bounded
+HTTP(S) redirects, and writes owner-only receipts under
+`~/.feather/x-bookmarks/`. `#x-bookmarks` owns canonical intake and lifecycle;
+the dispatcher writes its review item there, then adds a provenance-preserving
+referral to the classified destination Room. Bookmarks and linked content are
+always untrusted evidence: the dispatcher never installs or executes code,
+writes to X, or performs a linked action. Skill candidates and name collisions
+remain review-only.
+
+Supervisor configuration lives in
+`infra/x-bookmark-dispatcher.supervisor.conf`. State includes a durable cursor,
+oldest-unseen-first bounded processing, a single-flight lock, and surfaced
+retry/backoff status.
 
 ## Releasing changes
 

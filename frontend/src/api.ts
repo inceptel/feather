@@ -17,6 +17,16 @@ async function responseJson<T = any>(response: Response): Promise<T> {
 }
 
 
+export interface RalphState {
+  enabled: boolean
+  status: 'waiting' | 'working' | 'scheduled' | 'blocked' | 'complete' | 'stopped' | 'error'
+  iteration: number
+  lastCallbackAt: string | null
+  blockedReason: string | null
+  completionReason: string | null
+  error: string | null
+}
+
 export interface SessionMeta {
   id: string
   title: string
@@ -28,6 +38,8 @@ export interface SessionMeta {
   projectLabel?: string | null
   share?: string[]
   roomAssigned?: boolean
+  mode?: 'ralph'
+  ralph?: RalphState
 }
 
 export interface BoxInfo {
@@ -404,12 +416,12 @@ export async function sendSessionKeys(id: string, keys: string[], box?: string |
 }
 
 
-export async function createSession(cwd?: string, agent?: string, room?: { name: string, role: 'leader' }): Promise<string> {
+export async function createSession(cwd?: string, agent?: string, room?: { name: string, role: 'leader' }, mode?: 'ralph'): Promise<string> {
   const id = crypto.randomUUID()
   const r = await fetch(`${BASE}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, cwd, agent, roomName: room?.name, roomRole: room?.role }),
+    body: JSON.stringify({ id, cwd, agent, roomName: room?.name, roomRole: room?.role, mode }),
   })
   const created = await responseJson<{ id: string }>(r)
   return created.id

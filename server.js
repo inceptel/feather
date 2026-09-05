@@ -24,6 +24,16 @@ import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.j
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes } from './lib/friction.js';
 import { createProtocolRunStore } from './lib/protocol-runs.js';
+import {
+  RALPH_CALLBACK_DELAY_MS,
+  RALPH_CALLBACK_MAX_ATTEMPTS,
+  RALPH_MODE,
+  RALPH_PROMPT_VERSION,
+  publicRalphState,
+  ralphBoundaryFromLine,
+  ralphContinuationPrompt,
+  ralphSystemPrompt,
+} from './lib/ralph.js';
 
 // Load ~/.env if present
 try {
@@ -803,6 +813,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
       // Project label is shown only for allowlisted projects (key present in labels);
       // unlisted sessions still carry projectId but appear unlabelled in the "All" view.
       const isAllowlisted = facts.projectId && (facts.projectId in labels);
+      const ralph = publicRalphState(meta[id]);
       sessions.push({
         id, title: effectiveTitle,
         updatedAt: new Date(facts.activityMs).toISOString(),
@@ -811,6 +822,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
         projectId: facts.projectId || null,
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
+        ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
       });
       required.delete(id);
     } catch {}
@@ -1012,13 +1024,22 @@ function roomLeaderNameForSession(id) {
   return Object.entries(leaders).find(([, sessionId]) => sessionId === id)?.[0] || null;
 }
 
-function writeRoomLeaderPrompt(id, roomName) {
-  if (!roomName) return null;
-  const promptDir = path.join(HOME, '.feather', 'room-leader-prompts');
+function isRalphSession(id) {
+  return readMeta()[id]?.mode === RALPH_MODE;
+}
+
+function writeSessionSystemPrompt(id) {
+  const parts = [];
+  const roomName = roomLeaderNameForSession(id);
+  if (roomName) parts.push(roomLeaderPrompt(roomName));
+  if (isRalphSession(id)) parts.push(ralphSystemPrompt());
+  if (parts.length === 0) return null;
+  const promptDir = path.join(HOME, '.feather', 'session-system-prompts');
   fs.mkdirSync(promptDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(promptDir, 0o700);
-  const promptPath = path.join(promptDir, `${id}-v${ROOM_LEADER_PROMPT_VERSION}.md`);
-  fs.writeFileSync(promptPath, roomLeaderPrompt(roomName), { mode: 0o600 });
+  const version = `leader-${roomName ? ROOM_LEADER_PROMPT_VERSION : 0}-ralph-${isRalphSession(id) ? RALPH_PROMPT_VERSION : 0}`;
+  const promptPath = path.join(promptDir, `${id}-${version}.md`);
+  fs.writeFileSync(promptPath, parts.join('\n\n'), { mode: 0o600 });
   fs.chmodSync(promptPath, 0o600);
   return promptPath;
 }
@@ -1040,7 +1061,7 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   if (!resume) resetOmpBridgeSessionState(id);
   const sessionDir = path.join(OMP_SESSIONS, id);
   fs.mkdirSync(sessionDir, { recursive: true });
-  const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
+  const systemPromptFile = writeSessionSystemPrompt(id);
   watchOmpSessionDir(sessionDir, id);
   const sourceOmpId = resume ? getOmpSessionId(id) : forkFrom ? getOmpSessionId(forkFrom) : null;
   if ((resume || forkFrom) && !sourceOmpId) throw new Error(`Cannot ${resume ? 'resume' : 'fork'} OMP session ${forkFrom || id}: exact OMP session id not found`);
@@ -1062,7 +1083,7 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
     'omp',
     ompModelFlags(ompSessionModel(id), OMP_THINKING).trim(),
     resume ? `--resume ${shellQuote(sourceOmpId)}` : forkFrom ? `--fork ${shellQuote(sourceOmpId)}` : '',
-    (appendSystemPromptFile || leaderPromptFile) ? `--append-system-prompt ${shellQuote(appendSystemPromptFile || leaderPromptFile)}` : '',
+    (appendSystemPromptFile || systemPromptFile) ? `--append-system-prompt ${shellQuote(appendSystemPromptFile || systemPromptFile)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
     bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
     `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
@@ -1078,29 +1099,54 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   launchInTmux(tmuxName(id), command, cwd);
 }
 
-function spawnSession(id, cwd, agent = 'claude', { ompModel = '' } = {}) {
+function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null } = {}) {
   const name = tmuxName(id);
-  // Persist agent type (and any OMP model override) in metadata
   const model = agent === 'omp' ? sanitizeOmpModel(ompModel) : '';
-  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent, ...(model ? { ompModel: model } : {}) } }));
+  updateMeta((meta) => ({
+    ...meta,
+    [id]: {
+      ...(meta[id] || {}),
+      agent,
+      ...(model ? { ompModel: model } : {}),
+      ...(mode === RALPH_MODE ? {
+        mode: RALPH_MODE,
+        ralph: {
+          enabled: true,
+          status: 'waiting',
+          iteration: 0,
+          lastBoundaryKey: null,
+          lastCallbackAt: null,
+          blockedReason: null,
+          completionReason: null,
+          error: null,
+        },
+      } : {}),
+    },
+  }));
 
   if (agent === 'omp') {
     launchOmpSession(id, cwd);
   } else if (agent === 'codex') {
-    // Codex doesn't accept a preset session id (issue openai/codex#15767).
-    // Snapshot existing rollout files, spawn codex, then poll for the new file
-    // and adopt its UUID into session-meta.
     ensureCodexTrust(cwd);
     const before = new Set(listCodexJsonlFiles().map(f => f.uuid));
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox'`, cwd);
+    const ralphFlag = isRalphSession(id)
+      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(ralphSystemPrompt())}`)}`
+      : '';
+    const args = [
+      'codex',
+      '-c check_for_update_on_startup=false',
+      ralphFlag,
+      '--dangerously-bypass-approvals-and-sandbox',
+    ].filter(Boolean).join(' ');
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd);
     adoptNewCodexUuid(id, before, cwd);
   } else {
     ensureClaudeTrust(cwd);
-    const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
+    const systemPromptFile = writeSessionSystemPrompt(id);
     const args = [
       'claude',
       `--session-id ${shellQuote(id)}`,
-      leaderPromptFile ? `--append-system-prompt-file ${shellQuote(leaderPromptFile)}` : '',
+      systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
@@ -1178,7 +1224,18 @@ function resumeSession(id, cwd) {
     sessionCwd = (sessionCwd || HOME).replace(/[^a-zA-Z0-9._\-/]/g, '');
     ensureCodexTrust(sessionCwd);
     const resumeArg = codexUuid ? `resume ${codexUuid}` : 'resume --last';
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic 'codex -c check_for_update_on_startup=false ${resumeArg} --cd ${sessionCwd} --dangerously-bypass-approvals-and-sandbox'`, cwd || sessionCwd);
+    const ralphFlag = isRalphSession(id)
+      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(ralphSystemPrompt())}`)}`
+      : '';
+    const args = [
+      'codex',
+      '-c check_for_update_on_startup=false',
+      ralphFlag,
+      resumeArg,
+      `--cd ${shellQuote(sessionCwd)}`,
+      '--dangerously-bypass-approvals-and-sandbox',
+    ].filter(Boolean).join(' ');
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd || sessionCwd);
   } else {
     // Claude resolves resumable sessions by project dir (cwd → ~/.claude/projects/<encoded>),
     // so launching from the wrong cwd makes --resume fail and the tmux session exits.
@@ -1196,11 +1253,11 @@ function resumeSession(id, cwd) {
       }
     }
     ensureClaudeTrust(sessionCwd);
-    const leaderPromptFile = writeRoomLeaderPrompt(id, roomLeaderNameForSession(id));
+    const systemPromptFile = writeSessionSystemPrompt(id);
     const args = [
       'claude',
       `--resume ${shellQuote(id)}`,
-      leaderPromptFile ? `--append-system-prompt-file ${shellQuote(leaderPromptFile)}` : '',
+      systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
@@ -1252,6 +1309,7 @@ async function sendInputIdempotent(id, text, messageId) {
       if (existing.textHash !== textHash) throw httpError(409, 'message id already used with different text');
       return existing.response;
     }
+    prepareRalphForHumanInput(id);
 
     await sendInputUnlocked(id, text);
     const response = { ok: true, sentAt: new Date().toISOString() };
@@ -1308,6 +1366,183 @@ async function sendInputUnlocked(id, text) {
   } else {
     execFileSync('tmux', ['send-keys', '-t', target, '-l', text], { stdio: 'ignore' });
     execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' });
+  }
+}
+
+const ralphCallbackTimers = new Map();
+
+function patchRalphState(id, patch) {
+  let changed = false;
+  updateMeta((meta) => {
+    if (meta[id]?.mode !== RALPH_MODE) return meta;
+    changed = true;
+    return {
+      ...meta,
+      [id]: {
+        ...meta[id],
+        ralph: {
+          ...(meta[id].ralph || {}),
+          ...patch,
+        },
+      },
+    };
+  });
+  return changed;
+}
+
+function cancelRalphCallback(id) {
+  const pending = ralphCallbackTimers.get(id);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  ralphCallbackTimers.delete(id);
+}
+
+function stopRalphSession(id, status = 'stopped') {
+  cancelRalphCallback(id);
+  patchRalphState(id, {
+    enabled: false,
+    status,
+    blockedReason: null,
+    completionReason: null,
+    error: null,
+    callbackAttempt: 0,
+  });
+}
+
+function prepareRalphForHumanInput(id) {
+  if (!isRalphSession(id)) return;
+  cancelRalphCallback(id);
+  patchRalphState(id, {
+    enabled: true,
+    status: 'working',
+    blockedReason: null,
+    completionReason: null,
+    error: null,
+    callbackAttempt: 0,
+  });
+}
+
+function armRalphCallback(id, boundaryKey, attempt = 0, delayMs = RALPH_CALLBACK_DELAY_MS) {
+  cancelRalphCallback(id);
+  const token = randomUUID();
+  const timer = setTimeout(async () => {
+    const pending = ralphCallbackTimers.get(id);
+    if (!pending || pending.token !== token) return;
+    ralphCallbackTimers.delete(id);
+    const state = readMeta()[id]?.ralph;
+    if (!state?.enabled || state.lastBoundaryKey !== boundaryKey) return;
+    const iteration = (Number.isSafeInteger(state.iteration) ? state.iteration : 0) + 1;
+    try {
+      await sendInput(id, ralphContinuationPrompt(iteration));
+      const latest = readMeta()[id]?.ralph;
+      if (!latest?.enabled || latest.lastBoundaryKey !== boundaryKey) return;
+      patchRalphState(id, {
+        status: 'working',
+        iteration,
+        lastCallbackAt: new Date().toISOString(),
+        error: null,
+        callbackAttempt: 0,
+      });
+    } catch (error) {
+      const nextAttempt = attempt + 1;
+      const message = error instanceof Error ? error.message : String(error);
+      if (nextAttempt < RALPH_CALLBACK_MAX_ATTEMPTS && readMeta()[id]?.ralph?.enabled) {
+        patchRalphState(id, {
+          status: 'scheduled',
+          error: `Callback delivery failed (${nextAttempt}/${RALPH_CALLBACK_MAX_ATTEMPTS}): ${message}`,
+          callbackAttempt: nextAttempt,
+        });
+        armRalphCallback(id, boundaryKey, nextAttempt, RALPH_CALLBACK_DELAY_MS * (2 ** nextAttempt));
+      } else {
+        patchRalphState(id, {
+          enabled: false,
+          status: 'error',
+          error: `Callback delivery failed after ${RALPH_CALLBACK_MAX_ATTEMPTS} attempts: ${message}`,
+          callbackAttempt: nextAttempt,
+        });
+      }
+    }
+  }, delayMs);
+  ralphCallbackTimers.set(id, { timer, token, boundaryKey });
+}
+
+function scheduleRalphCallback(id, boundary) {
+  const meta = readMeta()[id];
+  if (meta?.mode !== RALPH_MODE || !meta.ralph?.enabled) return;
+  if (boundary.complete) {
+    cancelRalphCallback(id);
+    patchRalphState(id, {
+      enabled: false,
+      status: 'complete',
+      lastBoundaryKey: boundary.key,
+      blockedReason: null,
+      completionReason: boundary.complete,
+      error: null,
+      callbackAttempt: 0,
+    });
+    return;
+  }
+  if (boundary.blocked) {
+    cancelRalphCallback(id);
+    patchRalphState(id, {
+      enabled: false,
+      status: 'blocked',
+      lastBoundaryKey: boundary.key,
+      blockedReason: boundary.blocked,
+      completionReason: null,
+      error: null,
+      callbackAttempt: 0,
+    });
+    return;
+  }
+  if (meta.ralph.lastBoundaryKey === boundary.key) return;
+  patchRalphState(id, {
+    status: 'scheduled',
+    lastBoundaryKey: boundary.key,
+    blockedReason: null,
+    completionReason: null,
+    error: null,
+    callbackAttempt: 0,
+  });
+  armRalphCallback(id, boundary.key);
+}
+
+function observeRalphBoundary(id, line) {
+  if (!isRalphSession(id)) return;
+  const boundary = ralphBoundaryFromLine(line, getAgentForSession(id));
+  if (!boundary) return;
+  if (boundary.type === 'active') {
+    cancelRalphCallback(id);
+    const state = readMeta()[id]?.ralph;
+    if (state?.enabled && state.status !== 'working') {
+      patchRalphState(id, {
+        status: 'working',
+        blockedReason: null,
+        completionReason: null,
+        error: null,
+        callbackAttempt: 0,
+      });
+    }
+    return;
+  }
+  scheduleRalphCallback(id, boundary);
+}
+
+function resumeRalphSession(id) {
+  if (!isRalphSession(id)) throw httpError(409, 'session is not a Ralph agent');
+  prepareRalphForHumanInput(id);
+  const key = `manual-${Date.now()}`;
+  patchRalphState(id, { status: 'scheduled', lastBoundaryKey: key });
+  armRalphCallback(id, key);
+}
+
+function recoverRalphCallbacks() {
+  for (const [id, entry] of Object.entries(readMeta())) {
+    if (entry?.mode !== RALPH_MODE || !entry.ralph?.enabled || entry.ralph.status !== 'scheduled') continue;
+    const key = entry.ralph.lastBoundaryKey;
+    if (typeof key === 'string' && key) {
+      armRalphCallback(id, key, Number.isSafeInteger(entry.ralph.callbackAttempt) ? entry.ralph.callbackAttempt : 0);
+    }
   }
 }
 
@@ -1781,6 +2016,7 @@ function processFileChange(filePath, sessionIdOverride) {
       if (line) {
         broadcast(sessionId, line, offset);
         observeOmpTurnBoundary(sessionId, line);
+        observeRalphBoundary(sessionId, line);
       }
       start = newline + 1;
     }
@@ -2486,11 +2722,14 @@ app.post('/api/sessions', (req, res) => {
   const agent = req.body.agent || 'claude';
   const roomRole = req.body.roomRole || null;
   const roomName = String(req.body.roomName || '').trim();
+  const mode = req.body.mode || null;
   let assignmentsBefore = null;
   let leadersBefore = null;
   try {
     const id = validateFreshSessionId(req.body.id);
     if (roomRole && roomRole !== 'leader') throw httpError(400, 'unsupported Room role');
+    if (mode && mode !== RALPH_MODE) throw httpError(400, 'unsupported session mode');
+    if (roomRole && mode) throw httpError(409, 'Room Leaders cannot use a session mode');
     if (roomRole === 'leader') {
       if (agent !== 'omp') throw httpError(409, 'new Room Leaders currently require OMP');
       if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
@@ -2509,12 +2748,12 @@ app.post('/api/sessions', (req, res) => {
         : null;
       appointRoomLeader(roomName, id, { assign: true, replaceStale: staleLeaderId });
     }
-    spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '' });
+    spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '', mode });
     if (roomRole === 'leader') {
       syncRoomSidecar(roomName);
       roomSnapshotCache.invalidate();
     }
-    res.json({ id, status: 'starting', agent, roomRole });
+    res.json({ id, status: 'starting', agent, roomRole, ...(mode ? { mode } : {}) });
   } catch (e) {
     if (assignmentsBefore && leadersBefore) {
       ROOM_ASSIGN_STATE.update(() => assignmentsBefore);
@@ -2530,6 +2769,7 @@ app.post('/api/sessions/:id/send', async (req, res) => {
     if (messageId !== undefined && !/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) {
       return res.status(400).json({ error: 'invalid message id' });
     }
+    if (!messageId) prepareRalphForHumanInput(req.params.id);
     if (!messageId) {
       await sendInput(req.params.id, req.body.text);
       return res.json({ ok: true, sentAt: new Date().toISOString() });
@@ -2563,13 +2803,32 @@ app.post('/api/sessions/:id/keys', (req, res) => {
 
 
 app.post('/api/sessions/:id/resume', (req, res) => {
-  try { resumeSession(req.params.id, req.body?.cwd); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    if (isRalphSession(req.params.id)) resumeRalphSession(req.params.id);
+    else resumeSession(req.params.id, req.body?.cwd);
+    res.json({ ok: true });
+  } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:id/ralph', (req, res) => {
+  try {
+    if (typeof req.body?.enabled !== 'boolean') throw httpError(400, 'enabled must be a boolean');
+    if (req.body.enabled) resumeRalphSession(req.params.id);
+    else stopRalphSession(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 
 app.post('/api/sessions/:id/interrupt', (req, res) => {
-  try { execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' }); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  const isRalph = isRalphSession(req.params.id);
+  if (isRalph) stopRalphSession(req.params.id);
+  try {
+    execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' });
+    res.json({ ok: true });
+  } catch (e) {
+    if (isRalph) res.json({ ok: true });
+    else res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/sessions/:id/delete', async (req, res) => {
@@ -2587,6 +2846,7 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
       const fpath = findJsonlPath(id, agent);
       if (fpath) fs.unlinkSync(fpath);
     }
+    cancelRalphCallback(id);
     updateMeta((meta) => {
       const next = { ...meta };
       delete next[id];
@@ -4238,6 +4498,7 @@ server.listen(PORT, '0.0.0.0', () => {
   // Warm the expensive Rooms snapshot before the first interactive request.
   setTimeout(() => { try { roomSnapshotCache.get(); } catch {} }, 0);
   if (!READ_ONLY_MODE) setTimeout(() => syncAllRoomSidecars({ primeNewResidents: true }), 1000);
+  if (!READ_ONLY_MODE) setTimeout(recoverRalphCallbacks, RALPH_CALLBACK_DELAY_MS);
   // Durable Room Sidecars are synchronized before listen; no startup 404 window.
   if (ROOM_PULSES_ENABLED) {
     setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));
