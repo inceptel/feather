@@ -135,10 +135,12 @@ describe('room assignment CLI', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
     const env = { ...process.env, HOME: root, ROOMS_DIR: roomsDir, FEATHER_URL: `http://127.0.0.1:${server.address().port}` }
     const cli = path.resolve(import.meta.dirname, '../../bin/room')
+    const complaintFile = path.join(root, 'complaint.txt')
+    fs.writeFileSync(complaintFile, 'The table gets crushed on mobile')
     try {
       await Promise.all([
-        run(cli, ['complain', 'The upload button loses my file'], { cwd: roomDir, env }),
-        run(cli, ['complain', 'The table gets crushed on mobile'], { cwd: roomDir, env }),
+        runWithInput(cli, ['complain', '--stdin'], { cwd: roomDir, env }, 'The upload button loses my file'),
+        run(cli, ['complain', '--file', complaintFile], { cwd: roomDir, env }),
       ])
       await run(cli, ['pause'], { cwd: roomDir, env })
       await run(cli, ['wake'], { cwd: roomDir, env })

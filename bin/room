@@ -15,7 +15,7 @@
 #                                      note work and wake a permanent resident
 #   room update TEXT|--stdin|--file PATH append legacy evidence
 #   room updates                         list legacy evidence
-#   room complain "<text>"             add an annoyance to #friction
+#   room complain TEXT|--stdin|--file PATH add an annoyance to #friction
 #   room pause                          stop scheduled status reports for this room
 #   room wake                           resume scheduled status reports for this room
 #   room send <room> TEXT|--stdin|--file PATH send tagged cross-Room chat
@@ -286,13 +286,12 @@ cmd_complain() {
         shift
         ;;
       --)
-        shift
         break
         ;;
       *) break ;;
     esac
   done
-  [ -n "${1:-}" ] || die 'usage: room complain [--id <id>] [--source <label>] [--no-wake] "<what is annoying>"'
+  read_room_text complain "$@"
   local source friction="$ROOMS_DIR/friction" marker=""
   if [ -n "$source_override" ]; then
     source="$source_override"
@@ -314,7 +313,7 @@ cmd_complain() {
     fi
   fi
   if [ "$duplicate" -eq 0 ]; then
-    printf -- '- %s %sComplaint from #%s: %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$marker" "$source" "$1" >>"$friction/notes.md" || die "could not record complaint in #friction"
+    printf -- '- %s %sComplaint from #%s: %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$marker" "$source" "$ROOM_TEXT" >>"$friction/notes.md" || die "could not record complaint in #friction"
   fi
   if [ "$wake" -eq 1 ]; then
     # Wake #friction so a paused queue resumes and processes this complaint.
