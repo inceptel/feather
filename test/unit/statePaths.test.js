@@ -39,6 +39,7 @@ describe('state path classification', () => {
     assert.equal(paths.instance.projectLabelsFile, `${releaseDir}/project-labels.json`)
     assert.equal(paths.instance.quickLinksFile, `${releaseDir}/quick-links.json`)
     assert.equal(paths.instance.starredFile, `${releaseDir}/starred.json`)
+    assert.equal(paths.instance.feedPreferencesFile, `${releaseDir}/feed-preferences.json`)
   })
 
   it('moves only instance state under the configured root', () => {
@@ -51,6 +52,7 @@ describe('state path classification', () => {
     assert.equal(paths.instance.external, true)
     assert.equal(paths.instance.metaFile, '/srv/feather/state/session-meta.json')
     assert.equal(paths.instance.uploadsDir, '/srv/feather/state/uploads')
+    assert.equal(paths.instance.feedPreferencesFile, '/srv/feather/state/feed-preferences.json')
     assert.equal(paths.release.staticDir, '/opt/feather/releases/a/static')
     assert.equal(paths.coordination.sidecarsDir, '/home/tester/.feather/sidecars')
     assert.equal(paths.coordination.roomAssignmentsFile, '/home/tester/.feather/room-sessions.json')

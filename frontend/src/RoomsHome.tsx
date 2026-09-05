@@ -1,6 +1,7 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomFriction, renameSession, RoomInfo, SessionMeta, FrictionComplaint } from './api'
 import { RoomWikiView } from './components/RoomWikiView'
+import { SuperFeed } from './components/SuperFeed'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -260,8 +261,14 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   return (
     <div style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
       <div style={{ 'max-width': '640px', margin: '0 auto', padding: '12px 12px 40px' }}>
-        <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '10px 4px 14px 44px' }}>
-          <span style={{ 'font-size': '20px', 'font-weight': '700' }}>Rooms</span>
+        <div style={{ padding: '10px 4px 12px 44px' }}>
+          <h1 style={{ margin: '0', 'font-size': '20px', 'font-weight': '700' }}>Super Feed</h1>
+          <div style={{ color: '#687384', 'font-size': '11px', 'margin-top': '2px' }}>What changed, what needs you, and where friction went.</div>
+        </div>
+        <SuperFeed onOpenSession={props.onOpen} />
+
+        <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '2px 4px 10px' }}>
+          <span style={{ 'font-size': '15px', 'font-weight': '700', color: '#aeb7c4' }}>Rooms</span>
           <button onClick={newRoom} disabled={busy()}
             style={{ background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>+ New room</button>
         </div>

@@ -214,7 +214,7 @@ export interface RoomInfo {
   residents: RoomResident[]
   sidecarGroupId: string | null
   active: boolean
-  latest: { role: string, text: string } | null
+  latest: { role: string, text: string, id?: string | null, timestamp?: string | null } | null
   updatedAt: string | null
   updates: { count: number, latestAt: string | null, latest: string | null }
   friction: { count: number, latestAt: string | null, latest: string | null }
@@ -278,6 +278,54 @@ export interface FrictionComplaint {
   source: string
   summary: string
   evidence: string | null
+}
+
+export type SuperFeedView = 'latest' | 'review' | 'following' | 'friction'
+
+export interface SuperFeedItem {
+  evidenceId: string
+  kind: 'update' | 'alert' | 'friction'
+  room: string
+  title: string
+  summary: string
+  detail: string | null
+  occurredAt: string | null
+  sourceHref: string
+  sourceState: 'available' | 'stale'
+  status: string | null
+  needsReview: boolean
+  sessionId: string | null
+  complaintId?: string
+}
+
+export interface SuperFeedSnapshot {
+  items: SuperFeedItem[]
+  following: string[]
+  cursor: string
+  generatedAt: string
+}
+
+export interface SuperFeedFetchResult {
+  snapshot: SuperFeedSnapshot | null
+  etag: string | null
+}
+
+export async function fetchSuperFeed(etag?: string | null, signal?: AbortSignal): Promise<SuperFeedFetchResult> {
+  const headers: Record<string, string> = {}
+  if (etag) headers['If-None-Match'] = etag
+  const response = await fetch(`${BASE}/api/feed`, { headers, signal })
+  if (response.status === 304) return { snapshot: null, etag: etag || null }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return { snapshot: await response.json(), etag: response.headers.get('ETag') }
+}
+
+export async function setFeedFollowing(room: string, following: boolean): Promise<string[]> {
+  const response = await fetch(`${BASE}/api/feed/following`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room, following }),
+  })
+  return (await responseJson<{ ok: true, following: string[] }>(response)).following
 }
 
 export async function fetchRoomFriction(room: string): Promise<FrictionComplaint[]> {

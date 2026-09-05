@@ -192,7 +192,7 @@ describe('server-enforced read-only canary', () => {
       `/api/sessions/${fx.sessionId}/messages`, `/api/sessions/${fx.sessionId}/export`,
       `/api/file?path=${encodeURIComponent(fx.readableFile)}`,
       `/api/files?path=${encodeURIComponent(fx.home)}`,
-      '/api/rooms', '/api/rooms/test-room/residents', '/api/sidecar', '/api/sidecar/stale-group',
+      '/api/rooms', '/api/feed', '/api/rooms/test-room/residents', '/api/sidecar', '/api/sidecar/stale-group',
       '/api/projects', '/api/quick-links', '/api/starred', '/api/sharing/peers', '/api/agents',
     ]
     for (const endpoint of readable) {
@@ -226,6 +226,7 @@ describe('server-enforced read-only canary', () => {
       ['POST', '/api/rooms/test-room/assign', { sessionId: fx.sessionId }],
       ['POST', '/api/rooms/test-room/pulse', { enabled: false }],
       ['POST', '/api/rooms/test-room/send', { fromRoom: 'source-room', text: 'no' }],
+      ['POST', '/api/feed/following', { room: 'test-room', following: false }],
       ['POST', '/api/open-in-editor', { path: fx.sessionFile }],
       ['POST', '/api/upload', 'bytes'], ['POST', '/api/transcribe', 'bytes'],
       ['DELETE', `/api/file?path=${encodeURIComponent(fx.sessionFile)}`],

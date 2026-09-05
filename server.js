@@ -23,6 +23,7 @@ import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes } from './lib/friction.js';
+import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-feed.js';
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
   RALPH_CALLBACK_DELAY_MS,
@@ -152,6 +153,14 @@ function isMessageReceiptState(value) {
       && typeof receipt.response.sentAt === 'string'));
 }
 
+function isFeedPreferencesState(value) {
+  if (!isJsonRecord(value)) return false;
+  if (value.rooms === null) return true;
+  return Array.isArray(value.rooms)
+    && value.rooms.every(room => typeof room === 'string' && /^[a-z0-9][a-z0-9-]{0,31}$/.test(room))
+    && new Set(value.rooms).size === value.rooms.length;
+}
+
 // A canary must be able to inspect a prepared copy without creating directories,
 // changing secret modes, or otherwise becoming a second state writer.
 if (!READ_ONLY_MODE) ensureStateLayout(STATE_PATHS);
@@ -172,6 +181,14 @@ const MESSAGE_RECEIPTS_STATE = createJsonState({
   document: 'message delivery receipts',
   defaultValue: {},
   validate: isMessageReceiptState,
+  mode: 0o600,
+});
+const FEED_PREFERENCES_STATE = createJsonState({
+  file: STATE_PATHS.instance.feedPreferencesFile,
+  root: STATE_PATHS.instance.root,
+  document: 'Super Feed preferences',
+  defaultValue: { rooms: null },
+  validate: isFeedPreferencesState,
   mode: 0o600,
 });
 
@@ -2174,6 +2191,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/files$/,
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
+  /^\/api\/feed$/,
   /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page|residents)$/,
 ];
 
@@ -3863,7 +3881,12 @@ function lastMessageSnippet(sessionId, agent) {
           .map((b) => b.text).join(' ')
           .replace(/\s+/g, ' ').trim();
         if (!text) continue;
-        return { role: m.role, text: text.slice(0, 200) };
+        return {
+          role: m.role,
+          text: text.slice(0, 200),
+          id: typeof m.uuid === 'string' ? m.uuid : null,
+          timestamp: typeof m.timestamp === 'string' ? m.timestamp : null,
+        };
       }
       if (start === 0) break;
     }
@@ -3923,12 +3946,18 @@ function appendRoomUpdate(name, text) {
   return entry;
 }
 
+let frictionComplaintsCache = { signature: null, complaints: [] };
 function readFrictionComplaints() {
   const notesPath = path.join(ROOMS_HOME_DIR, 'friction', 'notes.md');
   try {
-    return parseFrictionNotes(fs.readFileSync(notesPath, 'utf8'));
+    const stat = fs.statSync(notesPath);
+    const signature = `${stat.size}:${stat.mtimeMs}`;
+    if (frictionComplaintsCache.signature === signature) return frictionComplaintsCache.complaints;
+    const complaints = parseFrictionNotes(fs.readFileSync(notesPath, 'utf8'));
+    frictionComplaintsCache = { signature, complaints };
+    return complaints;
   } catch {
-    return [];
+    return frictionComplaintsCache.complaints;
   }
 }
 
@@ -4112,6 +4141,110 @@ app.post('/api/rooms/:name/send', async (req, res) => {
 app.get('/api/rooms', (_req, res) => {
   try { res.json({ rooms: roomSnapshotCache.get() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+function followedFeedRooms(rooms) {
+  const available = rooms.map(room => room.name);
+  const configured = FEED_PREFERENCES_STATE.read().rooms;
+  return Array.isArray(configured)
+    ? configured.filter(room => available.includes(room))
+    : available;
+}
+
+const FEED_MESSAGES_PER_ROOM = 8;
+const feedMessageCache = new Map();
+const EXCLUDED_FEED_MESSAGE_PREFIXES = [
+  '[feather-sidecar ',
+  '[Cross-Room ·',
+  '<system-notice>',
+  '<system-reminder>',
+];
+
+function roomFeedMessages(room) {
+  if (!room.leaderSessionId) return [];
+  const session = room.sessions.find(candidate => candidate.id === room.leaderSessionId);
+  const agent = session?.agent || 'omp';
+  const file = findJsonlPath(room.leaderSessionId, agent);
+  if (!file) return [];
+  try {
+    const stat = fs.statSync(file);
+    const signature = `${stat.size}:${stat.mtimeMs}`;
+    const cached = feedMessageCache.get(room.leaderSessionId);
+    if (cached?.signature === signature) return cached.messages;
+    const messages = readLatestMessages(file, agent, 60).messages
+      .filter(message => message.role === 'user' || message.role === 'assistant')
+      .map(message => {
+        const text = (message.content || [])
+          .filter(block => block?.type === 'text' && block.text)
+          .map(block => block.text)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return {
+          id: typeof message.uuid === 'string' ? message.uuid : null,
+          timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+          role: message.role,
+          text: text.slice(0, 600),
+        };
+      })
+      .filter(message => message.text
+        && !EXCLUDED_FEED_MESSAGE_PREFIXES.some(prefix => message.text.startsWith(prefix)))
+      .slice(-FEED_MESSAGES_PER_ROOM);
+    feedMessageCache.set(room.leaderSessionId, { signature, messages });
+    return messages;
+  } catch {
+    return feedMessageCache.get(room.leaderSessionId)?.messages || [];
+  }
+}
+
+
+let feedHistory = [];
+function buildFeedProjection() {
+  const rooms = roomSnapshotCache.get();
+  const feedRooms = rooms.map(room => ({ ...room, feedMessages: roomFeedMessages(room) }));
+  const current = buildSuperFeed({ rooms: feedRooms, complaints: readFrictionComplaints() });
+  feedHistory = mergeSuperFeed(feedHistory, current, rooms);
+  return {
+    items: feedHistory,
+    cursor: superFeedCursor(feedHistory),
+    generatedAt: new Date().toISOString(),
+  };
+}
+const feedSnapshotCache = createSnapshotCache(buildFeedProjection, { ttlMs: 10_000 });
+
+
+app.get('/api/feed', (req, res) => {
+  try {
+    const rooms = roomSnapshotCache.get();
+    const projection = feedSnapshotCache.get();
+    const following = followedFeedRooms(rooms);
+    const preferenceCursor = createHash('sha256').update(JSON.stringify(following)).digest('hex').slice(0, 12);
+    const etag = `\"${projection.cursor}-${preferenceCursor}\"`;
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('ETag', etag);
+    if (req.get('If-None-Match') === etag) return res.status(304).end();
+    res.json({ ...projection, following });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/feed/following', (req, res) => {
+  try {
+    const rooms = roomSnapshotCache.get();
+    const room = String(req.body?.room || '').trim().replace(/^#/, '');
+    if (!rooms.some(candidate => candidate.name === room)) throw httpError(404, 'no such room');
+    if (typeof req.body?.following !== 'boolean') throw httpError(400, 'following must be boolean');
+    const current = new Set(followedFeedRooms(rooms));
+    if (req.body.following) current.add(room);
+    else current.delete(room);
+    const following = rooms.map(candidate => candidate.name).filter(name => current.has(name));
+    const state = FEED_PREFERENCES_STATE.read();
+    FEED_PREFERENCES_STATE.write({ ...state, rooms: following });
+    res.json({ ok: true, following });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 app.get('/api/rooms/:name/residents', (req, res) => {

@@ -2,6 +2,12 @@ import { test, expect } from '@playwright/test'
 
 const BASE = process.env.FEATHER_URL || 'http://localhost:4870'
 
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/feed', route => route.fulfill({
+    json: { items: [], following: [], generatedAt: '2026-09-05T12:00:00Z' },
+  }))
+})
+
 test('attaches and detaches an existing chat without duplicate Room rows', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   let attached = false
@@ -281,4 +287,74 @@ test('shows friction only on the Room that reported it', async ({ page }) => {
   await expect(panel).toContainText('Calendar login loop')
   await expect(panel).toContainText('OAuth callback returned 401')
   await expect(page.getByTestId('friction-panel-family')).toHaveCount(0)
+})
+
+test('Super Feed filters attention, subscriptions, and friction without exposing raw evidence', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.unroute('**/api/feed')
+  const room = {
+    name: 'trading', cwd: '/srv/rooms/trading', active: false,
+    latest: { role: 'assistant', text: 'Risk review completed.' }, updatedAt: '2026-09-05T12:00:00Z',
+    updates: { count: 0, latestAt: null, latest: null },
+    friction: { count: 0, latestAt: null, latest: null },
+    pulse: { enabled: true, status: 'waiting', lastRunAt: '2026-09-05T12:00:00Z', nextRunAt: null, sessionId: null },
+    leaderSessionId: 'trading-leader',
+    residents: [{ role: 'leader', sessionId: 'trading-leader', agent: 'omp', title: '#trading Leader', status: 'waiting' }],
+    sessions: [{ id: 'trading-leader', title: '#trading Leader', updatedAt: '2026-09-05T12:00:00Z', isActive: false, agent: 'omp', roomAssigned: true }],
+  }
+  const items = [{
+    evidenceId: 'session:trading-leader:2026-09-05T12:00:00Z', kind: 'update', room: 'trading', title: '#trading',
+    summary: 'Risk review completed.', detail: null, occurredAt: '2026-09-05T12:00:00Z',
+    sourceHref: '/#trading-leader', sourceState: 'available',
+    status: 'updated', needsReview: false, sessionId: 'trading-leader',
+  }, {
+    evidenceId: 'room:health:pulse:2026-09-05T12:30:00Z', kind: 'alert', room: 'health', title: '#health status failed',
+    summary: 'Status check failed.', detail: 'Open the Room to investigate.', occurredAt: '2026-09-05T12:30:00Z',
+    sourceHref: '/#health-leader', sourceState: 'available',
+    status: 'needs review', needsReview: true, sessionId: 'health-leader',
+  }, {
+    evidenceId: 'friction:calendar-auth', kind: 'friction', room: 'health', title: '#health → #friction',
+    summary: 'Calendar auth repeatedly expires.', detail: '401 from provider', occurredAt: '2026-09-05T13:00:00Z',
+    sourceHref: '/api/rooms/health/friction#calendar-auth', sourceState: 'available',
+    status: null, needsReview: false, sessionId: null, complaintId: 'calendar-auth',
+  }]
+  let following = ['trading']
+  let failFeed = false
+  await page.route('**/api/feed', route => failFeed
+    ? route.fulfill({ status: 503, json: { error: 'temporary feed failure' } })
+    : route.fulfill({ json: { items, following, cursor: 'cursor-1', generatedAt: '2026-09-05T13:00:00Z' } }))
+  await page.route('**/api/feed/following', async route => {
+    const body = JSON.parse(route.request().postData() || '{}')
+    following = body.following ? [...new Set([...following, body.room])] : following.filter(name => name !== body.room)
+    await route.fulfill({ json: { ok: true, following } })
+  })
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [room] } }))
+
+  await page.goto(BASE)
+  await expect(page.getByRole('heading', { name: 'Super Feed' })).toBeVisible()
+  const feed = page.getByTestId('super-feed')
+  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).toBeVisible()
+
+  failFeed = true
+  await feed.getByTestId('feed-refresh').click()
+  await expect(feed.getByText('HTTP 503', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  failFeed = false
+
+  await feed.getByTestId('feed-tab-review').click()
+  await expect(feed.getByText('Status check failed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
+  await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
+
+  await feed.getByTestId('feed-tab-following').click()
+  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
+  await feed.getByTestId('feed-follow-trading').click()
+  await expect(feed.getByTestId('feed-empty')).toContainText('Follow a Room from Latest')
+
+  await feed.getByTestId('feed-tab-friction').click()
+  await expect(feed.getByText('401 from provider', { exact: true })).toBeVisible()
+  await expect(feed.getByText('calendar-auth', { exact: true })).toBeVisible()
+  await page.screenshot({ path: 'test-results/super-feed-mobile.png', fullPage: true })
 })

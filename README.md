@@ -113,6 +113,16 @@ durable meaning from `notes.md`, legacy updates, and sessions into curated
 compatibility, but agents should write working evidence to `notes.md` and leave
 human-facing synthesis to the caretaker.
 
+The Rooms home starts with **Super Feed**, a read-only projection of canonical
+Leader-chat outcomes, Room status failures, and structured `#friction` records.
+**Latest**, **Review**, **Following**, and **Friction** are views over the same
+stable evidence identities; following only changes selection. Cards link back
+to their source, retain stale locators when a source disappears, and never
+expose raw notes, legacy Updates, Sidecar traffic, or tool activity. Complaint
+status remains unknown unless a canonical resolution event proves otherwise.
+The client conditionally polls with ETags and preserves its last-good view on a
+transient failure.
+
 `room note` records evidence but does not wake another session. For actionable
 cross-session work, use a stable delivery id:
 
