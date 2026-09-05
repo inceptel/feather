@@ -3,7 +3,7 @@
 # Self-identifies via the tmux session name (feather-<id8>); Feather resolves
 # which group this session belongs to.
 #
-#   sidecar post --to <role|a,b|all> <text...>   send to a peer, several, or all
+#   sidecar post --to <role|a,b|all> TEXT|--stdin|--file PATH
 #   sidecar read [--since <seq>] [--from <role>]  print the thread (optionally filtered)
 #   sidecar wait --from <role|all> --count <N> [--timeout <S>]   block until N replies land
 #   sidecar whoami                                show this session's group(s)
@@ -33,6 +33,31 @@ self_prefix() {
   esac
 }
 
+read_post_text() {
+  POST_TEXT=""
+  case "${1:-}" in
+    --stdin)
+      [ "$#" -eq 1 ] || die "sidecar post: cannot combine --stdin with positional text"
+      IFS= read -r -d '' POST_TEXT || true
+      ;;
+    --file)
+      [ "$#" -eq 2 ] || die "sidecar post: --file requires exactly one path and no positional text"
+      [ -f "$2" ] || die "sidecar post: input file not found: $2"
+      IFS= read -r -d '' POST_TEXT <"$2" || true
+      ;;
+    --)
+      shift
+      [ "$#" -gt 0 ] || die "sidecar post: text must not be empty"
+      POST_TEXT="$*"
+      ;;
+    *)
+      [ "$#" -gt 0 ] || die "sidecar post: text must not be empty"
+      POST_TEXT="$*"
+      ;;
+  esac
+  [ -n "$POST_TEXT" ] || die "sidecar post: text must not be empty"
+}
+
 # Resolve a concrete group id for read/wait: explicit --group, then $SIDECAR_GROUP,
 # then the (unique) active group containing this session.
 resolve_group() {
@@ -60,15 +85,23 @@ case "$cmd" in
     printf '%s\n' "$BASE"
     ;;
   post)
-    to=""; group=""; text=""
+    to=""; group=""
     while [ $# -gt 0 ]; do
       case "$1" in
-        --to) to="${2:-}"; shift 2 ;;
-        --group) group="${2:-}"; shift 2 ;;
-        *) text="${text:+$text }$1"; shift ;;
+        --to)
+          [ "$#" -ge 2 ] || die "sidecar post: --to requires a value"
+          to="$2"; shift 2
+          ;;
+        --group)
+          [ "$#" -ge 2 ] || die "sidecar post: --group requires a value"
+          group="$2"; shift 2
+          ;;
+        *) break ;;
       esac
     done
-    [ -n "$to" ] && [ -n "$text" ] || die "usage: sidecar post --to <role|a,b|all> <text>"
+    [ -n "$to" ] || die "usage: sidecar post --to <role|a,b|all> [--group ID] TEXT | --stdin | --file PATH"
+    read_post_text "$@"
+    text="$POST_TEXT"
     prefix=$(self_prefix)
     [ -n "$group" ] || group="${SIDECAR_GROUP:-}"
     auth_headers=()
@@ -151,7 +184,7 @@ case "$cmd" in
         '.groups[] | select(any(.members[]; .sessionId[0:8]==$p)) | "group \(.id) [\(.status)] roles: \([.members[].role] | join(", "))"'
     ;;
   ""|-h|--help|help)
-    echo "usage: sidecar {post --to <role|a,b|all> <text> | read [--since N] [--from role] | wait --from <role|all> --count N [--timeout S] | whoami} [--group <id>]"
+    echo "usage: sidecar {post --to <role|a,b|all> [--group ID] TEXT|--stdin|--file PATH | read [--since N] [--from role] | wait --from <role|all> --count N [--timeout S] | whoami} [--group <id>]"
     echo "Room posting is resident-only; assigned Room chats hand off with: room dispatch --to <role> --stdin"
     ;;
   *)
