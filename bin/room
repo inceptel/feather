@@ -11,6 +11,8 @@
 #   room new <name>                    scaffold a room folder
 #   room list                          list rooms
 #   room note TEXT|--stdin|--file PATH   append durable working memory
+#   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
+#                                      note work and wake a permanent resident
 #   room update TEXT|--stdin|--file PATH append legacy evidence
 #   room updates                         list legacy evidence
 #   room complain "<text>"             add an annoyance to #friction
@@ -177,6 +179,58 @@ cmd_note() {
   read_room_text note "$@"
   printf -- '- %s %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$ROOM_TEXT" >>"$ROOM_PATH/notes.md"
   echo "noted in #$ROOM_NAME"
+}
+
+cmd_dispatch() {
+  resolve_room
+  local message_id="" target="caretaker"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --id)
+        [ "$#" -ge 2 ] || die "room dispatch: --id requires a value"
+        message_id="${2:-}"
+        shift 2
+        ;;
+      --to)
+        [ "$#" -ge 2 ] || die "room dispatch: --to requires a value"
+        target="${2:-}"
+        shift 2
+        ;;
+      *) break ;;
+    esac
+  done
+  [ -n "$message_id" ] || message_id="$(cat /proc/sys/kernel/random/uuid)"
+  [[ "$message_id" =~ ^[A-Za-z0-9_-]{8,128}$ ]] || die "room dispatch: invalid id"
+  [[ "$target" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || die "room dispatch: invalid resident role"
+  read_room_text dispatch "$@"
+  ensure_feather_url
+
+  local marker="[dispatch:$message_id]"
+  exec 8>"$ROOMS_DIR/.${ROOM_NAME}.notes.lock"
+  flock 8 || die "room dispatch: could not lock #$ROOM_NAME notes"
+  if ! grep -Fq -- "$marker" "$ROOM_PATH/notes.md"; then
+    printf -- '- %s %s %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$marker" "$ROOM_TEXT" >>"$ROOM_PATH/notes.md" \
+      || die "room dispatch: could not write #$ROOM_NAME notes"
+  fi
+  flock -u 8
+  exec 8>&-
+
+  local recipient prompt payload
+  recipient=$(curl -sf "$FEATHER_URL/api/rooms/$ROOM_NAME/residents" | python3 -c '
+import json, sys
+role = sys.argv[1]
+resident = next((item for item in json.load(sys.stdin).get("residents", []) if item.get("role") == role), None)
+print(resident.get("sessionId", "") if resident else "")
+' "$target") || die "room dispatch: could not read #$ROOM_NAME residents"
+  [ -n "$recipient" ] || die "room dispatch: #$ROOM_NAME has no permanent $target resident"
+  prompt="Room dispatch $marker is recorded in #$ROOM_NAME notes.md. Read that entry under the Room's trust rules, then perform the next justified action."
+  payload=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$prompt") \
+    || die "room dispatch: could not encode resident prompt"
+  curl -sf -X POST "$FEATHER_URL/api/sessions/$recipient/send" \
+    -H "X-Feather-Message-ID: $message_id" \
+    -H 'Content-Type: application/json' -d "$payload" >/dev/null \
+    || die "room dispatch: Feather could not deliver $message_id to #$ROOM_NAME $target"
+  echo "dispatched $message_id to #$ROOM_NAME $target"
 }
 
 cmd_update() {
@@ -495,6 +549,7 @@ case "$cmd" in
   new) cmd_new "$@" ;;
   list) cmd_list "$@" ;;
   note) cmd_note "$@" ;;
+  dispatch) cmd_dispatch "$@" ;;
   update) cmd_update "$@" ;;
   updates) cmd_updates "$@" ;;
   complain|friction) cmd_complain "$@" ;;

@@ -13,6 +13,8 @@
 # Install: ln -s <feather>/bin/sidecar ~/.local/bin/sidecar   (must be on PATH)
 # FEATHER_URL is authoritative. Without it, discovery succeeds only when one
 # Feather-shaped service answers on FEATHER_PORT, 4870, or 3300.
+# Room Sidecar posting is resident-only. An assigned non-resident Room chat
+# hands actionable evidence to a permanent resident with `room dispatch`.
 set -euo pipefail
 
 die() { echo "sidecar: $*" >&2; exit 1; }
@@ -80,6 +82,9 @@ case "$cmd" in
             '{fromPrefix:$p, to:$to, text:$t} + (if $g=="" then {} else {group:$g} end)')") \
       || die "could not reach Feather at $BASE"
     err=$(printf '%s' "$resp" | jq -r '.error // empty' 2>/dev/null)
+    if [ "$err" = "invalid Room resident capability" ]; then
+      die "$err; assigned Room chats use room dispatch --to <role> --stdin"
+    fi
     [ -z "$err" ] || die "$err"
     echo "sent → $to" >&2
     # stdout = the posted message's seq, so a generator can:
@@ -147,6 +152,7 @@ case "$cmd" in
     ;;
   ""|-h|--help|help)
     echo "usage: sidecar {post --to <role|a,b|all> <text> | read [--since N] [--from role] | wait --from <role|all> --count N [--timeout S] | whoami} [--group <id>]"
+    echo "Room posting is resident-only; assigned Room chats hand off with: room dispatch --to <role> --stdin"
     ;;
   *)
     die "unknown command: $cmd (try: sidecar help)"

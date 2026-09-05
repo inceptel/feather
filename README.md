@@ -113,6 +113,21 @@ durable meaning from `notes.md`, legacy updates, and sessions into curated
 compatibility, but agents should write working evidence to `notes.md` and leave
 human-facing synthesis to the caretaker.
 
+`room note` records evidence but does not wake another session. For actionable
+cross-session work, use a stable delivery id:
+
+```bash
+printf '%s' 'Review the new receipt and act if justified.' \
+  | room dispatch --id source-item-123 --to caretaker --stdin
+```
+
+`room dispatch` appends one `[dispatch:<id>]` note, resolves the named permanent
+resident, and uses Feather's idempotent session delivery to wake it immediately.
+Retries with the same id do not duplicate the note or resident input, and
+delivery does not depend on the Room's automatic pulse being enabled. Room
+Sidecar posting remains resident-only; assigned non-resident chats use
+`room dispatch` for a supported handoff.
+
 Agents can run `room complain "..."` to append recurring annoyances to
 `#friction`. `#meta` is the separate place for reusable lessons across Rooms.
 
