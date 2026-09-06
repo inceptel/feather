@@ -269,10 +269,6 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   return (
     <div style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
       <div style={{ 'max-width': '640px', margin: '0 auto', padding: '12px 12px 40px' }}>
-        <div style={{ padding: '10px 4px 12px 44px' }}>
-          <h1 style={{ margin: '0', 'font-size': '20px', 'font-weight': '700' }}>Super Feed</h1>
-          <div style={{ color: '#687384', 'font-size': '11px', 'margin-top': '2px' }}>What changed, what needs you, and where friction went.</div>
-        </div>
         <SuperFeed onOpenSession={props.onOpen} />
 
         <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '2px 4px 10px' }}>

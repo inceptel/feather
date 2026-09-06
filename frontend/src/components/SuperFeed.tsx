@@ -1,6 +1,7 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { fetchSuperFeed, postFeedComment, setFeedFollowing, FeedComment, SuperFeedItem, SuperFeedView } from '../api'
 import { appUrl } from '../lib/appPath'
+import { markdownCSS, renderWikiMarkdown } from './MessageView'
 
 const views: Array<{ key: SuperFeedView, label: string }> = [
   { key: 'latest', label: 'Latest' },
@@ -8,6 +9,15 @@ const views: Array<{ key: SuperFeedView, label: string }> = [
   { key: 'following', label: 'Following' },
   { key: 'friction', label: 'Friction' },
 ]
+
+// Palette: every text colour passes WCAG AA on the #0d1117 card ground.
+const ink = '#e6ebf2'
+const body = '#c9d1dc'
+const muted = '#8b97a8'
+const line = '#1e2632'
+const green = '#69c77f'
+const amber = '#e0b45f'
+const red = '#e3826d'
 
 function timeAgo(iso: string | null) {
   if (!iso) return ''
@@ -19,12 +29,55 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(hours / 24)}d`
 }
 
-function statusColor(item: SuperFeedItem) {
-  if (item.kind === 'friction') return '#d5a85d'
-  if (item.needsReview) return '#df7861'
-  if (item.status === 'working') return '#69c77f'
-  return '#8190a4'
+// One-line preview text for clamped rows: markdown syntax stripped, not rendered.
+function plainText(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
+
+// Publications carry `#room · Title`; the room becomes a chip, so drop the prefix.
+function headline(item: SuperFeedItem) {
+  const prefix = `#${item.room} · `
+  return item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title
+}
+
+function isChat(item: SuperFeedItem) {
+  return item.kind === 'update' && !item.publicationId
+}
+
+type Entry =
+  | { type: 'card', item: SuperFeedItem, key: string }
+  | { type: 'activity', item: SuperFeedItem, items: SuperFeedItem[], key: string }
+
+// Publications, alerts, and friction are cards. Leader chat collapses into one
+// activity row per Room so the feed reads as what shipped, not a transcript.
+function toEntries(items: SuperFeedItem[]): Entry[] {
+  const entries: Entry[] = []
+  const activity = new Map<string, Entry & { type: 'activity' }>()
+  for (const item of items) {
+    if (!isChat(item)) { entries.push({ type: 'card', item, key: item.evidenceId }); continue }
+    const existing = activity.get(item.room)
+    if (existing) { existing.items.push(item); continue }
+    const entry = { type: 'activity' as const, item, items: [item], key: `activity:${item.room}:${item.evidenceId}` }
+    activity.set(item.room, entry)
+    entries.push(entry)
+  }
+  return entries
+}
+
+const CommentIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+    <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
+  </svg>
+)
 
 export function SuperFeed(props: { onOpenSession: (sessionId: string) => void }) {
   const [view, setView] = createSignal<SuperFeedView>('latest')
@@ -37,6 +90,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
   const [commentDraft, setCommentDraft] = createSignal('')
   const [commentBusy, setCommentBusy] = createSignal(false)
   const [pendingComments, setPendingComments] = createSignal<Record<string, FeedComment[]>>({})
+  const [expandedReplies, setExpandedReplies] = createSignal<Record<string, boolean>>({})
 
   let timer: ReturnType<typeof setInterval>
   let requestInFlight = false
@@ -79,8 +133,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
     requestController?.abort()
   })
 
-  const visibleItems = createMemo(() => {
-    const selected = view()
+  const itemsFor = (selected: SuperFeedView) => {
     if (selected === 'review') return items().filter(item => item.needsReview)
     if (selected === 'following') {
       const followed = new Set(following())
@@ -88,17 +141,9 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
     }
     if (selected === 'friction') return items().filter(item => item.kind === 'friction')
     return items()
-  })
-
-  const countFor = (selected: SuperFeedView) => {
-    if (selected === 'review') return items().filter(item => item.needsReview).length
-    if (selected === 'following') {
-      const followed = new Set(following())
-      return items().filter(item => followed.has(item.room)).length
-    }
-    if (selected === 'friction') return items().filter(item => item.kind === 'friction').length
-    return items().length
   }
+  const entries = createMemo(() => toEntries(itemsFor(view())))
+  const countFor = (selected: SuperFeedView) => toEntries(itemsFor(selected)).length
 
   async function toggleFollowing(room: string, event: MouseEvent) {
     event.stopPropagation()
@@ -130,6 +175,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
       const comment = await postFeedComment(item.evidenceId, text)
       setPendingComments(current => ({ ...current, [item.evidenceId]: [...(current[item.evidenceId] || []), comment] }))
       setCommentDraft('')
+      setCommentOpen(null)
       setError(null)
       etag = null
       refresh()
@@ -141,114 +187,239 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
   }
 
   // Server comments win; pending ones show until the projection catches up.
-  const commentsFor = (item: SuperFeedItem): FeedComment[] => {
-    const server = item.comments || []
-    const known = new Set(server.map(comment => comment.id))
-    const pending = (pendingComments()[item.evidenceId] || []).filter(comment => !known.has(comment.id))
-    return [...server, ...pending]
+  const commentsFor = (list: SuperFeedItem[]): FeedComment[] => {
+    const out: FeedComment[] = []
+    for (const item of list) {
+      const server = item.comments || []
+      const known = new Set(server.map(comment => comment.id))
+      const pending = (pendingComments()[item.evidenceId] || []).filter(comment => !known.has(comment.id))
+      out.push(...server, ...pending)
+    }
+    return out.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
   }
 
-  return (
-    <section data-testid="super-feed" style={{ 'margin-bottom': '24px' }}>
-      <div style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '5px' }}>
-        <button data-testid="feed-refresh" onClick={refresh} disabled={requestInFlight}
-          style={{ background: 'none', border: 'none', color: '#6f7b8c', 'font-size': '10px', cursor: 'pointer', padding: '2px 3px' }}>Refresh</button>
+  const canOpen = (item: SuperFeedItem) => item.sourceState === 'available' && Boolean(item.sessionId)
+
+  const RoomChip = (chipProps: { room: string }) => (
+    <span style={{ color: muted, 'font-size': '12px', 'font-weight': '700', padding: '2px 7px', border: `1px solid ${line}`, 'border-radius': '999px', 'white-space': 'nowrap', 'flex-shrink': '0' }}>#{chipProps.room}</span>
+  )
+
+  const Flag = (flagProps: { text: string, color: string }) => (
+    <span style={{ color: flagProps.color, 'font-size': '12px', 'font-weight': '700', 'white-space': 'nowrap' }}>{flagProps.text}</span>
+  )
+
+  const FollowStar = (starProps: { item: SuperFeedItem }) => (
+    <Show when={starProps.item.sourceState === 'available'}>
+      <button aria-label={`${following().includes(starProps.item.room) ? 'Unfollow' : 'Follow'} #${starProps.item.room}`} data-testid={`feed-follow-${starProps.item.room}`}
+        disabled={followBusy() === starProps.item.room} onClick={(event) => toggleFollowing(starProps.item.room, event)}
+        style={{ background: 'none', border: 'none', color: following().includes(starProps.item.room) ? amber : muted, 'font-size': '18px', padding: '0 2px', cursor: 'pointer', 'line-height': '1', 'flex-shrink': '0' }}>
+        {following().includes(starProps.item.room) ? '★' : '☆'}
+      </button>
+    </Show>
+  )
+
+  const MetaRow = (metaProps: { item: SuperFeedItem, dot?: boolean, flag?: { text: string, color: string } | null, count?: number }) => (
+    <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'min-width': '0' }}>
+      <Show when={metaProps.dot}>
+        <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: metaProps.item.status === 'working' ? green : muted, 'flex-shrink': '0' }} />
+      </Show>
+      <RoomChip room={metaProps.item.room} />
+      <Show when={metaProps.count && metaProps.count > 1}>
+        <span style={{ color: muted, 'font-size': '12px', 'white-space': 'nowrap' }}>{metaProps.count} updates</span>
+      </Show>
+      <Show when={metaProps.flag}><Flag text={metaProps.flag!.text} color={metaProps.flag!.color} /></Show>
+      <Show when={metaProps.item.sourceState === 'stale'}><Flag text="Source unavailable" color={red} /></Show>
+      <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '12px', 'font-variant-numeric': 'tabular-nums', 'white-space': 'nowrap' }}>{timeAgo(metaProps.item.occurredAt)}</span>
+      <FollowStar item={metaProps.item} />
+    </div>
+  )
+
+  // Comment thread under a card: the comment, the Room's answer, and the composer.
+  const Thread = (threadProps: { item: SuperFeedItem, items: SuperFeedItem[] }) => {
+    const list = () => commentsFor(threadProps.items)
+    return (
+      <div onClick={(event) => event.stopPropagation()} style={{ 'margin-top': '10px' }}>
+        <Show when={list().length > 0}>
+          <div style={{ display: 'grid', gap: '8px', 'margin-bottom': '8px' }}>
+            <For each={list()}>{(comment) => {
+              const long = () => Boolean(comment.reply && (comment.reply.text.length > 420 || comment.reply.text.split('\n').length > 6))
+              const open = () => Boolean(expandedReplies()[comment.id])
+              return (
+                <div data-testid={`feed-comment-${comment.id}`} style={{ background: '#0a0d12', border: `1px solid ${line}`, 'border-radius': '10px', padding: '9px 11px' }}>
+                  <div style={{ display: 'flex', 'align-items': 'baseline', gap: '7px', 'font-size': '12px', color: muted }}>
+                    <span style={{ color: ink, 'font-weight': '700' }}>You</span>
+                    <span>{timeAgo(comment.createdAt)}</span>
+                  </div>
+                  <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '2px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{comment.text}</div>
+                  <div style={{ 'border-top': `1px solid ${line}`, 'margin-top': '8px', 'padding-top': '8px' }}>
+                    <Show when={comment.reply} fallback={
+                      <div style={{ color: muted, 'font-size': '13px' }}>#{comment.room} is answering…</div>
+                    }>
+                      <div style={{ display: 'flex', 'align-items': 'baseline', gap: '7px', 'font-size': '12px', color: muted }}>
+                        <span style={{ color: green, 'font-weight': '700' }}>#{comment.room}</span>
+                        <span>{timeAgo(comment.reply!.timestamp)}</span>
+                      </div>
+                      <div class="markdown" innerHTML={renderWikiMarkdown(comment.reply!.text)}
+                        style={{ color: body, 'font-size': '14px', 'margin-top': '2px', ...(long() && !open() ? { display: '-webkit-box', '-webkit-line-clamp': '6', '-webkit-box-orient': 'vertical', overflow: 'hidden' } : {}) }} />
+                      <Show when={long()}>
+                        <button onClick={() => setExpandedReplies(current => ({ ...current, [comment.id]: !open() }))}
+                          style={{ background: 'none', border: 'none', color: muted, 'font-size': '12px', 'font-weight': '700', padding: '4px 0 0', cursor: 'pointer' }}>{open() ? 'Show less' : 'Show more'}</button>
+                      </Show>
+                    </Show>
+                  </div>
+                </div>
+              )
+            }}</For>
+          </div>
+        </Show>
+        <Show when={commentOpen() === threadProps.item.evidenceId}>
+          <form onSubmit={(event) => submitComment(threadProps.item, event)} style={{ display: 'flex', gap: '6px', 'align-items': 'flex-end' }}>
+            <textarea data-testid={`feed-comment-input-${threadProps.item.evidenceId}`} value={commentDraft()} onInput={(event) => setCommentDraft(event.currentTarget.value)}
+              placeholder={`Ask #${threadProps.item.room} about this…`} rows={2} autofocus
+              onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitComment(threadProps.item, event) }}
+              style={{ flex: '1', 'min-width': '0', background: '#0b0e13', border: '1px solid #2a3442', 'border-radius': '8px', color: ink, 'font-size': '14px', padding: '8px 10px', resize: 'vertical', 'font-family': 'inherit' }} />
+            <button type="submit" disabled={commentBusy() || !commentDraft().trim()}
+              style={{ background: '#243044', border: 'none', color: ink, 'font-size': '13px', 'font-weight': '700', padding: '9px 13px', 'border-radius': '8px', cursor: 'pointer' }}>{commentBusy() ? '…' : 'Send'}</button>
+            <button type="button" onClick={(event) => toggleComment(threadProps.item, event)}
+              style={{ background: 'none', border: 'none', color: muted, 'font-size': '13px', padding: '9px 4px', cursor: 'pointer' }}>Cancel</button>
+          </form>
+        </Show>
       </div>
-      <div role="tablist" aria-label="Super Feed views" style={{ display: 'grid', 'grid-template-columns': 'repeat(4, 1fr)', gap: '4px', padding: '3px', background: '#0b0e13', border: '1px solid #1e2632', 'border-radius': '11px', 'margin-bottom': '10px' }}>
+    )
+  }
+
+  const CommentButton = (buttonProps: { item: SuperFeedItem, items: SuperFeedItem[] }) => {
+    const count = () => commentsFor(buttonProps.items).length
+    return (
+      <button data-testid={`feed-comment-open-${buttonProps.item.evidenceId}`} onClick={(event) => toggleComment(buttonProps.item, event)}
+        aria-expanded={commentOpen() === buttonProps.item.evidenceId}
+        style={{ display: 'inline-flex', 'align-items': 'center', gap: '5px', background: 'none', border: `1px solid ${line}`, 'border-radius': '999px', color: muted, 'font-size': '12px', 'font-weight': '700', padding: '4px 10px', cursor: 'pointer', 'white-space': 'nowrap' }}>
+        <CommentIcon />{count() > 0 ? `${count()} comment${count() === 1 ? '' : 's'}` : 'Comment'}
+      </button>
+    )
+  }
+
+  const EvidenceLink = (linkProps: { item: SuperFeedItem, label: string }) => (
+    <a href={appUrl(linkProps.item.sourceHref)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}
+      style={{ color: muted, 'font-size': '12px', 'font-weight': '600', 'text-decoration': 'none', 'white-space': 'nowrap' }}>{linkProps.label}</a>
+  )
+
+  const cardStyle = (item: SuperFeedItem, clickable: boolean) => ({
+    background: item.needsReview ? '#15120f' : '#0d1117',
+    border: `1px solid ${item.needsReview ? '#3d2f22' : line}`,
+    'border-radius': '12px',
+    padding: '12px 14px',
+    'min-width': '0',
+    overflow: 'hidden',
+    cursor: clickable ? 'pointer' : 'default',
+    '-webkit-tap-highlight-color': 'transparent',
+  })
+
+  return (
+    <section data-testid="super-feed" style={{ 'margin-bottom': '28px', 'font-size': '14px' }}>
+      <style>{markdownCSS}</style>
+      <div style={{ display: 'flex', 'align-items': 'flex-end', gap: '10px', padding: '8px 2px 12px' }}>
+        <div style={{ 'min-width': '0' }}>
+          <h1 style={{ margin: '0', 'font-size': '20px', 'font-weight': '700', color: ink, 'line-height': '1.2' }}>Super Feed</h1>
+          <div style={{ color: muted, 'font-size': '12px', 'margin-top': '3px' }}>What shipped, what needs you, and where friction went.</div>
+        </div>
+        <button data-testid="feed-refresh" onClick={refresh} disabled={requestInFlight}
+          style={{ 'margin-left': 'auto', background: 'none', border: `1px solid ${line}`, 'border-radius': '999px', color: muted, 'font-size': '12px', 'font-weight': '700', cursor: 'pointer', padding: '4px 10px', 'flex-shrink': '0' }}>Refresh</button>
+      </div>
+      <div role="tablist" aria-label="Super Feed views" style={{ display: 'grid', 'grid-template-columns': 'repeat(4, 1fr)', gap: '4px', padding: '3px', background: '#0b0e13', border: `1px solid ${line}`, 'border-radius': '11px', 'margin-bottom': '10px' }}>
         <For each={views}>{(option) => (
           <button role="tab" aria-selected={view() === option.key} data-testid={`feed-tab-${option.key}`} onClick={() => setView(option.key)}
-            style={{ border: 'none', background: view() === option.key ? '#202938' : 'transparent', color: view() === option.key ? '#f0f3f8' : '#7f8998', padding: '8px 4px', 'border-radius': '8px', 'font-size': '11px', 'font-weight': '700', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-            {option.label}<Show when={countFor(option.key) > 0}><span style={{ color: view() === option.key ? '#aeb9c8' : '#596474', 'font-weight': '600' }}> {countFor(option.key)}</span></Show>
+            style={{ border: 'none', background: view() === option.key ? '#202938' : 'transparent', color: view() === option.key ? ink : muted, padding: '8px 4px', 'border-radius': '8px', 'font-size': '12px', 'font-weight': '700', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+            {option.label}<Show when={countFor(option.key) > 0}><span style={{ color: view() === option.key ? '#aeb9c8' : '#6c7889', 'font-weight': '600' }}> {countFor(option.key)}</span></Show>
           </button>
         )}</For>
       </div>
 
       <Show when={error()}>
-        <div style={{ color: '#df7861', 'font-size': '12px', padding: '8px 4px' }}>{error()}</div>
+        <div style={{ color: red, 'font-size': '13px', padding: '8px 4px' }}>{error()}</div>
       </Show>
       <Show when={loading()}>
-        <div style={{ color: '#667080', 'text-align': 'center', padding: '26px 8px', 'font-size': '13px' }}>Loading your feed…</div>
+        <div style={{ color: muted, 'text-align': 'center', padding: '26px 8px', 'font-size': '14px' }}>Loading your feed…</div>
       </Show>
-      <Show when={!loading() && visibleItems().length === 0}>
-        <div data-testid="feed-empty" style={{ color: '#667080', 'text-align': 'center', padding: '26px 12px', background: '#0d1117', border: '1px solid #1e2632', 'border-radius': '12px', 'font-size': '13px', 'line-height': '1.5' }}>
+      <Show when={!loading() && entries().length === 0}>
+        <div data-testid="feed-empty" style={{ color: muted, 'text-align': 'center', padding: '26px 12px', background: '#0d1117', border: `1px solid ${line}`, 'border-radius': '12px', 'font-size': '14px', 'line-height': '1.5' }}>
           {view() === 'following' ? 'Nothing from followed Rooms yet. Follow a Room from Latest.' : view() === 'review' ? 'Nothing needs your review.' : view() === 'friction' ? 'No friction has been reported.' : 'No Room updates yet.'}
         </div>
       </Show>
 
-      <div style={{ display: 'grid', gap: '8px' }}>
-        <For each={visibleItems()}>{(item) => (
-          <article data-testid={`feed-item-${item.evidenceId}`}
-            onClick={() => { if (item.sourceState === 'available' && item.sessionId) props.onOpenSession(item.sessionId) }}
-            style={{ background: item.needsReview ? '#15120f' : '#0d1117', border: `1px solid ${item.needsReview ? '#382b20' : '#1e2632'}`, 'border-radius': '12px', padding: '12px 13px', 'min-width': '0', overflow: 'hidden', cursor: item.sourceState === 'available' && item.sessionId ? 'pointer' : 'default', '-webkit-tap-highlight-color': 'transparent' }}>
-            <div style={{ display: 'flex', 'align-items': 'center', gap: '7px' }}>
-              <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: statusColor(item), 'flex-shrink': '0' }} />
-              <strong style={{ color: '#e2e7ee', 'font-size': '13px', 'min-width': '0', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{item.title}</strong>
-              <Show when={item.status}>
-                <span style={{ color: statusColor(item), 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em' }}>{item.status}</span>
-              </Show>
-              <Show when={item.sourceState === 'stale'}>
-                <span style={{ color: '#df7861', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase' }}>source unavailable</span>
-              </Show>
-              <span style={{ 'margin-left': 'auto', color: '#596474', 'font-size': '10px', 'font-family': 'monospace' }}>{timeAgo(item.occurredAt)}</span>
-              <Show when={item.sourceState === 'available'}>
-                <button aria-label={`${following().includes(item.room) ? 'Unfollow' : 'Follow'} #${item.room}`} data-testid={`feed-follow-${item.room}`} disabled={followBusy() === item.room} onClick={(event) => toggleFollowing(item.room, event)}
-                  style={{ background: 'none', border: 'none', color: following().includes(item.room) ? '#e0b45f' : '#596474', 'font-size': '17px', padding: '0 2px', cursor: 'pointer', 'line-height': '1' }}>
-                  {following().includes(item.room) ? '★' : '☆'}
-                </button>
-              </Show>
-            </div>
-            <div style={{ color: '#bdc5d0', 'font-size': '13px', 'line-height': '1.45', 'margin-top': '7px', 'white-space': 'pre-wrap', 'word-break': 'break-word', display: '-webkit-box', '-webkit-line-clamp': '4', '-webkit-box-orient': 'vertical', overflow: 'hidden' }}>{item.summary}</div>
-            <Show when={item.detail}>
-              <div style={{ color: '#788495', 'font-size': '11px', 'line-height': '1.4', 'margin-top': '6px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{item.detail}</div>
-            </Show>
-            <Show when={item.visualHref && item.visualAlt}>
-              <img src={appUrl(item.visualHref!)} alt={item.visualAlt!} loading="lazy"
-                style={{ display: 'block', width: '100%', 'max-height': '320px', 'object-fit': 'cover', 'margin-top': '9px', 'border-radius': '9px', border: '1px solid #202938', background: '#080b10' }} />
-            </Show>
-            <Show when={item.publicationId && item.sourceState === 'available'}>
-              <a href={appUrl(item.sourceHref)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}
-                style={{ display: 'inline-block', color: '#8d9bae', 'font-size': '10px', 'margin-top': '7px', 'text-decoration': 'none' }}>Published evidence ↗</a>
-            </Show>
-            <Show when={item.complaintId}>
-              <div style={{ color: '#665b4b', 'font-size': '9px', 'font-family': 'monospace', 'margin-top': '7px' }}>{item.complaintId}</div>
-            </Show>
-            <Show when={item.kind !== 'friction' && item.sourceState === 'available'}>
-              <div onClick={(event) => event.stopPropagation()} style={{ 'margin-top': '9px' }}>
-                <For each={commentsFor(item)}>{(comment) => (
-                  <div data-testid={`feed-comment-${comment.id}`} style={{ 'border-left': '2px solid #2a3442', padding: '4px 0 4px 9px', 'margin-bottom': '6px' }}>
-                    <div style={{ color: '#d5dbe4', 'font-size': '12px', 'line-height': '1.4', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
-                      <span style={{ color: '#8190a4', 'font-size': '10px', 'font-weight': '700', 'margin-right': '6px' }}>YOU</span>{comment.text}
-                    </div>
-                    <Show when={comment.reply} fallback={<div style={{ color: '#667080', 'font-size': '10px', 'margin-top': '3px' }}>#{comment.room} is answering…</div>}>
-                      <div style={{ color: '#bdc5d0', 'font-size': '12px', 'line-height': '1.45', 'margin-top': '5px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
-                        <span style={{ color: '#69c77f', 'font-size': '10px', 'font-weight': '700', 'margin-right': '6px' }}>#{comment.room.toUpperCase()}</span>{comment.reply!.text}
-                      </div>
-                    </Show>
-                  </div>
-                )}</For>
-                <Show when={commentOpen() === item.evidenceId} fallback={
-                  <button data-testid={`feed-comment-open-${item.evidenceId}`} onClick={(event) => toggleComment(item, event)}
-                    style={{ background: 'none', border: 'none', color: '#8d9bae', 'font-size': '11px', padding: '2px 0', cursor: 'pointer' }}>Comment</button>
-                }>
-                  <form onSubmit={(event) => submitComment(item, event)} style={{ display: 'flex', gap: '6px', 'align-items': 'flex-end' }}>
-                    <textarea data-testid={`feed-comment-input-${item.evidenceId}`} value={commentDraft()} onInput={(event) => setCommentDraft(event.currentTarget.value)}
-                      placeholder={`Ask #${item.room} about this…`} rows={2} autofocus
-                      onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitComment(item, event) }}
-                      style={{ flex: '1', background: '#0b0e13', border: '1px solid #2a3442', 'border-radius': '8px', color: '#e2e7ee', 'font-size': '13px', padding: '7px 9px', resize: 'vertical', 'font-family': 'inherit' }} />
-                    <button type="submit" disabled={commentBusy() || !commentDraft().trim()}
-                      style={{ background: '#202938', border: 'none', color: '#f0f3f8', 'font-size': '12px', 'font-weight': '700', padding: '8px 12px', 'border-radius': '8px', cursor: 'pointer' }}>{commentBusy() ? '…' : 'Send'}</button>
-                    <button type="button" onClick={(event) => toggleComment(item, event)}
-                      style={{ background: 'none', border: 'none', color: '#7f8998', 'font-size': '12px', padding: '8px 4px', cursor: 'pointer' }}>Cancel</button>
-                  </form>
+      <div style={{ display: 'grid', gap: '10px' }}>
+        <For each={entries()}>{(entry) => {
+          const item = entry.item
+          if (entry.type === 'activity') {
+            // Leader chat, one row per Room: the newest line, opens the Leader.
+            return (
+              <article data-testid={`feed-item-${item.evidenceId}`} onClick={() => { if (canOpen(item)) props.onOpenSession(item.sessionId!) }} style={cardStyle(item, canOpen(item))}>
+                <MetaRow item={item} dot count={entry.items.length} />
+                <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '7px', 'word-break': 'break-word', display: '-webkit-box', '-webkit-line-clamp': '2', '-webkit-box-orient': 'vertical', overflow: 'hidden' }}>{plainText(item.summary)}</div>
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px' }}>
+                  <Show when={item.sourceState === 'available'}><CommentButton item={item} items={entry.items} /></Show>
+                  <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '12px' }}>Open the Room →</span>
+                </div>
+                <Show when={item.sourceState === 'available'}><Thread item={item} items={entry.items} /></Show>
+              </article>
+            )
+          }
+          if (item.kind === 'friction') {
+            return (
+              <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
+                <MetaRow item={item} flag={{ text: 'Friction', color: amber }} />
+                <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: ink, 'font-size': '15px', 'font-weight': '600', 'margin-top': '7px' }} />
+                <Show when={item.detail}>
+                  <div class="markdown" innerHTML={renderWikiMarkdown(item.detail!)} style={{ color: body, 'font-size': '13px', 'margin-top': '6px' }} />
                 </Show>
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px', 'min-width': '0' }}>
+                  <Show when={item.sourceState === 'available'}><EvidenceLink item={item} label="Canonical evidence ↗" /></Show>
+                  <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{item.complaintId}</span>
+                </div>
+              </article>
+            )
+          }
+          if (item.publicationId) {
+            // Publication: visual on top, headline, summary, details folded, comments.
+            return (
+              <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
+                <Show when={item.visualHref && item.visualAlt}>
+                  <img src={appUrl(item.visualHref!)} alt={item.visualAlt!} loading="lazy"
+                    style={{ display: 'block', width: '100%', 'aspect-ratio': '16 / 9', 'object-fit': 'cover', 'margin-bottom': '10px', 'border-radius': '9px', border: '1px solid #202938', background: '#080b10' }} />
+                </Show>
+                <MetaRow item={item} />
+                <h3 style={{ margin: '8px 0 0', color: ink, 'font-size': '16px', 'font-weight': '700', 'line-height': '1.3', 'word-break': 'break-word' }}>{headline(item)}</h3>
+                <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px', 'margin-top': '6px' }} />
+                <Show when={item.detail}>
+                  <details style={{ 'margin-top': '6px' }}>
+                    <summary style={{ color: muted, 'font-size': '12px', 'font-weight': '700', cursor: 'pointer', 'user-select': 'none' }}>Details</summary>
+                    <div class="markdown" innerHTML={renderWikiMarkdown(item.detail!)} style={{ color: body, 'font-size': '13px', 'margin-top': '6px' }} />
+                  </details>
+                </Show>
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '10px' }}>
+                  <Show when={item.sourceState === 'available'}><CommentButton item={item} items={[item]} /></Show>
+                  <Show when={item.sourceState === 'available'}><span style={{ 'margin-left': 'auto' }}><EvidenceLink item={item} label="Published evidence ↗" /></span></Show>
+                </div>
+                <Show when={item.sourceState === 'available'}><Thread item={item} items={[item]} /></Show>
+              </article>
+            )
+          }
+          // Alerts and anything else that needs review.
+          return (
+            <article data-testid={`feed-item-${item.evidenceId}`} onClick={() => { if (canOpen(item)) props.onOpenSession(item.sessionId!) }} style={cardStyle(item, canOpen(item))}>
+              <MetaRow item={item} flag={item.needsReview ? { text: 'Needs review', color: red } : null} />
+              <div style={{ color: ink, 'font-size': '15px', 'font-weight': '600', 'margin-top': '7px', 'word-break': 'break-word' }}>{headline(item)}</div>
+              <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px', 'margin-top': '4px' }} />
+              <Show when={item.detail}>
+                <div style={{ color: muted, 'font-size': '13px', 'line-height': '1.45', 'margin-top': '4px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{item.detail}</div>
+              </Show>
+              <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px' }}>
+                <Show when={item.sourceState === 'available'}><CommentButton item={item} items={[item]} /></Show>
               </div>
-            </Show>
-            <Show when={item.kind === 'friction' && item.sourceState === 'available'}>
-              <a href={appUrl(item.sourceHref)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}
-                style={{ display: 'inline-block', color: '#8d9bae', 'font-size': '10px', 'margin-top': '7px', 'text-decoration': 'none' }}>Canonical evidence ↗</a>
-            </Show>
-          </article>
-        )}</For>
+              <Show when={item.sourceState === 'available'}><Thread item={item} items={[item]} /></Show>
+            </article>
+          )
+        }}</For>
       </div>
     </section>
   )

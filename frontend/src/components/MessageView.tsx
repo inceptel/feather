@@ -640,7 +640,7 @@ function buildRenderItems(messages: Message[], isPureToolResult: (m: Message) =>
 
 // ── Markdown styles ─────────────────────────────────────────────────────────
 
-const markdownCSS = `
+export const markdownCSS = `
 .markdown { line-height: 1.55; word-break: break-word; }
 .markdown p { margin: 0 0 8px 0; }
 .markdown p:last-child { margin-bottom: 0; }
