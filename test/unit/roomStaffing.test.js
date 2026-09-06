@@ -156,7 +156,7 @@ describe('Room staffing from the template', () => {
       }
       setUpdaterRalph({ enabled: true, status: 'working' })
       fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
-        'ev-shop': { ...busy, updater: { ...busy.updater, nextWakeAtMs: 1 } },
+        'ev-shop': { ...busy, updater: { ...busy.updater, nextWakeAtMs: Date.now() - 1_000 } },
       }))
       await new Promise(resolve => setTimeout(resolve, 300))
       assert.equal((readSent().match(/\[Room wake · #ev-shop · updater/g) || []).length, 0, readSent())
@@ -164,6 +164,14 @@ describe('Room staffing from the template', () => {
       await waitFor(() => readSent().includes('[Room wake · #ev-shop · updater') ? readSent() : null, { message: 'updater wake after RALPH_COMPLETE' })
       assert.equal(readMeta()[updaterSessionId].ralph.enabled, true)
       assert.ok(readResidents()['ev-shop'].updater.nextWakeAtMs > Date.now() + 1_700_000)
+      // A turn that never ends does not silence the resident: a whole interval
+      // past due, the wake is sent anyway.
+      setUpdaterRalph({ enabled: true, status: 'working' })
+      const stuck = readResidents()['ev-shop']
+      fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
+        'ev-shop': { ...stuck, updater: { ...stuck.updater, nextWakeAtMs: Date.now() - 1_800_000 - 1_000 } },
+      }))
+      await waitFor(() => (readSent().match(/\[Room wake · #ev-shop · updater/g) || []).length === 2 || null, { message: 'overdue updater wake' })
 
       // Feed comments: publish one card as the updater, then comment on it.
       const updaterId = updaterSessionId

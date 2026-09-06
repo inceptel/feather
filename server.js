@@ -3908,8 +3908,9 @@ function syncRoomSidecar(name, { primeNewResidents = false } = {}) {
         `Explicit Sidecar messages are visible to the human. Contribute only your distinct expertise; no status chatter.`,
         `Post: sidecar post ${groupFlag} --to <role|all> \"...\"`,
         `Read: sidecar read ${groupFlag}`,
-        `Wait: sidecar wait ${groupFlag} --from <role|all> --count <N>`,
-        'Wait for a message and reply through this Room Sidecar group.',
+        `Wait (only when you have just asked someone a question): sidecar wait ${groupFlag} --from <role> --count 1 --timeout 120`,
+        'Sidecar messages addressed to you are delivered into this chat automatically, so never sit in an open-ended `sidecar wait`.',
+        'Your charter (see the ROLE.md file named in AGENTS.md) says what a wake is; wake prompts arrive on schedule. Finish every turn, and end it with RALPH_COMPLETE when there is nothing left to do.',
       ].join('\n');
       sendInput(member.sessionId, prime)
         .then(() => sidecar.markMembersPrimed(id, [memberKey]))
@@ -4776,7 +4777,11 @@ function residentWakeDue(resident, sessionId, meta, now) {
   const next = Number.isFinite(resident.nextWakeAtMs) ? resident.nextWakeAtMs : ROOM_PULSE_STARTED_AT + interval;
   if (now < next) return false;
   const ralph = meta[sessionId]?.ralph;
-  if (ralph?.enabled && (ralph.status === 'working' || ralph.status === 'scheduled') && tmuxIsActive(sessionId)) return false;
+  // Mid-turn residents wait for their boundary, but not forever: one whole
+  // interval past due, wake it anyway (OMP queues the message) so a turn
+  // stuck on a blocking command cannot silence a resident for good.
+  if (ralph?.enabled && (ralph.status === 'working' || ralph.status === 'scheduled') && tmuxIsActive(sessionId)
+    && now < next + interval) return false;
   return true;
 }
 
