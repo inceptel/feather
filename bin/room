@@ -11,7 +11,7 @@
 #   room new <name> [--mission TEXT|--stdin|--file PATH]
 #                                      create a room; with a mission, Feather
 #                                      staffs it (Leader + caretaker/updater/marketer)
-#   room visual --out FILE.png "<prompt>" render a card image (Gemini, else text card)
+#   room visual --out FILE.png "<prompt>" render a card image (any available provider, else text card)
 #   room list                          list rooms
 #   room note TEXT|--stdin|--file PATH   append durable working memory
 #   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
