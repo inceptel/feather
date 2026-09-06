@@ -204,6 +204,10 @@ export interface RoomResident {
   agent: string
   title: string
   status: 'working' | 'waiting' | 'offline'
+  wakeIntervalMs?: number | null
+  nextWakeAtMs?: number | null
+  lastWakeAt?: string | null
+  paused?: boolean
 }
 
 export interface RoomInfo {
@@ -212,6 +216,7 @@ export interface RoomInfo {
   sessions: SessionMeta[]
   leaderSessionId: string | null
   residents: RoomResident[]
+  residentsPaused?: boolean
   sidecarGroupId: string | null
   active: boolean
   latest: { role: string, text: string, id?: string | null, timestamp?: string | null } | null
@@ -892,4 +897,72 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
       }
     },
   }
+}
+
+export async function setRoomResidentsPaused(room: string, paused: boolean): Promise<{ paused: boolean, residents: RoomResident[], residentsPaused: boolean }> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/residents/pause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paused }),
+  })
+  return responseJson(response)
+}
+
+// Costs tab: local token ledger plus provider limits.
+export interface UsageTotals {
+  requests: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  cost: number
+  costedRequests: number
+}
+
+export interface UsageGroup extends UsageTotals {
+  lastAt: number
+  model?: string
+  provider?: string | null
+  harness?: string
+  room?: string | null
+  sessionId?: string | null
+}
+
+export interface UsageWindow {
+  key: '5h' | '24h' | '7d'
+  label: string
+  since: string
+  totals: UsageTotals
+  byModel: UsageGroup[]
+  byRoom: UsageGroup[]
+  bySession: UsageGroup[]
+  byHarness: UsageGroup[]
+}
+
+export interface LimitWindow { name: string, utilization: number, resetsAt: string | null }
+
+export interface UsageSnapshot {
+  generatedAt: string
+  scanMs: number
+  files: number
+  windows: UsageWindow[]
+  providers: {
+    anthropic: { windows?: LimitWindow[], tokenSource?: string, tokenExpiresAt?: string | null, error: string | null, lastGoodAt: string | null }
+    openrouter: {
+      totalCredits?: number, totalUsage?: number, remaining?: number,
+      usageDaily?: number, usageWeekly?: number, usageMonthly?: number,
+      keyLimit?: number | null, keyLimitRemaining?: number | null,
+      error: string | null, lastGoodAt: string | null
+    }
+    codex: {
+      windows: LimitWindow[], observedAt: string | null,
+      credits: { hasCredits: boolean, unlimited: boolean, balance: string } | null,
+      tokenExpiresAt: string | null, tokenExpired: boolean | null, error: string | null
+    }
+  }
+}
+
+export async function fetchUsage(refresh = false): Promise<UsageSnapshot> {
+  const response = await fetch(`${BASE}/api/usage${refresh ? '?refresh=1' : ''}`)
+  return responseJson(response)
 }

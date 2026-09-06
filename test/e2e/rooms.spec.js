@@ -371,3 +371,54 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await expect(feed.getByText('calendar-auth', { exact: true })).toBeVisible()
   await page.screenshot({ path: 'test-results/super-feed-mobile.png', fullPage: true })
 })
+
+test('Costs tab shows provider limits and the token ledger, and lives at #costs', async ({ page }) => {
+  const usage = {
+    generatedAt: new Date().toISOString(), scanMs: 12, files: 3,
+    windows: ['5h', '24h', '7d'].map((key, index) => ({
+      key, label: `Last ${key}`, since: new Date().toISOString(),
+      totals: { requests: 10 * (index + 1), input: 1_000_000, output: 50_000, cacheRead: 20_000_000, cacheWrite: 300_000, cost: 12.5 * (index + 1), costedRequests: 8 },
+      byModel: [{ model: 'gpt-5.6-sol', provider: 'openai-codex', harness: 'omp', requests: 8, input: 900_000, output: 40_000, cacheRead: 19_000_000, cacheWrite: 200_000, cost: 12.5 * (index + 1), costedRequests: 8, lastAt: Date.now() }],
+      byRoom: [{ room: 'ev-shop-815', requests: 10, input: 1_000_000, output: 50_000, cacheRead: 20_000_000, cacheWrite: 300_000, cost: 12.5, costedRequests: 8, lastAt: Date.now() }],
+      bySession: [{ sessionId: 'ev-updater-session', harness: 'omp', room: 'ev-shop-815', model: 'gpt-5.6-sol', requests: 10, input: 1_000_000, output: 50_000, cacheRead: 20_000_000, cacheWrite: 300_000, cost: 12.5, costedRequests: 8, lastAt: Date.now() }],
+      byHarness: [],
+    })),
+    providers: {
+      anthropic: { windows: [{ name: 'five_hour', utilization: 0.42, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }, { name: 'seven_day', utilization: 0.91, resetsAt: null }], tokenSource: 'omp', tokenExpiresAt: null, error: null, lastGoodAt: new Date().toISOString() },
+      openrouter: { totalCredits: 20, totalUsage: 9.3, remaining: 10.7, usageDaily: 1.2, usageWeekly: 1.87, usageMonthly: 1.41, keyLimit: null, keyLimitRemaining: null, error: null, lastGoodAt: new Date().toISOString() },
+      codex: { windows: [{ name: '7d', utilization: 0.52, resetsAt: null }], observedAt: new Date().toISOString(), credits: null, tokenExpiresAt: null, tokenExpired: true, error: 'Codex login expired; limits shown are from the last transcript that reported them' },
+    },
+  }
+  let usageRequests = 0
+  await page.route('**/api/usage*', route => { usageRequests++; route.fulfill({ json: usage }) })
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [] } }))
+  await page.route('**/api/feed', route => route.fulfill({ json: { items: [], following: [], cursor: 'c', generatedAt: new Date().toISOString() } }))
+
+  await page.goto(BASE)
+  await expect(page.getByTestId('home-nav-rooms')).toBeVisible()
+  await expect(page.getByTestId('costs-view')).toHaveCount(0)
+  await page.getByTestId('home-nav-costs').click()
+  await expect(page.getByTestId('costs-view')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#costs')
+
+  const anthropic = page.getByTestId('limits-anthropic')
+  await expect(anthropic).toContainText('5 hour')
+  await expect(anthropic).toContainText('42%')
+  await expect(anthropic).toContainText('91%')
+  await expect(page.getByTestId('limits-openrouter')).toContainText('$10.70')
+  await expect(page.getByTestId('limits-codex')).toContainText('Codex login expired')
+  await expect(page.getByTestId('costs-view')).toContainText('$12.50')
+  await page.getByTestId('costs-window-7d').click()
+  await expect(page.getByTestId('costs-view')).toContainText('$37.50')
+  await expect(page.getByTestId('costs-view')).toContainText('#ev-shop-815')
+
+  // Refresh asks the server for a fresh scan; the view survives a reload at #costs.
+  const before = usageRequests
+  await page.getByTestId('costs-refresh').click()
+  await expect.poll(() => usageRequests).toBeGreaterThan(before)
+  await page.reload()
+  await expect(page.getByTestId('costs-view')).toBeVisible()
+  await page.getByTestId('home-nav-rooms').click()
+  await expect(page.getByTestId('costs-view')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('')
+})

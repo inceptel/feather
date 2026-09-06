@@ -23,6 +23,8 @@ import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes } from './lib/friction.js';
+import { createUsageLedger, summarizeUsage } from './lib/usage-ledger.js';
+import { createProviderLimits } from './lib/provider-limits.js';
 import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-feed.js';
 import { appendRoomPublication, readRoomPublications, verifiedPublicationVisual } from './lib/room-publications.js';
 import {
@@ -2210,6 +2212,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/agents$/,
   /^\/api\/rooms$/,
   /^\/api\/feed$/,
+  /^\/api\/usage$/,
   /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page|residents)$/,
   /^\/api\/rooms\/[^/]+\/publications\/[^/]+(?:\/visual)?$/,
 ];
@@ -4403,6 +4406,49 @@ async function readyRoomLeader(roomName) {
 }
 const feedSnapshotCache = createSnapshotCache(buildFeedProjection, { ttlMs: 10_000 });
 
+
+// Costs: local token ledger from every harness transcript on this box plus
+// each provider's own view of the account limits.
+const usageLedger = createUsageLedger({
+  claudeProjectsDir: CLAUDE_PROJECTS,
+  ompSessionsDir: OMP_SESSIONS,
+  codexSessionsDir: CODEX_SESSIONS_ROOT,
+  roomsDir: ROOMS_HOME_DIR,
+  readAssignments: readRoomAssignments,
+});
+const providerLimits = createProviderLimits({
+  ompAuthFile: path.join(HOME, '.omp/agent/auth.json'),
+  claudeCredentialsFile: path.join(HOME, '.claude/.credentials.json'),
+  keyvaultFile: process.env.FEATHER_KEYVAULT || path.join(HOME, 'keyvault.txt'),
+});
+const USAGE_SNAPSHOT_TTL_MS = 60_000;
+let usageSnapshot = null;
+let usageSnapshotPending = null;
+async function buildUsageSnapshot() {
+  const startedAt = Date.now();
+  const scan = usageLedger.scan();
+  const providers = await providerLimits.snapshot({ codexRateLimits: scan.codexRateLimits });
+  return {
+    generatedAt: new Date(startedAt).toISOString(),
+    scanMs: Date.now() - startedAt,
+    files: scan.files,
+    windows: summarizeUsage(scan.events, { now: startedAt }),
+    providers,
+  };
+}
+app.get('/api/usage', async (req, res) => {
+  try {
+    const fresh = usageSnapshot && Date.now() - Date.parse(usageSnapshot.generatedAt) < USAGE_SNAPSHOT_TTL_MS && req.query.refresh !== '1';
+    if (!fresh) {
+      if (!usageSnapshotPending) usageSnapshotPending = buildUsageSnapshot().finally(() => { usageSnapshotPending = null; });
+      usageSnapshot = await usageSnapshotPending;
+    }
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.json(usageSnapshot);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.get('/api/feed', (req, res) => {
   try {

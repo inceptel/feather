@@ -4,6 +4,7 @@ import { batch, createSignal, createEffect, createMemo, onMount, onCleanup, Show
 import { MessageView, renderWikiMarkdown } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
+import { CostsView } from './components/CostsView'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
@@ -142,6 +143,9 @@ export default function App() {
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
+  // Home sub-view when no session is open: the Rooms home, the Costs tab,
+  // or a Room page. Kept in the hash so reloads and back buttons work.
+  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string }>({ kind: 'rooms' })
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
@@ -545,12 +549,19 @@ export default function App() {
     const hash = location.hash.slice(1)
     const boxMatch = hash.match(/^([a-z0-9_-]+):(.+)$/i)
     if (boxMatch) setCurrentBox(boxMatch[1])
+    else applyHomeHash(hash)
     await refreshSessions()
     fetchAgents().then(setAgents).catch(() => {})
     fetch(appUrl('/api/quick-links')).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
     if (boxMatch) select(boxMatch[2])
-    else if (hash) select(hash)
+    else {
+      // Re-read the hash: the user may have moved (e.g. to #costs) while the
+      // session list was loading, and a stale value must not undo that.
+      const current = location.hash.slice(1)
+      if (current && !applyHomeHash(current)) select(current)
+    }
+    window.addEventListener('hashchange', onHashChange)
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('online', retryRecoverableMedia)
@@ -597,7 +608,7 @@ export default function App() {
     }
     location.reload()
   }
-  onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearAssistantStream(); clearPendingMedia(); cleanupSSE?.close(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath) })
+  onCleanup(() => { if (mediaNoticeTimer) clearTimeout(mediaNoticeTimer); clearAssistantStream(); clearPendingMedia(); cleanupSSE?.close(); if (sessionPoll) clearInterval(sessionPoll); if (versionPoll) clearInterval(versionPoll); document.removeEventListener('keydown', onGlobalKeyDown); document.removeEventListener('visibilitychange', onVisibility); document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('online', retryRecoverableMedia); window.removeEventListener('feather:open-path', onOpenPath); window.removeEventListener('hashchange', onHashChange) })
 
   const isPeerBox = () => !!boxes().find(b => b.id === currentBox())?.peer
   const isRemoteBox = () => currentBox() !== 'local'
@@ -1032,10 +1043,33 @@ export default function App() {
     select(sourceId)
   }
 
+  function applyHomeHash(hash: string): boolean {
+    if (hash === 'costs') { setHomeRoute({ kind: 'costs' }); return true }
+    const room = hash.match(/^room\/([a-z0-9][a-z0-9-]{0,63})$/)
+    if (room) { setHomeRoute({ kind: 'room', name: room[1] }); return true }
+    if (hash === '') { setHomeRoute({ kind: 'rooms' }); return true }
+    return false
+  }
+  function onHashChange() {
+    const hash = location.hash.slice(1)
+    if (hash === '' || hash === 'costs' || hash.startsWith('room/')) {
+      if (currentId()) {
+        goHome()
+        location.hash = hash
+      }
+      applyHomeHash(hash)
+    }
+  }
+  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string }) {
+    if (currentId()) goHome()
+    setHomeRoute(route)
+    location.hash = route.kind === 'rooms' ? '' : route.kind === 'costs' ? 'costs' : `room/${route.name}`
+  }
   function goHome() {
     dismissMediaNotice()
     setCurrentId(null)
     location.hash = ''
+    setHomeRoute({ kind: 'rooms' })
     setSidebar(false)
     cleanupSSE?.close()
     setMessages([])
@@ -1604,6 +1638,10 @@ export default function App() {
       .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
   }
 
+  const homeNavStyle = (active: boolean) => ({
+    background: active ? '#1b2430' : 'transparent', color: active ? '#e6ebf2' : '#8b97a8', border: `1px solid ${active ? '#2b3644' : 'transparent'}`,
+    'border-radius': '999px', padding: '4px 12px', 'font-size': '13px', 'font-weight': '650', cursor: 'pointer',
+  })
   const tabStyle = (t: string) => ({
     padding: '9px 14px', border: 'none', 'border-bottom': tab() === t ? '2px solid var(--success)' : '2px solid transparent',
     background: 'none', color: tab() === t ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
@@ -1939,7 +1977,12 @@ export default function App() {
         {/* Header */}
         <div style={{ position: 'relative', padding: '8px 16px 0 100px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <span data-testid="build-version" title={`Build ${__BUILD_VERSION__}`} style={{ position: 'absolute', top: '2px', right: '10px', color: 'var(--text-ghost)', 'font-size': '8px', 'font-family': "'SF Mono', Menlo, monospace", 'line-height': '1', 'letter-spacing': '0.02em', 'white-space': 'nowrap' }}>{__BUILD_TIME__}</span>
-          <Show when={cur()} fallback={<span style={{ color: '#666', 'font-size': '14px' }}>Select a session</span>}>
+          <Show when={cur()} fallback={
+            <div data-testid="home-nav" style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
+              <button data-testid="home-nav-rooms" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind !== 'costs')}>Rooms</button>
+              <button data-testid="home-nav-costs" onClick={() => showHome({ kind: 'costs' })} style={homeNavStyle(homeRoute().kind === 'costs')}>Costs</button>
+            </div>
+          }>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
               <Show when={renaming()} fallback={
@@ -2039,7 +2082,11 @@ export default function App() {
         {/* Content */}
         <div style={{ flex: '1', overflow: 'hidden', display: expanded() ? 'none' : 'block' }}>
           <Show when={currentId()} fallback={
-            <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
+            <Show when={homeRoute().kind === 'costs'} fallback={
+              <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
+            }>
+              <CostsView onOpenSession={select} />
+            </Show>
           }>
             <div data-testid="chat-panel" style={{ display: tab() === 'chat' ? 'block' : 'none', height: '100%' }}>
               <MessageView
