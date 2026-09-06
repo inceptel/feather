@@ -175,7 +175,13 @@ async function sendInput(id, text) {
 // ── SSE streaming ─────────────────────────────────────────────────────────
 
 const sseClients = new Map();
-const fileOffsets = new Map();
+const STREAM_RECONCILE_INTERVAL_MS = 1000;
+const STREAM_PATH_REFRESH_INTERVAL_MS = 10_000;
+const fileTails = new Map(); // sessionId -> { path, offset, nextDiscoveryAt }
+
+function setFileTail(sessionId, filePath, offset, nextDiscoveryAt = Date.now() + STREAM_PATH_REFRESH_INTERVAL_MS) {
+  fileTails.set(sessionId, { path: filePath, offset, nextDiscoveryAt });
+}
 
 function broadcast(sessionId, line, offset) {
   const clients = sseClients.get(sessionId);
@@ -191,9 +197,13 @@ function broadcast(sessionId, line, offset) {
 function processFileChange(filePath) {
   if (!filePath.endsWith('.jsonl')) return;
   const sessionId = path.basename(filePath, '.jsonl');
-  const currentOffset = fileOffsets.get(sessionId) || 0;
   try {
     const stat = fs.statSync(filePath);
+    const previous = fileTails.get(sessionId);
+    const currentOffset = previous?.path === filePath && stat.size >= previous.offset ? previous.offset : 0;
+    if (!previous || previous.path !== filePath || stat.size < previous.offset) {
+      setFileTail(sessionId, filePath, 0);
+    }
     if (stat.size <= currentOffset) return;
     const fd = fs.openSync(filePath, 'r');
     const buf = Buffer.alloc(stat.size - currentOffset);
@@ -210,9 +220,37 @@ function processFileChange(filePath) {
       if (line) broadcast(sessionId, line, offset);
       start = newline + 1;
     }
-    fileOffsets.set(sessionId, currentOffset + complete.length);
+    setFileTail(sessionId, filePath, currentOffset + complete.length);
   } catch {}
 }
+
+const streamReconcileTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [sessionId, clients] of sseClients) {
+    if (clients.size === 0) {
+      sseClients.delete(sessionId);
+      continue;
+    }
+    const tail = fileTails.get(sessionId);
+    let fpath = tail?.path;
+    if (!fpath || tail.nextDiscoveryAt <= now || !fs.existsSync(fpath)) {
+      const resolved = findJsonlPath(sessionId);
+      if (!resolved) continue;
+      fpath = resolved;
+      if (!tail) {
+        try { setFileTail(sessionId, fpath, completeFileOffset(fpath)); } catch {}
+        continue;
+      }
+      if (tail.path !== fpath) {
+        processFileChange(fpath);
+        continue;
+      }
+      setFileTail(sessionId, tail.path, tail.offset);
+    }
+    processFileChange(fpath);
+  }
+}, STREAM_RECONCILE_INTERVAL_MS);
+streamReconcileTimer.unref();
 
 // Init watchers
 function initWatchers() {
@@ -221,12 +259,13 @@ function initWatchers() {
     const dp = path.join(CLAUDE_PROJECTS, dir);
     try {
       for (const f of fs.readdirSync(dp)) {
-        if (f.endsWith('.jsonl')) fileOffsets.set(f.replace('.jsonl', ''), completeFileOffset(path.join(dp, f)));
+        if (f.endsWith('.jsonl')) {
+          const fpath = path.join(dp, f);
+          setFileTail(f.replace('.jsonl', ''), fpath, completeFileOffset(fpath));
+        }
       }
       fs.watch(dp, (event, filename) => {
         if (filename?.endsWith('.jsonl')) {
-          const sid = filename.replace('.jsonl', '');
-          if (!fileOffsets.has(sid)) fileOffsets.set(sid, 0);
           processFileChange(path.join(dp, filename));
         }
       });
@@ -239,8 +278,6 @@ function initWatchers() {
       if (fs.statSync(dp).isDirectory()) {
         fs.watch(dp, (ev, fn) => {
           if (fn?.endsWith('.jsonl')) {
-            const sid = fn.replace('.jsonl', '');
-            if (!fileOffsets.has(sid)) fileOffsets.set(sid, 0);
             processFileChange(path.join(dp, fn));
           }
         });
@@ -326,7 +363,19 @@ app.get('/api/sessions/:id/stream', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   const sid = req.params.id;
   if (!sseClients.has(sid)) sseClients.set(sid, new Set());
-  sseClients.get(sid).add(res);
+  const clients = sseClients.get(sid);
+  clients.add(res);
+  const activeTail = fileTails.get(sid);
+  if (activeTail) {
+    setFileTail(sid, activeTail.path, activeTail.offset, 0);
+  } else {
+    const initialPath = findJsonlPath(sid);
+    if (initialPath) {
+      try { setFileTail(sid, initialPath, completeFileOffset(initialPath), 0); } catch {}
+    } else {
+      setFileTail(sid, null, 0, 0);
+    }
+  }
   res.write('event: connected\ndata: {}\n\n');
   const lastId = parseInt(req.query.lastEventId || req.headers['last-event-id'] || '0');
   if (lastId > 0) {
@@ -357,7 +406,11 @@ app.get('/api/sessions/:id/stream', (req, res) => {
     }
   }
   const hb = setInterval(() => { try { res.write('event: heartbeat\ndata: {}\n\n'); } catch { clearInterval(hb); } }, 15000);
-  res.on('close', () => { clearInterval(hb); sseClients.get(sid)?.delete(res); });
+  res.on('close', () => {
+    clearInterval(hb);
+    clients.delete(res);
+    if (clients.size === 0) sseClients.delete(sid);
+  });
 });
 
 app.post('/api/sessions', (req, res) => {
@@ -387,7 +440,7 @@ app.post('/api/sessions/:id/delete', (req, res) => {
     const fpath = findJsonlPath(id);
     if (fpath) fs.unlinkSync(fpath);
     sseClients.delete(id);
-    fileOffsets.delete(id);
+    fileTails.delete(id);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
