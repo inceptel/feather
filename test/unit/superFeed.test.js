@@ -141,4 +141,30 @@ describe('Super Feed projection', () => {
     assert.equal(item.summary, '😀'.repeat(600))
     assert.equal(item.detail, 'e'.repeat(1_200))
   })
+
+  it('projects selected Room publications with their verified visual locator', () => {
+    const [item] = buildSuperFeed({
+      rooms: [{ name: 'jacksonville-ev' }],
+      publications: [{
+        room: 'jacksonville-ev',
+        id: 'jax-ev-0001',
+        title: 'Jacksonville charging signal',
+        summary: 'A local change now affects EV planning.',
+        detail: 'Primary evidence checked.',
+        occurredAt: '2026-09-06T14:00:00Z',
+        visualHref: '/api/rooms/jacksonville-ev/publications/jax-ev-0001/visual',
+        visualAlt: 'A map-style Jacksonville EV briefing.',
+      }],
+    })
+
+    assert.equal(item.evidenceId, 'publication:jacksonville-ev:jax-ev-0001')
+    assert.equal(item.title, '#jacksonville-ev · Jacksonville charging signal')
+    assert.equal(item.status, 'briefing')
+    assert.equal(item.sessionId, null)
+    assert.equal(item.visualHref, '/api/rooms/jacksonville-ev/publications/jax-ev-0001/visual')
+    assert.equal(item.visualAlt, 'A map-style Jacksonville EV briefing.')
+
+    const [stale] = mergeSuperFeed([item], [], [])
+    assert.equal(stale.sourceState, 'stale')
+  })
 })

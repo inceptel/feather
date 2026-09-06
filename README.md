@@ -114,24 +114,27 @@ compatibility, but agents should write working evidence to `notes.md` and leave
 human-facing synthesis to the caretaker.
 
 The Rooms home starts with **Super Feed**, a read-only projection of canonical
-Leader-chat outcomes, active Room status failures, and explicitly keyed,
-structured `#friction` records. **Latest**, **Review**, **Following**, and
-**Friction** are views over the same stable evidence identities; following only
-changes selection. Review currently means an explicit active system alert:
-user-message rows may say `asked`, but they do not claim unresolved human
-attention without durable approval or decision evidence. Cards link back to
-their source, retain stale locators when a source disappears, and never expose
-raw notes, unkeyed legacy complaints, legacy Updates, Sidecar traffic, or tool
-activity. Complaint status remains unknown unless a canonical resolution event
-proves otherwise. Complaint IDs and Room names must fit the writer's ASCII
-bounds; summary/evidence fields are bounded by Unicode code point.
+Leader-chat outcomes, authenticated Updater publications, active Room status
+failures, and explicitly keyed, structured `#friction` records. **Latest**,
+**Review**, **Following**, and **Friction** are views over the same stable
+evidence identities; following only changes selection. Review currently means
+an explicit active system alert: user-message rows may say `asked`, but they do
+not claim unresolved human attention without durable approval or decision
+evidence. Cards link back to their source, retain stale locators when a source
+disappears, and never expose raw notes, unkeyed legacy complaints, legacy
+Updates, Sidecar traffic, or tool activity. Selected publications may include a
+validated Room-local PNG, JPEG, or WebP through the authenticated publication
+route; remote images and symlink escapes are rejected. Complaint status remains
+unknown unless a canonical resolution event proves otherwise.
+
 
 The client conditionally polls with ETags every 10 seconds and preserves its
 last-good view on a transient failure. The Room and feed projections each use a
 10-second stale-while-refresh cache, so that polling interval is not a hard
 freshness bound. Feed history beyond the latest eight reconstructed Leader
-messages per Room is process-local best effort and resets on server restart;
-stable evidence IDs do not make that older membership durable.
+messages per Room is process-local best effort and resets on server restart.
+Updater publications are append-only Room evidence and survive restarts.
+
 
 `room note` records evidence but does not wake another session. For actionable
 cross-session work, use a stable delivery id:
@@ -147,6 +150,14 @@ Retries with the same id do not duplicate the note or resident input, and
 delivery does not depend on the Room's automatic pulse being enabled. Room
 Sidecar posting remains resident-only; assigned non-resident chats use
 `room dispatch` for a supported handoff.
+
+A registered `updater` OMP Ralph may publish one selected item from a JSON
+object using `room publish FILE`. The command presents its per-session bridge
+capability; the server binds that capability to the Room's current Updater,
+enforces stable evidence identity, idempotency, a 30-minute interval, and a
+three-per-UTC-day ceiling, then refreshes Super Feed. Requests without the
+current Updater capability are rejected. The current shared-UID deployment is
+an organizational boundary, not protection from another local process.
 
 Agents can run `room complain "..."` to append recurring annoyances to
 `#friction`. `#meta` is the separate place for reusable lessons across Rooms.

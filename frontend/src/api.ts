@@ -296,6 +296,10 @@ export interface SuperFeedItem {
   needsReview: boolean
   sessionId: string | null
   complaintId?: string
+  publicationId?: string
+  visualHref?: string
+  visualAlt?: string
+
 }
 
 export interface SuperFeedSnapshot {

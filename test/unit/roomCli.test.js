@@ -322,4 +322,65 @@ describe('room assignment CLI', () => {
     assert.equal(fs.readFileSync(notesPath, 'utf8'), notesBeforeRejectedInput)
     assert.equal(fs.readFileSync(updatesPath, 'utf8'), updatesBeforeRejectedInput)
   })
+
+  it('publishes only with the current OMP session capability', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-publish-'))
+    roots.push(root)
+    const roomsDir = path.join(root, 'rooms')
+    const roomDir = path.join(roomsDir, 'jacksonville-ev')
+    fs.mkdirSync(roomDir, { recursive: true })
+    fs.writeFileSync(path.join(roomDir, 'AGENTS.md'), '# Room: #jacksonville-ev\n')
+    fs.writeFileSync(path.join(roomDir, 'notes.md'), '# notes\n')
+    const publication = {
+      id: 'jax-ev-0001',
+      sourceEvidenceId: 'jea-drive-electric-2026',
+      title: 'Local EV signal',
+      summary: 'A primary source changed the Jacksonville EV outlook.',
+    }
+    const publicationFile = path.join(root, 'publication.json')
+    fs.writeFileSync(publicationFile, JSON.stringify(publication))
+    const requests = []
+    const server = http.createServer((request, response) => {
+      const chunks = []
+      request.on('data', chunk => chunks.push(chunk))
+      request.on('end', () => {
+        requests.push({
+          url: request.url,
+          sessionId: request.headers['x-feather-session-id'],
+          token: request.headers['x-feather-bridge-token'],
+          body: JSON.parse(Buffer.concat(chunks).toString()),
+        })
+        response.writeHead(201, { 'Content-Type': 'application/json' })
+        response.end('{"ok":true,"reused":false}')
+      })
+    })
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    const cli = path.resolve(import.meta.dirname, '../../bin/room')
+    const env = {
+      ...process.env,
+      HOME: root,
+      ROOMS_DIR: roomsDir,
+      FEATHER_URL: `http://127.0.0.1:${server.address().port}`,
+      FEATHER_SESSION_ID: 'updater-session',
+      FEATHER_BRIDGE_TOKEN: 'secret-capability',
+    }
+    try {
+      const result = await run(cli, ['publish', publicationFile], { cwd: roomDir, env })
+      assert.deepEqual(JSON.parse(result.stdout), { ok: true, reused: false })
+      assert.deepEqual(requests, [{
+        url: '/api/internal/rooms/jacksonville-ev/publications',
+        sessionId: 'updater-session',
+        token: 'secret-capability',
+        body: publication,
+      }])
+      const { FEATHER_SESSION_ID: _session, FEATHER_BRIDGE_TOKEN: _token, ...withoutCapability } = env
+      await assert.rejects(
+        run(cli, ['publish', publicationFile], { cwd: roomDir, env: withoutCapability }),
+        /authenticated OMP session capability required/,
+      )
+      assert.equal(requests.length, 1)
+    } finally {
+      await new Promise(resolve => server.close(resolve))
+    }
+  })
 })

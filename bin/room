@@ -13,6 +13,8 @@
 #   room note TEXT|--stdin|--file PATH   append durable working memory
 #   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
 #                                      note work and wake a permanent resident
+#   room publish FILE                   publish selected JSON as Room updater
+
 #   room update TEXT|--stdin|--file PATH append legacy evidence
 #   room updates                         list legacy evidence
 #   room complain TEXT|--stdin|--file PATH add an annoyance to #friction
@@ -232,6 +234,29 @@ print(resident.get("sessionId", "") if resident else "")
     || die "room dispatch: Feather could not deliver $message_id to #$ROOM_NAME $target"
   echo "dispatched $message_id to #$ROOM_NAME $target"
 }
+cmd_publish() {
+  resolve_room
+  [ "$#" -eq 1 ] || die "usage: room publish FILE"
+  [ -f "$1" ] || die "room publish: input file not found: $1"
+  [ -n "${FEATHER_SESSION_ID:-}" ] && [ -n "${FEATHER_BRIDGE_TOKEN:-}" ] \
+    || die "room publish: authenticated OMP session capability required"
+  ensure_feather_url
+  local payload
+  payload=$(python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    value = json.load(source)
+if not isinstance(value, dict):
+    raise SystemExit("publication JSON must be an object")
+print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+' "$1") || die "room publish: invalid publication JSON"
+  curl -sSf -X POST "$FEATHER_URL/api/internal/rooms/$ROOM_NAME/publications" \
+    -H "X-Feather-Session-ID: $FEATHER_SESSION_ID" \
+    -H "X-Feather-Bridge-Token: $FEATHER_BRIDGE_TOKEN" \
+    -H 'Content-Type: application/json' -d "$payload" \
+    || die "room publish: Feather rejected publication"
+}
+
 
 cmd_update() {
   resolve_room
@@ -549,6 +574,7 @@ case "$cmd" in
   list) cmd_list "$@" ;;
   note) cmd_note "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
+  publish) cmd_publish "$@" ;;
   update) cmd_update "$@" ;;
   updates) cmd_updates "$@" ;;
   complain|friction) cmd_complain "$@" ;;

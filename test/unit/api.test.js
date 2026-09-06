@@ -497,6 +497,92 @@ describe('POST /api/rooms/:name/send', () => {
     }
   })
 })
+
+describe('Room Ralph publication capability', () => {
+  it('registers an OMP Ralph updater and publishes one visual briefing', async () => {
+    if (EXTERNAL_SERVER) return
+    const roomName = `jax-ev-${Date.now().toString(36)}`
+    const roomResponse = await fetch(`${BASE}/api/rooms`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: roomName }),
+    })
+    assert.equal(roomResponse.status, 200)
+    const { cwd } = await roomResponse.json()
+    const tmuxRegistry = path.join(fixtureRoot, 'publication-tmux.reg')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
+      `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
+      'case "$1" in load-buffer|paste-buffer|send-keys|set-option) exit 0;; esac',
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    const leaderId = randomUUID()
+    const updaterId = randomUUID()
+    try {
+      for (const spec of [
+        { id: leaderId, roomRole: 'leader' },
+        { id: updaterId, roomRole: 'updater', mode: 'ralph' },
+      ]) {
+        const response = await fetch(`${BASE}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...spec, cwd, roomName, agent: 'omp' }),
+        })
+        assert.equal(response.status, 200, await response.text())
+      }
+      const residentsResponse = await fetch(`${BASE}/api/rooms/${roomName}/residents`)
+      assert.equal(residentsResponse.status, 200)
+      const residents = (await residentsResponse.json()).residents
+      assert.deepEqual(residents.map(resident => resident.role), ['updater'])
+
+      fs.mkdirSync(path.join(cwd, 'artifacts'))
+      const visualBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+      fs.writeFileSync(path.join(cwd, 'artifacts/brief.png'), visualBytes)
+      const body = {
+        id: 'jax-api-001',
+        sourceEvidenceId: 'primary-source-001',
+        title: 'Jacksonville EV signal',
+        summary: 'A verified local change now affects EV planning.',
+        visual: 'artifacts/brief.png',
+        visualAlt: 'A Jacksonville EV planning brief.',
+      }
+      const denied = await fetch(`${BASE}/api/internal/rooms/${roomName}/publications`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      assert.equal(denied.status, 403)
+
+      const tokenName = createHash('sha256').update(updaterId).digest('hex')
+      const token = fs.readFileSync(path.join(fixtureHome, '.feather/omp-sessions/.feather-bridge-tokens', tokenName), 'utf8')
+      const publish = () => fetch(`${BASE}/api/internal/rooms/${roomName}/publications`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Feather-Session-ID': updaterId,
+          'X-Feather-Bridge-Token': token,
+        },
+        body: JSON.stringify(body),
+      })
+      const created = await publish()
+      assert.equal(created.status, 201, await created.text())
+      assert.equal((await publish()).status, 200)
+
+      const feed = await (await fetch(`${BASE}/api/feed`)).json()
+      const item = feed.items.find(candidate => candidate.evidenceId === `publication:${roomName}:jax-api-001`)
+      assert.equal(item.summary, body.summary)
+      assert.equal(item.visualAlt, body.visualAlt)
+      assert.match(item.visualHref, /jax-api-001\/visual$/)
+
+      const visual = await fetch(`${BASE}${item.visualHref}`)
+      assert.equal(visual.status, 200)
+      assert.deepEqual(Buffer.from(await visual.arrayBuffer()), visualBytes)
+      const canonical = await (await fetch(`${BASE}${item.sourceHref}`)).json()
+      assert.equal(canonical.publication.sourceEvidenceId, body.sourceEvidenceId)
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+})
+
 // ── SSE ─────────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions/:id/stream (SSE)', () => {

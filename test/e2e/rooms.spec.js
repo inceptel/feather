@@ -317,6 +317,12 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
     summary: 'Calendar auth repeatedly expires.', detail: '401 from provider', occurredAt: '2026-09-05T13:00:00Z',
     sourceHref: '/api/rooms/health/friction#calendar-auth', sourceState: 'available',
     status: null, needsReview: false, sessionId: null, complaintId: 'calendar-auth',
+  }, {
+    evidenceId: 'publication:trading:market-brief-1', kind: 'update', room: 'trading', title: '#trading · Market brief',
+    summary: 'A decision-ready market change.', detail: 'Primary evidence checked.', occurredAt: '2026-09-05T13:10:00Z',
+    sourceHref: '/api/rooms/trading/publications/market-brief-1', sourceState: 'available',
+    status: 'briefing', needsReview: false, sessionId: null, publicationId: 'market-brief-1',
+    visualHref: '/api/rooms/trading/publications/market-brief-1/visual', visualAlt: 'A compact market-change chart.',
   }]
   let following = ['trading']
   let failFeed = false
@@ -328,6 +334,11 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
     following = body.following ? [...new Set([...following, body.room])] : following.filter(name => name !== body.room)
     await route.fulfill({ json: { ok: true, following } })
   })
+  await page.route('**/api/rooms/trading/publications/market-brief-1/visual', route => route.fulfill({
+    contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  }))
+
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [room] } }))
 
   await page.goto(BASE)
@@ -335,6 +346,8 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   const feed = page.getByTestId('super-feed')
   await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).toBeVisible()
+  await expect(feed.getByAltText('A compact market-change chart.')).toBeVisible()
+  await expect(feed.getByRole('link', { name: 'Published evidence ↗' })).toHaveAttribute('href', /publications\/market-brief-1/)
 
   failFeed = true
   await feed.getByTestId('feed-refresh').click()
@@ -350,7 +363,7 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await feed.getByTestId('feed-tab-following').click()
   await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
-  await feed.getByTestId('feed-follow-trading').click()
+  await feed.getByTestId('feed-follow-trading').first().click()
   await expect(feed.getByTestId('feed-empty')).toContainText('Follow a Room from Latest')
 
   await feed.getByTestId('feed-tab-friction').click()

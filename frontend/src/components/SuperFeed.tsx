@@ -163,6 +163,14 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
             <Show when={item.detail}>
               <div style={{ color: '#788495', 'font-size': '11px', 'line-height': '1.4', 'margin-top': '6px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{item.detail}</div>
             </Show>
+            <Show when={item.visualHref && item.visualAlt}>
+              <img src={appUrl(item.visualHref!)} alt={item.visualAlt!} loading="lazy"
+                style={{ display: 'block', width: '100%', 'max-height': '320px', 'object-fit': 'cover', 'margin-top': '9px', 'border-radius': '9px', border: '1px solid #202938', background: '#080b10' }} />
+            </Show>
+            <Show when={item.publicationId && item.sourceState === 'available'}>
+              <a href={appUrl(item.sourceHref)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}
+                style={{ display: 'inline-block', color: '#8d9bae', 'font-size': '10px', 'margin-top': '7px', 'text-decoration': 'none' }}>Published evidence ↗</a>
+            </Show>
             <Show when={item.complaintId}>
               <div style={{ color: '#665b4b', 'font-size': '9px', 'font-family': 'monospace', 'margin-top': '7px' }}>{item.complaintId}</div>
             </Show>
