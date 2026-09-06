@@ -179,10 +179,10 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
         <For each={visibleItems()}>{(item) => (
           <article data-testid={`feed-item-${item.evidenceId}`}
             onClick={() => { if (item.sourceState === 'available' && item.sessionId) props.onOpenSession(item.sessionId) }}
-            style={{ background: item.needsReview ? '#15120f' : '#0d1117', border: `1px solid ${item.needsReview ? '#382b20' : '#1e2632'}`, 'border-radius': '12px', padding: '12px 13px', cursor: item.sourceState === 'available' && item.sessionId ? 'pointer' : 'default', '-webkit-tap-highlight-color': 'transparent' }}>
+            style={{ background: item.needsReview ? '#15120f' : '#0d1117', border: `1px solid ${item.needsReview ? '#382b20' : '#1e2632'}`, 'border-radius': '12px', padding: '12px 13px', 'min-width': '0', overflow: 'hidden', cursor: item.sourceState === 'available' && item.sessionId ? 'pointer' : 'default', '-webkit-tap-highlight-color': 'transparent' }}>
             <div style={{ display: 'flex', 'align-items': 'center', gap: '7px' }}>
               <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: statusColor(item), 'flex-shrink': '0' }} />
-              <strong style={{ color: '#e2e7ee', 'font-size': '13px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{item.title}</strong>
+              <strong style={{ color: '#e2e7ee', 'font-size': '13px', 'min-width': '0', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{item.title}</strong>
               <Show when={item.status}>
                 <span style={{ color: statusColor(item), 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em' }}>{item.status}</span>
               </Show>
