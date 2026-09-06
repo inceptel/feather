@@ -25,6 +25,62 @@ describe('X bookmark dispatcher', () => {
     assert.match(classification.rationale, /preserve it/u)
   })
 
+  it('requires an artifact signal for skill candidates across the six-receipt corpus', () => {
+    const cases = [
+      {
+        id: '2096469846334865513',
+        text: 'The two best I know personally, skill wise are @ImDanTheMan and @AntoineRSX',
+        urls: [],
+        expected: 'reference',
+      },
+      {
+        id: '2096259218835718273',
+        text: 'Build a reusable agent skill named `evm-token-due-diligence`. Create the actual skill files.',
+        urls: [],
+        expected: 'skill-candidate',
+      },
+      {
+        id: '2096010451251499343',
+        text: 'u can use my council skill',
+        urls: ['https://github.com/kitze/council'],
+        expected: 'skill-candidate',
+        collision: true,
+      },
+      {
+        id: '2096276340337172659',
+        text: '@KaiavRNihalani',
+        urls: ['https://github.com/Fchaubard/autoresearcherUI'],
+        expected: 'code-reference',
+      },
+      {
+        id: '2096433162230600019',
+        text: 'made a performant terminal for uniswap LPs on robinhood chain',
+        urls: ['https://robinhoodpools.lol/'],
+        expected: 'reference',
+      },
+      {
+        id: '2096608599413837973',
+        text: 'every model can search x',
+        urls: ['https://x.pcstyle.dev/'],
+        expected: 'reference',
+      },
+    ]
+
+    for (const item of cases) {
+      const bookmark = { ...normalizeBookmark(raw(item.id, item.text)), canonicalUrls: item.urls }
+      const classification = classifyBookmark(bookmark, {
+        roomExists: () => true,
+        skillCollision: item.collision === true,
+      })
+      assert.equal(classification.kind, item.expected, item.id)
+      assert.equal(classification.collision, item.collision === true, item.id)
+      if (item.expected !== 'skill-candidate') {
+        assert.match(classification.rationale, /does not encode execution intent/u, item.id)
+        assert.doesNotMatch(classification.rationale, /approval/iu, item.id)
+      }
+    }
+  })
+
   it('bootstraps only the newest item, then processes unseen items oldest first', () => {
     const bookmarks = ['103', '101', '102'].map((id) => normalizeBookmark(raw(`2096010451251499${id}`)))
     assert.deepEqual(selectUnseen(bookmarks, null).map((item) => item.id), ['2096010451251499103'])
