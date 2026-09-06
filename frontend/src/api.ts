@@ -953,6 +953,7 @@ export interface UsageSnapshot {
   windows: UsageWindow[]
   providers: {
     anthropic: { windows?: LimitWindow[], tokenSource?: string, tokenExpiresAt?: string | null, error: string | null, lastGoodAt: string | null }
+    anthropicApi: { days: { date: string, usd: number }[], todayUsd: number, weekUsd: number, error: string | null, lastGoodAt: string | null } | null
     openrouter: {
       totalCredits?: number, totalUsage?: number, remaining?: number,
       usageDaily?: number, usageWeekly?: number, usageMonthly?: number,
@@ -962,7 +963,7 @@ export interface UsageSnapshot {
     codex: {
       windows: LimitWindow[], observedAt: string | null,
       credits: { hasCredits: boolean, unlimited: boolean, balance: string } | null,
-      tokenExpiresAt: string | null, tokenExpired: boolean | null, error: string | null
+      tokenExpiresAt: string | null, tokenExpired: boolean | null, error: string | null, source?: string
     }
   }
 }

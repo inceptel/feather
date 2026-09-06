@@ -4388,6 +4388,8 @@ const providerLimits = createProviderLimits({
   claudeCredentialsFile: path.join(HOME, '.claude/.credentials.json'),
   keyvaultFile: process.env.FEATHER_KEYVAULT || path.join(HOME, 'keyvault.txt'),
   cacheFile: STATE_PATHS.instance.providerLimitsFile,
+  brokerUrl: process.env.OMP_AUTH_BROKER_URL || null,
+  brokerTokenFile: path.join(HOME, '.omp/auth-broker.token'),
 });
 const USAGE_SNAPSHOT_TTL_MS = 60_000;
 let usageSnapshot = null;

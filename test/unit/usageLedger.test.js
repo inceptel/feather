@@ -5,7 +5,7 @@ import os from 'os'
 import path from 'path'
 
 import { parseClaudeTranscript, parseOmpTranscript, parseCodexTranscript, createUsageLedger, summarizeUsage, roomForCwd } from '../../lib/usage-ledger.js'
-import { normalizeAnthropicUsage, normalizeCodexRateLimits, readOpenRouterKey, createProviderLimits } from '../../lib/provider-limits.js'
+import { normalizeAnthropicUsage, normalizeCodexRateLimits, normalizeBrokerReports, normalizeAnthropicCostReport, readOpenRouterKey, createProviderLimits } from '../../lib/provider-limits.js'
 
 const roots = []
 afterEach(() => { while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true }) })
@@ -202,5 +202,66 @@ describe('provider limits', () => {
     assert.equal(afterRestart.anthropic.windows[0].utilization, 0.3, 'last good reading survives a restart')
     assert.ok(afterRestart.anthropic.lastGoodAt)
     assert.ok(!fs.readFileSync(path.join(root, 'state/provider-limits.json'), 'utf8').includes('tok"'), 'no token in the cache file')
+  })
+
+  it('prefers live OMP auth-broker limits over transcript-derived Codex windows', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-broker-'))
+    roots.push(root)
+    const auth = path.join(root, 'auth.json')
+    fs.writeFileSync(auth, JSON.stringify({ 'openai-codex': { access: 'x', expires: 500 } }))
+    const tokenFile = path.join(root, 'broker.token')
+    fs.writeFileSync(tokenFile, 'broker-secret\n')
+    const doc = { generatedAt: 1, reports: [{ provider: 'openai-codex', fetchedAt: 1_788_731_256_376, limits: [
+      { id: 'openai-codex:primary', label: '7 days', scope: { provider: 'openai-codex', windowId: '7d' }, window: { id: '7d', label: '7 days', resetsAt: 1_788_748_015_000 }, amount: { usedFraction: 0.87 } },
+      { id: 'openai-codex:spark:primary', label: '5 hours (Spark)', scope: { tier: 'spark' }, window: { label: '5 hours', resetsAt: 1 }, amount: { usedFraction: 0 } },
+    ] }] }
+    assert.deepEqual(normalizeBrokerReports(doc)['openai-codex'].windows, [{ name: '7 days', utilization: 0.87, resetsAt: '2026-09-07T02:26:55.000Z' }])
+    const calls = []
+    const fetchImpl = async (url, { headers }) => {
+      calls.push([url, headers.Authorization])
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(doc) }
+    }
+    const limits = createProviderLimits({ ompAuthFile: auth, claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: path.join(root, 'none'), fetchImpl, brokerUrl: 'http://127.0.0.1:8765/', brokerTokenFile: tokenFile, now: () => 1_788_731_300_000, env: {} })
+    const snapshot = await limits.snapshot({ codexRateLimits: { at: 1, primary: { used_percent: 3, window_minutes: 10080, resets_at: 1 } } })
+    assert.deepEqual(calls, [['http://127.0.0.1:8765/v1/usage', 'Bearer broker-secret']])
+    assert.equal(snapshot.codex.windows[0].utilization, 0.87)
+    assert.equal(snapshot.codex.source, 'omp-auth-broker')
+    assert.equal(snapshot.codex.error, null)
+    assert.equal(snapshot.codex.tokenExpired, false)
+    assert.ok(!JSON.stringify(snapshot).includes('broker-secret'))
+  })
+
+  it('reads Anthropic Admin API spend when ANTHROPIC_ADMIN_KEY is in the keyvault', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-admin-'))
+    roots.push(root)
+    const keyvault = path.join(root, 'keyvault.txt')
+    fs.writeFileSync(keyvault, 'ANTHROPIC_ADMIN_KEY=sk-ant-admin01-test\n')
+    const doc = { data: [
+      { starting_at: '2026-09-05T00:00:00Z', ending_at: '2026-09-06T00:00:00Z', results: [{ amount: '123.78', currency: 'USD' }, { amount: '1.5', currency: 'USD' }] },
+      { starting_at: '2026-09-06T00:00:00Z', ending_at: '2026-09-07T00:00:00Z', results: [] },
+    ], has_more: false, next_page: null }
+    assert.deepEqual(normalizeAnthropicCostReport(doc), [{ date: '2026-09-05', usd: 1.25 }, { date: '2026-09-06', usd: 0 }])
+    const calls = []
+    const fetchImpl = async (url, { headers }) => {
+      calls.push([url, headers['x-api-key']])
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(doc) }
+    }
+    const limits = createProviderLimits({ ompAuthFile: path.join(root, 'none'), claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: keyvault, fetchImpl, now: () => Date.parse('2026-09-06T12:00:00Z'), env: {} })
+    const snapshot = await limits.snapshot({})
+    assert.equal(calls.length, 1)
+    assert.ok(calls[0][0].startsWith('https://api.anthropic.com/v1/organizations/cost_report?starting_at=2026-08-31T00:00:00.000Z&ending_at=2026-09-07T00:00:00.000Z'))
+    assert.equal(calls[0][1], 'sk-ant-admin01-test')
+    assert.equal(snapshot.anthropicApi.todayUsd, 0)
+    assert.equal(snapshot.anthropicApi.weekUsd, 1.25)
+    assert.equal(snapshot.anthropicApi.error, null)
+    assert.ok(!JSON.stringify(snapshot).includes('sk-ant-admin01-test'))
+  })
+
+  it('omits the Anthropic API card when no admin key exists', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-noadmin-'))
+    roots.push(root)
+    const limits = createProviderLimits({ ompAuthFile: path.join(root, 'none'), claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: path.join(root, 'none'), fetchImpl: async () => { throw new Error('should not fetch') }, env: {} })
+    const snapshot = await limits.snapshot({})
+    assert.equal(snapshot.anthropicApi, null)
   })
 })

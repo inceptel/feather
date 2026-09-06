@@ -194,6 +194,12 @@ export function CostsView(props: { onOpenSession: (id: string) => void }) {
                 <For each={anthropic()!.windows}>{(w) => <Bar window={w} />}</For>
               </Show>
               <Note text={anthropic()?.error} tone="warn" />
+              <Show when={data()?.providers.anthropicApi}>{(api) => (
+                <div style={{ color: muted, 'font-size': '12px', 'margin-top': '10px', 'border-top': `1px solid ${line}`, 'padding-top': '8px' }} data-testid="limits-anthropic-api">
+                  API spend (metered, not the subscription): today <b style={{ color: ink }}>{money(api().todayUsd)}</b> · last 7 days <b style={{ color: ink }}>{money(api().weekUsd)}</b>
+                  <Note text={api().error} tone="warn" />
+                </div>
+              )}</Show>
             </div>
 
             <div style={cardStyle} data-testid="limits-openrouter">
@@ -225,7 +231,7 @@ export function CostsView(props: { onOpenSession: (id: string) => void }) {
                 <span style={{ color: ink, 'font-size': '15px', 'font-weight': '650' }}>OpenAI Codex</span>
                 <span style={{ color: muted, 'font-size': '11px' }}>{codex()?.observedAt ? `seen ${timeAgo(codex()!.observedAt)}` : 'no reading yet'}</span>
               </div>
-              <div style={{ color: muted, 'font-size': '12px', margin: '2px 0 8px' }}>ChatGPT subscription, as reported by the last Codex turn on this box.</div>
+              <div style={{ color: muted, 'font-size': '12px', margin: '2px 0 8px' }}>{codex()?.source === 'omp-auth-broker' ? 'ChatGPT subscription, live from the OMP auth broker.' : 'ChatGPT subscription, as reported by the last Codex turn on this box.'}</div>
               <Show when={(codex()?.windows || []).length > 0} fallback={<div style={{ color: muted, 'font-size': '13px' }}>Limits not available yet.</div>}>
                 <For each={codex()!.windows}>{(w) => <Bar window={w} />}</For>
               </Show>
