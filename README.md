@@ -121,12 +121,16 @@ room new ev-shop --mission "build me a business plan for an EV-only auto shop at
 
 Feather scaffolds the folder (`AGENTS.md` with the mission verbatim, one charter
 per resident, `notes.md`, `wiki/Home.md`), opens an OMP Leader, and registers
-three OMP Ralph residents: a **caretaker** that wakes every 15 minutes and keeps
+four OMP Ralph residents: a **caretaker** that wakes every 15 minutes and keeps
 `wiki/` current from the other sessions' logs, an **updater** that wakes every
-30 minutes and decides what is worth publishing to Super Feed, and a
+30 minutes and decides what is worth publishing to Super Feed, a
 **marketer** the updater briefs over Sidecar to write the card and render its
-image with `room visual` (Gemini through `~/gemini.py`, with a plain text card as
-the fallback). The Leader receives the mission as its first message. A resident
+image with `room visual` (any configured image provider, with a plain text card
+as the fallback; see Optional services), and a **replyguy** that is woken by
+each comment the user leaves under one of the Room's cards and answers it with
+`room reply` from what the Room already knows, handing anything harder to the
+Leader with `room dispatch --to leader`. Rooms without a replyguy route comments
+to the Leader. The Leader receives the mission as its first message. A resident
 that ends a wake with `RALPH_COMPLETE` simply sleeps until its next slot.
 `room new <name>` without a mission scaffolds the same files locally and starts
 nothing; the Rooms home's **New room** button asks for the mission as well.

@@ -162,7 +162,7 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
               <span style={{ color: muted, 'font-size': '12px', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{leader() ? `${leader()!.agent} · ${leader()!.title}` : 'not started'}</span>
               <span style={{ color: muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leader() ? timeAgo(leader()!.updatedAt) : ''}</span>
             </div>
-            <Show when={residents().length === 0}><div style={{ color: muted, 'font-size': '12px', padding: '8px 0 2px' }}>No residents. Rooms created with a mission get a caretaker, an updater, and a marketer.</div></Show>
+            <Show when={residents().length === 0}><div style={{ color: muted, 'font-size': '12px', padding: '8px 0 2px' }}>No residents. Rooms created with a mission get a caretaker, an updater, a marketer, and a replyguy.</div></Show>
             <For each={residents()}>{(resident) => {
               const status = residentStatus(resident)
               const session = current().sessions.find(candidate => candidate.id === resident.sessionId)

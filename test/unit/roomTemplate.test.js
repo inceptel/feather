@@ -26,7 +26,7 @@ describe('Room template', () => {
 
   it('stamps the mission verbatim into AGENTS.md, notes, and the Wiki home', () => {
     const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION, now: new Date('2026-09-06T12:00:00Z') })
-    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'notes.md', 'wiki/Home.md'])
+    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'notes.md', 'wiki/Home.md'])
     assert.match(files['AGENTS.md'], /^# Room: #ev-shop\n/)
     assert.ok(files['AGENTS.md'].includes('## Mission (verbatim from the user)'))
     assert.ok(files['AGENTS.md'].includes(`> ${MISSION}`))
@@ -48,6 +48,9 @@ describe('Room template', () => {
     assert.ok(files['UPDATER.md'].includes('never enter Review, create an alert badge, or require a visual'))
     assert.ok(files['UPDATER.md'].includes('"attention": "briefing"'))
     assert.ok(files['MARKETER.md'].includes('"attention": "briefing|by-the-way"'))
+    assert.ok(files['REPLYGUY.md'].includes('room dispatch --to leader'))
+    assert.ok(files['REPLYGUY.md'].includes('Reply first'))
+    assert.ok(files['AGENTS.md'].includes('**replyguy**'))
     assert.ok(files['CARETAKER.md'].includes('RALPH_COMPLETE'))
   })
 
@@ -78,7 +81,7 @@ describe('Room template', () => {
       const dir = path.join(root, 'ev-shop')
       fs.mkdirSync(dir)
       const files = scaffoldRoom(dir, { name: 'ev-shop', mission: MISSION })
-      assert.deepEqual(files, ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'notes.md', 'wiki/Home.md'])
+      assert.deepEqual(files, ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'notes.md', 'wiki/Home.md'])
       for (const file of files) assert.ok(fs.existsSync(path.join(dir, file)), file)
       for (const sub of ROOM_TEMPLATE_DIRS) assert.ok(fs.statSync(path.join(dir, sub)).isDirectory(), sub)
       assert.equal(fs.readlinkSync(path.join(dir, 'CLAUDE.md')), 'AGENTS.md')

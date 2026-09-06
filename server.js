@@ -4513,8 +4513,16 @@ app.post('/api/feed/following', (req, res) => {
   }
 });
 
-// A comment on a feed card goes to the Room Leader as chat; the reply comes
-// back through the feed projection (see attachFeedComments).
+// A comment on a feed card goes to the Room's replyguy resident as chat (the
+// Leader when the Room has none); the reply comes back through the feed
+// projection (see attachFeedComments).
+function feedCommentResponder(roomName) {
+  const replyguy = ROOM_RESIDENTS_STATE.read()[roomName]?.replyguy;
+  if (replyguy?.sessionId && readMeta()[replyguy.sessionId]?.mode === RALPH_MODE) {
+    return { sessionId: replyguy.sessionId, role: 'replyguy' };
+  }
+  return null;
+}
 app.post('/api/feed/comments', async (req, res) => {
   try {
     const evidenceId = String(req.body?.evidenceId || '').trim();
@@ -4528,14 +4536,23 @@ app.post('/api/feed/comments', async (req, res) => {
     const roomName = item.room;
     if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
     const leaderId = await readyRoomLeader(roomName);
+    const responder = feedCommentResponder(roomName);
+    const responderId = responder?.sessionId || leaderId;
     const commentId = randomUUID().replaceAll('-', '');
     const prompt = feedCommentPrompt({ commentId, roomName, item, text });
-    const receipt = await sendInputIdempotent(leaderId, prompt, commentId);
-    const comment = { id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(), leaderSessionId: leaderId };
+    if (responder) {
+      prepareRalphForHumanInput(responderId);
+      await ensureResidentRunning(responderId, roomName);
+    }
+    const receipt = await sendInputIdempotent(responderId, prompt, commentId);
+    const comment = {
+      id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(),
+      leaderSessionId: leaderId, responderSessionId: responderId, responderRole: responder?.role || 'leader',
+    };
     FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
     feedSnapshotCache.refresh();
-    scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt });
-    scheduleFeedReplyNudge({ leaderId, commentId, roomName, text });
+    scheduleFeedCommentDeliveryCheck({ leaderId: responderId, commentId, prompt });
+    scheduleFeedReplyNudge({ leaderId: responderId, commentId, roomName, text });
     res.status(201).json({ ok: true, comment: publicFeedComment(comment) });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
@@ -5080,12 +5097,15 @@ const RESIDENT_RELAUNCH_SETTLE_MS = Math.max(0, Number(process.env.FEATHER_RESID
 
 // A resident whose OMP process died before it wrote a session file cannot be
 // resumed; start it fresh in the Room and give it time to load before pasting.
-async function wakeResident(sessionId, roomName, prompt) {
+async function ensureResidentRunning(sessionId, roomName) {
   if (!tmuxIsActive(sessionId) && !getOmpSessionId(sessionId)) {
     console.warn(`[room wake] #${roomName}: relaunching ${sessionId} (no OMP session to resume)`);
     launchOmpSession(sessionId, path.join(ROOMS_HOME_DIR, roomName));
     await sleep(RESIDENT_RELAUNCH_SETTLE_MS);
   }
+}
+async function wakeResident(sessionId, roomName, prompt) {
+  await ensureResidentRunning(sessionId, roomName);
   await sendInput(sessionId, prompt);
 }
 function checkResidentWakes() {

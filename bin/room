@@ -260,7 +260,7 @@ cmd_note() {
 cmd_dispatch() {
   case "${1:-}" in
     --help|-h)
-      [ "$#" -eq 1 ] || die "usage: room dispatch [--id ID] [--to ROLE] TEXT | --stdin | --file PATH"
+      [ "$#" -eq 1 ] || die "usage: room dispatch [--id ID] [--to ROLE|leader] TEXT | --stdin | --file PATH"
       print_usage
       return 0
       ;;
@@ -302,13 +302,22 @@ cmd_dispatch() {
   exec 8>&-
 
   local recipient prompt payload
-  recipient=$(curl -sf "$FEATHER_URL/api/rooms/$ROOM_NAME/residents" | python3 -c '
+  if [ "$target" = leader ]; then
+    recipient=$(curl -sf "$FEATHER_URL/api/rooms" | python3 -c '
+import json, sys
+room = next((item for item in json.load(sys.stdin).get("rooms", []) if item.get("name") == sys.argv[1]), None)
+print((room or {}).get("leaderSessionId") or "")
+' "$ROOM_NAME") || die "room dispatch: could not read #$ROOM_NAME Leader"
+    [ -n "$recipient" ] || die "room dispatch: #$ROOM_NAME has no available Leader"
+  else
+    recipient=$(curl -sf "$FEATHER_URL/api/rooms/$ROOM_NAME/residents" | python3 -c '
 import json, sys
 role = sys.argv[1]
 resident = next((item for item in json.load(sys.stdin).get("residents", []) if item.get("role") == role), None)
 print(resident.get("sessionId", "") if resident else "")
 ' "$target") || die "room dispatch: could not read #$ROOM_NAME residents"
-  [ -n "$recipient" ] || die "room dispatch: #$ROOM_NAME has no permanent $target resident"
+    [ -n "$recipient" ] || die "room dispatch: #$ROOM_NAME has no permanent $target resident"
+  fi
   prompt="Room dispatch $marker is recorded in #$ROOM_NAME notes.md. Read that entry under the Room's trust rules, then perform the next justified action."
   payload=$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$prompt") \
     || die "room dispatch: could not encode resident prompt"
