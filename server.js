@@ -4523,11 +4523,17 @@ app.get('/api/rooms/:name/friction', (req, res) => {
 // marketer). The mission sentence is stamped verbatim into AGENTS.md, the
 // Wiki, notes.md, and the Leader's first message.
 const ROOM_KICKOFF_DELAY_MS = Math.max(0, Number(process.env.FEATHER_ROOM_KICKOFF_DELAY_MS) || 8_000);
-function staffRoom(name, mission) {
+// OMP keeps one SQLite database per user; four processes opening it in the
+// same second can lose one to "database is locked". Space the launches out.
+const ROOM_STAFF_STAGGER_MS = Math.max(0, Number(process.env.FEATHER_ROOM_STAFF_STAGGER_MS ?? 2_500));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function staffRoom(name, mission) {
   const cwd = path.join(ROOMS_HOME_DIR, name);
   const leader = createSessionForRequest({ id: randomUUID(), cwd, agent: 'omp', roomName: name, roomRole: 'leader' });
   const residents = [];
   for (const spec of ROOM_STANDARD_RESIDENTS) {
+    if (ROOM_STAFF_STAGGER_MS) await sleep(ROOM_STAFF_STAGGER_MS);
     const created = createSessionForRequest({
       id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE,
       roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
@@ -4550,7 +4556,7 @@ function staffRoom(name, mission) {
   return { leaderSessionId: leader.id, residents };
 }
 
-app.post('/api/rooms', (req, res) => {
+app.post('/api/rooms', async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
     if (!ROOM_NAME_RE.test(name)) throw httpError(400, 'bad room name (lowercase, digits, dashes)');
@@ -4564,7 +4570,7 @@ app.post('/api/rooms', (req, res) => {
     fs.mkdirSync(dir, { recursive: true });
     const files = scaffoldRoom(dir, { name, mission });
     roomSnapshotCache.refresh();
-    const staffing = staff ? staffRoom(name, mission) : null;
+    const staffing = staff ? await staffRoom(name, mission) : null;
     if (staffing) roomSnapshotCache.refresh();
     res.json({ name, cwd: dir, mission, files, ...(staffing || {}) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -4775,6 +4781,18 @@ function residentWakeDue(resident, sessionId, meta, now) {
 }
 
 const residentWakesInFlight = new Set();
+const RESIDENT_RELAUNCH_SETTLE_MS = Math.max(0, Number(process.env.FEATHER_RESIDENT_RELAUNCH_SETTLE_MS ?? 6_000));
+
+// A resident whose OMP process died before it wrote a session file cannot be
+// resumed; start it fresh in the Room and give it time to load before pasting.
+async function wakeResident(sessionId, roomName, prompt) {
+  if (!tmuxIsActive(sessionId) && !getOmpSessionId(sessionId)) {
+    console.warn(`[room wake] #${roomName}: relaunching ${sessionId} (no OMP session to resume)`);
+    launchOmpSession(sessionId, path.join(ROOMS_HOME_DIR, roomName));
+    await sleep(RESIDENT_RELAUNCH_SETTLE_MS);
+  }
+  await sendInput(sessionId, prompt);
+}
 function checkResidentWakes() {
   if (!ROOM_PULSES_ENABLED) return;
   const now = Date.now();
@@ -4803,7 +4821,7 @@ function checkResidentWakes() {
       const prompt = residentWakePrompt({ roomName, role, charter, at });
       residentWakesInFlight.add(sessionId);
       prepareRalphForHumanInput(sessionId);
-      sendInput(sessionId, prompt)
+      wakeResident(sessionId, roomName, prompt)
         .catch((error) => console.warn(`[room wake] #${roomName} ${role}:`, error.message))
         .finally(() => residentWakesInFlight.delete(sessionId));
     }

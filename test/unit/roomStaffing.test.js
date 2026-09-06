@@ -53,7 +53,7 @@ describe('Room staffing from the template', () => {
       cwd: REPO,
       env: {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
-        FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_KICKOFF_DELAY_MS: '100',
+        FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_KICKOFF_DELAY_MS: '100', FEATHER_ROOM_STAFF_STAGGER_MS: '0', FEATHER_RESIDENT_RELAUNCH_SETTLE_MS: '50',
         PATH: `${binDir}:${process.env.PATH}`, TMUX_REG: tmuxReg, TMUX_SENT_LOG: sentLog,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -134,6 +134,16 @@ describe('Room staffing from the template', () => {
       assert.ok(after.nextWakeAtMs > Date.now() + 800_000)
       assert.ok(Number.isFinite(Date.parse(after.lastWakeAt)))
       assert.equal(readMeta()[caretakerId].ralph.enabled, true)
+
+      // A resident whose OMP died before writing a session file is started fresh.
+      const shortCaretaker = `feather-${caretakerId.slice(0, 8)}`
+      fs.writeFileSync(tmuxReg, fs.readFileSync(tmuxReg, 'utf8').split('\n').filter(name => name && name !== shortCaretaker).join('\n') + '\n')
+      const wokenOnce = readResidents()['ev-shop']
+      fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
+        'ev-shop': { ...wokenOnce, caretaker: { ...wokenOnce.caretaker, nextWakeAtMs: 1 } },
+      }))
+      await waitFor(() => (readSent().match(/\[Room wake · #ev-shop · caretaker/g) || []).length === 2 || null, { message: 'caretaker relaunch wake' })
+      assert.ok(fs.readFileSync(tmuxReg, 'utf8').split('\n').includes(shortCaretaker), 'caretaker relaunched in tmux')
 
       // A Ralph resident that is mid-turn is left alone until it finishes;
       // one that said RALPH_COMPLETE is woken again when its slot comes up.
