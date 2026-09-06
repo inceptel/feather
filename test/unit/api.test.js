@@ -499,7 +499,7 @@ describe('POST /api/rooms/:name/send', () => {
 })
 
 describe('Room Ralph publication capability', () => {
-  it('registers an OMP Ralph updater and publishes one visual briefing', async () => {
+  it('registers an OMP Ralph updater and publishes one visual By-the-way item', async () => {
     if (EXTERNAL_SERVER) return
     const roomName = `jax-ev-${Date.now().toString(36)}`
     const roomResponse = await fetch(`${BASE}/api/rooms`, {
@@ -541,6 +541,7 @@ describe('Room Ralph publication capability', () => {
       const body = {
         id: 'jax-api-001',
         sourceEvidenceId: 'primary-source-001',
+        attention: 'by-the-way',
         title: 'Jacksonville EV signal',
         summary: 'A verified local change now affects EV planning.',
         visual: 'artifacts/brief.png',
@@ -569,6 +570,8 @@ describe('Room Ralph publication capability', () => {
       const feed = await (await fetch(`${BASE}/api/feed`)).json()
       const item = feed.items.find(candidate => candidate.evidenceId === `publication:${roomName}:jax-api-001`)
       assert.equal(item.summary, body.summary)
+      assert.equal(item.attention, 'by-the-way')
+      assert.equal(item.status, 'by the way')
       assert.equal(item.visualAlt, body.visualAlt)
       assert.match(item.visualHref, /jax-api-001\/visual$/)
 
@@ -577,6 +580,7 @@ describe('Room Ralph publication capability', () => {
       assert.deepEqual(Buffer.from(await visual.arrayBuffer()), visualBytes)
       const canonical = await (await fetch(`${BASE}${item.sourceHref}`)).json()
       assert.equal(canonical.publication.sourceEvidenceId, body.sourceEvidenceId)
+      assert.equal(canonical.publication.attention, body.attention)
     } finally {
       fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }

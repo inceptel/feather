@@ -323,6 +323,11 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
     sourceHref: '/api/rooms/trading/publications/market-brief-1', sourceState: 'available',
     status: 'briefing', needsReview: false, sessionId: null, publicationId: 'market-brief-1',
     visualHref: '/api/rooms/trading/publications/market-brief-1/visual', visualAlt: 'A compact market-change chart.',
+  }, {
+    evidenceId: 'publication:trading:market-context-1', kind: 'update', room: 'trading', title: '#trading · Nearby context',
+    summary: 'Useful evidence-backed context; no action is requested.', detail: null, occurredAt: '2026-09-05T13:09:00Z',
+    sourceHref: '/api/rooms/trading/publications/market-context-1', sourceState: 'available',
+    attention: 'by-the-way', status: 'by the way', needsReview: false, sessionId: null, publicationId: 'market-context-1',
   }]
   let following = ['trading']
   let failFeed = false
@@ -347,7 +352,10 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).toBeVisible()
   await expect(feed.getByAltText('A compact market-change chart.')).toBeVisible()
-  await expect(feed.getByRole('link', { name: 'Published evidence ↗' })).toHaveAttribute('href', /publications\/market-brief-1/)
+  await expect(feed.getByRole('link', { name: 'Published evidence ↗' }).first()).toHaveAttribute('href', /publications\/market-brief-1/)
+  await expect(feed.getByText('Briefing', { exact: true })).toBeVisible()
+  await expect(feed.getByText('By the way', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Useful evidence-backed context; no action is requested.', { exact: true })).toBeVisible()
 
   failFeed = true
   await feed.getByTestId('feed-refresh').click()
@@ -359,6 +367,7 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await expect(feed.getByText('Status check failed.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
   await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
+  await expect(feed.getByText('By the way', { exact: true })).not.toBeVisible()
 
   await feed.getByTestId('feed-tab-following').click()
   await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()

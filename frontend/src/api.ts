@@ -307,6 +307,7 @@ export interface SuperFeedItem {
   resolvedAt?: string | null
   resolution?: string | null
   publicationId?: string
+  attention?: 'briefing' | 'by-the-way'
   visualHref?: string
   visualAlt?: string
   comments?: FeedComment[]

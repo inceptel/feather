@@ -18,10 +18,11 @@ function fixture() {
 }
 
 
-function input(id = 'jax-ev-0001', sourceEvidenceId = 'https://example.test/evidence/1') {
+function input(id = 'jax-ev-0001', sourceEvidenceId = 'https://example.test/evidence/1', attention = undefined) {
   return {
     id,
     sourceEvidenceId,
+    ...(attention ? { attention } : {}),
     title: 'Charging program changed',
     summary: 'The operating terms changed in a way that affects local planning.',
     detail: 'Primary source checked on 2026-09-06.',
@@ -39,6 +40,7 @@ describe('Room publication store', () => {
         now: new Date('2026-09-06T12:00:00Z'),
       })
       assert.equal(first.reused, false)
+      assert.equal(first.record.attention, 'briefing')
       const retry = appendRoomPublication({
         roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1', input: input(),
         now: new Date('2026-09-06T12:01:00Z'),
@@ -50,10 +52,36 @@ describe('Room publication store', () => {
       }), /source evidence was already published/)
       const rapid = appendRoomPublication({
         roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
-        input: input('jax-ev-0003', 'https://example.test/evidence/3'), now: new Date('2026-09-06T12:10:00Z'),
+        input: input('jax-ev-0003', 'https://example.test/evidence/3', 'by-the-way'), now: new Date('2026-09-06T12:10:00Z'),
       })
       assert.equal(rapid.reused, false)
+      assert.equal(rapid.record.attention, 'by-the-way')
+      assert.throws(() => appendRoomPublication({
+        roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
+        input: input('jax-ev-0004', 'https://example.test/evidence/4', 'urgent'),
+      }), /attention must be briefing or by-the-way/)
       assert.equal(readRoomPublications(roomRoot, 'jacksonville-ev').length, 2)
+    } finally {
+      fs.rmSync(roomRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps legacy publications without an attention field as briefing-compatible evidence', () => {
+    const roomRoot = fixture()
+    try {
+      const legacy = {
+        room: 'jacksonville-ev',
+        ...input(),
+        occurredAt: '2026-09-06T12:00:00.000Z',
+        publisherSessionId: 'updater-1',
+      }
+      fs.writeFileSync(path.join(roomRoot, 'feed-publications.jsonl'), `${JSON.stringify(legacy)}\n`)
+      assert.equal(readRoomPublications(roomRoot, 'jacksonville-ev').length, 1)
+      const retry = appendRoomPublication({
+        roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1', input: input(),
+      })
+      assert.equal(retry.reused, true)
+      assert.equal(retry.record.attention, undefined)
     } finally {
       fs.rmSync(roomRoot, { recursive: true, force: true })
     }

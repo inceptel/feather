@@ -156,10 +156,14 @@ an explicit active system alert: user-message rows may say `asked`, but they do
 not claim unresolved human attention without durable approval or decision
 evidence. Cards link back to their source, retain stale locators when a source
 disappears, and never expose raw notes, unkeyed legacy complaints, legacy
-Updates, Sidecar traffic, or tool activity. Selected publications may include a
-validated Room-local PNG, JPEG, or WebP through the authenticated publication
-route; remote images and symlink escapes are rejected. Complaint status remains
-unknown unless a canonical resolution event proves otherwise.
+Updates, Sidecar traffic, or tool activity. An Updater classifies each selected
+publication as a **Briefing** when it changes a decision or action, or **By the
+way** when it adds useful, evidence-backed context without asking for action.
+By-the-way items stay out of Review, create no alert badge, and do not require a
+visual. Selected publications may include a validated Room-local PNG, JPEG, or
+WebP through the authenticated publication route; remote images and symlink
+escapes are rejected. Complaint status remains unknown unless a canonical
+resolution event proves otherwise.
 
 
 The client conditionally polls with ETags every 10 seconds and preserves its
