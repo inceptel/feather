@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   FEED_COMMENT_MAX_CHARS, FEED_COMMENT_PREFIX, FEED_REPLY_MAX_CHARS,
-  feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment,
+  commentDelivered, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment,
 } from '../../lib/feed-comments.js'
 
 const ID = 'a'.repeat(32)
@@ -58,4 +58,13 @@ describe('Super Feed comments', () => {
     assert.ok(!('leaderSessionId' in answered))
     assert.equal(publicFeedComment(comment()).reply, null)
   })
+})
+
+it('commentDelivered finds the tagged prompt only in user turns', () => {
+  const tag = `[feed-comment:${ID}]`
+  assert.equal(commentDelivered([], ID), false)
+  assert.equal(commentDelivered([{ role: 'assistant', content: `echo ${tag}` }], ID), false)
+  assert.equal(commentDelivered([{ role: 'user', content: `[Super Feed comment · #x] ${tag}\nhi` }], ID), true)
+  assert.equal(commentDelivered([{ role: 'user', content: [{ type: 'text', text: `${tag} hi` }] }], ID), true)
+  assert.equal(commentDelivered([{ role: 'user', content: '[feed-comment:0000] other' }], ID), false)
 })

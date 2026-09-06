@@ -44,7 +44,7 @@ import {
   scaffoldRoom,
   roomTemplateFiles,
 } from './lib/room-template.js';
-import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
+import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, commentDelivered, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -4475,11 +4475,31 @@ app.post('/api/feed/comments', async (req, res) => {
     const comment = { id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(), leaderSessionId: leaderId };
     FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
     feedSnapshotCache.refresh();
+    scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt });
     res.status(201).json({ ok: true, comment: publicFeedComment(comment) });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
 });
+
+// A pasted prompt can vanish when the Leader's agent is busy or restarting
+// (seen 2026-09-06: the receipt said sent, the transcript never got it). Look
+// for the tagged prompt in the transcript after a delay and re-send once.
+const FEED_COMMENT_DELIVERY_CHECK_MS = Number(process.env.FEATHER_FEED_COMMENT_CHECK_MS || 25_000);
+function scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt }) {
+  if (!(FEED_COMMENT_DELIVERY_CHECK_MS > 0)) return;
+  const timer = setTimeout(async () => {
+    try {
+      const { messages } = getMessages(leaderId, 60);
+      if (commentDelivered(messages, commentId)) return;
+      console.warn(`[feed] comment ${commentId} not seen in Leader ${leaderId.slice(0, 8)} transcript; re-sending once`);
+      await sendInputIdempotent(leaderId, prompt, `${commentId}-retry`);
+    } catch (error) {
+      console.warn(`[feed] comment ${commentId} delivery check failed: ${error.message}`);
+    }
+  }, FEED_COMMENT_DELIVERY_CHECK_MS);
+  timer.unref?.();
+}
 
 // The Room's answer to a comment. The Leader runs `room reply <id> ...`;
 // the id is a capability in itself (32 random hex chars from the tagged
