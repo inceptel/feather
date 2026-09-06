@@ -223,9 +223,10 @@ if data.get("leaderSessionId"):
 ' "$response"
 }
 
-# Card image for a Super Feed publication. Gemini (via ~/gemini.py and
-# OpenRouter) when available; otherwise a plain rendered text card so the
-# updater can always publish. Prints which path produced the file.
+# Card image for a Super Feed publication. bin/room-visual.py tries every
+# image provider this box has a key for (OpenRouter, Google Gemini, OpenAI);
+# otherwise a plain rendered text card so the updater can always publish.
+# Prints "<provider> <path>" so the caller knows which path produced the file.
 cmd_visual() {
   local out=""
   while [ $# -gt 0 ]; do
@@ -237,58 +238,9 @@ cmd_visual() {
   [ -n "$out" ] || die 'usage: room visual --out FILE.png "<prompt>"'
   case "$out" in *.png) ;; *) die "room visual: --out must end in .png" ;; esac
   read_room_text visual "$@"
-  local prompt="$ROOM_TEXT"
-  mkdir -p "$(dirname "$out")"
-  local gemini="${ROOM_GEMINI_SCRIPT:-$HOME/gemini.py}"
-  local tmp="$out.tmp.$$"
-  # gemini.py's CLI cannot take a text-only prompt (argparse eats it as the
-  # image path), so call its generate() directly.
-  if [ -f "$gemini" ] && timeout "${ROOM_VISUAL_TIMEOUT:-180}" python3 - "$gemini" "$prompt" "$tmp" >/dev/null 2>"$tmp.err" <<'PY' \
-     && [ -s "$tmp" ]; then
-import importlib.util, sys
-from PIL import Image
-spec = importlib.util.spec_from_file_location("gemini", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-saved, text, usage = module.generate(sys.argv[2], output=sys.argv[3])
-if not saved:
-    raise SystemExit("no image returned: %s" % (usage,))
-# OpenRouter usually returns JPEG whatever name is asked for; the feed wants PNG.
-image = Image.open(sys.argv[3])
-image.load()
-image.convert("RGB").save(sys.argv[3], "PNG")
-PY
-    mv "$tmp" "$out"; rm -f "$tmp.err"
-    echo "gemini $out"
-    return 0
-  fi
-  local reason=""
-  [ -f "$tmp.err" ] && reason="$(tail -c 300 "$tmp.err" 2>/dev/null | tr '\n' ' ')"
-  rm -f "$tmp" "$tmp.err"
-  python3 - "$out" "$prompt" <<'PY' || die "room visual: fallback render failed"
-import sys, textwrap
-from PIL import Image, ImageDraw, ImageFont
-out, prompt = sys.argv[1], sys.argv[2]
-W, H = 1200, 675
-img = Image.new("RGB", (W, H), (13, 17, 23))
-draw = ImageDraw.Draw(img)
-for y in range(H):
-    shade = 13 + int(18 * y / H)
-    draw.line([(0, y), (W, y)], fill=(shade, shade + 4, shade + 10))
-try:
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
-except Exception:
-    font = ImageFont.load_default()
-lines = textwrap.wrap(prompt, width=48)[:8]
-y = (H - len(lines) * 54) // 2
-for line in lines:
-    w = draw.textlength(line, font=font)
-    draw.text(((W - w) / 2, y), line, fill=(226, 231, 238), font=font)
-    y += 54
-draw.rectangle([(40, 40), (W - 40, H - 40)], outline=(42, 52, 66), width=3)
-img.save(out, "PNG")
-PY
-  echo "fallback $out${reason:+ (gemini: $reason)}"
+  local script="${ROOM_VISUAL_SCRIPT:-$(dirname "$(readlink -f "$0")")/room-visual.py}"
+  [ -f "$script" ] || die "room visual: $script is missing"
+  python3 "$script" "$out" "$ROOM_TEXT" || die "room visual: no image produced"
 }
 
 cmd_list() {
