@@ -45,7 +45,7 @@ import {
   scaffoldRoom,
   roomTemplateFiles,
 } from './lib/room-template.js';
-import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, commentDelivered, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
+import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, commentDelivered, feedCommentPrompt, feedReplyNudgePrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -4535,6 +4535,7 @@ app.post('/api/feed/comments', async (req, res) => {
     FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
     feedSnapshotCache.refresh();
     scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt });
+    scheduleFeedReplyNudge({ leaderId, commentId, roomName, text });
     res.status(201).json({ ok: true, comment: publicFeedComment(comment) });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
@@ -4557,6 +4558,25 @@ function scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt }) {
       console.warn(`[feed] comment ${commentId} delivery check failed: ${error.message}`);
     }
   }, FEED_COMMENT_DELIVERY_CHECK_MS);
+  timer.unref?.();
+}
+
+// A Leader that reads a comment and starts researching can take an hour to
+// answer (seen 2026-09-06, #trading). Remind it once if the card is still
+// unanswered after a while.
+const FEED_REPLY_NUDGE_MS = Number(process.env.FEATHER_FEED_REPLY_NUDGE_MS || 10 * 60_000);
+function scheduleFeedReplyNudge({ leaderId, commentId, roomName, text }) {
+  if (!(FEED_REPLY_NUDGE_MS > 0)) return;
+  const timer = setTimeout(async () => {
+    try {
+      const stored = FEED_COMMENTS_STATE.read().comments.find((comment) => comment.id === commentId);
+      if (!stored || stored.reply) return;
+      console.warn(`[feed] comment ${commentId} unanswered after ${FEED_REPLY_NUDGE_MS}ms; nudging Leader ${leaderId.slice(0, 8)}`);
+      await sendInputIdempotent(leaderId, feedReplyNudgePrompt({ commentId, roomName, text }), `${commentId}-nudge`);
+    } catch (error) {
+      console.warn(`[feed] comment ${commentId} nudge failed: ${error.message}`);
+    }
+  }, FEED_REPLY_NUDGE_MS);
   timer.unref?.();
 }
 

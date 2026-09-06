@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   FEED_COMMENT_MAX_CHARS, FEED_COMMENT_PREFIX, FEED_REPLY_MAX_CHARS,
-  commentDelivered, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment,
+  commentDelivered, feedCommentPrompt, feedReplyNudgePrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment,
 } from '../../lib/feed-comments.js'
 
 const ID = 'a'.repeat(32)
@@ -20,6 +20,10 @@ describe('Super Feed comments', () => {
     assert.ok(prompt.includes(`  Summary: ${'S'.repeat(400)}\n`))
     assert.ok(prompt.includes('\nHow many bays?\n'))
     assert.ok(prompt.includes(`room reply ${ID} --stdin`))
+    assert.ok(prompt.includes('Reply FIRST'))
+    const nudge = feedReplyNudgePrompt({ commentId: ID, roomName: 'ev-shop', text: 'How many bays?' })
+    assert.ok(nudge.startsWith(`${FEED_COMMENT_PREFIX} reminder · #ev-shop] [feed-comment:${ID}]\n`))
+    assert.ok(nudge.includes(`room reply ${ID} --stdin`))
   })
 
   it('validates the stored comment document', () => {
