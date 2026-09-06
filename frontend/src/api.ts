@@ -319,8 +319,7 @@ export interface FeedComment {
   room: string
   text: string
   createdAt: string
-  delivered: boolean
-  reply: { text: string, timestamp: string | null } | null
+  reply: { text: string, timestamp: string } | null
 }
 
 export interface SuperFeedSnapshot {

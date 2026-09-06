@@ -139,8 +139,10 @@ redundant status pulse. Specialist cadence is opt-in through the request's
 `specialists` map.
 
 Each Super Feed card has a **Comment** box. A comment goes to that Room's
-Leader as a tagged chat message, and the Leader's next reply is shown under the
-card. Comments are kept in the instance state and never appear as feed cards.
+Leader as a tagged chat message carrying a comment id. The Leader answers with
+`room reply <id> "..."`, which stores the answer on the comment; the card shows
+that stored answer and nothing else. Comments are kept in the instance state
+and never appear as feed cards.
 
 By default, Feather checks each inactive Room every 15 minutes and launches one
 non-interactive OMP session to do the next useful thing. The Room card shows when
@@ -154,14 +156,12 @@ durable meaning from `notes.md`, legacy updates, and sessions into curated
 compatibility, but agents should write working evidence to `notes.md` and leave
 human-facing synthesis to the caretaker.
 
-The Rooms home starts with **Super Feed**, a read-only projection of canonical
-Leader-chat outcomes, authenticated Updater publications, active Room status
-failures, and explicitly keyed, structured `#friction` records. **Latest**,
+The Rooms home starts with **Super Feed**, a read-only projection of
+authenticated Updater publications, active Room status failures, and explicitly
+keyed, structured `#friction` records. Leader chat is never a feed source. **Latest**,
 **Review**, **Following**, and **Friction** are views over the same stable
 evidence identities; following only changes selection. Review currently means
-an explicit active system alert: user-message rows may say `asked`, but they do
-not claim unresolved human attention without durable approval or decision
-evidence. Cards link back to their source, retain stale locators when a source
+an explicit active system alert. Cards link back to their source, retain stale locators when a source
 disappears, and never expose raw notes, unkeyed legacy complaints, legacy
 Updates, Sidecar traffic, or tool activity. An Updater classifies each selected
 publication as a **Briefing** when it changes a decision or action, or **By the

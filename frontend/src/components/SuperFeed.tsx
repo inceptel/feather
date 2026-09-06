@@ -30,48 +30,10 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(hours / 24)}d`
 }
 
-// One-line preview text for clamped rows: markdown syntax stripped, not rendered.
-function plainText(text: string) {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, '')
-    .replace(/(\*\*|__)(.*?)\1/g, '$2')
-    .replace(/(\*|_)(.*?)\1/g, '$2')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 // Publications carry `#room · Title`; the room becomes a chip, so drop the prefix.
 function headline(item: SuperFeedItem) {
   const prefix = `#${item.room} · `
   return item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title
-}
-
-function isChat(item: SuperFeedItem) {
-  return item.kind === 'update' && !item.publicationId
-}
-
-type Entry =
-  | { type: 'card', item: SuperFeedItem, key: string }
-  | { type: 'activity', item: SuperFeedItem, items: SuperFeedItem[], key: string }
-
-// Publications, alerts, and friction are cards. Leader chat collapses into one
-// activity row per Room so the feed reads as what shipped, not a transcript.
-function toEntries(items: SuperFeedItem[]): Entry[] {
-  const entries: Entry[] = []
-  const activity = new Map<string, Entry & { type: 'activity' }>()
-  for (const item of items) {
-    if (!isChat(item)) { entries.push({ type: 'card', item, key: item.evidenceId }); continue }
-    const existing = activity.get(item.room)
-    if (existing) { existing.items.push(item); continue }
-    const entry = { type: 'activity' as const, item, items: [item], key: `activity:${item.room}:${item.evidenceId}` }
-    activity.set(item.room, entry)
-    entries.push(entry)
-  }
-  return entries
 }
 
 const CommentIcon = () => (
@@ -145,8 +107,8 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
     if (selected === 'friction') return items().filter(item => item.kind === 'friction')
     return items()
   }
-  const entries = createMemo(() => toEntries(itemsFor(view())))
-  const countFor = (selected: SuperFeedView) => toEntries(itemsFor(selected)).length
+  const entries = createMemo(() => itemsFor(view()))
+  const countFor = (selected: SuperFeedView) => itemsFor(selected).length
 
   async function toggleFollowing(room: string, event: MouseEvent) {
     event.stopPropagation()
@@ -203,8 +165,11 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
 
   const canOpen = (item: SuperFeedItem) => item.sourceState === 'available' && Boolean(item.sessionId)
 
+  // The Room chip opens the Room page (mission, residents, cards, friction).
   const RoomChip = (chipProps: { room: string }) => (
-    <span style={{ color: muted, 'font-size': '12px', 'font-weight': '700', padding: '2px 7px', border: `1px solid ${line}`, 'border-radius': '999px', 'white-space': 'nowrap', 'flex-shrink': '0' }}>#{chipProps.room}</span>
+    <button data-testid={`open-room-${chipProps.room}`} title={`Open #${chipProps.room}`}
+      onClick={(event) => { if (props.onOpenRoom) { event.stopPropagation(); props.onOpenRoom(chipProps.room) } }}
+      style={{ background: 'none', color: muted, 'font-size': '12px', 'font-weight': '700', padding: '2px 7px', border: `1px solid ${line}`, 'border-radius': '999px', 'white-space': 'nowrap', 'flex-shrink': '0', cursor: props.onOpenRoom ? 'pointer' : 'default', 'font-family': 'inherit' }}>#{chipProps.room}</button>
   )
 
   const Flag = (flagProps: { text: string, color: string }) => (
@@ -221,15 +186,9 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
     </Show>
   )
 
-  const MetaRow = (metaProps: { item: SuperFeedItem, dot?: boolean, flag?: { text: string, color: string } | null, count?: number }) => (
+  const MetaRow = (metaProps: { item: SuperFeedItem, flag?: { text: string, color: string } | null }) => (
     <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'min-width': '0' }}>
-      <Show when={metaProps.dot}>
-        <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: metaProps.item.status === 'working' ? green : muted, 'flex-shrink': '0' }} />
-      </Show>
       <RoomChip room={metaProps.item.room} />
-      <Show when={metaProps.count && metaProps.count > 1}>
-        <span style={{ color: muted, 'font-size': '12px', 'white-space': 'nowrap' }}>{metaProps.count} updates</span>
-      </Show>
       <Show when={metaProps.flag}><Flag text={metaProps.flag!.text} color={metaProps.flag!.color} /></Show>
       <Show when={metaProps.item.sourceState === 'stale'}><Flag text="Source unavailable" color={red} /></Show>
       <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '12px', 'font-variant-numeric': 'tabular-nums', 'white-space': 'nowrap' }}>{timeAgo(metaProps.item.occurredAt)}</span>
@@ -256,7 +215,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
                   <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '2px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{comment.text}</div>
                   <div style={{ 'border-top': `1px solid ${line}`, 'margin-top': '8px', 'padding-top': '8px' }}>
                     <Show when={comment.reply} fallback={
-                      <div style={{ color: muted, 'font-size': '13px' }}>#{comment.room} is answering…</div>
+                      <div style={{ color: muted, 'font-size': '13px' }}>Sent to #{comment.room} · no answer yet</div>
                     }>
                       <div style={{ display: 'flex', 'align-items': 'baseline', gap: '7px', 'font-size': '12px', color: muted }}>
                         <span style={{ color: green, 'font-weight': '700' }}>#{comment.room}</span>
@@ -346,28 +305,12 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
       </Show>
       <Show when={!loading() && entries().length === 0}>
         <div data-testid="feed-empty" style={{ color: muted, 'text-align': 'center', padding: '26px 12px', background: '#0d1117', border: `1px solid ${line}`, 'border-radius': '12px', 'font-size': '14px', 'line-height': '1.5' }}>
-          {view() === 'following' ? 'Nothing from followed Rooms yet. Follow a Room from Latest.' : view() === 'review' ? 'Nothing needs your review.' : view() === 'friction' ? 'No friction has been reported.' : 'No Room updates yet.'}
+          {view() === 'following' ? 'Nothing from followed Rooms yet. Follow a Room from Latest.' : view() === 'review' ? 'Nothing needs your review.' : view() === 'friction' ? 'No friction has been reported.' : 'Nothing published yet. Rooms post here when they have something worth your time.'}
         </div>
       </Show>
 
       <div style={{ display: 'grid', gap: '10px' }}>
-        <For each={entries()}>{(entry) => {
-          const item = entry.item
-          if (entry.type === 'activity') {
-            // Leader chat, one row per Room: the newest line, opens the Leader.
-            return (
-              <article data-testid={`feed-item-${item.evidenceId}`} onClick={() => { if (canOpen(item)) props.onOpenSession(item.sessionId!) }} style={cardStyle(item, canOpen(item))}>
-                <MetaRow item={item} dot count={entry.items.length} />
-                <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '7px', 'word-break': 'break-word', display: '-webkit-box', '-webkit-line-clamp': '2', '-webkit-box-orient': 'vertical', overflow: 'hidden' }}>{plainText(item.summary)}</div>
-                <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px' }}>
-                  <Show when={item.sourceState === 'available'}><CommentButton item={item} items={entry.items} /></Show>
-                  <button data-testid={`open-room-${item.room}`} onClick={(event) => { if (props.onOpenRoom) { event.stopPropagation(); props.onOpenRoom(item.room) } }}
-                    style={{ 'margin-left': 'auto', background: 'none', border: 'none', color: muted, 'font-size': '12px', padding: '0', cursor: 'pointer', 'font-family': 'inherit' }}>Open the Room →</button>
-                </div>
-                <Show when={item.sourceState === 'available'}><Thread item={item} items={entry.items} /></Show>
-              </article>
-            )
-          }
+        <For each={entries()}>{(item) => {
           if (item.kind === 'friction') {
             return (
               <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>

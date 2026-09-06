@@ -2,8 +2,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  FEED_COMMENT_MAX_CHARS, FEED_COMMENT_PREFIX,
-  feedCommentPrompt, feedCommentReplies, isFeedCommentState, normalizeFeedCommentText,
+  FEED_COMMENT_MAX_CHARS, FEED_COMMENT_PREFIX, FEED_REPLY_MAX_CHARS,
+  feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment,
 } from '../../lib/feed-comments.js'
 
 const ID = 'a'.repeat(32)
@@ -19,7 +19,7 @@ describe('Super Feed comments', () => {
     assert.ok(prompt.includes('  Card: EV shop plan'))
     assert.ok(prompt.includes(`  Summary: ${'S'.repeat(400)}\n`))
     assert.ok(prompt.includes('\nHow many bays?\n'))
-    assert.ok(prompt.includes('shown under the card'))
+    assert.ok(prompt.includes(`room reply ${ID} --stdin`))
   })
 
   it('validates the stored comment document', () => {
@@ -32,6 +32,10 @@ describe('Super Feed comments', () => {
     assert.equal(isFeedCommentState({ comments: [comment({ text: '' })] }), false)
     assert.equal(isFeedCommentState({ comments: [comment({ createdAt: 'yesterday' })] }), false)
     assert.equal(isFeedCommentState({ comments: [comment({ leaderSessionId: '' })] }), false)
+    assert.equal(isFeedCommentState({ comments: [comment({ reply: null })] }), true)
+    assert.equal(isFeedCommentState({ comments: [comment({ reply: { text: 'Eleven bays.', timestamp: '2026-09-06T12:01:00.000Z' } })] }), true)
+    assert.equal(isFeedCommentState({ comments: [comment({ reply: { text: '', timestamp: '2026-09-06T12:01:00.000Z' } })] }), false)
+    assert.equal(isFeedCommentState({ comments: [comment({ reply: { text: 'x', timestamp: 'later' } })] }), false)
   })
 
   it('normalizes comment text and rejects junk', () => {
@@ -42,22 +46,16 @@ describe('Super Feed comments', () => {
     assert.throws(() => normalizeFeedCommentText('a\x00b'), /control characters/)
   })
 
-  it('reads each reply from the Leader transcript after the tagged message', () => {
-    const other = 'c'.repeat(32)
-    const messages = [
-      { role: 'assistant', text: 'Earlier answer', timestamp: '2026-09-06T11:00:00Z' },
-      { role: 'user', text: feedCommentPrompt({ commentId: ID, roomName: 'ev-shop', item: { title: 'T' }, text: 'How many bays?' }), timestamp: '2026-09-06T12:00:00Z' },
-      { role: 'assistant', text: '', timestamp: '2026-09-06T12:00:30Z' },
-      { role: 'assistant', text: 'Eleven bays, per the listing.', timestamp: '2026-09-06T12:01:00Z' },
-      { role: 'user', text: feedCommentPrompt({ commentId: other, roomName: 'ev-shop', item: { title: 'T' }, text: 'Rent?' }), timestamp: '2026-09-06T12:02:00Z' },
-    ]
-    const replies = feedCommentReplies([comment(), comment({ id: other, text: 'Rent?' }), comment({ id: 'd'.repeat(32), text: 'lost' })], messages)
-    assert.equal(replies[0].delivered, true)
-    assert.deepEqual(replies[0].reply, { text: 'Eleven bays, per the listing.', timestamp: '2026-09-06T12:01:00Z' })
-    assert.equal(replies[1].delivered, true)
-    assert.equal(replies[1].reply, null)
-    assert.equal(replies[2].delivered, false)
-    assert.equal(replies[2].reply, null)
-    assert.ok(!('leaderSessionId' in replies[0]))
+  it('accepts long replies but not junk', () => {
+    assert.equal(normalizeFeedReplyText('  answer\r\n'), 'answer')
+    assert.equal(normalizeFeedReplyText('x'.repeat(FEED_REPLY_MAX_CHARS)).length, FEED_REPLY_MAX_CHARS)
+    assert.throws(() => normalizeFeedReplyText('x'.repeat(FEED_REPLY_MAX_CHARS + 1)), /reply exceeds/)
+  })
+
+  it('exposes the stored reply and hides the Leader session', () => {
+    const answered = publicFeedComment(comment({ reply: { text: 'Eleven bays, per the listing.', timestamp: '2026-09-06T12:01:00Z', extra: 'hidden' } }))
+    assert.deepEqual(answered.reply, { text: 'Eleven bays, per the listing.', timestamp: '2026-09-06T12:01:00Z' })
+    assert.ok(!('leaderSessionId' in answered))
+    assert.equal(publicFeedComment(comment()).reply, null)
   })
 })

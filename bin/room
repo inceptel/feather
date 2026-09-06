@@ -17,6 +17,8 @@
 #   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
 #                                      note work and wake a permanent resident
 #   room publish FILE                   publish selected JSON as Room updater
+#   room reply <comment-id> TEXT|--stdin|--file PATH
+#                                      answer a Super Feed comment (shown under its card)
 
 #   room update TEXT|--stdin|--file PATH append legacy evidence
 #   room updates                         list legacy evidence
@@ -387,6 +389,37 @@ print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
     || die "room publish: Feather rejected publication"
 }
 
+
+# Answer a Super Feed comment. The id comes from the tagged comment message
+# ([feed-comment:<id>]); the answer is stored on the comment and shown under
+# the card. Sending it again replaces the earlier answer.
+cmd_reply() {
+  [ "$#" -ge 2 ] || die 'usage: room reply <comment-id> TEXT | --stdin | --file PATH'
+  local comment_id="$1"; shift
+  case "$comment_id" in
+    *[!0-9a-f]*|"") die "room reply: comment id must be the 32 hex chars from [feed-comment:...]" ;;
+  esac
+  [ "${#comment_id}" -eq 32 ] || die "room reply: comment id must be the 32 hex chars from [feed-comment:...]"
+  read_room_text reply "$@"
+  ensure_feather_url
+  local payload
+  payload="$(printf '%s' "$ROOM_TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')" \
+    || die "room reply: could not encode reply"
+  local response
+  response="$(curl -sS -X POST "$FEATHER_URL/api/feed/comments/$comment_id/reply" \
+    -H 'Content-Type: application/json' -d "$payload")" \
+    || die "room reply: Feather request failed"
+  python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except ValueError:
+    raise SystemExit("room reply: unexpected Feather response: " + sys.argv[1][:200])
+if "error" in data:
+    raise SystemExit("room reply: " + data["error"])
+print("replied to comment", data["comment"]["id"], "on", data["comment"]["evidenceId"])
+' "$response"
+}
 
 cmd_update() {
   resolve_room
@@ -774,6 +807,7 @@ case "$cmd" in
   note) cmd_note "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   publish) cmd_publish "$@" ;;
+  reply) cmd_reply "$@" ;;
   update) cmd_update "$@" ;;
   updates) cmd_updates "$@" ;;
   complain|friction) cmd_complain "$@" ;;

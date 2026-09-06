@@ -81,7 +81,7 @@ describe('Super Feed API', () => {
       assert.equal(complaint.needsReview, false)
       assert.equal(complaint.status, null)
       const serialized = JSON.stringify(initial)
-      assert.equal(serialized.includes('Health review completed.'), true)
+      assert.equal(serialized.includes('Health review completed.'), false, 'Leader chat is not a feed source')
       assert.equal(serialized.includes('PRIVATE RAW NOTE'), false)
       assert.equal(serialized.includes('PRIVATE SIDECAR TEXT'), false)
       assert.equal(serialized.includes('friction:legacy-'), false)
@@ -107,6 +107,17 @@ describe('Super Feed API', () => {
         body: JSON.stringify({ room: 'missing', following: true }),
       })
       assert.equal(missing.status, 404)
+
+      const unknownReply = await fetch(`${base}/api/feed/comments/${'f'.repeat(32)}/reply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'nobody asked' }),
+      })
+      assert.equal(unknownReply.status, 404)
+      const badReply = await fetch(`${base}/api/feed/comments/not-an-id/reply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'nobody asked' }),
+      })
+      assert.equal(badReply.status, 400)
     } finally {
       child.kill('SIGTERM')
       await new Promise(resolve => child.once('exit', resolve))

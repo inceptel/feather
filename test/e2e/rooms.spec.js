@@ -303,11 +303,6 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
     sessions: [{ id: 'trading-leader', title: '#trading Leader', updatedAt: '2026-09-05T12:00:00Z', isActive: false, agent: 'omp', roomAssigned: true }],
   }
   const items = [{
-    evidenceId: 'session:trading-leader:2026-09-05T12:00:00Z', kind: 'update', room: 'trading', title: '#trading',
-    summary: 'Risk review completed.', detail: null, occurredAt: '2026-09-05T12:00:00Z',
-    sourceHref: '/#trading-leader', sourceState: 'available',
-    status: 'updated', needsReview: false, sessionId: 'trading-leader',
-  }, {
     evidenceId: 'room:health:pulse:2026-09-05T12:30:00Z', kind: 'alert', room: 'health', title: '#health status failed',
     summary: 'Status check failed.', detail: 'Open the Room to investigate.', occurredAt: '2026-09-05T12:30:00Z',
     sourceHref: '/#health-leader', sourceState: 'available',
@@ -349,7 +344,8 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await page.goto(BASE)
   await expect(page.getByRole('heading', { name: 'Super Feed' })).toBeVisible()
   const feed = page.getByTestId('super-feed')
-  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
+  await expect(feed.getByText('A decision-ready market change.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).toBeVisible()
   await expect(feed.getByAltText('A compact market-change chart.')).toBeVisible()
   await expect(feed.getByRole('link', { name: 'Published evidence ↗' }).first()).toHaveAttribute('href', /publications\/market-brief-1/)
@@ -360,17 +356,17 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   failFeed = true
   await feed.getByTestId('feed-refresh').click()
   await expect(feed.getByText('HTTP 503', { exact: true })).toBeVisible()
-  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('A decision-ready market change.', { exact: true })).toBeVisible()
   failFeed = false
 
   await feed.getByTestId('feed-tab-review').click()
   await expect(feed.getByText('Status check failed.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
-  await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
+  await expect(feed.getByText('A decision-ready market change.', { exact: true })).not.toBeVisible()
   await expect(feed.getByText('By the way', { exact: true })).not.toBeVisible()
 
   await feed.getByTestId('feed-tab-following').click()
-  await expect(feed.getByText('Risk review completed.', { exact: true })).toBeVisible()
+  await expect(feed.getByText('A decision-ready market change.', { exact: true })).toBeVisible()
   await expect(feed.getByText('Calendar auth repeatedly expires.', { exact: true })).not.toBeVisible()
   await feed.getByTestId('feed-follow-trading').first().click()
   await expect(feed.getByTestId('feed-empty')).toContainText('Follow a Room from Latest')
@@ -460,10 +456,6 @@ test('Room page shows the mission, residents, cards, and friction, and is reacha
     ],
   })
   const items = [{
-    evidenceId: 'session:ev-leader:2026-09-06T12:00:00Z', kind: 'update', room: 'ev-shop', title: '#ev-shop',
-    summary: 'Leader finished work.', detail: null, occurredAt: '2026-09-06T12:00:00Z',
-    sourceHref: '/#ev-leader', sourceState: 'available', status: 'updated', needsReview: false, sessionId: 'ev-leader',
-  }, {
     evidenceId: 'publication:ev-shop:kickoff-plan', kind: 'update', room: 'ev-shop', title: '#ev-shop · Kickoff plan',
     summary: 'Three quotes by Friday, permit check first.', detail: null, occurredAt: '2026-09-06T09:00:00Z',
     sourceHref: '/api/rooms/ev-shop/publications/kickoff-plan', sourceState: 'available',
@@ -506,8 +498,8 @@ test('Room page shows the mission, residents, cards, and friction, and is reacha
   // The room card counts only open friction.
   await expect(page.getByTestId('friction-ev-shop')).toContainText('1')
 
-  // "Open the Room →" on the activity row goes to the Room page, not the chat.
-  await page.getByTestId('open-room-ev-shop').click()
+  // The Room chip on any card goes to the Room page, not the chat.
+  await page.getByTestId('feed-item-publication:ev-shop:kickoff-plan').getByTestId('open-room-ev-shop').click()
   await expect(page).toHaveURL(/#room\/ev-shop$/)
   const roomPage = page.getByTestId('room-page-ev-shop')
   await expect(roomPage).toBeVisible()

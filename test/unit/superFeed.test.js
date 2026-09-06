@@ -5,12 +5,13 @@ import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from '../../lib/super
 import { parseFrictionNotes } from '../../lib/friction.js'
 
 describe('Super Feed projection', () => {
-  it('orders Room outcomes, failures, and friction in one stable timeline', () => {
+  it('orders publications, failures, and friction in one stable timeline and never shows Leader chat', () => {
     const items = buildSuperFeed({
       rooms: [{
         name: 'trading', active: true, leaderSessionId: 'leader-1', updatedAt: '2026-09-05T12:00:00Z',
-        latest: { role: 'assistant', text: 'Risk check completed.' },
+        latest: { role: 'assistant', text: 'PRIVATE CHAT LINE' },
         pulse: { status: 'working', lastRunAt: '2026-09-05T11:59:00Z' },
+        feedMessages: [{ id: 'm1', role: 'assistant', text: 'PRIVATE CHAT LINE 2', timestamp: '2026-09-05T12:00:00Z' }],
       }, {
         name: 'health', active: false, leaderSessionId: 'leader-2', updatedAt: '2026-09-05T11:00:00Z',
         latest: { role: 'assistant', text: 'Waiting on calendar access.' },
@@ -20,63 +21,46 @@ describe('Super Feed projection', () => {
         id: 'calendar-auth', hasStableId: true, source: 'health', timestamp: '2026-09-05T13:00:00Z',
         summary: 'Calendar auth repeatedly expires.', evidence: '401 from provider',
       }],
+      publications: [{
+        room: 'trading', id: 'risk-check-1', title: 'Risk check', summary: 'Risk check completed.',
+        occurredAt: '2026-09-05T12:10:00Z',
+      }],
     })
 
     assert.deepEqual(items.map(item => [item.kind, item.room]), [
       ['friction', 'health'],
       ['alert', 'health'],
       ['update', 'trading'],
-      ['update', 'health'],
     ])
     assert.equal(items[0].complaintId, 'calendar-auth')
     assert.equal(items[0].needsReview, false)
     assert.equal(items[1].summary, 'Calendar token expired')
-    assert.equal(items[2].sessionId, 'leader-1')
-    assert.equal(items[2].status, 'working')
+    assert.equal(items[2].publicationId, 'risk-check-1')
+    assert.equal(items[2].sessionId, null)
     assert.equal(items[0].status, null, 'complaint resolution is unknown without canonical evidence')
-    assert.equal(items[2].sourceHref, '/#leader-1')
+    assert.equal(JSON.stringify(items).includes('PRIVATE CHAT'), false)
+    assert.equal(JSON.stringify(items).includes('Waiting on calendar'), false)
     assert.equal(superFeedCursor(items), superFeedCursor(items))
   })
 
-  it('does not expose empty Rooms as fake updates', () => {
+  it('does not expose Rooms without publications as fake updates', () => {
     assert.deepEqual(buildSuperFeed({
-      rooms: [{ name: 'new-room', latest: null, updatedAt: null, pulse: { status: 'waiting' } }],
+      rooms: [
+        { name: 'new-room', latest: null, updatedAt: null, pulse: { status: 'waiting' } },
+        { name: 'chatty', leaderSessionId: 'leader-c', updatedAt: '2026-09-05T12:00:00Z', latest: { role: 'assistant', text: 'chat' }, pulse: { status: 'waiting' } },
+      ],
       complaints: [],
     }), [])
   })
 
-  it('uses deterministic evidence identity and excludes non-user-facing Room evidence', () => {
-    const occurredAt = '2026-09-05T12:00:00Z'
-    const items = buildSuperFeed({
-      rooms: [{
-        name: 'notes-only', leaderSessionId: null, updatedAt: occurredAt,
-        latest: { role: 'notes', text: 'PRIVATE RAW NOTE' }, pulse: { status: 'waiting' },
-      }, {
-        name: 'zeta', leaderSessionId: 'leader-z', updatedAt: occurredAt, active: false,
-        latest: { role: 'assistant', text: 'Z outcome' }, pulse: { status: 'waiting' },
-      }, {
-        name: 'alpha', leaderSessionId: 'leader-a', updatedAt: occurredAt, active: false,
-        latest: { role: 'assistant', text: 'A outcome' }, pulse: { status: 'waiting' },
-      }],
-    })
-
-    assert.deepEqual(items.map(item => item.evidenceId), [
-      `message:leader-a:${occurredAt}`,
-      `message:leader-z:${occurredAt}`,
-    ])
-    assert.equal(JSON.stringify(items).includes('PRIVATE RAW NOTE'), false)
-  })
-
   it('retains an exact locator and marks it stale when its source disappears', () => {
     const previous = buildSuperFeed({
-      rooms: [{
-        name: 'old-room', leaderSessionId: 'old-leader', updatedAt: '2026-09-05T12:00:00Z', active: false,
-        latest: { role: 'assistant', text: 'Historical outcome' }, pulse: { status: 'waiting' }, sessions: [{ id: 'old-leader' }],
-      }],
+      rooms: [{ name: 'old-room', sessions: [] }],
+      publications: [{ room: 'old-room', id: 'old-brief-1', title: 'Old', summary: 'Historical outcome', occurredAt: '2026-09-05T12:00:00Z' }],
     })
     const merged = mergeSuperFeed(previous, [], [])
 
-    assert.equal(merged[0].sourceHref, '/#old-leader')
+    assert.equal(merged[0].sourceHref, '/api/rooms/old-room/publications/old-brief-1')
     assert.equal(merged[0].sourceState, 'stale')
     assert.equal(merged[0].summary, 'Historical outcome')
   })

@@ -44,7 +44,7 @@ import {
   scaffoldRoom,
   roomTemplateFiles,
 } from './lib/room-template.js';
-import { FEED_COMMENTS_MAX, FEED_COMMENT_PREFIX, feedCommentPrompt, feedCommentReplies, isFeedCommentState, normalizeFeedCommentText } from './lib/feed-comments.js';
+import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, feedCommentPrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -4306,66 +4306,6 @@ function followedFeedRooms(rooms) {
     : available;
 }
 
-const FEED_MESSAGES_PER_ROOM = 8;
-const feedMessageCache = new Map();
-// A Leader's answer to a Super Feed comment is shown under the commented
-// card (see feedCommentReplies); as its own feed row it would be a duplicate.
-function isFeedCommentAnswer(messages, index) {
-  const message = messages[index];
-  if (message.role !== 'assistant') return false;
-  for (let cursor = index - 1; cursor >= 0; cursor--) {
-    const previous = messages[cursor];
-    if (!previous.text) continue;
-    return previous.role === 'user' && previous.text.startsWith(FEED_COMMENT_PREFIX);
-  }
-  return false;
-}
-
-const EXCLUDED_FEED_MESSAGE_PREFIXES = [
-  '[feather-sidecar ',
-  FEED_COMMENT_PREFIX,
-  '[Cross-Room ·',
-  '<system-notice>',
-  '<system-reminder>',
-];
-
-function roomFeedMessages(room) {
-  if (!room.leaderSessionId) return [];
-  const session = room.sessions.find(candidate => candidate.id === room.leaderSessionId);
-  const agent = session?.agent || 'omp';
-  const file = findJsonlPath(room.leaderSessionId, agent);
-  if (!file) return [];
-  try {
-    const stat = fs.statSync(file);
-    const signature = `${stat.size}:${stat.mtimeMs}`;
-    const cached = feedMessageCache.get(room.leaderSessionId);
-    if (cached?.signature === signature) return cached.messages;
-    const messages = readLatestMessages(file, agent, 60).messages
-      .filter(message => message.role === 'user' || message.role === 'assistant')
-      .map(message => {
-        const text = (message.content || [])
-          .filter(block => block?.type === 'text' && block.text)
-          .map(block => block.text)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        return {
-          id: typeof message.uuid === 'string' ? message.uuid : null,
-          timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
-          role: message.role,
-          text: text.slice(0, 600),
-        };
-      })
-      .filter((message, index, all) => message.text
-        && !EXCLUDED_FEED_MESSAGE_PREFIXES.some(prefix => message.text.startsWith(prefix))
-        && !isFeedCommentAnswer(all, index))
-      .slice(-FEED_MESSAGES_PER_ROOM);
-    feedMessageCache.set(room.leaderSessionId, { signature, messages });
-    return messages;
-  } catch {
-    return feedMessageCache.get(room.leaderSessionId)?.messages || [];
-  }
-}
 function roomFeedPublications(rooms) {
   return rooms.flatMap((room) => {
     const roomRoot = path.join(ROOMS_HOME_DIR, room.name);
@@ -4394,15 +4334,14 @@ function roomFeedPublications(rooms) {
 let feedHistory = [];
 function buildFeedProjection() {
   const rooms = roomSnapshotCache.get();
-  const feedRooms = rooms.map(room => ({ ...room, feedMessages: roomFeedMessages(room) }));
   const current = buildSuperFeed({
-    rooms: feedRooms,
+    rooms,
     complaints: readFrictionComplaints(),
     publications: roomFeedPublications(rooms),
   });
 
   feedHistory = mergeSuperFeed(feedHistory, current, rooms);
-  const items = attachFeedComments(feedHistory, rooms);
+  const items = attachFeedComments(feedHistory);
   return {
     items,
     cursor: superFeedCursor(items),
@@ -4410,54 +4349,11 @@ function buildFeedProjection() {
   };
 }
 
-// Leader transcript tail as plain {role, text, timestamp} rows, for matching
-// comment replies. Separate cache from roomFeedMessages: this one keeps the
-// tagged comment messages that the feed itself hides.
-const feedReplyCache = new Map();
-function roomLeaderTranscript(room, count = 120) {
-  if (!room.leaderSessionId) return [];
-  const session = room.sessions.find(candidate => candidate.id === room.leaderSessionId);
-  const agent = session?.agent || 'omp';
-  const file = findJsonlPath(room.leaderSessionId, agent);
-  if (!file) return [];
-  try {
-    const stat = fs.statSync(file);
-    const signature = `${stat.size}:${stat.mtimeMs}:${count}`;
-    const cached = feedReplyCache.get(room.leaderSessionId);
-    if (cached?.signature === signature) return cached.messages;
-    const messages = readLatestMessages(file, agent, count).messages
-      .filter(message => message.role === 'user' || message.role === 'assistant')
-      .map(message => ({
-        role: message.role,
-        timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
-        text: (message.content || [])
-          .filter(block => block?.type === 'text' && block.text)
-          .map(block => block.text)
-          .join('\n')
-          .trim(),
-      }))
-      .filter(message => message.text);
-    feedReplyCache.set(room.leaderSessionId, { signature, messages });
-    return messages;
-  } catch {
-    return feedReplyCache.get(room.leaderSessionId)?.messages || [];
-  }
-}
-
-function attachFeedComments(items, rooms) {
-  const stored = FEED_COMMENTS_STATE.read().comments;
-  if (stored.length === 0) return items.map(item => ({ ...item, comments: [] }));
-  const byRoom = new Map(rooms.map(room => [room.name, room]));
-  const transcripts = new Map();
+function attachFeedComments(items) {
   const byEvidence = new Map();
-  for (const room of new Set(stored.map(comment => comment.room))) {
-    const snapshot = byRoom.get(room);
-    transcripts.set(room, snapshot ? roomLeaderTranscript(snapshot) : []);
-  }
-  for (const comment of stored) {
-    const resolved = feedCommentReplies([comment], transcripts.get(comment.room) || [])[0];
+  for (const comment of FEED_COMMENTS_STATE.read().comments) {
     const list = byEvidence.get(comment.evidenceId) || [];
-    list.push(resolved);
+    list.push(publicFeedComment(comment));
     byEvidence.set(comment.evidenceId, list);
   }
   return items.map(item => ({ ...item, comments: byEvidence.get(item.evidenceId) || [] }));
@@ -4491,6 +4387,7 @@ const providerLimits = createProviderLimits({
   ompAuthFile: path.join(HOME, '.omp/agent/auth.json'),
   claudeCredentialsFile: path.join(HOME, '.claude/.credentials.json'),
   keyvaultFile: process.env.FEATHER_KEYVAULT || path.join(HOME, 'keyvault.txt'),
+  cacheFile: STATE_PATHS.instance.providerLimitsFile,
 });
 const USAGE_SNAPSHOT_TTL_MS = 60_000;
 let usageSnapshot = null;
@@ -4576,7 +4473,35 @@ app.post('/api/feed/comments', async (req, res) => {
     const comment = { id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(), leaderSessionId: leaderId };
     FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
     feedSnapshotCache.refresh();
-    res.status(201).json({ ok: true, comment: { ...comment, delivered: false, reply: null } });
+    res.status(201).json({ ok: true, comment: publicFeedComment(comment) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// The Room's answer to a comment. The Leader runs `room reply <id> ...`;
+// the id is a capability in itself (32 random hex chars from the tagged
+// prompt), so no further authentication is required. Last reply wins.
+app.post('/api/feed/comments/:id/reply', (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!FEED_COMMENT_ID_RE.test(id)) throw httpError(400, 'invalid comment id');
+    let text;
+    try { text = normalizeFeedReplyText(req.body?.text); }
+    catch (error) { throw httpError(400, error.message); }
+    if (!text) throw httpError(400, 'reply text is required');
+    const reply = { text, timestamp: new Date().toISOString() };
+    let updated = null;
+    FEED_COMMENTS_STATE.update((current) => ({
+      comments: current.comments.map((comment) => {
+        if (comment.id !== id) return comment;
+        updated = { ...comment, reply };
+        return updated;
+      }),
+    }));
+    if (!updated) throw httpError(404, 'no such comment');
+    feedSnapshotCache.refresh();
+    res.json({ ok: true, comment: publicFeedComment(updated) });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }

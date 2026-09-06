@@ -162,12 +162,12 @@ describe('provider limits', () => {
       calls.push(url)
       assert.ok(!JSON.stringify(headers).includes('undefined'))
       if (url.includes('anthropic')) {
-        return { ok: anthropicStatus === 200, status: anthropicStatus, text: async () => JSON.stringify(anthropicStatus === 200 ? { five_hour: { utilization: 0.3, resets_at: 1787708024 } } : { error: 'rate' }) }
+        return { ok: anthropicStatus === 200, status: anthropicStatus, headers: { get: (name) => name === 'retry-after' && anthropicStatus === 429 ? '514' : null }, text: async () => JSON.stringify(anthropicStatus === 200 ? { five_hour: { utilization: 0.3, resets_at: 1787708024 } } : { error: 'rate' }) }
       }
       if (url.endsWith('/credits')) return { ok: true, status: 200, text: async () => JSON.stringify({ data: { total_credits: 20, total_usage: 9.3 } }) }
       return { ok: true, status: 200, text: async () => JSON.stringify({ data: { usage_daily: 1.2, usage_weekly: 1.8, usage_monthly: 1.4, limit: null, limit_remaining: null } }) }
     }
-    const limits = createProviderLimits({ ompAuthFile: auth, claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: vault, fetchImpl, pollMs: 1000, now: () => clock, env: {} })
+    const limits = createProviderLimits({ ompAuthFile: auth, claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: vault, fetchImpl, pollMs: 1000, anthropicPollMs: 1000, cacheFile: path.join(root, 'state/provider-limits.json'), now: () => clock, env: {} })
     const codexRateLimits = { at: Date.now(), primary: { used_percent: 3, window_minutes: 10080, resets_at: 1787708024 }, credits: { has_credits: false, unlimited: false, balance: '0' } }
     const first = await limits.snapshot({ codexRateLimits })
     assert.equal(first.anthropic.windows[0].utilization, 0.3)
@@ -188,5 +188,19 @@ describe('provider limits', () => {
     assert.match(third.anthropic.error, /rate-limiting/)
     assert.ok(!JSON.stringify(third).includes('tok') || JSON.stringify(third).includes('tokenSource'), 'no token in the snapshot')
     assert.ok(!JSON.stringify(third).includes('sk-or-test'))
+    assert.match(third.anthropic.error, /next try in 10 min/)
+    clock += 2000
+    await limits.snapshot({ codexRateLimits })
+    assert.equal(calls.filter(url => url.includes('anthropic')).length, 2, 'honors Retry-After instead of hammering the endpoint')
+    clock += 600_000
+    await limits.snapshot({ codexRateLimits })
+    assert.equal(calls.filter(url => url.includes('anthropic')).length, 3, 'retries once Retry-After has passed')
+
+    // A fresh instance starts from the cached last good reading.
+    const restarted = createProviderLimits({ ompAuthFile: auth, claudeCredentialsFile: path.join(root, 'none'), keyvaultFile: vault, fetchImpl: async () => { throw new Error('offline') }, pollMs: 1000, anthropicPollMs: 1000, cacheFile: path.join(root, 'state/provider-limits.json'), now: () => clock, env: {} })
+    const afterRestart = await restarted.snapshot({ codexRateLimits })
+    assert.equal(afterRestart.anthropic.windows[0].utilization, 0.3, 'last good reading survives a restart')
+    assert.ok(afterRestart.anthropic.lastGoodAt)
+    assert.ok(!fs.readFileSync(path.join(root, 'state/provider-limits.json'), 'utf8').includes('tok"'), 'no token in the cache file')
   })
 })
