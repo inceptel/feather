@@ -1,0 +1,278 @@
+#!/usr/bin/env node
+import fs from 'fs'
+import path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import dns from 'dns/promises'
+import net from 'net'
+
+import { createJsonState } from '../lib/json-state.js'
+import {
+  classifyBookmark,
+  expandShortUrls,
+  normalizeBookmark,
+  noteMarker,
+  reviewNote,
+  selectUnseen,
+  validDispatcherState,
+} from '../lib/x-bookmarks.js'
+
+const execFileAsync = promisify(execFile)
+const HOME = process.env.HOME || '/home/user'
+const ROOT = path.resolve(process.env.X_BOOKMARK_STATE_DIR || path.join(HOME, '.feather/x-bookmarks'))
+const ITEMS_DIR = path.join(ROOT, 'items')
+const STATE_FILE = path.join(ROOT, 'state.json')
+const LOCK_FILE = path.join(ROOT, 'poll.lock')
+const X_BIN = process.env.X_BOOKMARK_X_BIN || path.join(HOME, '.local/bin/x')
+const ROOM_BIN = process.env.X_BOOKMARK_ROOM_BIN || path.resolve(import.meta.dirname, 'room')
+const ROOMS_DIR = path.resolve(process.env.ROOMS_DIR || path.join(HOME, 'rooms'))
+const INTERVAL_MS = Number(process.env.X_BOOKMARK_INTERVAL_MS || 15 * 60_000)
+const MAX_BACKOFF_MS = Number(process.env.X_BOOKMARK_MAX_BACKOFF_MS || 6 * 60 * 60_000)
+const MAX_BATCH = Number(process.env.X_BOOKMARK_MAX_BATCH || 20)
+const args = new Set(process.argv.slice(2))
+
+if ([INTERVAL_MS, MAX_BACKOFF_MS, MAX_BATCH].some((value) => !Number.isFinite(value) || value <= 0)) {
+  throw new Error('bookmark interval, backoff, and batch settings must be positive numbers')
+}
+
+fs.mkdirSync(ITEMS_DIR, { recursive: true, mode: 0o700 })
+fs.chmodSync(ROOT, 0o700)
+fs.chmodSync(ITEMS_DIR, 0o700)
+
+const stateStore = createJsonState({
+  file: STATE_FILE,
+  root: ROOT,
+  document: 'X bookmark dispatcher state',
+  defaultValue: { version: 1, cursor: null, lastPollAt: null, consecutiveFailures: 0, lastError: null, nextRetryAt: null },
+  validate: validDispatcherState,
+  mode: 0o600,
+})
+
+function atomicWriteJson(file, value) {
+  const temporary = `${file}.${process.pid}.tmp`
+  const bytes = `${JSON.stringify(value, null, 2)}\n`
+  const fd = fs.openSync(temporary, 'wx', 0o600)
+  try {
+    fs.writeFileSync(fd, bytes)
+    fs.fsyncSync(fd)
+  } finally { fs.closeSync(fd) }
+  fs.renameSync(temporary, file)
+  const dir = fs.openSync(path.dirname(file), 'r')
+  try { fs.fsyncSync(dir) } finally { fs.closeSync(dir) }
+}
+
+function acquireLock() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(LOCK_FILE, 'wx', 0o600)
+      fs.writeFileSync(fd, `${process.pid}\n`)
+      fs.closeSync(fd)
+      return () => { try { fs.unlinkSync(LOCK_FILE) } catch (error) { if (error.code !== 'ENOENT') throw error } }
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      let owner = 0
+      try { owner = Number(fs.readFileSync(LOCK_FILE, 'utf8').trim()) } catch {}
+      try { if (owner > 0) process.kill(owner, 0); throw new Error(`bookmark poll already running as pid ${owner || 'unknown'}`) }
+      catch (probe) {
+        if (probe.code !== 'ESRCH') throw probe
+        fs.unlinkSync(LOCK_FILE)
+      }
+    }
+  }
+  throw new Error('could not acquire bookmark poll lock')
+}
+
+async function readBookmarks() {
+  const { stdout } = await execFileAsync(X_BIN, ['bookmarks', '--all', '--max-pages', '2', '--json'], {
+    timeout: 30_000,
+    maxBuffer: 5 * 1024 * 1024,
+    env: { HOME, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' },
+  })
+  const parsed = JSON.parse(stdout)
+  const tweets = Array.isArray(parsed) ? parsed : parsed?.tweets
+  if (!Array.isArray(tweets)) throw new Error('X bookmarks response has no tweet array')
+  return {
+    bookmarks: tweets.map(normalizeBookmark),
+    hasMore: !Array.isArray(parsed) && typeof parsed?.nextCursor === 'string' && parsed.nextCursor !== '',
+  }
+}
+
+function privateAddress(address) {
+  if (net.isIPv4(address)) {
+    const [a, b] = address.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+      || (a === 100 && b >= 64 && b <= 127) || a >= 224
+  }
+  const normalized = address.toLowerCase()
+  return normalized === '::' || normalized === '::1' || normalized.startsWith('fc')
+    || normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9')
+    || normalized.startsWith('fea') || normalized.startsWith('feb') || normalized.startsWith('::ffff:127.')
+    || normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.')
+}
+
+async function assertPublicHttpUrl(value) {
+  const url = new URL(value)
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('redirect left HTTP(S)')
+  if (url.username || url.password) throw new Error('redirect URL contained credentials')
+  const hostname = url.hostname.toLowerCase()
+  if (hostname === 'localhost' || hostname.endsWith('.local')) throw new Error('redirect targeted a local host')
+  const addresses = net.isIP(hostname) ? [{ address: hostname }] : await dns.lookup(hostname, { all: true, verbatim: true })
+  if (!addresses.length || addresses.some(({ address }) => privateAddress(address))) {
+    throw new Error('redirect targeted a non-public address')
+  }
+  return url
+}
+
+async function resolveRedirect(start) {
+  let current = (await assertPublicHttpUrl(start)).href
+  for (let hop = 0; hop < 5; hop++) {
+    const response = await fetch(current, {
+      method: 'GET', redirect: 'manual', headers: { Range: 'bytes=0-0', 'User-Agent': 'Feather-X-Bookmark-Reader/1' },
+      signal: AbortSignal.timeout(10_000),
+    })
+    const location = response.headers.get('location')
+    await response.body?.cancel()
+    if (!location || response.status < 300 || response.status >= 400) return current
+    current = (await assertPublicHttpUrl(new URL(location, current))).href
+  }
+  return current
+}
+
+function candidateName(bookmark) {
+  for (const value of bookmark.canonicalUrls) {
+    try {
+      const url = new URL(value)
+      if (url.hostname.toLowerCase() !== 'github.com') continue
+      const parts = url.pathname.split('/').filter(Boolean)
+      if (parts.length >= 2) return parts[1].replace(/\.git$/u, '').toLowerCase()
+    } catch {}
+  }
+  return null
+}
+
+function installedSkillCollision(bookmark) {
+  const name = candidateName(bookmark)
+  if (!name) return false
+  return [
+    path.join(HOME, '.omp/skills', name, 'SKILL.md'),
+    path.join(HOME, '.claude/skills', name, 'SKILL.md'),
+    path.resolve(import.meta.dirname, '../skills', name, 'SKILL.md'),
+  ].some((file) => fs.existsSync(file))
+}
+
+function roomExists(name) {
+  try { return fs.statSync(path.join(ROOMS_DIR, name)).isDirectory() } catch { return false }
+}
+
+function receiptFile(id) {
+  return path.join(ITEMS_DIR, `${id}.json`)
+}
+
+function readReceipt(id) {
+  try { return JSON.parse(fs.readFileSync(receiptFile(id), 'utf8')) } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  }
+}
+
+async function dispatchRoomNote(room, id, text) {
+  await execFileAsync(ROOM_BIN, ['-r', room, 'dispatch', '--id', id, '--to', 'caretaker', text], {
+    timeout: 30_000,
+    maxBuffer: 256 * 1024,
+    env: { ...process.env, HOME, ROOMS_DIR },
+  })
+}
+
+async function dispatch(item) {
+  const marker = noteMarker(item.id)
+  const dispatchId = `x-bookmark-${item.id}`
+  await dispatchRoomNote('x-bookmarks', dispatchId, reviewNote(item))
+  const target = item.classification.room
+  if (target !== 'x-bookmarks') {
+    const urls = item.canonicalUrls.length ? item.canonicalUrls.join(', ') : '(no external URL)'
+    await dispatchRoomNote(target, dispatchId,
+      `${marker} Referral from #x-bookmarks: ${item.classification.kind}, ${item.classification.disposition}. `
+      + `URLs: ${urls}. Canonical receipt: ${item.receiptPath}`)
+  }
+}
+
+async function processBookmark(bookmark, dryRun) {
+  const expanded = process.env.X_BOOKMARK_SKIP_URL_RESOLUTION === '1'
+    ? bookmark
+    : await expandShortUrls(bookmark, resolveRedirect)
+  const existing = readReceipt(expanded.id)
+  if (existing?.status === 'dispatched') return existing
+  const receiptPath = receiptFile(expanded.id)
+  let item = existing || {
+    ...expanded,
+    classification: classifyBookmark(expanded, {
+      roomExists,
+      skillCollision: installedSkillCollision(expanded),
+    }),
+    intakeRoom: 'x-bookmarks',
+    receiptPath,
+    observedAt: new Date().toISOString(),
+    status: 'classified',
+  }
+  if (dryRun) {
+    process.stdout.write(`${JSON.stringify(item, null, 2)}\n`)
+    return { ...item, status: 'dry-run' }
+  }
+  atomicWriteJson(receiptPath, { ...item, status: 'dispatching' })
+  await dispatch(item)
+  item = { ...item, status: 'dispatched', dispatchedAt: new Date().toISOString() }
+  atomicWriteJson(receiptPath, item)
+  console.log(`x-bookmarks: ${item.id} -> #x-bookmarks -> #${item.classification.room} ${item.classification.disposition}`)
+  return item
+}
+
+async function runOnce({ dryRun = false } = {}) {
+  const release = acquireLock()
+  try {
+    const state = stateStore.read()
+    const { bookmarks, hasMore } = await readBookmarks()
+    if (state.cursor && hasMore && bookmarks.length && bookmarks.every(({ id }) => BigInt(id) > BigInt(state.cursor.tweetId))) {
+      throw new Error(`bookmark cursor ${state.cursor.tweetId} is older than the bounded two-page window; manual catch-up required`)
+    }
+    const unseen = selectUnseen(bookmarks, state.cursor?.tweetId || null, MAX_BATCH)
+    let cursor = state.cursor
+    for (const bookmark of unseen) {
+      const item = await processBookmark(bookmark, dryRun)
+      if (!dryRun && item.status === 'dispatched') {
+        cursor = { tweetId: bookmark.id, createdAt: bookmark.createdAt }
+        stateStore.write({ ...stateStore.read(), cursor, lastPollAt: new Date().toISOString(), consecutiveFailures: 0, lastError: null, nextRetryAt: null })
+      }
+    }
+    if (!dryRun) stateStore.write({ ...stateStore.read(), lastPollAt: new Date().toISOString(), consecutiveFailures: 0, lastError: null, nextRetryAt: null })
+    if (!unseen.length) console.log('x-bookmarks: no unseen bookmarks')
+  } catch (error) {
+    if (!dryRun) {
+      const state = stateStore.read()
+      const failures = state.consecutiveFailures + 1
+      const delay = Math.min(INTERVAL_MS * (2 ** Math.min(failures - 1, 8)), MAX_BACKOFF_MS)
+      stateStore.write({ ...state, lastPollAt: new Date().toISOString(), consecutiveFailures: failures, lastError: String(error.message || error), nextRetryAt: new Date(Date.now() + delay).toISOString() })
+    }
+    throw error
+  } finally { release() }
+}
+
+async function main() {
+  const loop = args.has('--loop')
+  const dryRun = args.has('--dry-run')
+  do {
+    try { await runOnce({ dryRun }) }
+    catch (error) {
+      console.error(`x-bookmarks: poll failed: ${error.stack || error}`)
+      if (!loop) process.exitCode = 1
+    }
+    if (!loop) break
+    const state = stateStore.read()
+    const wait = state.consecutiveFailures
+      ? Math.min(INTERVAL_MS * (2 ** Math.min(state.consecutiveFailures - 1, 8)), MAX_BACKOFF_MS)
+      : INTERVAL_MS
+    await new Promise((resolve) => setTimeout(resolve, wait))
+  } while (true)
+}
+
+await main()
