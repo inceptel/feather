@@ -21,6 +21,10 @@
 #   room update TEXT|--stdin|--file PATH append legacy evidence
 #   room updates                         list legacy evidence
 #   room complain TEXT|--stdin|--file PATH add an annoyance to #friction
+#   room resolve <complaint-id> TEXT|--stdin|--file PATH
+#                                      close a #friction complaint with what changed
+#   room wikis [query]                 index every Room's wiki (or grep it) before
+#                                      you research something another Room may know
 #   room pause                          stop scheduled status reports for this room
 #   room wake                           resume scheduled status reports for this room
 #   room send <room> TEXT|--stdin|--file PATH send tagged cross-Room chat
@@ -484,6 +488,52 @@ cmd_complain() {
   fi
 }
 
+cmd_resolve() {
+  local complaint_id="${1:-}"
+  [[ "$complaint_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || die "usage: room resolve <complaint-id> TEXT|--stdin|--file PATH"
+  shift
+  read_room_text resolve "$@"
+  local friction="$ROOMS_DIR/friction"
+  [ -f "$friction/notes.md" ] || die "#friction has no notes.md"
+  exec 9>"$ROOMS_DIR/.friction.lock"
+  flock 9 || die "could not lock #friction"
+  grep -Fq -- "[id:$complaint_id] " "$friction/notes.md" || die "no complaint with id $complaint_id in #friction"
+  if grep -Fq -- "[resolved:$complaint_id]" "$friction/notes.md"; then
+    echo "already resolved: $complaint_id"
+    return 0
+  fi
+  local text
+  text="$(printf '%s' "$ROOM_TEXT" | tr '\n' ' ')"
+  printf -- '- %s [resolved:%s] %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$complaint_id" "$text" >>"$friction/notes.md" \
+    || die "could not record resolution in #friction"
+  echo "resolved $complaint_id in #friction"
+}
+
+# Cross-room awareness: every Room keeps curated truth in wiki/. Before a Room
+# researches something, it should look at what the other Rooms already know.
+cmd_wikis() {
+  local query="${1:-}" dir room page title
+  if [ -n "$query" ]; then
+    grep -ril --include='*.md' -- "$query" "$ROOMS_DIR"/*/wiki 2>/dev/null | sort | while read -r file; do
+      room="$(basename "$(dirname "$(dirname "$file")")")"
+      page="$(basename "$file" .md)"
+      echo "#$room/$page  ($file)"
+      grep -i -m 3 -- "$query" "$file" | cut -c1-200 | sed 's/^/    /'
+    done
+    return 0
+  fi
+  for dir in "$ROOMS_DIR"/*/wiki; do
+    [ -d "$dir" ] || continue
+    room="$(basename "$(dirname "$dir")")"
+    for file in "$dir"/*.md; do
+      [ -f "$file" ] || continue
+      page="$(basename "$file" .md)"
+      title="$(grep -m1 -v '^\s*$' "$file" | sed 's/^#* *//' | cut -c1-100)"
+      printf '#%s/%s\t%s\n' "$room" "$page" "$title"
+    done
+  done
+}
+
 cmd_pulse() {
   local enabled="$1"
   resolve_room
@@ -709,6 +759,8 @@ case "$cmd" in
   update) cmd_update "$@" ;;
   updates) cmd_updates "$@" ;;
   complain|friction) cmd_complain "$@" ;;
+  resolve) cmd_resolve "$@" ;;
+  wikis) cmd_wikis "$@" ;;
   pause) cmd_pulse false ;;
   wake) cmd_pulse true ;;
   send) cmd_send "$@" ;;

@@ -29,7 +29,7 @@ import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
-import { parseFrictionNotes } from './lib/friction.js';
+import { parseFrictionNotes, openFrictionComplaints } from './lib/friction.js';
 import { createUsageLedger, summarizeUsage } from './lib/usage-ledger.js';
 import { createProviderLimits } from './lib/provider-limits.js';
 import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-feed.js';
@@ -38,6 +38,7 @@ import {
   ROOM_STANDARD_RESIDENTS,
   leaderKickoffPrompt,
   normalizeRoomMission,
+  parseRoomMission,
   residentWakePrompt,
   scaffoldRoom,
 } from './lib/room-template.js';
@@ -4083,14 +4084,36 @@ function readFrictionComplaints() {
   }
 }
 
+// `count` is the open complaints; resolved ones stay in the list so the feed
+// can show what closed, but they no longer count against the Room.
 function roomFrictionSummary(name, complaints) {
   const matching = complaints.filter(complaint => complaint.source === name);
-  const newest = matching[matching.length - 1] || null;
+  const open = openFrictionComplaints(matching);
+  const newest = open[open.length - 1] || null;
   return {
-    count: matching.length,
+    count: open.length,
+    resolvedCount: matching.length - open.length,
     latestAt: newest?.timestamp || null,
     latest: newest?.summary || null,
   };
+}
+
+// The mission sentence lives in AGENTS.md. Cached per room by file signature
+// so a snapshot rebuild costs one stat per room, not a read.
+const roomMissionCache = new Map();
+function readRoomMission(name) {
+  const agentsPath = path.join(ROOMS_HOME_DIR, name, 'AGENTS.md');
+  try {
+    const stat = fs.statSync(agentsPath);
+    const signature = `${stat.size}:${stat.mtimeMs}`;
+    const cached = roomMissionCache.get(name);
+    if (cached && cached.signature === signature) return cached.mission;
+    const mission = parseRoomMission(fs.readFileSync(agentsPath, 'utf8'));
+    roomMissionCache.set(name, { signature, mission });
+    return mission;
+  } catch {
+    return null;
+  }
 }
 
 function buildRoomsSnapshot() {
@@ -4163,6 +4186,7 @@ function buildRoomsSnapshot() {
     return {
       name,
       cwd: path.join(ROOMS_HOME_DIR, name),
+      mission: readRoomMission(name),
       sessions,
       leaderSessionId,
       residents,

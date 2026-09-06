@@ -97,6 +97,19 @@ describe('Super Feed projection', () => {
     assert.equal(JSON.stringify(items).includes('--stdin'), false)
   })
 
+  it('marks a resolved complaint instead of dropping it', () => {
+    const complaints = parseFrictionNotes([
+      '- 2026-09-05 23:21 [id:slow-feed] Complaint from #feather: Feed is slow',
+      '- 2026-09-06 08:00 [resolved:slow-feed] Cached the snapshot',
+    ].join('\n'))
+    const [item] = buildSuperFeed({ rooms: [{ name: 'feather' }], complaints })
+    assert.equal(item.status, 'resolved')
+    assert.equal(item.resolvedAt, '2026-09-06T08:00:00Z')
+    assert.equal(item.resolution, 'Cached the snapshot')
+    // The card keeps its place in the timeline (when it was filed).
+    assert.equal(item.occurredAt, '2026-09-05T23:21:00Z')
+  })
+
   it('removes a recovered pulse failure from Review', () => {
     const failedRoom = {
       name: 'health', leaderSessionId: 'leader-health', updatedAt: '2026-09-05T12:00:00Z',

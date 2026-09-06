@@ -110,7 +110,7 @@ function Table(props: { title: string, rows: UsageGroup[], first: (g: UsageGroup
             <tbody>
               <For each={props.rows}>{(g) => (
                 <tr onClick={() => props.onRow?.(g)} style={{ 'border-top': `1px solid ${line}`, cursor: props.onRow ? 'pointer' : 'default' }}>
-                  <td style={{ padding: '6px 8px', color: ink, 'max-width': '260px', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{props.first(g)}</td>
+                  <td style={{ padding: '6px 8px', color: ink, 'min-width': '120px', 'word-break': 'break-word', 'line-height': '1.3' }}>{props.first(g)}</td>
                   <td style={cellNum}>{g.requests}</td>
                   <td style={cellNum}>{tokens(g.input + g.cacheWrite)}</td>
                   <td style={cellNum}>{tokens(g.cacheRead)}</td>

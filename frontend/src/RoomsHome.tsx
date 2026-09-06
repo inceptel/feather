@@ -58,7 +58,7 @@ function roleLabel(role: string) {
   return role.split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : '').join(' ')
 }
 
-export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void }) {
+export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void, onOpenRoom?: (name: string) => void }) {
   const [rooms, setRooms] = createSignal<RoomInfo[] | null>(null)
   const [error, setError] = createSignal<string | null>(null)
   const [expanded, setExpanded] = createSignal<string | null>(null)
@@ -89,6 +89,36 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   let timer: ReturnType<typeof setInterval>
   onMount(() => { refresh(); timer = setInterval(() => { if (!wikiRoom()) refresh() }, 10000) })
   onCleanup(() => clearInterval(timer))
+
+  // Pull-to-refresh on phones: drag down from the top of the list past the
+  // threshold and release. The feed re-fetches through refreshKey.
+  const PULL_THRESHOLD = 72
+  const [pull, setPull] = createSignal(0)
+  const [pullRefreshing, setPullRefreshing] = createSignal(false)
+  const [feedRefreshKey, setFeedRefreshKey] = createSignal(0)
+  let scroller: HTMLDivElement | undefined
+  let pullStartY: number | null = null
+  function onTouchStart(event: TouchEvent) {
+    pullStartY = scroller && scroller.scrollTop <= 0 && !pullRefreshing() ? event.touches[0].clientY : null
+  }
+  function onTouchMove(event: TouchEvent) {
+    if (pullStartY === null) return
+    const delta = event.touches[0].clientY - pullStartY
+    if (delta <= 0 || (scroller && scroller.scrollTop > 0)) { setPull(0); return }
+    setPull(Math.min(delta * 0.5, PULL_THRESHOLD * 1.5))
+  }
+  async function onTouchEnd() {
+    if (pullStartY === null) return
+    pullStartY = null
+    if (pull() < PULL_THRESHOLD) { setPull(0); return }
+    setPull(PULL_THRESHOLD * 0.6)
+    setPullRefreshing(true)
+    setFeedRefreshKey(feedRefreshKey() + 1)
+    try { await refresh() } finally {
+      setPullRefreshing(false)
+      setPull(0)
+    }
+  }
 
   async function newRoom() {
     const name = prompt('Room name (lowercase, digits, dashes):')?.trim()
@@ -267,9 +297,13 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   )
 
   return (
-    <div style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+    <div ref={scroller} data-testid="rooms-home" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
+      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
+      <div data-testid="pull-indicator" style={{ height: `${pull()}px`, overflow: 'hidden', transition: pullStartY === null ? 'height 0.2s' : 'none', display: 'flex', 'align-items': 'flex-end', 'justify-content': 'center', color: '#8b97a8', 'font-size': '12px' }}>
+        <span style={{ 'padding-bottom': '6px' }}>{pullRefreshing() ? 'Refreshing…' : pull() >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}</span>
+      </div>
       <div style={{ 'max-width': '640px', margin: '0 auto', padding: '12px 12px 40px' }}>
-        <SuperFeed onOpenSession={props.onOpen} />
+        <SuperFeed onOpenSession={props.onOpen} onOpenRoom={props.onOpenRoom} refreshKey={feedRefreshKey()} />
 
         <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '2px 4px 10px' }}>
           <span style={{ 'font-size': '15px', 'font-weight': '700', color: '#aeb7c4' }}>Rooms</span>
@@ -310,9 +344,16 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                       {room.pulse.enabled ? 'Status on' : 'Status off'}
                     </button>
                     <span style={{ color: room.pulse.status === 'error' ? '#d48166' : '#666', 'font-size': '11px' }}>{pulseLabel(room)}</span>
+                    <Show when={props.onOpenRoom}>
+                      <button data-testid={`room-page-${room.name}`} onClick={(event) => { event.stopPropagation(); props.onOpenRoom?.(room.name) }}
+                        aria-label={`Open the #${room.name} Room page`}
+                        style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', background: 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                        Room
+                      </button>
+                    </Show>
                     <button data-testid={`wiki-${room.name}`} onClick={(event) => openWiki(room, event)}
                       aria-label={`Wiki for #${room.name}`}
-                      style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: wikiRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                      style={{ 'margin-left': props.onOpenRoom ? '0' : 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: wikiRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                       Wiki
                     </button>
                     <button data-testid={`friction-${room.name}`} onClick={(event) => openFriction(room, event)}
@@ -339,11 +380,16 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
                       <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No friction reported from #{room.name}.</div>
                     </Show>
                     <For each={frictionList()}>{(complaint) => (
-                      <article style={{ padding: '9px 0', 'border-bottom': '1px solid #171713' }}>
-                        <div style={{ color: '#5a6472', 'font-size': '10px', 'font-family': 'monospace', 'margin-bottom': '3px' }}>{updateTimeLabel(complaint.timestamp)}</div>
+                      <article style={{ padding: '9px 0', 'border-bottom': '1px solid #171713', opacity: complaint.resolvedAt ? '0.7' : '1' }}>
+                        <div style={{ color: '#5a6472', 'font-size': '10px', 'font-family': 'monospace', 'margin-bottom': '3px' }}>
+                          <Show when={complaint.resolvedAt}><span style={{ color: '#69c77f', 'font-weight': '700' }}>RESOLVED · </span></Show>{updateTimeLabel(complaint.timestamp)}
+                        </div>
                         <div style={{ color: '#d0d4da', 'font-size': '13px', 'line-height': '1.45', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.summary}</div>
                         <Show when={complaint.evidence}>
                           <div style={{ color: '#77818f', 'font-size': '11px', 'font-family': 'monospace', 'line-height': '1.4', 'margin-top': '5px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.evidence}</div>
+                        </Show>
+                        <Show when={complaint.resolution}>
+                          <div style={{ color: '#9fb5a6', 'font-size': '12px', 'margin-top': '5px' }}>{complaint.resolution}</div>
                         </Show>
                       </article>
                     )}</For>

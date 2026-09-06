@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js'
 import { fetchSuperFeed, postFeedComment, setFeedFollowing, FeedComment, SuperFeedItem, SuperFeedView } from '../api'
 import { appUrl } from '../lib/appPath'
 import { markdownCSS, renderWikiMarkdown } from './MessageView'
@@ -79,7 +79,7 @@ const CommentIcon = () => (
   </svg>
 )
 
-export function SuperFeed(props: { onOpenSession: (sessionId: string) => void }) {
+export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, onOpenRoom?: (room: string) => void, refreshKey?: number }) {
   const [view, setView] = createSignal<SuperFeedView>('latest')
   const [items, setItems] = createSignal<SuperFeedItem[]>([])
   const [following, setFollowing] = createSignal<string[]>([])
@@ -128,6 +128,8 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
     refresh()
     timer = setInterval(refresh, 10_000)
   })
+  // Pull-to-refresh (and any other outside nudge) bumps refreshKey.
+  createEffect(on(() => props.refreshKey, (key, previous) => { if (key !== undefined && key !== previous) refresh() }, { defer: true }))
   onCleanup(() => {
     clearInterval(timer)
     requestController?.abort()
@@ -358,7 +360,8 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
                 <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '7px', 'word-break': 'break-word', display: '-webkit-box', '-webkit-line-clamp': '2', '-webkit-box-orient': 'vertical', overflow: 'hidden' }}>{plainText(item.summary)}</div>
                 <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px' }}>
                   <Show when={item.sourceState === 'available'}><CommentButton item={item} items={entry.items} /></Show>
-                  <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '12px' }}>Open the Room →</span>
+                  <button data-testid={`open-room-${item.room}`} onClick={(event) => { if (props.onOpenRoom) { event.stopPropagation(); props.onOpenRoom(item.room) } }}
+                    style={{ 'margin-left': 'auto', background: 'none', border: 'none', color: muted, 'font-size': '12px', padding: '0', cursor: 'pointer', 'font-family': 'inherit' }}>Open the Room →</button>
                 </div>
                 <Show when={item.sourceState === 'available'}><Thread item={item} items={entry.items} /></Show>
               </article>
@@ -367,10 +370,15 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
           if (item.kind === 'friction') {
             return (
               <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
-                <MetaRow item={item} flag={{ text: 'Friction', color: amber }} />
-                <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: ink, 'font-size': '15px', 'font-weight': '600', 'margin-top': '7px' }} />
+                <MetaRow item={item} flag={item.resolvedAt ? { text: 'Resolved', color: green } : { text: 'Friction', color: amber }} />
+                <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: item.resolvedAt ? body : ink, 'font-size': '15px', 'font-weight': '600', 'margin-top': '7px' }} />
                 <Show when={item.detail}>
                   <div class="markdown" innerHTML={renderWikiMarkdown(item.detail!)} style={{ color: body, 'font-size': '13px', 'margin-top': '6px' }} />
+                </Show>
+                <Show when={item.resolvedAt}>
+                  <div data-testid={`resolved-${item.complaintId}`} style={{ 'margin-top': '8px', padding: '7px 10px', 'border-left': `2px solid ${green}`, background: '#0f1a14', color: body, 'font-size': '13px', 'line-height': '1.45' }}>
+                    <span style={{ color: green, 'font-weight': '700' }}>Resolved</span>{item.resolution ? ` · ${item.resolution}` : ''}
+                  </div>
                 </Show>
                 <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '9px', 'min-width': '0' }}>
                   <Show when={item.sourceState === 'available'}><EvidenceLink item={item} label="Canonical evidence ↗" /></Show>

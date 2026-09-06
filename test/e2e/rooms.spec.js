@@ -422,3 +422,112 @@ test('Costs tab shows provider limits and the token ledger, and lives at #costs'
   await expect(page.getByTestId('costs-view')).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('')
 })
+
+test('Room page shows the mission, residents, cards, and friction, and is reachable from the feed and the room card', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.unroute('**/api/feed')
+  let paused = false
+  const pauseCalls = []
+  const room = () => ({
+    name: 'ev-shop', cwd: '/srv/rooms/ev-shop', active: true,
+    mission: 'Find the cheapest way to get an EV charger installed at the shop by October.',
+    latest: { role: 'assistant', text: 'Leader finished work.' }, updatedAt: '2026-09-06T12:00:00Z',
+    updates: { count: 0, latestAt: null, latest: null },
+    friction: { count: 1, resolvedCount: 1, latestAt: '2026-09-06T11:00:00Z', latest: 'Permit portal times out' },
+    pulse: { enabled: !paused, status: 'waiting', lastRunAt: '2026-09-06T11:30:00Z', nextRunAt: null, sessionId: null },
+    leaderSessionId: 'ev-leader',
+    residentsPaused: paused,
+    residents: [
+      { role: 'leader', sessionId: 'ev-leader', agent: 'omp', title: '#ev-shop Leader', status: 'waiting' },
+      { role: 'caretaker', sessionId: 'ev-caretaker', agent: 'omp', title: 'caretaker', status: 'waiting', wakeIntervalMs: 900000, nextWakeAtMs: paused ? null : Date.now() + 600000, lastWakeAt: '2026-09-06T11:45:00Z', paused },
+      { role: 'updater', sessionId: 'ev-updater', agent: 'omp', title: 'updater', status: 'working', wakeIntervalMs: 1800000, nextWakeAtMs: paused ? null : Date.now() + 1200000, lastWakeAt: null, paused },
+      { role: 'marketer', sessionId: 'ev-marketer', agent: 'omp', title: 'marketer', status: 'waiting', wakeIntervalMs: null, nextWakeAtMs: null, lastWakeAt: null, paused },
+    ],
+    sessions: [
+      { id: 'ev-leader', title: '#ev-shop Leader', updatedAt: '2026-09-06T12:00:00Z', isActive: true, agent: 'omp', roomAssigned: true },
+      { id: 'ev-caretaker', title: 'caretaker', updatedAt: '2026-09-06T11:45:00Z', isActive: false, agent: 'omp', roomAssigned: true },
+      { id: 'ev-updater', title: 'updater', updatedAt: '2026-09-06T11:50:00Z', isActive: true, agent: 'omp', roomAssigned: true },
+      { id: 'ev-marketer', title: 'marketer', updatedAt: '2026-09-06T10:00:00Z', isActive: false, agent: 'omp', roomAssigned: true },
+    ],
+  })
+  const items = [{
+    evidenceId: 'session:ev-leader:2026-09-06T12:00:00Z', kind: 'update', room: 'ev-shop', title: '#ev-shop',
+    summary: 'Leader finished work.', detail: null, occurredAt: '2026-09-06T12:00:00Z',
+    sourceHref: '/#ev-leader', sourceState: 'available', status: 'updated', needsReview: false, sessionId: 'ev-leader',
+  }, {
+    evidenceId: 'publication:ev-shop:kickoff-plan', kind: 'update', room: 'ev-shop', title: '#ev-shop · Kickoff plan',
+    summary: 'Three quotes by Friday, permit check first.', detail: null, occurredAt: '2026-09-06T09:00:00Z',
+    sourceHref: '/api/rooms/ev-shop/publications/kickoff-plan', sourceState: 'available',
+    status: 'briefing', needsReview: false, sessionId: null, publicationId: 'kickoff-plan',
+  }, {
+    evidenceId: 'friction:permit-portal', kind: 'friction', room: 'ev-shop', title: '#ev-shop → #friction',
+    summary: 'Permit portal times out', detail: null, occurredAt: '2026-09-06T11:00:00Z',
+    sourceHref: '/api/rooms/ev-shop/friction#permit-portal', sourceState: 'available',
+    status: null, needsReview: false, sessionId: null, complaintId: 'permit-portal',
+  }, {
+    evidenceId: 'friction:slow-wiki', kind: 'friction', room: 'ev-shop', title: '#ev-shop → #friction',
+    summary: 'Wiki page took a minute to load', detail: null, occurredAt: '2026-09-05T11:00:00Z',
+    sourceHref: '/api/rooms/ev-shop/friction#slow-wiki', sourceState: 'available',
+    status: 'resolved', needsReview: false, sessionId: null, complaintId: 'slow-wiki',
+    resolvedAt: '2026-09-06T08:00:00Z', resolution: 'Cached the wiki index',
+  }]
+  await page.route('**/api/feed', route => route.fulfill({ json: { items, following: [], cursor: 'c1', generatedAt: '2026-09-06T12:00:00Z' } }))
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [room()] } }))
+  await page.route('**/api/rooms/ev-shop/friction', route => route.fulfill({ json: { count: 2, complaints: [
+    { id: 'permit-portal', timestamp: '2026-09-06T11:00:00Z', source: 'ev-shop', summary: 'Permit portal times out', evidence: null, resolvedAt: null, resolution: null },
+    { id: 'slow-wiki', timestamp: '2026-09-05T11:00:00Z', source: 'ev-shop', summary: 'Wiki page took a minute to load', evidence: null, resolvedAt: '2026-09-06T08:00:00Z', resolution: 'Cached the wiki index' },
+  ] } }))
+  await page.route('**/api/rooms/ev-shop/wiki', route => route.fulfill({ json: { pages: [{ name: 'Home', size: 80, updatedAt: '2026-09-06T10:00:00Z' }] } }))
+  await page.route('**/api/rooms/ev-shop/wiki/page**', route => route.fulfill({ json: { name: 'Home', content: '# EV shop wiki\n\nThe cheapest installer so far is Volt Bros.', updatedAt: '2026-09-06T10:00:00Z' } }))
+  await page.route('**/api/rooms/ev-shop/residents/pause', async route => {
+    const body = JSON.parse(route.request().postData() || '{}')
+    pauseCalls.push(body.paused)
+    paused = body.paused
+    await route.fulfill({ json: { ok: true, paused, residents: room().residents, residentsPaused: paused } })
+  })
+  await page.route('**/api/rooms/ev-shop/pulse', route => route.fulfill({ json: { enabled: !paused, status: 'waiting', lastRunAt: null, nextRunAt: null, sessionId: null } }))
+  await page.route('**/api/sessions/ev-leader/**', route => route.fulfill({ json: { messages: [] } }))
+
+  await page.goto(BASE)
+  // The feed marks a resolved complaint and keeps the open one plain.
+  const resolvedCard = page.getByTestId('feed-item-friction:slow-wiki')
+  await expect(resolvedCard).toContainText('Resolved')
+  await expect(page.getByTestId('resolved-slow-wiki')).toContainText('Cached the wiki index')
+  await expect(page.getByTestId('feed-item-friction:permit-portal')).not.toContainText('Resolved')
+  // The room card counts only open friction.
+  await expect(page.getByTestId('friction-ev-shop')).toContainText('1')
+
+  // "Open the Room →" on the activity row goes to the Room page, not the chat.
+  await page.getByTestId('open-room-ev-shop').click()
+  await expect(page).toHaveURL(/#room\/ev-shop$/)
+  const roomPage = page.getByTestId('room-page-ev-shop')
+  await expect(roomPage).toBeVisible()
+  await expect(page.getByTestId('room-mission')).toContainText('cheapest way to get an EV charger')
+  await expect(page.getByTestId('room-resident-caretaker')).toContainText('wakes in')
+  await expect(page.getByTestId('room-resident-caretaker')).toContainText('every 15m')
+  await expect(page.getByTestId('room-resident-updater')).toContainText('working now')
+  await expect(page.getByTestId('room-resident-marketer')).toContainText('woken by the updater')
+  await expect(page.getByTestId('room-cards')).toContainText('Kickoff plan')
+  await expect(page.getByTestId('room-cards')).not.toContainText('Permit portal')
+  await expect(page.getByTestId('room-friction')).toContainText('1 open · 1 resolved')
+  await expect(page.getByTestId('wiki-content-ev-shop')).toContainText('Volt Bros')
+
+  // Pause residents and status together; the page reflects it.
+  await page.getByTestId('room-toggle-paused').click()
+  await expect(page.getByTestId('room-toggle-paused')).toHaveText('Resume residents')
+  await expect(page.getByTestId('room-resident-caretaker')).toContainText('paused')
+  expect(pauseCalls).toEqual([true])
+
+  // Reload keeps the Room page; back returns to Rooms.
+  await page.reload()
+  await expect(page.getByTestId('room-page-ev-shop')).toBeVisible()
+  await page.getByTestId('room-page-back').click()
+  await expect(page).toHaveURL(new RegExp(`${BASE.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}/?#?$`))
+  await expect(page.getByTestId('room-card-ev-shop')).toBeVisible()
+
+  // The Room button on the card opens the page; tapping the card still opens the Leader.
+  await page.getByTestId('room-page-ev-shop').click()
+  await expect(page.getByTestId('room-page-ev-shop')).toBeVisible()
+  await page.getByTestId('room-open-leader').click()
+  await expect(page).toHaveURL(/#ev-leader$/)
+})

@@ -213,6 +213,7 @@ export interface RoomResident {
 export interface RoomInfo {
   name: string
   cwd: string
+  mission?: string | null
   sessions: SessionMeta[]
   leaderSessionId: string | null
   residents: RoomResident[]
@@ -222,7 +223,7 @@ export interface RoomInfo {
   latest: { role: string, text: string, id?: string | null, timestamp?: string | null } | null
   updatedAt: string | null
   updates: { count: number, latestAt: string | null, latest: string | null }
-  friction: { count: number, latestAt: string | null, latest: string | null }
+  friction: { count: number, resolvedCount?: number, latestAt: string | null, latest: string | null }
   pulse: {
     enabled: boolean
     status: 'waiting' | 'working' | 'paused' | 'error'
@@ -283,6 +284,8 @@ export interface FrictionComplaint {
   source: string
   summary: string
   evidence: string | null
+  resolvedAt?: string | null
+  resolution?: string | null
 }
 
 export type SuperFeedView = 'latest' | 'review' | 'following' | 'friction'
@@ -301,6 +304,8 @@ export interface SuperFeedItem {
   needsReview: boolean
   sessionId: string | null
   complaintId?: string
+  resolvedAt?: string | null
+  resolution?: string | null
   publicationId?: string
   visualHref?: string
   visualAlt?: string

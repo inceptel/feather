@@ -4,6 +4,7 @@ import { batch, createSignal, createEffect, createMemo, onMount, onCleanup, Show
 import { MessageView, renderWikiMarkdown } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
+import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
@@ -2083,7 +2084,11 @@ export default function App() {
         <div style={{ flex: '1', overflow: 'hidden', display: expanded() ? 'none' : 'block' }}>
           <Show when={currentId()} fallback={
             <Show when={homeRoute().kind === 'costs'} fallback={
-              <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} />
+              <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
+                <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} onOpenRoom={(name) => showHome({ kind: 'room', name })} />
+              }>
+                {(name) => <RoomPage name={name()} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
+              </Show>
             }>
               <CostsView onOpenSession={select} />
             </Show>

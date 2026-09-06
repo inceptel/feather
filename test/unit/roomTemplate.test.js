@@ -7,6 +7,7 @@ import path from 'path'
 import {
   ROOM_MISSION_MAX_CHARS, ROOM_STANDARD_RESIDENTS, ROOM_TEMPLATE_DIRS,
   leaderKickoffPrompt, normalizeRoomMission, residentWakePrompt, roomTemplateFiles, scaffoldRoom,
+  parseRoomMission,
 } from '../../lib/room-template.js'
 
 const MISSION = 'go investigate this one spot that\'s available for rent or for purchase and build me a business plan for what it would look like to run an EV-only auto shop out of that location'
@@ -68,6 +69,9 @@ describe('Room template', () => {
     assert.match(kickoff, /^\[Room kickoff · #ev-shop\]\n/)
     assert.ok(kickoff.includes(`> ${MISSION}`))
     assert.ok(kickoff.includes('room note'))
+    assert.ok(kickoff.includes('[plan]'))
+    assert.ok(kickoff.includes('room dispatch --to updater'))
+    assert.ok(kickoff.includes('room wikis'))
   })
 
   it('scaffolds the folder with the CLAUDE.md symlink and working directories', () => {
@@ -84,5 +88,26 @@ describe('Room template', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  it('tells every resident how to use other Rooms and gives the updater a judgment rubric', () => {
+    const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION })
+    assert.ok(files['AGENTS.md'].includes('## Other Rooms'))
+    assert.ok(files['AGENTS.md'].includes('room wikis'))
+    assert.ok(files['AGENTS.md'].includes('room resolve'))
+    assert.ok(files['CARETAKER.md'].includes('room wikis'))
+    assert.ok(files['UPDATER.md'].includes('## Judgment'))
+    assert.ok(files['UPDATER.md'].includes('kickoff plan'))
+    assert.ok(files['UPDATER.md'].includes('mission outcome'))
+    assert.ok(files['UPDATER.md'].includes('Suppress:'))
+    assert.ok(!files['UPDATER.md'].includes('## Selection rule'))
+  })
+
+  it('reads the mission back out of AGENTS.md', () => {
+    const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION })
+    assert.equal(parseRoomMission(files['AGENTS.md']), MISSION)
+    assert.equal(parseRoomMission(roomTemplateFiles({ name: 'bare' })['AGENTS.md']), null)
+    assert.equal(parseRoomMission('# Room: #x\n\nfree text only\n'), null)
+    assert.equal(parseRoomMission('## Mission (verbatim from the user)\n\n> line one\n> line two\n\nEvery session...\n## Next\n'), 'line one\nline two')
   })
 })
