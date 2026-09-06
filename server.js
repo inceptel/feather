@@ -4224,6 +4224,19 @@ function followedFeedRooms(rooms) {
 
 const FEED_MESSAGES_PER_ROOM = 8;
 const feedMessageCache = new Map();
+// A Leader's answer to a Super Feed comment is shown under the commented
+// card (see feedCommentReplies); as its own feed row it would be a duplicate.
+function isFeedCommentAnswer(messages, index) {
+  const message = messages[index];
+  if (message.role !== 'assistant') return false;
+  for (let cursor = index - 1; cursor >= 0; cursor--) {
+    const previous = messages[cursor];
+    if (!previous.text) continue;
+    return previous.role === 'user' && previous.text.startsWith(FEED_COMMENT_PREFIX);
+  }
+  return false;
+}
+
 const EXCLUDED_FEED_MESSAGE_PREFIXES = [
   '[feather-sidecar ',
   FEED_COMMENT_PREFIX,
@@ -4259,8 +4272,9 @@ function roomFeedMessages(room) {
           text: text.slice(0, 600),
         };
       })
-      .filter(message => message.text
-        && !EXCLUDED_FEED_MESSAGE_PREFIXES.some(prefix => message.text.startsWith(prefix)))
+      .filter((message, index, all) => message.text
+        && !EXCLUDED_FEED_MESSAGE_PREFIXES.some(prefix => message.text.startsWith(prefix))
+        && !isFeedCommentAnswer(all, index))
       .slice(-FEED_MESSAGES_PER_ROOM);
     feedMessageCache.set(room.leaderSessionId, { signature, messages });
     return messages;
