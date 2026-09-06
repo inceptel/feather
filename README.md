@@ -279,6 +279,13 @@ npm install    # installs deps + builds frontend automatically
 npm start      # → Feather on http://localhost:4870
 ```
 
+## Optional services (bring your own keys)
+
+Feather runs without any API keys. Two features need one, and neither is installed for you:
+
+- **Voice input (Deepgram).** The microphone button posts audio to `/api/transcribe`, which calls Deepgram Nova-3. Set `FEATHER_DEEPGRAM_API_KEY` in the server's environment (for supervisord, in the program's `environment=` line). Without it the button returns "No Deepgram API key configured" and everything else works.
+- **Room card images (`room visual`).** The marketer resident renders each Super Feed card's picture with `bin/room-visual.py`, which needs `python3` with `httpx` and `Pillow` (`pip install httpx pillow`) plus a key for at least one image provider, read from the environment or `~/keyvault.txt` (`NAME=value` lines): `OPENROUTER_API_KEY`, `GOOGLE_API_KEY` (or `GEMINI_API_KEY`), or `OPENAI_API_KEY`. Providers are tried in that order; override with `ROOM_VISUAL_PROVIDERS=google,openai`. With no key or no reachable provider, cards get a rendered text card instead, so publishing never blocks.
+
 ## Persistent state
 
 By default Feather keeps its instance metadata beside `server.js`, exactly as
