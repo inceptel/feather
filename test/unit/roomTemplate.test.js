@@ -42,6 +42,10 @@ describe('Room template', () => {
     assert.ok(files['MARKETER.md'].includes('notes-md-2026-09-06t18-12-mission-outcome'))
     assert.ok(files['MARKETER.md'].includes('"sourceEvidenceId": "<evidence-id>"'))
     assert.ok(files['UPDATER.md'].includes('plain slugs'))
+    assert.ok(files['UPDATER.md'].includes('**By the way**'))
+    assert.ok(files['UPDATER.md'].includes('never enter Review, create an alert badge, or require a visual'))
+    assert.ok(files['UPDATER.md'].includes('"attention": "briefing"'))
+    assert.ok(files['MARKETER.md'].includes('"attention": "briefing|by-the-way"'))
     assert.ok(files['CARETAKER.md'].includes('RALPH_COMPLETE'))
   })
 

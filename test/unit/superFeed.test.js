@@ -180,4 +180,24 @@ describe('Super Feed projection', () => {
     const [stale] = mergeSuperFeed([item], [], [])
     assert.equal(stale.sourceState, 'stale')
   })
+  it('projects By-the-way publications without review attention or a visual', () => {
+    const [item] = buildSuperFeed({
+      rooms: [{ name: 'ev-shop' }],
+      publications: [{
+        room: 'ev-shop',
+        id: 'competitor-context',
+        sourceEvidenceId: 'wiki/Competition.md#2026-09-06',
+        attention: 'by-the-way',
+        title: 'Nearby hybrid shop opened',
+        summary: 'Useful local context; no action is requested.',
+        occurredAt: '2026-09-06T15:00:00Z',
+      }],
+    })
+
+    assert.equal(item.attention, 'by-the-way')
+    assert.equal(item.status, 'by the way')
+    assert.equal(item.needsReview, false)
+    assert.equal(item.visualHref, undefined)
+  })
+
 })

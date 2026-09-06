@@ -17,6 +17,7 @@ const muted = '#8b97a8'
 const line = '#1e2632'
 const green = '#69c77f'
 const amber = '#e0b45f'
+const blue = '#79b8d1'
 const red = '#e3826d'
 
 function timeAgo(iso: string | null) {
@@ -395,7 +396,9 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
                   <img src={appUrl(item.visualHref!)} alt={item.visualAlt!} loading="lazy"
                     style={{ display: 'block', width: '100%', 'aspect-ratio': '16 / 9', 'object-fit': 'cover', 'margin-bottom': '10px', 'border-radius': '9px', border: '1px solid #202938', background: '#080b10' }} />
                 </Show>
-                <MetaRow item={item} />
+                <MetaRow item={item} flag={item.attention === 'by-the-way'
+                  ? { text: 'By the way', color: blue }
+                  : { text: 'Briefing', color: green }} />
                 <h3 style={{ margin: '8px 0 0', color: ink, 'font-size': '16px', 'font-weight': '700', 'line-height': '1.3', 'word-break': 'break-word' }}>{headline(item)}</h3>
                 <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px', 'margin-top': '6px' }} />
                 <Show when={item.detail}>
