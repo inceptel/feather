@@ -325,6 +325,7 @@ cmd_dispatch() {
         target="${2:-}"
         shift 2
         ;;
+      --stdin|--file) break ;;
       --) break ;;
       --*) die "room dispatch: unknown option: $1" ;;
       *) break ;;

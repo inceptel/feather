@@ -282,11 +282,17 @@ install_capabilities_impl() {
   done
   for name in "${CAPABILITY_CLIS[@]}"; do destinations+=("$bin_dir/$name"); targets+=("$target_root/bin/$name"); done
 
-  local conflicts=()
+  local conflicts=() active_target resolved_dest target_relative
+  active_target="$(readlink -f "$target_root")"
   for ((index=0; index<${#destinations[@]}; index++)); do
     dest="${destinations[$index]}"; target="${targets[$index]}"
     if [ -L "$dest" ]; then
-      [ "$(readlink "$dest")" = "$target" ] || conflicts+=("$dest")
+      if [ "$(readlink "$dest")" != "$target" ]; then
+        target_relative="${target#"$target_root"/}"
+        resolved_dest="$(readlink -f "$dest" 2>/dev/null || true)"
+        [ "$target_relative" != "$target" ] && [ "$resolved_dest" = "$active_target/$target_relative" ] \
+          || conflicts+=("$dest")
+      fi
     elif [ -e "$dest" ]; then conflicts+=("$dest")
     fi
   done
@@ -309,7 +315,11 @@ install_capabilities_impl() {
   mkdir -p "$claude_dir" "$codex_dir" "$omp_skills_dir" "$omp_extensions_dir" "$bin_dir"
   for ((index=0; index<${#destinations[@]}; index++)); do
     dest="${destinations[$index]}"; target="${targets[$index]}"
-    [ -L "$dest" ] || ln -s "$target" "$dest"
+    if [ -L "$dest" ]; then
+      [ "$(readlink "$dest")" = "$target" ] || atomic_current_link "$dest" "$target"
+    else
+      ln -s "$target" "$dest"
+    fi
   done
   note "installed Feather and Sidecar for Claude and Codex; installed Council and Feather protocol tools for OMP; installed room, sidecar, refeather, and feather-instance CLIs"
 }
@@ -510,13 +520,16 @@ run_switch() {
   trap 'switch_failed 130' INT TERM
 
   if [ "$TX_SKIP_CAPABILITIES" -eq 0 ]; then
-    install_capabilities_impl "$TX_CANDIDATE" "$TX_CURRENT" \
-      "${REFEATHER_CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}" \
-      "${REFEATHER_CODEX_SKILLS_DIR:-$HOME/.codex/skills}" \
-      "${REFEATHER_OMP_SKILLS_DIR:-$HOME/.omp/agent/skills}" \
-      "${REFEATHER_OMP_EXTENSIONS_DIR:-$HOME/.omp/agent/extensions}" \
-      "${REFEATHER_BIN_DIR:-$HOME/.local/bin}" \
-      "${REFEATHER_CONFLICT_BACKUP_DIR:-$HOME/.feather/install-conflicts/$TX_ID}"
+    (
+      trap - ERR INT TERM
+      install_capabilities_impl "$TX_CANDIDATE" "$TX_CURRENT" \
+        "${REFEATHER_CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}" \
+        "${REFEATHER_CODEX_SKILLS_DIR:-$HOME/.codex/skills}" \
+        "${REFEATHER_OMP_SKILLS_DIR:-$HOME/.omp/agent/skills}" \
+        "${REFEATHER_OMP_EXTENSIONS_DIR:-$HOME/.omp/agent/extensions}" \
+        "${REFEATHER_BIN_DIR:-$HOME/.local/bin}" \
+        "${REFEATHER_CONFLICT_BACKUP_DIR:-$HOME/.feather/install-conflicts/$TX_ID}"
+    )
   fi
   if [ -n "$TX_PRECHECK" ]; then write_tx_state preflight; bash -lc "$TX_PRECHECK"; fi
 

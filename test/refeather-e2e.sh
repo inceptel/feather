@@ -12,17 +12,17 @@ journal="$TMP/journal"
 lock="$TMP/refeather.lock"
 current="$TMP/current"
 service_log="$TMP/supervisor.log"
-
 git init --bare -q "$origin"
 git init -q "$source_repo"
 git -C "$source_repo" config user.email test@example.com
 git -C "$source_repo" config user.name Test
-mkdir -p "$source_repo/skills" "$source_repo/bin"
-for skill in feather sidecar; do
+mkdir -p "$source_repo/skills" "$source_repo/omp-tools" "$source_repo/bin"
+for skill in feather sidecar council; do
   mkdir -p "$source_repo/skills/$skill"
   printf -- '---\nname: %s\n---\n' "$skill" >"$source_repo/skills/$skill/SKILL.md"
 done
-for cli in room sidecar refeather; do printf '#!/bin/sh\n' >"$source_repo/bin/$cli"; chmod +x "$source_repo/bin/$cli"; done
+printf 'export default function () {}\n' >"$source_repo/omp-tools/feather-protocol-tools.js"
+for cli in room sidecar refeather feather-instance; do printf '#!/bin/sh\n' >"$source_repo/bin/$cli"; chmod +x "$source_repo/bin/$cli"; done
 cat >"$source_repo/build-test.sh" <<'SH'
 #!/usr/bin/env bash
 set -e
@@ -207,6 +207,39 @@ switch_env=(env REFEATHER_SUPERVISORCTL="$fake_supervisor" REFEATHER_CURL="$fake
   REFEATHER_SUPERVISOR_TIMEOUT=0.1s REFEATHER_SUPERVISOR_KILL_AFTER=0.1s)
 switch_args=(--current-link "$current" --program feather-prod --supervisor-socket unix:///tmp/feather-supervisor.sock
   --health-url http://127.0.0.1:8123/feather2/api/health --skip-capability-install)
+
+# A capability conflict happens after the durable transaction is prepared but
+# before service mutation. It must preserve evidence and finalize automatically.
+cap_root="$TMP/promotion-capabilities"
+cap_claude="$cap_root/.claude/skills"
+cap_codex="$cap_root/.codex/skills"
+cap_omp_skills="$cap_root/.omp/agent/skills"
+cap_omp_extensions="$cap_root/.omp/agent/extensions"
+cap_bin="$cap_root/.local/bin"
+cap_backup="$TMP/promotion-conflict-backup"
+mkdir -p "$cap_claude"
+printf 'user-owned skill\n' >"$cap_claude/feather"
+if "${switch_env[@]}" \
+    REFEATHER_CLAUDE_SKILLS_DIR="$cap_claude" \
+    REFEATHER_CODEX_SKILLS_DIR="$cap_codex" \
+    REFEATHER_OMP_SKILLS_DIR="$cap_omp_skills" \
+    REFEATHER_OMP_EXTENSIONS_DIR="$cap_omp_extensions" \
+    REFEATHER_BIN_DIR="$cap_bin" \
+    REFEATHER_CONFLICT_BACKUP_DIR="$cap_backup" \
+    "$ROOT/bin/refeather" promote --release "$release" \
+    --current-link "$current" --program feather-prod \
+    --supervisor-socket unix:///tmp/feather-supervisor.sock \
+    --health-url http://127.0.0.1:8123/feather2/api/health \
+    2>"$TMP/promotion-capability-conflict.err"; then
+  echo "capability conflict unexpectedly promoted" >&2; exit 1
+fi
+grep -q 'capability destination conflicts' "$TMP/promotion-capability-conflict.err"
+[ "$(cat "$cap_claude/feather")" = 'user-owned skill' ]
+grep -q "$cap_claude/feather" "$cap_backup/manifest.tsv"
+[ "$(readlink -f "$current")" = "$old" ]
+[ ! -e "$service_log" ]
+[ ! -e "$journal/active.json" ]
+grep -q '"phase": "rolled-back"' "$journal"/*.jsonl
 
 # A target changed after staging must be rejected before service mutation.
 chmod u+w "$release/build.marker"; printf 'tampered\n' >>"$release/build.marker"; chmod a-w "$release/build.marker"

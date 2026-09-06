@@ -43,6 +43,15 @@ done
 [ "$(readlink "$omp_extensions/feather-protocol-tools.js")" = "$current/omp-tools/feather-protocol-tools.js" ]
 for cli in room sidecar refeather feather-instance; do [ "$(readlink "$bindir/$cli")" = "$current/bin/$cli" ]; done
 
+# Direct links into the active immutable release are Feather-managed, not user
+# conflicts. Migrate them back to the stable current-link target atomically.
+rm "$omp_skills/council" "$omp_extensions/feather-protocol-tools.js"
+ln -s "$release/skills/council" "$omp_skills/council"
+ln -s "$release/omp-tools/feather-protocol-tools.js" "$omp_extensions/feather-protocol-tools.js"
+"${install[@]}"
+[ "$(readlink "$omp_skills/council")" = "$current/skills/council" ]
+[ "$(readlink "$omp_extensions/feather-protocol-tools.js")" = "$current/omp-tools/feather-protocol-tools.js" ]
+
 rm "$claude/feather"
 printf 'user-owned skill\n' >"$claude/feather"
 if "${install[@]}" 2>"$TMP/conflict.err"; then
