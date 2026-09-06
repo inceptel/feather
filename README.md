@@ -131,6 +131,13 @@ that ends a wake with `RALPH_COMPLETE` simply sleeps until its next slot.
 `room new <name>` without a mission scaffolds the same files locally and starts
 nothing; the Rooms home's **New room** button asks for the mission as well.
 
+An existing pre-template Room can be migrated with
+`POST /api/rooms/<name>/staff`. The operation preserves its Leader and existing
+specialists, adds any missing standard residents, replaces the three
+product-managed standard charters, applies their current cadence, and pauses the
+redundant status pulse. Specialist cadence is opt-in through the request's
+`specialists` map.
+
 Each Super Feed card has a **Comment** box. A comment goes to that Room's
 Leader as a tagged chat message, and the Leader's next reply is shown under the
 card. Comments are kept in the instance state and never appear as feed cards.
@@ -197,8 +204,12 @@ Requests without the
 current Updater capability are rejected. The current shared-UID deployment is
 an organizational boundary, not protection from another local process.
 
-Agents can run `room complain "..."` to append recurring annoyances to
-`#friction`. `#meta` is the separate place for reusable lessons across Rooms.
+`room complain` gives every new complaint a canonical ID, appends it once to
+`#friction`, and sends an idempotent wake keyed by that ID directly to the
+Resolver. If direct delivery is unavailable, the scheduled Resolver is resumed
+as a bounded catch-up path. Complaint cards themselves remain the canonical
+Super Feed evidence; an Updater must not duplicate each one as a publication.
+`#meta` is the separate place for reusable lessons across Rooms.
 
 The `room` CLI also provides optional delegation tools. Use `room council` when a
 decision benefits from several sealed attempts and a judge; use `room lookup`,

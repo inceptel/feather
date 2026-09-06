@@ -36,11 +36,13 @@ import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-fee
 import { appendRoomPublication, readRoomPublications, verifiedPublicationVisual } from './lib/room-publications.js';
 import {
   ROOM_STANDARD_RESIDENTS,
+  ROOM_TEMPLATE_DIRS,
   leaderKickoffPrompt,
   normalizeRoomMission,
   parseRoomMission,
   residentWakePrompt,
   scaffoldRoom,
+  roomTemplateFiles,
 } from './lib/room-template.js';
 import { FEED_COMMENTS_MAX, FEED_COMMENT_PREFIX, feedCommentPrompt, feedCommentReplies, isFeedCommentState, normalizeFeedCommentText } from './lib/feed-comments.js';
 
@@ -4698,6 +4700,78 @@ async function staffRoom(name, mission) {
   return { leaderSessionId: leader.id, residents };
 }
 
+async function staffExistingRoom(name, specialistWakeIntervals = {}) {
+  const cwd = path.join(ROOMS_HOME_DIR, name);
+  if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+  const leaderSessionId = ROOM_LEADERS_STATE.read()[name] || null;
+  if (!leaderSessionId || !validRoomLeaderDesignation(name, leaderSessionId)) {
+    throw httpError(409, `#${name} has no available Leader`);
+  }
+  const configuredBefore = ROOM_RESIDENTS_STATE.read()[name] || {};
+  for (const role of Object.keys(specialistWakeIntervals)) {
+    if (!configuredBefore[role]) throw httpError(409, `#${name} has no existing ${role} specialist`);
+  }
+  for (const sub of ROOM_TEMPLATE_DIRS) fs.mkdirSync(path.join(cwd, sub), { recursive: true });
+  const claudePath = path.join(cwd, 'CLAUDE.md');
+  if (!fs.existsSync(claudePath)) fs.symlinkSync('AGENTS.md', claudePath);
+
+
+  const files = roomTemplateFiles({ name, mission: readRoomMission(name) });
+  for (const spec of ROOM_STANDARD_RESIDENTS) {
+    fs.writeFileSync(path.join(cwd, spec.charter), files[spec.charter]);
+  }
+
+  const created = [];
+  for (const spec of ROOM_STANDARD_RESIDENTS) {
+    const before = ROOM_RESIDENTS_STATE.read()[name]?.[spec.role]?.sessionId || null;
+    if (!before && ROOM_STAFF_STAGGER_MS) await sleep(ROOM_STAFF_STAGGER_MS);
+    const resident = createSessionForRequest({
+      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE,
+      roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
+    });
+    if (resident.status !== 'existing') created.push(spec.role);
+  }
+
+  const now = Date.now();
+  ROOM_RESIDENTS_STATE.update((current) => {
+    const residents = { ...(current[name] || {}) };
+    for (const spec of ROOM_STANDARD_RESIDENTS) {
+      const resident = residents[spec.role];
+      if (!resident) throw httpError(500, `failed to register ${spec.role}`);
+      residents[spec.role] = {
+        ...resident,
+        wakeIntervalMs: spec.wakeIntervalMs,
+        nextWakeAtMs: spec.wakeIntervalMs ? now + spec.wakeIntervalMs : null,
+        paused: false,
+      };
+    }
+    for (const [role, wakeIntervalMs] of Object.entries(specialistWakeIntervals)) {
+      residents[role] = {
+        ...residents[role],
+        wakeIntervalMs,
+        nextWakeAtMs: now + wakeIntervalMs,
+        paused: false,
+      };
+    }
+    return { ...current, [name]: residents };
+  });
+  ROOM_PULSES_STATE.update((current) => ({
+    ...current,
+    [name]: pulseRecord(current[name], { enabled: false, status: 'paused', nextRunAtMs: null, error: null }),
+  }));
+  const configured = ROOM_RESIDENTS_STATE.read()[name];
+  updateMeta((meta) => {
+    const next = { ...meta };
+    for (const [role, resident] of Object.entries(configured)) {
+      next[resident.sessionId] = { ...(next[resident.sessionId] || {}), title: `${role}: #${name}` };
+    }
+    return next;
+  });
+  syncRoomSidecar(name, { primeNewResidents: true });
+  const room = roomSnapshotCache.refresh().find((candidate) => candidate.name === name);
+  return { leaderSessionId, residents: room?.residents || [], created };
+}
+
 app.post('/api/rooms', async (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
@@ -4716,6 +4790,27 @@ app.post('/api/rooms', async (req, res) => {
     if (staffing) roomSnapshotCache.refresh();
     res.json({ name, cwd: dir, mission, files, ...(staffing || {}) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+app.post('/api/rooms/:name/staff', async (req, res) => {
+  try {
+    const { name } = req.params;
+    const specialists = req.body?.specialists ?? {};
+    if (!isJsonRecord(specialists)) throw httpError(400, 'specialists must be an object');
+    const specialistWakeIntervals = {};
+    for (const [role, wakeIntervalMs] of Object.entries(specialists)) {
+      if (!ROOM_RESIDENT_ROLE_RE.test(role) || ROOM_STANDARD_RESIDENTS.some((spec) => spec.role === role)) {
+        throw httpError(400, 'specialists must name existing non-standard resident roles');
+      }
+      if (!Number.isFinite(wakeIntervalMs) || wakeIntervalMs < 60_000 || wakeIntervalMs > 8.64e15) {
+        throw httpError(400, `invalid wake interval for ${role}`);
+      }
+      specialistWakeIntervals[role] = Math.floor(wakeIntervalMs);
+    }
+    res.json({ ok: true, ...(await staffExistingRoom(name, specialistWakeIntervals)) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // Pull an existing session (any cwd) into a room, or remove it again.

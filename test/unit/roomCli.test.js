@@ -124,10 +124,20 @@ describe('room assignment CLI', () => {
     fs.writeFileSync(path.join(roomDir, 'notes.md'), '# notes\n')
     const requests = []
     const server = http.createServer((request, response) => {
+      if (request.method === 'GET' && request.url === '/api/rooms/friction/residents') {
+        requests.push({ url: request.url, body: null })
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end('{"residents":[{"role":"resolver","sessionId":"friction-resolver"}]}')
+        return
+      }
       const chunks = []
       request.on('data', (chunk) => chunks.push(chunk))
       request.on('end', () => {
-        requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString()) })
+        requests.push({
+          url: request.url,
+          messageId: request.headers['x-feather-message-id'],
+          body: JSON.parse(Buffer.concat(chunks).toString()),
+        })
         response.writeHead(200, { 'Content-Type': 'application/json' })
         response.end('{"ok":true}')
       })
@@ -144,23 +154,25 @@ describe('room assignment CLI', () => {
       ])
       await run(cli, ['pause'], { cwd: roomDir, env })
       await run(cli, ['wake'], { cwd: roomDir, env })
-      // Each complaint also fires a detached, best-effort `room wake` for
-      // #friction so a paused queue resumes; those POSTs land asynchronously.
-      for (let i = 0; i < 200 && requests.filter((r) => r.url === '/api/rooms/friction/pulse').length < 2; i++) {
+      // Every complaint gets a canonical id and an idempotent direct Resolver
+      // wake. Scheduled Resolver catch-up is only the delivery fallback.
+      for (let i = 0; i < 200 && requests.filter((r) => r.url === '/api/sessions/friction-resolver/send').length < 2; i++) {
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
       const notes = fs.readFileSync(path.join(roomsDir, 'friction/notes.md'), 'utf8')
-      assert.match(notes, /Complaint from #health: The upload button loses my file/)
-      assert.match(notes, /Complaint from #health: The table gets crushed on mobile/)
+      assert.match(notes, /\[id:[0-9a-f-]{36}\] Complaint from #health: The upload button loses my file/)
+      assert.match(notes, /\[id:[0-9a-f-]{36}\] Complaint from #health: The table gets crushed on mobile/)
       // Explicit pause then wake on #health are ordered and exact.
-      assert.deepEqual(requests.filter((r) => r.url === '/api/rooms/health/pulse'), [
+      assert.deepEqual(requests.filter((r) => r.url === '/api/rooms/health/pulse').map(({ url, body }) => ({ url, body })), [
         { url: '/api/rooms/health/pulse', body: { enabled: false } },
         { url: '/api/rooms/health/pulse', body: { enabled: true } },
       ])
-      // Both complaints woke #friction.
-      const frictionWakes = requests.filter((r) => r.url === '/api/rooms/friction/pulse')
-      assert.equal(frictionWakes.length, 2)
-      assert.ok(frictionWakes.every((r) => r.body.enabled === true))
+      const resolverWakes = requests.filter((r) => r.url === '/api/sessions/friction-resolver/send')
+      assert.equal(resolverWakes.length, 2)
+      assert.equal(new Set(resolverWakes.map((r) => r.messageId)).size, 2)
+      assert.ok(resolverWakes.every((r) => /^friction-[a-f0-9]{40}$/.test(r.messageId)))
+      assert.ok(resolverWakes.every((r) => /New canonical complaint \[id:[0-9a-f-]{36}\]/.test(r.body.text)))
+      assert.equal(requests.filter((r) => r.url === '/api/rooms/friction/pulse').length, 0)
     } finally {
       await new Promise((resolve) => server.close(resolve))
     }

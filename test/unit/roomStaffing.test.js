@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const MISSION = 'go investigate this one spot that\'s available for rent or for purchase and build me a business plan for what it would look like to run an EV-only auto shop out of that location'
@@ -140,6 +140,68 @@ describe('Room staffing from the template', () => {
         assert.ok(!models.includes('gateway-test-token'))
       }
       assert.equal(new Set(ompIds.map(sessionId => path.join(home, '.feather/omp-agents', sessionId))).size, 4)
+
+      // A pre-template Room can be migrated without replacing its Leader or
+      // specialist. Standard charters and cadence are applied idempotently.
+      const frictionDir = path.join(home, 'rooms/friction')
+      fs.mkdirSync(frictionDir, { recursive: true })
+      fs.writeFileSync(path.join(frictionDir, 'AGENTS.md'), '# Room: #friction\n')
+      fs.writeFileSync(path.join(frictionDir, 'notes.md'), '# notes\n')
+      fs.writeFileSync(path.join(frictionDir, 'CARETAKER.md'), 'legacy caretaker\n')
+      fs.writeFileSync(path.join(frictionDir, 'RESOLVER.md'), 'specialist contract\n')
+      const createFrictionSession = async (body) => {
+        const response = await fetch(`${base}/api/sessions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: randomUUID(), cwd: frictionDir, roomName: 'friction', agent: 'omp', ...body }),
+        })
+        const text = await response.text()
+        assert.equal(response.status, 200, text)
+        return JSON.parse(text)
+      }
+      const frictionLeader = await createFrictionSession({ roomRole: 'leader' })
+      const legacyCaretaker = await createFrictionSession({ roomRole: 'caretaker', mode: 'ralph' })
+      const legacyResolver = await createFrictionSession({ roomRole: 'resolver', mode: 'ralph' })
+      const migratedResponse = await fetch(`${base}/api/rooms/friction/staff`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ specialists: { resolver: 900_000 } }),
+      })
+      const migratedText = await migratedResponse.text()
+      assert.equal(migratedResponse.status, 200, migratedText)
+      const migrated = JSON.parse(migratedText)
+      assert.equal(migrated.leaderSessionId, frictionLeader.id)
+      assert.deepEqual(migrated.created, ['updater', 'marketer'])
+      assert.deepEqual(migrated.residents.map(resident => resident.role).sort(),
+        ['caretaker', 'marketer', 'resolver', 'updater'])
+      const frictionResidents = readResidents().friction
+      assert.equal(frictionResidents.caretaker.sessionId, legacyCaretaker.id)
+      assert.equal(frictionResidents.caretaker.wakeIntervalMs, 900_000)
+      assert.equal(frictionResidents.updater.wakeIntervalMs, 1_800_000)
+      assert.equal(frictionResidents.marketer.wakeIntervalMs, null)
+      assert.equal(frictionResidents.resolver.sessionId, legacyResolver.id)
+      assert.equal(frictionResidents.resolver.wakeIntervalMs, 900_000)
+      assert.ok(Object.values(frictionResidents).every(resident => resident.paused === false))
+      assert.ok(frictionResidents.resolver.nextWakeAtMs > Date.now() + 800_000)
+      const frictionPulse = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-pulses.json'), 'utf8')).friction
+      assert.equal(frictionPulse.enabled, false)
+      assert.equal(frictionPulse.status, 'paused')
+      assert.match(fs.readFileSync(path.join(frictionDir, 'CARETAKER.md'), 'utf8'), /resident caretaker/)
+      assert.match(fs.readFileSync(path.join(frictionDir, 'UPDATER.md'), 'utf8'), /\*\*By the way\*\*/)
+      assert.ok(fs.existsSync(path.join(frictionDir, 'MARKETER.md')))
+      assert.equal(fs.readFileSync(path.join(frictionDir, 'RESOLVER.md'), 'utf8'), 'specialist contract\n')
+      for (const sub of ['wiki', 'artifacts', '.caretaker', '.updater']) {
+        assert.ok(fs.statSync(path.join(frictionDir, sub)).isDirectory(), sub)
+      }
+      assert.equal(fs.readlinkSync(path.join(frictionDir, 'CLAUDE.md')), 'AGENTS.md')
+
+      const beforeRetry = Object.fromEntries(Object.entries(frictionResidents).map(([role, resident]) => [role, resident.sessionId]))
+      const retryResponse = await fetch(`${base}/api/rooms/friction/staff`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ specialists: { resolver: 900_000 } }),
+      })
+      const retryText = await retryResponse.text()
+      assert.equal(retryResponse.status, 200, retryText)
+      assert.deepEqual(JSON.parse(retryText).created, [])
+      assert.deepEqual(Object.fromEntries(Object.entries(readResidents().friction).map(([role, resident]) => [role, resident.sessionId])), beforeRetry)
 
       // The Leader gets the mission, verbatim, once the session has settled.
       const kickoff = await waitFor(() => readSent().includes('[Room kickoff · #ev-shop]') ? readSent() : null, { message: 'kickoff prompt' })
