@@ -37,7 +37,10 @@ describe('Room template', () => {
       assert.ok(files[spec.charter].includes('~/rooms/ev-shop'), `${spec.charter} names the room path`)
     }
     assert.ok(files['UPDATER.md'].includes('room publish'))
-    assert.ok(files['MARKETER.md'].includes('room visual --out ~/rooms/ev-shop/artifacts/<evidence-id>.png'))
+    assert.ok(files['MARKETER.md'].includes('room visual --out ~/rooms/ev-shop/artifacts/<slug>.png'))
+    assert.ok(files['MARKETER.md'].includes('notes-md-2026-09-06t18-12-mission-outcome'))
+    assert.ok(files['MARKETER.md'].includes('"sourceEvidenceId": "<evidence-id>"'))
+    assert.ok(files['UPDATER.md'].includes('plain slugs'))
     assert.ok(files['CARETAKER.md'].includes('RALPH_COMPLETE'))
   })
 
