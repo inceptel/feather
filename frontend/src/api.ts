@@ -299,7 +299,17 @@ export interface SuperFeedItem {
   publicationId?: string
   visualHref?: string
   visualAlt?: string
+  comments?: FeedComment[]
+}
 
+export interface FeedComment {
+  id: string
+  evidenceId: string
+  room: string
+  text: string
+  createdAt: string
+  delivered: boolean
+  reply: { text: string, timestamp: string | null } | null
 }
 
 export interface SuperFeedSnapshot {
@@ -332,14 +342,23 @@ export async function setFeedFollowing(room: string, following: boolean): Promis
   return (await responseJson<{ ok: true, following: string[] }>(response)).following
 }
 
+export async function postFeedComment(evidenceId: string, text: string): Promise<FeedComment> {
+  const response = await fetch(`${BASE}/api/feed/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ evidenceId, text }),
+  })
+  return (await responseJson<{ ok: true, comment: FeedComment }>(response)).comment
+}
+
 export async function fetchRoomFriction(room: string): Promise<FrictionComplaint[]> {
   const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/friction`)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return (await response.json()).complaints
 }
 
-export async function createRoom(name: string): Promise<{ name: string, cwd: string }> {
-  const r = await fetch(`${BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+export async function createRoom(name: string, mission?: string): Promise<{ name: string, cwd: string, leaderSessionId?: string }> {
+  const r = await fetch(`${BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, mission: mission || undefined }) })
   return responseJson(r)
 }
 

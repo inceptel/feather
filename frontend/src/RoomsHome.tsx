@@ -93,8 +93,16 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
   async function newRoom() {
     const name = prompt('Room name (lowercase, digits, dashes):')?.trim()
     if (!name) return
+    const mission = prompt('Mission, in your own words (one or two sentences). Leave empty for a bare folder with no agents.')
+    if (mission === null) return
     setBusy(true)
-    try { await createRoom(name); await refresh(); setExpanded(name) }
+    try {
+      const created = await createRoom(name, mission.trim())
+      await refresh()
+      setExpanded(name)
+      props.onSessionsChanged?.()
+      if (created.leaderSessionId) props.onOpen(created.leaderSessionId)
+    }
     catch (e: any) { alert(e.message) }
     finally { setBusy(false) }
   }

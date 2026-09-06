@@ -25,6 +25,14 @@ import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.
 import { parseFrictionNotes } from './lib/friction.js';
 import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-feed.js';
 import { appendRoomPublication, readRoomPublications, verifiedPublicationVisual } from './lib/room-publications.js';
+import {
+  ROOM_STANDARD_RESIDENTS,
+  leaderKickoffPrompt,
+  normalizeRoomMission,
+  residentWakePrompt,
+  scaffoldRoom,
+} from './lib/room-template.js';
+import { FEED_COMMENTS_MAX, FEED_COMMENT_PREFIX, feedCommentPrompt, feedCommentReplies, isFeedCommentState, normalizeFeedCommentText } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -191,6 +199,14 @@ const FEED_PREFERENCES_STATE = createJsonState({
   document: 'Super Feed preferences',
   defaultValue: { rooms: null },
   validate: isFeedPreferencesState,
+  mode: 0o600,
+});
+const FEED_COMMENTS_STATE = createJsonState({
+  file: STATE_PATHS.instance.feedCommentsFile,
+  root: STATE_PATHS.instance.root,
+  document: 'Super Feed comments',
+  defaultValue: { comments: [] },
+  validate: isFeedCommentState,
   mode: 0o600,
 });
 
@@ -2739,16 +2755,19 @@ function sessionStreamHandler(req, res) {
 
 app.get('/api/sessions/:id/stream', sessionStreamHandler);
 
-app.post('/api/sessions', (req, res) => {
-  const agent = req.body.agent || 'claude';
-  const roomRole = req.body.roomRole || null;
-  const roomName = String(req.body.roomName || '').trim();
-  const mode = req.body.mode || null;
+// Create a session, optionally as a Room Leader or resident. Shared by
+// POST /api/sessions and Room staffing so both paths keep the same rules.
+// Returns the JSON body the API answers with; throws httpError on refusal.
+function createSessionForRequest(body) {
+  const agent = body.agent || 'claude';
+  const roomRole = body.roomRole || null;
+  const roomName = String(body.roomName || '').trim();
+  const mode = body.mode || null;
   let assignmentsBefore = null;
   let leadersBefore = null;
   let residentsBefore = null;
   try {
-    const id = validateFreshSessionId(req.body.id);
+    const id = validateFreshSessionId(body.id);
     const residentRole = roomRole && roomRole !== 'leader' ? String(roomRole) : null;
     if (residentRole && !ROOM_RESIDENT_ROLE_RE.test(residentRole)) throw httpError(400, 'invalid Room resident role');
     if (mode && mode !== RALPH_MODE) throw httpError(400, 'unsupported session mode');
@@ -2758,7 +2777,7 @@ app.post('/api/sessions', (req, res) => {
     }
     if (roomRole) {
       if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
-      if (path.resolve(String(req.body.cwd || '')) !== path.join(ROOMS_HOME_DIR, roomName)) {
+      if (path.resolve(String(body.cwd || '')) !== path.join(ROOMS_HOME_DIR, roomName)) {
         throw httpError(409, `${roomRole} cwd must be #${roomName}`);
       }
       assignmentsBefore = readRoomAssignments();
@@ -2769,7 +2788,7 @@ app.post('/api/sessions', (req, res) => {
       const existingLeaderId = leadersBefore[roomName] || null;
       if (existingLeaderId && validRoomLeaderDesignation(roomName, existingLeaderId)) {
         syncRoomSidecar(roomName);
-        return res.json({ id: existingLeaderId, status: 'existing', agent: getAgentForSession(existingLeaderId), roomRole });
+        return { id: existingLeaderId, status: 'existing', agent: getAgentForSession(existingLeaderId), roomRole };
       }
       const staleLeaderId = existingLeaderId && !validRoomLeaderDesignation(roomName, existingLeaderId)
         ? existingLeaderId
@@ -2781,34 +2800,46 @@ app.post('/api/sessions', (req, res) => {
       if (existing && assignmentsBefore[existing.sessionId] === roomName
         && (tmuxIsActive(existing.sessionId) || fs.existsSync(path.join(OMP_SESSIONS, existing.sessionId)))) {
         syncRoomSidecar(roomName);
-        return res.json({ id: existing.sessionId, status: 'existing', agent: getAgentForSession(existing.sessionId), roomRole, mode: RALPH_MODE });
+        return { id: existing.sessionId, status: 'existing', agent: getAgentForSession(existing.sessionId), roomRole, mode: RALPH_MODE };
       }
       ROOM_ASSIGN_STATE.update((current) => {
         const next = { ...current, [id]: roomName };
         if (existing) delete next[existing.sessionId];
         return next;
       });
+      const wakeIntervalMs = Number.isFinite(body.wakeIntervalMs) && body.wakeIntervalMs >= 60_000 ? Math.floor(body.wakeIntervalMs) : null;
       ROOM_RESIDENTS_STATE.update((current) => ({
         ...current,
         [roomName]: {
           ...(current[roomName] || {}),
-          [residentRole]: { sessionId: id },
+          [residentRole]: {
+            sessionId: id,
+            wakeIntervalMs,
+            nextWakeAtMs: wakeIntervalMs ? Date.now() + wakeIntervalMs : null,
+            lastWakeAt: null,
+          },
         },
       }));
     }
-    spawnSession(id, req.body.cwd, agent, { ompModel: req.body.model || '', mode });
+    spawnSession(id, body.cwd, agent, { ompModel: body.model || '', mode });
     if (roomRole) {
       syncRoomSidecar(roomName, { primeNewResidents: true });
       roomSnapshotCache.refresh();
     }
-    res.json({ id, status: 'starting', agent, roomRole, ...(mode ? { mode } : {}) });
+    return { id, status: 'starting', agent, roomRole, ...(mode ? { mode } : {}) };
   } catch (e) {
     if (assignmentsBefore) ROOM_ASSIGN_STATE.update(() => assignmentsBefore);
     if (leadersBefore) ROOM_LEADERS_STATE.update(() => leadersBefore);
     if (residentsBefore) ROOM_RESIDENTS_STATE.update(() => residentsBefore);
-    res.status(e.status || 500).json({ error: e.message });
+    throw e;
   }
+}
+
+app.post('/api/sessions', (req, res) => {
+  try { res.json(createSessionForRequest(req.body || {})); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+
 
 app.post('/api/sessions/:id/send', async (req, res) => {
   try {
@@ -3739,6 +3770,15 @@ function isRoomResidentState(value) {
       if (typeof resident.sessionId !== 'string' || !UUID_RE.test(resident.sessionId)) return false;
       if (sessionIds.has(resident.sessionId)) return false;
       sessionIds.add(resident.sessionId);
+      // Optional wake schedule: how often Feather pings the resident with
+      // "if there is something to do, do it". Absent or null means only
+      // Sidecar or the user wakes it.
+      const wakeMs = resident.wakeIntervalMs;
+      if (wakeMs !== undefined && wakeMs !== null && !(Number.isFinite(wakeMs) && wakeMs >= 60_000 && wakeMs <= 8.64e15)) return false;
+      const nextMs = resident.nextWakeAtMs;
+      if (nextMs !== undefined && nextMs !== null && !(Number.isFinite(nextMs) && nextMs >= 0 && nextMs <= 8.64e15)) return false;
+      const lastAt = resident.lastWakeAt;
+      if (lastAt !== undefined && lastAt !== null && (typeof lastAt !== 'string' || !Number.isFinite(Date.parse(lastAt)))) return false;
     }
   }
   return true;
@@ -4185,6 +4225,7 @@ const FEED_MESSAGES_PER_ROOM = 8;
 const feedMessageCache = new Map();
 const EXCLUDED_FEED_MESSAGE_PREFIXES = [
   '[feather-sidecar ',
+  FEED_COMMENT_PREFIX,
   '[Cross-Room ·',
   '<system-notice>',
   '<system-reminder>',
@@ -4262,11 +4303,78 @@ function buildFeedProjection() {
   });
 
   feedHistory = mergeSuperFeed(feedHistory, current, rooms);
+  const items = attachFeedComments(feedHistory, rooms);
   return {
-    items: feedHistory,
-    cursor: superFeedCursor(feedHistory),
+    items,
+    cursor: superFeedCursor(items),
     generatedAt: new Date().toISOString(),
   };
+}
+
+// Leader transcript tail as plain {role, text, timestamp} rows, for matching
+// comment replies. Separate cache from roomFeedMessages: this one keeps the
+// tagged comment messages that the feed itself hides.
+const feedReplyCache = new Map();
+function roomLeaderTranscript(room, count = 120) {
+  if (!room.leaderSessionId) return [];
+  const session = room.sessions.find(candidate => candidate.id === room.leaderSessionId);
+  const agent = session?.agent || 'omp';
+  const file = findJsonlPath(room.leaderSessionId, agent);
+  if (!file) return [];
+  try {
+    const stat = fs.statSync(file);
+    const signature = `${stat.size}:${stat.mtimeMs}:${count}`;
+    const cached = feedReplyCache.get(room.leaderSessionId);
+    if (cached?.signature === signature) return cached.messages;
+    const messages = readLatestMessages(file, agent, count).messages
+      .filter(message => message.role === 'user' || message.role === 'assistant')
+      .map(message => ({
+        role: message.role,
+        timestamp: typeof message.timestamp === 'string' ? message.timestamp : null,
+        text: (message.content || [])
+          .filter(block => block?.type === 'text' && block.text)
+          .map(block => block.text)
+          .join('\n')
+          .trim(),
+      }))
+      .filter(message => message.text);
+    feedReplyCache.set(room.leaderSessionId, { signature, messages });
+    return messages;
+  } catch {
+    return feedReplyCache.get(room.leaderSessionId)?.messages || [];
+  }
+}
+
+function attachFeedComments(items, rooms) {
+  const stored = FEED_COMMENTS_STATE.read().comments;
+  if (stored.length === 0) return items.map(item => ({ ...item, comments: [] }));
+  const byRoom = new Map(rooms.map(room => [room.name, room]));
+  const transcripts = new Map();
+  const byEvidence = new Map();
+  for (const room of new Set(stored.map(comment => comment.room))) {
+    const snapshot = byRoom.get(room);
+    transcripts.set(room, snapshot ? roomLeaderTranscript(snapshot) : []);
+  }
+  for (const comment of stored) {
+    const resolved = feedCommentReplies([comment], transcripts.get(comment.room) || [])[0];
+    const list = byEvidence.get(comment.evidenceId) || [];
+    list.push(resolved);
+    byEvidence.set(comment.evidenceId, list);
+  }
+  return items.map(item => ({ ...item, comments: byEvidence.get(item.evidenceId) || [] }));
+}
+
+async function readyRoomLeader(roomName) {
+  const leaderId = ROOM_LEADERS_STATE.read()[roomName] || null;
+  if (!leaderId || !validRoomLeaderDesignation(roomName, leaderId)) throw httpError(409, `#${roomName} has no available Leader`);
+  if (!tmuxIsActive(leaderId)) {
+    resumeSession(leaderId, path.join(ROOMS_HOME_DIR, roomName));
+    for (let attempt = 0; attempt < 30 && !tmuxIsActive(leaderId); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  if (!tmuxIsActive(leaderId)) throw httpError(503, `#${roomName} Leader did not become ready`);
+  return leaderId;
 }
 const feedSnapshotCache = createSnapshotCache(buildFeedProjection, { ttlMs: 10_000 });
 
@@ -4300,6 +4408,33 @@ app.post('/api/feed/following', (req, res) => {
     const state = FEED_PREFERENCES_STATE.read();
     FEED_PREFERENCES_STATE.write({ ...state, rooms: following });
     res.json({ ok: true, following });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// A comment on a feed card goes to the Room Leader as chat; the reply comes
+// back through the feed projection (see attachFeedComments).
+app.post('/api/feed/comments', async (req, res) => {
+  try {
+    const evidenceId = String(req.body?.evidenceId || '').trim();
+    if (!evidenceId || evidenceId.length > 500) throw httpError(400, 'evidenceId is required');
+    let text;
+    try { text = normalizeFeedCommentText(req.body?.text); }
+    catch (error) { throw httpError(400, error.message); }
+    if (!text) throw httpError(400, 'comment text is required');
+    const item = feedSnapshotCache.get().items.find(candidate => candidate.evidenceId === evidenceId);
+    if (!item) throw httpError(404, 'no such feed item');
+    const roomName = item.room;
+    if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
+    const leaderId = await readyRoomLeader(roomName);
+    const commentId = randomUUID().replaceAll('-', '');
+    const prompt = feedCommentPrompt({ commentId, roomName, item, text });
+    const receipt = await sendInputIdempotent(leaderId, prompt, commentId);
+    const comment = { id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(), leaderSessionId: leaderId };
+    FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
+    feedSnapshotCache.refresh();
+    res.status(201).json({ ok: true, comment: { ...comment, delivered: false, reply: null } });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -4383,28 +4518,55 @@ app.get('/api/rooms/:name/friction', (req, res) => {
   }
 });
 
-// Scaffold a new room folder — same shape as `room new` in bin/room.
+// Scaffold a new Room from the template and, when a mission is given, staff
+// it: one OMP Leader plus the standard Ralph residents (caretaker, updater,
+// marketer). The mission sentence is stamped verbatim into AGENTS.md, the
+// Wiki, notes.md, and the Leader's first message.
+const ROOM_KICKOFF_DELAY_MS = Math.max(0, Number(process.env.FEATHER_ROOM_KICKOFF_DELAY_MS) || 8_000);
+function staffRoom(name, mission) {
+  const cwd = path.join(ROOMS_HOME_DIR, name);
+  const leader = createSessionForRequest({ id: randomUUID(), cwd, agent: 'omp', roomName: name, roomRole: 'leader' });
+  const residents = [];
+  for (const spec of ROOM_STANDARD_RESIDENTS) {
+    const created = createSessionForRequest({
+      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE,
+      roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
+    });
+    updateMeta((meta) => ({ ...meta, [created.id]: { ...(meta[created.id] || {}), title: `${spec.role}: #${name}` } }));
+    residents.push({ role: spec.role, sessionId: created.id, wakeIntervalMs: spec.wakeIntervalMs });
+  }
+  updateMeta((meta) => ({ ...meta, [leader.id]: { ...(meta[leader.id] || {}), title: `#${name}` } }));
+  // The caretaker covers what the status reporter used to; keep the Room
+  // pulse quiet so a fresh Room runs four sessions, not five.
+  ROOM_PULSES_STATE.update((current) => ({
+    ...current,
+    [name]: pulseRecord(current[name], { enabled: false, status: 'paused', nextRunAtMs: null, error: null }),
+  }));
+  const kickoff = leaderKickoffPrompt({ roomName: name, mission });
+  setTimeout(() => {
+    sendInput(leader.id, kickoff)
+      .catch((error) => console.warn(`[room] #${name} kickoff failed:`, error.message));
+  }, ROOM_KICKOFF_DELAY_MS);
+  return { leaderSessionId: leader.id, residents };
+}
+
 app.post('/api/rooms', (req, res) => {
   try {
     const name = String(req.body?.name || '').trim();
     if (!ROOM_NAME_RE.test(name)) throw httpError(400, 'bad room name (lowercase, digits, dashes)');
+    let mission;
+    try { mission = normalizeRoomMission(req.body?.mission); }
+    catch (error) { throw httpError(400, error.message); }
+    const staff = req.body?.staff === undefined ? Boolean(mission) : Boolean(req.body.staff);
+    if (staff && !mission) throw httpError(400, 'a mission sentence is required to staff a room');
     const dir = path.join(ROOMS_HOME_DIR, name);
     if (fs.existsSync(dir)) throw httpError(409, 'room exists');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'AGENTS.md'), [
-      `# Room: #${name}`,
-      '',
-      '<!-- Two lines on what this room is about. Edit me. -->',
-      '',
-      'Follow the shared room doctrine: read ~/rooms/_doctrine.md now.',
-      'On start, read notes.md — it is the room\'s memory; this chat is not.',
-      '',
-    ].join('\n'));
-    fs.symlinkSync('AGENTS.md', path.join(dir, 'CLAUDE.md'));
-    fs.writeFileSync(path.join(dir, 'notes.md'),
-      `# #${name} — notes\n\nWorking memory for this room. Sessions append decisions and open\nthreads as they happen (\`room note "..."\`). Newest at the bottom.\n`);
+    const files = scaffoldRoom(dir, { name, mission });
     roomSnapshotCache.refresh();
-    res.json({ name, cwd: dir });
+    const staffing = staff ? staffRoom(name, mission) : null;
+    if (staffing) roomSnapshotCache.refresh();
+    res.json({ name, cwd: dir, mission, files, ...(staffing || {}) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -4598,6 +4760,56 @@ function checkRoomPulses() {
   roomSnapshotCache.invalidate();
 }
 
+// Resident wakes: the "if there is something to do, do it" ping. Each Room
+// resident with a wakeIntervalMs gets a wake prompt when due, unless its
+// Ralph loop is still running from the previous wake. RALPH_COMPLETE only
+// puts a resident to sleep; the next wake re-arms it.
+function residentWakeDue(resident, sessionId, meta, now) {
+  const interval = Number(resident?.wakeIntervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) return false;
+  const next = Number.isFinite(resident.nextWakeAtMs) ? resident.nextWakeAtMs : ROOM_PULSE_STARTED_AT + interval;
+  if (now < next) return false;
+  const ralph = meta[sessionId]?.ralph;
+  if (ralph?.enabled && (ralph.status === 'working' || ralph.status === 'scheduled') && tmuxIsActive(sessionId)) return false;
+  return true;
+}
+
+const residentWakesInFlight = new Set();
+function checkResidentWakes() {
+  if (!ROOM_PULSES_ENABLED) return;
+  const now = Date.now();
+  const meta = readMeta();
+  const residentState = ROOM_RESIDENTS_STATE.read();
+  const roomNames = new Set(listRoomDirs());
+  for (const [roomName, residents] of Object.entries(residentState)) {
+    if (!roomNames.has(roomName)) continue;
+    for (const [role, resident] of Object.entries(residents)) {
+      const sessionId = resident.sessionId;
+      if (residentWakesInFlight.has(sessionId)) continue;
+      if (!residentWakeDue(resident, sessionId, meta, now)) continue;
+      if (meta[sessionId]?.mode !== RALPH_MODE) continue;
+      const interval = resident.wakeIntervalMs;
+      const at = new Date(now);
+      ROOM_RESIDENTS_STATE.update((current) => {
+        const entry = current[roomName]?.[role];
+        if (!entry || entry.sessionId !== sessionId) return current;
+        return {
+          ...current,
+          [roomName]: { ...current[roomName], [role]: { ...entry, nextWakeAtMs: now + interval, lastWakeAt: at.toISOString() } },
+        };
+      });
+      const spec = ROOM_STANDARD_RESIDENTS.find((candidate) => candidate.role === role);
+      const charter = spec?.charter || `${role.toUpperCase()}.md`;
+      const prompt = residentWakePrompt({ roomName, role, charter, at });
+      residentWakesInFlight.add(sessionId);
+      prepareRalphForHumanInput(sessionId);
+      sendInput(sessionId, prompt)
+        .catch((error) => console.warn(`[room wake] #${roomName} ${role}:`, error.message))
+        .finally(() => residentWakesInFlight.delete(sessionId));
+    }
+  }
+}
+
 // Validate every durable JSON document before accepting traffic. Only truly
 // missing files receive their documented defaults; corruption fails startup.
 for (const state of [
@@ -4750,5 +4962,6 @@ server.listen(PORT, '0.0.0.0', () => {
   if (ROOM_PULSES_ENABLED) {
     setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));
     setInterval(checkRoomPulses, ROOM_PULSE_CHECK_MS);
+    setInterval(checkResidentWakes, ROOM_PULSE_CHECK_MS);
   }
 });

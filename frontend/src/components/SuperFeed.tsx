@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { fetchSuperFeed, setFeedFollowing, SuperFeedItem, SuperFeedView } from '../api'
+import { fetchSuperFeed, postFeedComment, setFeedFollowing, FeedComment, SuperFeedItem, SuperFeedView } from '../api'
 import { appUrl } from '../lib/appPath'
 
 const views: Array<{ key: SuperFeedView, label: string }> = [
@@ -33,6 +33,10 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
   const [loading, setLoading] = createSignal(true)
   const [error, setError] = createSignal<string | null>(null)
   const [followBusy, setFollowBusy] = createSignal<string | null>(null)
+  const [commentOpen, setCommentOpen] = createSignal<string | null>(null)
+  const [commentDraft, setCommentDraft] = createSignal('')
+  const [commentBusy, setCommentBusy] = createSignal(false)
+  const [pendingComments, setPendingComments] = createSignal<Record<string, FeedComment[]>>({})
 
   let timer: ReturnType<typeof setInterval>
   let requestInFlight = false
@@ -110,6 +114,40 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
     }
   }
 
+  function toggleComment(item: SuperFeedItem, event: MouseEvent) {
+    event.stopPropagation()
+    setCommentOpen(commentOpen() === item.evidenceId ? null : item.evidenceId)
+    setCommentDraft('')
+  }
+
+  async function submitComment(item: SuperFeedItem, event: Event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const text = commentDraft().trim()
+    if (!text || commentBusy()) return
+    setCommentBusy(true)
+    try {
+      const comment = await postFeedComment(item.evidenceId, text)
+      setPendingComments(current => ({ ...current, [item.evidenceId]: [...(current[item.evidenceId] || []), comment] }))
+      setCommentDraft('')
+      setError(null)
+      etag = null
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setCommentBusy(false)
+    }
+  }
+
+  // Server comments win; pending ones show until the projection catches up.
+  const commentsFor = (item: SuperFeedItem): FeedComment[] => {
+    const server = item.comments || []
+    const known = new Set(server.map(comment => comment.id))
+    const pending = (pendingComments()[item.evidenceId] || []).filter(comment => !known.has(comment.id))
+    return [...server, ...pending]
+  }
+
   return (
     <section data-testid="super-feed" style={{ 'margin-bottom': '24px' }}>
       <div style={{ display: 'flex', 'justify-content': 'flex-end', 'margin-bottom': '5px' }}>
@@ -173,6 +211,37 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void })
             </Show>
             <Show when={item.complaintId}>
               <div style={{ color: '#665b4b', 'font-size': '9px', 'font-family': 'monospace', 'margin-top': '7px' }}>{item.complaintId}</div>
+            </Show>
+            <Show when={item.kind !== 'friction' && item.sourceState === 'available'}>
+              <div onClick={(event) => event.stopPropagation()} style={{ 'margin-top': '9px' }}>
+                <For each={commentsFor(item)}>{(comment) => (
+                  <div data-testid={`feed-comment-${comment.id}`} style={{ 'border-left': '2px solid #2a3442', padding: '4px 0 4px 9px', 'margin-bottom': '6px' }}>
+                    <div style={{ color: '#d5dbe4', 'font-size': '12px', 'line-height': '1.4', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
+                      <span style={{ color: '#8190a4', 'font-size': '10px', 'font-weight': '700', 'margin-right': '6px' }}>YOU</span>{comment.text}
+                    </div>
+                    <Show when={comment.reply} fallback={<div style={{ color: '#667080', 'font-size': '10px', 'margin-top': '3px' }}>#{comment.room} is answering…</div>}>
+                      <div style={{ color: '#bdc5d0', 'font-size': '12px', 'line-height': '1.45', 'margin-top': '5px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>
+                        <span style={{ color: '#69c77f', 'font-size': '10px', 'font-weight': '700', 'margin-right': '6px' }}>#{comment.room.toUpperCase()}</span>{comment.reply!.text}
+                      </div>
+                    </Show>
+                  </div>
+                )}</For>
+                <Show when={commentOpen() === item.evidenceId} fallback={
+                  <button data-testid={`feed-comment-open-${item.evidenceId}`} onClick={(event) => toggleComment(item, event)}
+                    style={{ background: 'none', border: 'none', color: '#8d9bae', 'font-size': '11px', padding: '2px 0', cursor: 'pointer' }}>Comment</button>
+                }>
+                  <form onSubmit={(event) => submitComment(item, event)} style={{ display: 'flex', gap: '6px', 'align-items': 'flex-end' }}>
+                    <textarea data-testid={`feed-comment-input-${item.evidenceId}`} value={commentDraft()} onInput={(event) => setCommentDraft(event.currentTarget.value)}
+                      placeholder={`Ask #${item.room} about this…`} rows={2} autofocus
+                      onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitComment(item, event) }}
+                      style={{ flex: '1', background: '#0b0e13', border: '1px solid #2a3442', 'border-radius': '8px', color: '#e2e7ee', 'font-size': '13px', padding: '7px 9px', resize: 'vertical', 'font-family': 'inherit' }} />
+                    <button type="submit" disabled={commentBusy() || !commentDraft().trim()}
+                      style={{ background: '#202938', border: 'none', color: '#f0f3f8', 'font-size': '12px', 'font-weight': '700', padding: '8px 12px', 'border-radius': '8px', cursor: 'pointer' }}>{commentBusy() ? '…' : 'Send'}</button>
+                    <button type="button" onClick={(event) => toggleComment(item, event)}
+                      style={{ background: 'none', border: 'none', color: '#7f8998', 'font-size': '12px', padding: '8px 4px', cursor: 'pointer' }}>Cancel</button>
+                  </form>
+                </Show>
+              </div>
             </Show>
             <Show when={item.kind === 'friction' && item.sourceState === 'available'}>
               <a href={appUrl(item.sourceHref)} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}

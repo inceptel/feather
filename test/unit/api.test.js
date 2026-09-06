@@ -535,7 +535,7 @@ describe('Room Ralph publication capability', () => {
       const residents = (await residentsResponse.json()).residents
       assert.deepEqual(residents.map(resident => resident.role), ['updater'])
 
-      fs.mkdirSync(path.join(cwd, 'artifacts'))
+      fs.mkdirSync(path.join(cwd, 'artifacts'), { recursive: true })
       const visualBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
       fs.writeFileSync(path.join(cwd, 'artifacts/brief.png'), visualBytes)
       const body = {

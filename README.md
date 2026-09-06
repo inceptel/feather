@@ -101,6 +101,28 @@ regardless of which background or historical chat spoke most recently. Expanding
 the card keeps Main first and shows only four other chats; **Manage other chats**
 reveals the full history plus Make main and Detach actions.
 
+A Room is created from one mission sentence, in the user's own words:
+
+```bash
+room new ev-shop --mission "build me a business plan for an EV-only auto shop at 815 3rd St"
+```
+
+Feather scaffolds the folder (`AGENTS.md` with the mission verbatim, one charter
+per resident, `notes.md`, `wiki/Home.md`), opens an OMP Leader, and registers
+three OMP Ralph residents: a **caretaker** that wakes every 15 minutes and keeps
+`wiki/` current from the other sessions' logs, an **updater** that wakes every
+30 minutes and decides what is worth publishing to Super Feed, and a
+**marketer** the updater briefs over Sidecar to write the card and render its
+image with `room visual` (Gemini through `~/gemini.py`, with a plain text card as
+the fallback). The Leader receives the mission as its first message. A resident
+that ends a wake with `RALPH_COMPLETE` simply sleeps until its next slot.
+`room new <name>` without a mission scaffolds the same files locally and starts
+nothing; the Rooms home's **New room** button asks for the mission as well.
+
+Each Super Feed card has a **Comment** box. A comment goes to that Room's
+Leader as a tagged chat message, and the Leader's next reply is shown under the
+card. Comments are kept in the instance state and never appear as feed cards.
+
 By default, Feather checks each inactive Room every 15 minutes and launches one
 non-interactive OMP session to do the next useful thing. The Room card shows when
 it last worked and when it will check again. Pause or resume that behavior from

@@ -8,7 +8,10 @@
 # delegate.
 #
 # Usage:
-#   room new <name>                    scaffold a room folder
+#   room new <name> [--mission TEXT|--stdin|--file PATH]
+#                                      create a room; with a mission, Feather
+#                                      staffs it (Leader + caretaker/updater/marketer)
+#   room visual --out FILE.png "<prompt>" render a card image (Gemini, else text card)
 #   room list                          list rooms
 #   room note TEXT|--stdin|--file PATH   append durable working memory
 #   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
@@ -150,23 +153,131 @@ attempt_status() {  # $1 = outfile → echoes ok|failed
 
 # ── Commands ────────────────────────────────────────────────────────────────
 
+# Bare rooms are scaffolded locally from lib/room-template.js (no Feather
+# needed, so `room complain` can create #friction offline). A mission goes
+# through Feather, which scaffolds the same files and staffs the room.
+scaffold_room_local() {
+  local name="$1" script_dir
+  script_dir="$(CDPATH= cd -- "$(dirname -- "$(readlink -f "$0")")" && pwd)"
+  node --input-type=module -e '
+import { pathToFileURL } from "node:url"
+const { scaffoldRoom } = await import(pathToFileURL(process.argv[1]).href)
+const files = scaffoldRoom(process.argv[3], { name: process.argv[2] })
+console.log("created", process.argv[3], "(" + files.join(", ") + ")")
+' "$script_dir/../lib/room-template.js" "$name" "$ROOMS_DIR/$name"
+}
+
 cmd_new() {
-  local name="${1:-}"; [ -n "$name" ] || die "usage: room new <name>"
+  local name="${1:-}"; [ -n "$name" ] || die "usage: room new <name> [--mission TEXT|--stdin|--file PATH]"
+  shift
+  case "$name" in *[!a-z0-9-]*|'') die "room new: bad room name (lowercase, digits, dashes)" ;; esac
   local dir="$ROOMS_DIR/$name"
   [ -e "$dir" ] && die "already exists: $dir"
-  mkdir -p "$dir"
-  cat >"$dir/AGENTS.md" <<EOF
-# Room: #$name
+  local mission=""
+  if [ "${1:-}" = "--mission" ]; then
+    shift
+    read_room_text new "$@"
+    mission="$ROOM_TEXT"
+  elif [ $# -gt 0 ]; then
+    die "usage: room new <name> [--mission TEXT|--stdin|--file PATH]"
+  fi
+  if [ -z "$mission" ]; then
+    mkdir -p "$ROOMS_DIR"
+    scaffold_room_local "$name" || die "room new: could not scaffold $dir"
+    echo "next: edit AGENTS.md, then pin a Feather chat with cwd $dir"
+    echo "      (or: room new <name> --mission \"...\" to have Feather staff it)"
+    return 0
+  fi
+  ensure_feather_url
+  local payload response
+  payload="$(python3 -c 'import json,sys; print(json.dumps({"name": sys.argv[1], "mission": sys.argv[2]}))' "$name" "$mission")" \
+    || die "room new: could not encode request"
+  response="$(curl -sS -X POST "$FEATHER_URL/api/rooms" -H 'Content-Type: application/json' -d "$payload")" \
+    || die "room new: Feather request failed"
+  python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except ValueError:
+    raise SystemExit("room new: unexpected Feather response: " + sys.argv[1][:200])
+if "error" in data:
+    raise SystemExit("room new: " + data["error"])
+print("created", data.get("cwd", ""), "(" + ", ".join(data.get("files", [])) + ")")
+if data.get("leaderSessionId"):
+    print("Leader session:", data["leaderSessionId"])
+    for resident in data.get("residents", []):
+        wake = resident.get("wakeIntervalMs")
+        print("  resident", resident["role"], resident["sessionId"], ("wakes every %d min" % (wake // 60000)) if wake else "woken by Sidecar")
+    print("The Leader has the mission and is starting now; open it in Feather.")
+' "$response"
+}
 
-<!-- Two lines on what this room is about. Edit me. -->
-
-Follow the shared room doctrine: read ~/rooms/_doctrine.md now.
-On start, read notes.md — it is the room's memory; this chat is not.
-EOF
-  ln -s AGENTS.md "$dir/CLAUDE.md"
-  printf '# %s — notes\n\nWorking memory for this room. Sessions append decisions and open\nthreads as they happen (`room note "..."`). Newest at the bottom.\n' "#$name" >"$dir/notes.md"
-  echo "created $dir (AGENTS.md, CLAUDE.md -> AGENTS.md, notes.md)"
-  echo "next: edit the AGENTS.md header, then pin a Feather chat with cwd $dir"
+# Card image for a Super Feed publication. Gemini (via ~/gemini.py and
+# OpenRouter) when available; otherwise a plain rendered text card so the
+# updater can always publish. Prints which path produced the file.
+cmd_visual() {
+  local out=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --out) [ "$#" -ge 2 ] || die "room visual: --out requires a path"; out="$2"; shift 2 ;;
+      *) break ;;
+    esac
+  done
+  [ -n "$out" ] || die 'usage: room visual --out FILE.png "<prompt>"'
+  case "$out" in *.png) ;; *) die "room visual: --out must end in .png" ;; esac
+  read_room_text visual "$@"
+  local prompt="$ROOM_TEXT"
+  mkdir -p "$(dirname "$out")"
+  local gemini="${ROOM_GEMINI_SCRIPT:-$HOME/gemini.py}"
+  local tmp="$out.tmp.$$"
+  # gemini.py's CLI cannot take a text-only prompt (argparse eats it as the
+  # image path), so call its generate() directly.
+  if [ -f "$gemini" ] && timeout "${ROOM_VISUAL_TIMEOUT:-180}" python3 - "$gemini" "$prompt" "$tmp" >/dev/null 2>"$tmp.err" <<'PY' \
+     && [ -s "$tmp" ]; then
+import importlib.util, sys
+from PIL import Image
+spec = importlib.util.spec_from_file_location("gemini", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+saved, text, usage = module.generate(sys.argv[2], output=sys.argv[3])
+if not saved:
+    raise SystemExit("no image returned: %s" % (usage,))
+# OpenRouter usually returns JPEG whatever name is asked for; the feed wants PNG.
+image = Image.open(sys.argv[3])
+image.load()
+image.convert("RGB").save(sys.argv[3], "PNG")
+PY
+    mv "$tmp" "$out"; rm -f "$tmp.err"
+    echo "gemini $out"
+    return 0
+  fi
+  local reason=""
+  [ -f "$tmp.err" ] && reason="$(tail -c 300 "$tmp.err" 2>/dev/null | tr '\n' ' ')"
+  rm -f "$tmp" "$tmp.err"
+  python3 - "$out" "$prompt" <<'PY' || die "room visual: fallback render failed"
+import sys, textwrap
+from PIL import Image, ImageDraw, ImageFont
+out, prompt = sys.argv[1], sys.argv[2]
+W, H = 1200, 675
+img = Image.new("RGB", (W, H), (13, 17, 23))
+draw = ImageDraw.Draw(img)
+for y in range(H):
+    shade = 13 + int(18 * y / H)
+    draw.line([(0, y), (W, y)], fill=(shade, shade + 4, shade + 10))
+try:
+    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+except Exception:
+    font = ImageFont.load_default()
+lines = textwrap.wrap(prompt, width=48)[:8]
+y = (H - len(lines) * 54) // 2
+for line in lines:
+    w = draw.textlength(line, font=font)
+    draw.text(((W - w) / 2, y), line, fill=(226, 231, 238), font=font)
+    y += 54
+draw.rectangle([(40, 40), (W - 40, H - 40)], outline=(42, 52, 66), width=3)
+img.save(out, "PNG")
+PY
+  echo "fallback $out${reason:+ (gemini: $reason)}"
 }
 
 cmd_list() {
@@ -571,6 +682,7 @@ while [ "${1:-}" = "-r" ]; do ROOM_NAME="$2"; ROOM_PATH="$ROOMS_DIR/$2"; shift 2
 cmd="$1"; shift
 case "$cmd" in
   new) cmd_new "$@" ;;
+  visual) cmd_visual "$@" ;;
   list) cmd_list "$@" ;;
   note) cmd_note "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
