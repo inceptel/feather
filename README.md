@@ -123,8 +123,8 @@ attention without durable approval or decision evidence. Cards link back to
 their source, retain stale locators when a source disappears, and never expose
 raw notes, unkeyed legacy complaints, legacy Updates, Sidecar traffic, or tool
 activity. Complaint status remains unknown unless a canonical resolution event
-proves otherwise, and complaint summary/evidence fields are bounded in the
-projection.
+proves otherwise. Complaint IDs and Room names must fit the writer's ASCII
+bounds; summary/evidence fields are bounded by Unicode code point.
 
 The client conditionally polls with ETags every 10 seconds and preserves its
 last-good view on a transient failure. The Room and feed projections each use a

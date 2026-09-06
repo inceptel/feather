@@ -115,16 +115,30 @@ describe('Super Feed projection', () => {
     assert.equal(merged.some(item => item.needsReview), false)
   })
 
-  it('bounds agent-writable complaint fields in the projection', () => {
+  it('removes a pulse failure when its Room is deleted', () => {
+    const previous = buildSuperFeed({
+      rooms: [{
+        name: 'deleted', leaderSessionId: 'leader-deleted', updatedAt: '2026-09-05T12:00:00Z',
+        latest: null, sessions: [{ id: 'leader-deleted' }],
+        pulse: { status: 'error', error: 'Room check failed', lastRunAt: '2026-09-05T12:30:00Z' },
+      }],
+    })
+    const merged = mergeSuperFeed(previous, [], [])
+
+    assert.equal(merged.some(item => item.kind === 'alert'), false)
+    assert.equal(merged.some(item => item.needsReview), false)
+  })
+
+  it('bounds complaint fields by Unicode code point without splitting a surrogate', () => {
     const [item] = buildSuperFeed({
       rooms: [{ name: 'health' }],
       complaints: [{
         id: 'oversized', hasStableId: true, source: 'health', timestamp: '2026-09-05T13:00:00Z',
-        summary: 's'.repeat(601), evidence: 'e'.repeat(1_201),
+        summary: '😀'.repeat(601), evidence: 'e'.repeat(1_201),
       }],
     })
 
-    assert.equal(item.summary, 's'.repeat(600))
+    assert.equal(item.summary, '😀'.repeat(600))
     assert.equal(item.detail, 'e'.repeat(1_200))
   })
 })
