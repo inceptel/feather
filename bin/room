@@ -43,6 +43,10 @@ LOOKUP_TIMEOUT="${ROOM_LOOKUP_TIMEOUT:-180}"
 
 die() { echo "room: $*" >&2; exit 1; }
 
+print_usage() {
+  grep '^#   room' "$0" | sed 's/^#   //'
+}
+
 ensure_feather_url() {
   [ -n "$FEATHER_URL" ] && return
   local script_dir
@@ -69,6 +73,7 @@ read_room_text() {
       [ "$#" -eq 1 ] || die "usage: room $command TEXT | --stdin | --file PATH"
       ROOM_TEXT="$1"
       ;;
+    --*) die "room $command: unknown option: $1" ;;
     *)
       [ "$#" -eq 1 ] || die "usage: room $command TEXT | --stdin | --file PATH"
       ROOM_TEXT="${1:-}"
@@ -295,6 +300,13 @@ cmd_note() {
 }
 
 cmd_dispatch() {
+  case "${1:-}" in
+    --help|-h)
+      [ "$#" -eq 1 ] || die "usage: room dispatch [--id ID] [--to ROLE] TEXT | --stdin | --file PATH"
+      print_usage
+      return 0
+      ;;
+  esac
   resolve_room
   local message_id="" target="caretaker"
   while [ $# -gt 0 ]; do
@@ -309,6 +321,8 @@ cmd_dispatch() {
         target="${2:-}"
         shift 2
         ;;
+      --) break ;;
+      --*) die "room dispatch: unknown option: $1" ;;
       *) break ;;
     esac
   done
@@ -677,10 +691,11 @@ session must be able to continue from this alone."
 }
 
 # ── Dispatch ────────────────────────────────────────────────────────────────
-[ $# -ge 1 ] || { grep '^#   room' "$0" | sed 's/^#   //'; exit 1; }
+[ $# -ge 1 ] || { print_usage; exit 1; }
 while [ "${1:-}" = "-r" ]; do ROOM_NAME="$2"; ROOM_PATH="$ROOMS_DIR/$2"; shift 2; done
 cmd="$1"; shift
 case "$cmd" in
+  help|--help|-h) print_usage ;;
   new) cmd_new "$@" ;;
   visual) cmd_visual "$@" ;;
   list) cmd_list "$@" ;;

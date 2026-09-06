@@ -224,6 +224,32 @@ describe('room assignment CLI', () => {
     )
   })
 
+  it('prints help without dispatch side effects and rejects unknown options', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-help-'))
+    roots.push(root)
+    const roomsDir = path.join(root, 'rooms')
+    const roomDir = path.join(roomsDir, 'feather')
+    fs.mkdirSync(roomDir, { recursive: true })
+    const notesPath = path.join(roomDir, 'notes.md')
+    fs.writeFileSync(notesPath, '# notes\n')
+    const env = { ...process.env, HOME: root, ROOMS_DIR: roomsDir, FEATHER_URL: '' }
+    const cli = path.resolve(import.meta.dirname, '../../bin/room')
+
+    for (const args of [['help'], ['--help'], ['-h'], ['dispatch', '--help']]) {
+      const result = await run(cli, args, { cwd: root, env })
+      assert.match(result.stdout, /room dispatch \[--id ID\] \[--to ROLE\]/)
+    }
+    assert.equal(fs.readFileSync(notesPath, 'utf8'), '# notes\n')
+    assert.equal(fs.existsSync(path.join(roomsDir, '.feather.notes.lock')), false)
+
+    await assert.rejects(
+      run(cli, ['dispatch', '--bogus'], { cwd: roomDir, env }),
+      /room dispatch: unknown option: --bogus/,
+    )
+    assert.equal(fs.readFileSync(notesPath, 'utf8'), '# notes\n')
+    assert.equal(fs.existsSync(path.join(roomsDir, '.feather.notes.lock')), false)
+  })
+
   it('dispatches a durable note directly to a paused Room caretaker and retries idempotently', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-dispatch-'))
     roots.push(root)
@@ -263,14 +289,19 @@ describe('room assignment CLI', () => {
     try {
       await run(cli, ['dispatch', '--id', id, '--to', 'caretaker', evidence], { cwd: roomDir, env })
       await run(cli, ['dispatch', '--id', id, '--to', 'caretaker', evidence], { cwd: roomDir, env })
+      const literalId = 'literal-help-dispatch'
+      await run(cli, ['dispatch', '--id', literalId, '--to', 'caretaker', '--', '--help'], { cwd: roomDir, env })
       const notes = fs.readFileSync(path.join(roomDir, 'notes.md'), 'utf8')
       assert.equal(notes.split(`[dispatch:${id}]`).length - 1, 1)
       assert.equal(notes.split(evidence).length - 1, 1)
+      assert.ok(notes.includes(`[dispatch:${literalId}] --help`))
       const sends = requests.filter((request) => request.url === '/api/sessions/caretaker-session/send')
-      assert.equal(sends.length, 2)
-      assert.ok(sends.every((request) => request.messageId === id))
-      assert.ok(sends.every((request) => request.body.text.includes(`[dispatch:${id}]`)))
-      assert.ok(sends.every((request) => !request.body.text.includes(evidence)))
+      const retrySends = sends.filter((request) => request.messageId === id)
+      assert.equal(retrySends.length, 2)
+      assert.ok(retrySends.every((request) => request.body.text.includes(`[dispatch:${id}]`)))
+      assert.ok(retrySends.every((request) => !request.body.text.includes(evidence)))
+      assert.ok(sends.some((request) => request.messageId === literalId
+        && request.body.text.includes(`[dispatch:${literalId}]`)))
       assert.equal(requests.some((request) => request.url.endsWith('/pulse')), false)
     } finally {
       await new Promise((resolve) => server.close(resolve))
