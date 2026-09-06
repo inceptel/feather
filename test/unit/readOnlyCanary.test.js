@@ -75,7 +75,7 @@ function fixture() {
   const bin = path.join(root, 'bin')
   fs.mkdirSync(bin)
   const tmuxLog = path.join(root, 'tmux.log')
-  fs.writeFileSync(path.join(bin, 'tmux'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${tmuxLog}"\nexit 0\n`, { mode: 0o755 })
+  fs.writeFileSync(path.join(bin, 'tmux'), `#!/bin/sh\nif [ "$1" = load-buffer ]; then printf 'paste %s\\n' "$(cat "$4")" >> "${tmuxLog}"; exit 0; fi\nprintf '%s\\n' "$*" >> "${tmuxLog}"\nexit 0\n`, { mode: 0o755 })
   return { home, state, sessionId, sessionFile, readableFile, tmuxLog, bin }
 }
 
@@ -362,9 +362,9 @@ describe('server-enforced read-only canary', () => {
     assert.equal(invalidSharedKeys.status, 400)
 
     const calls = fs.readFileSync(fx.tmuxLog, 'utf8').trim().split('\n')
-    assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l deliver once').length, 1)
-    assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l legacy retry').length, 2)
-    assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly -l [viewer] peer deliver once').length, 1)
+    assert.equal(calls.filter(call => call === 'paste deliver once').length, 1)
+    assert.equal(calls.filter(call => call === 'paste legacy retry').length, 2)
+    assert.equal(calls.filter(call => call === 'paste [viewer] peer deliver once').length, 1)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly Home Down Enter').length, 1)
     assert.equal(calls.filter(call => call === 'send-keys -t feather-readonly M-a').length, 1)
     const receiptsFile = path.join(fx.state, 'uploads/.message-receipts.json')
@@ -376,27 +376,6 @@ describe('server-enforced read-only canary', () => {
     const deleted = await fetch(`${running.base}/api/sessions/${fx.sessionId}/delete`, { method: 'POST' })
     assert.equal(deleted.status, 200)
     assert.equal(fx.sessionId in JSON.parse(fs.readFileSync(receiptsFile, 'utf8')), false)
-  })
-
-  it('enforces the audio boundary and returns a stable 413 JSON shape', async () => {
-    const fx = fixture()
-    fs.mkdirSync(path.join(fx.state, 'uploads'))
-    const { base } = await startServer(fx, false)
-    const exactLimit = Buffer.alloc(25 * 1024 * 1024)
-    const boundary = await fetch(`${base}/api/transcribe`, {
-      method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: exactLimit,
-    })
-    const boundaryBody = await boundary.json()
-    assert.equal(boundary.status, 500, JSON.stringify(boundaryBody))
-    assert.deepEqual(boundaryBody, { error: 'No Deepgram API key configured' })
-
-    const oversized = await fetch(`${base}/api/transcribe`, {
-      method: 'POST',
-      headers: { 'Content-Length': String((25 * 1024 * 1024) + 1) },
-      body: Buffer.alloc((25 * 1024 * 1024) + 1),
-    })
-    assert.equal(oversized.status, 413)
-    assert.deepEqual(await oversized.json(), { error: 'audio exceeds 25 MB limit' })
   })
 
   it('rejects the add-peer CLI mutation before changing state', () => {

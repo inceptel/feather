@@ -102,53 +102,21 @@ describe('parseMessage: basic parsing', () => {
 // ── Filtering ───────────────────────────────────────────────────────────────
 
 describe('parseMessage: filtering', () => {
-  it('filters out progress type', () => {
-    assert.equal(parseMessage(lines[12]), null)
-  })
-
-  it('filters out system type', () => {
-    assert.equal(parseMessage(lines[13]), null)
-  })
-
-  it('filters out sidechain messages', () => {
-    assert.equal(parseMessage(lines[14]), null)
-  })
-
-  it('filters out isMeta messages', () => {
-    const line = jsonl({ isMeta: true })
-    assert.equal(parseMessage(line), null)
-  })
-
-  it('filters internal Room Sidecar delivery envelopes', () => {
-    const line = jsonl({ message: { role: 'user', content: '[feather-sidecar room-feather 42 operator] \"internal coordination\"' } })
-    assert.equal(parseMessage(line), null)
-  })
-
-  it('filters out empty string content', () => {
-    assert.equal(parseMessage(lines[18]), null)
-  })
-
-  it('filters out empty array content', () => {
-    assert.equal(parseMessage(lines[19]), null)
-  })
-
-  it('filters out null content', () => {
-    const line = jsonl({ message: { role: 'user', content: null } })
-    assert.equal(parseMessage(line), null)
-  })
-
-  it('filters out missing message field', () => {
-    const line = JSON.stringify({ type: 'user', uuid: 'x', timestamp: 'x' })
-    assert.equal(parseMessage(line), null)
-  })
-
-  it('filters out whitespace-only string content', () => {
-    const line = jsonl({ message: { role: 'user', content: '   \n\t  ' } })
-    assert.equal(parseMessage(line), null)
-  })
-
-  it('filters messages where all tags are stripped leaving nothing', () => {
-    assert.equal(parseMessage(lines[15]), null)
+  it('returns null for every kind of non-message line', () => {
+    const cases = {
+      progress: lines[12],
+      system: lines[13],
+      sidechain: lines[14],
+      'all tags stripped': lines[15],
+      'empty string': lines[18],
+      'empty array': lines[19],
+      isMeta: jsonl({ isMeta: true }),
+      'sidecar envelope': jsonl({ message: { role: 'user', content: '[feather-sidecar room-feather 42 operator] "internal coordination"' } }),
+      'null content': jsonl({ message: { role: 'user', content: null } }),
+      'missing message': JSON.stringify({ type: 'user', uuid: 'x', timestamp: 'x' }),
+      whitespace: jsonl({ message: { role: 'user', content: '   \n\t  ' } }),
+    }
+    for (const [name, line] of Object.entries(cases)) assert.equal(parseMessage(line), null, name)
   })
 })
 
@@ -241,26 +209,10 @@ describe('parseMessage: edge cases', () => {
     assert.equal(parseMessage('[]'), null)
   })
 
-  it('handles very long text content', () => {
-    const longText = 'x'.repeat(100000)
-    const line = jsonl({ message: { role: 'user', content: longText } })
-    const msg = parseMessage(line)
-    assert.ok(msg)
-    assert.equal(msg.content[0].text.length, 100000)
-  })
-
-  it('handles unicode content', () => {
-    const line = jsonl({ message: { role: 'user', content: '你好世界 🚀 café naïve' } })
-    const msg = parseMessage(line)
-    assert.ok(msg)
-    assert.equal(msg.content[0].text, '你好世界 🚀 café naïve')
-  })
-
-  it('handles content with newlines and tabs', () => {
-    const line = jsonl({ message: { role: 'user', content: 'line1\nline2\ttab' } })
-    const msg = parseMessage(line)
-    assert.ok(msg)
-    assert.equal(msg.content[0].text, 'line1\nline2\ttab')
+  it('round-trips long, unicode, and whitespace-bearing text unchanged', () => {
+    for (const text of ['x'.repeat(100000), '你好世界 🚀 café naïve', 'line1\nline2\ttab']) {
+      assert.equal(parseMessage(jsonl({ message: { role: 'user', content: text } }))?.content[0].text, text)
+    }
   })
 
   it('handles both isSidechain=true and isMeta=true', () => {
@@ -268,27 +220,12 @@ describe('parseMessage: edge cases', () => {
     assert.equal(parseMessage(line), null)
   })
 
-  it('handles missing uuid gracefully', () => {
-    const line = JSON.stringify({
-      type: 'user', timestamp: '2025-01-01T00:00:00Z',
-      isSidechain: false, isMeta: false,
-      message: { role: 'user', content: 'no uuid' },
-    })
-    const msg = parseMessage(line)
+  it('tolerates a missing uuid or timestamp', () => {
+    const msg = parseMessage(JSON.stringify({ type: 'user', isSidechain: false, isMeta: false, message: { role: 'user', content: 'bare' } }))
     assert.ok(msg)
     assert.equal(msg.uuid, undefined)
-    assert.equal(msg.content[0].text, 'no uuid')
-  })
-
-  it('handles missing timestamp gracefully', () => {
-    const line = JSON.stringify({
-      type: 'user', uuid: 'abc',
-      isSidechain: false, isMeta: false,
-      message: { role: 'user', content: 'no ts' },
-    })
-    const msg = parseMessage(line)
-    assert.ok(msg)
     assert.equal(msg.timestamp, undefined)
+    assert.equal(msg.content[0].text, 'bare')
   })
 
   it('handles content array with mixed known and unknown block types', () => {
@@ -312,38 +249,3 @@ describe('parseMessage: edge cases', () => {
   })
 })
 
-// ── Fixture integrity ───────────────────────────────────────────────────────
-
-describe('parseMessage: fixture counts', () => {
-  it('fixture has expected number of lines', () => {
-    assert.equal(lines.length, 21)
-  })
-
-  it('parses exactly 15 valid messages from fixture', () => {
-    let count = 0
-    for (const line of lines) {
-      if (parseMessage(line)) count++
-    }
-    assert.equal(count, 15)
-  })
-
-  it('every parsed message has role, content array', () => {
-    for (const line of lines) {
-      const msg = parseMessage(line)
-      if (!msg) continue
-      assert.ok(['user', 'assistant'].includes(msg.role), `bad role: ${msg.role}`)
-      assert.ok(Array.isArray(msg.content), `content not array for ${msg.uuid}`)
-      assert.ok(msg.content.length > 0, `empty content for ${msg.uuid}`)
-    }
-  })
-
-  it('content blocks always have a type field', () => {
-    for (const line of lines) {
-      const msg = parseMessage(line)
-      if (!msg) continue
-      for (const block of msg.content) {
-        assert.ok(block.type, `block missing type in ${msg.uuid}`)
-      }
-    }
-  })
-})

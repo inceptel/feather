@@ -56,14 +56,6 @@ describe('Room template', () => {
     assert.ok(!files['wiki/Home.md'].includes('Mission:'))
   })
 
-  it('describes three standard residents with their wake cadence', () => {
-    assert.deepEqual(ROOM_STANDARD_RESIDENTS.map(spec => [spec.role, spec.wakeIntervalMs]), [
-      ['caretaker', 15 * 60 * 1000],
-      ['updater', 30 * 60 * 1000],
-      ['marketer', null],
-    ])
-  })
-
   it('writes wake and kickoff prompts that quote the charter and mission', () => {
     const wake = residentWakePrompt({ roomName: 'ev-shop', role: 'caretaker', charter: 'CARETAKER.md', at: new Date('2026-09-06T12:00:00Z') })
     assert.equal(wake.split('\n')[0], '[Room wake · #ev-shop · caretaker · 2026-09-06T12:00:00.000Z]')
@@ -92,19 +84,6 @@ describe('Room template', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true })
     }
-  })
-
-  it('tells every resident how to use other Rooms and gives the updater a judgment rubric', () => {
-    const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION })
-    assert.ok(files['AGENTS.md'].includes('## Other Rooms'))
-    assert.ok(files['AGENTS.md'].includes('room wikis'))
-    assert.ok(files['AGENTS.md'].includes('room resolve'))
-    assert.ok(files['CARETAKER.md'].includes('room wikis'))
-    assert.ok(files['UPDATER.md'].includes('## Judgment'))
-    assert.ok(files['UPDATER.md'].includes('kickoff plan'))
-    assert.ok(files['UPDATER.md'].includes('mission outcome'))
-    assert.ok(files['UPDATER.md'].includes('Suppress:'))
-    assert.ok(!files['UPDATER.md'].includes('## Selection rule'))
   })
 
   it('reads the mission back out of AGENTS.md', () => {

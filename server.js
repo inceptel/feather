@@ -4,6 +4,7 @@ import http from 'http';
 import net from 'net';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { execFileSync, execSync } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
@@ -930,6 +931,71 @@ function tmuxIsActive(id) {
   catch { return false; }
 }
 
+// Run a tmux command and surface stderr in the thrown error instead of
+// swallowing it (the old stdio: 'ignore' hid every paste failure).
+function tmuxRun(args) {
+  try { return execFileSync('tmux', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (error) {
+    const detail = String(error.stderr || error.message || '').trim().split('\n')[0];
+    throw new Error(`tmux ${args[0]} failed: ${detail}`);
+  }
+}
+
+// Visible pane text, or null when there is nothing to observe (blank pane,
+// fake tmux in tests, pane gone). Callers treat null as "unknown" and fall back to a fixed delay.
+function tmuxCapture(target) {
+  try {
+    const screen = execFileSync('tmux', ['capture-pane', '-p', '-t', target], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return screen.trim() ? screen : null;
+  } catch { return null; }
+}
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Wait for the pane to draw something different from `before`. Returns true on
+// an observed change, false on timeout, null when the screen is unobservable.
+async function waitForPaneChange(target, before, timeoutMs, pollMs = 100) {
+  if (before === null) { await pause(Math.min(timeoutMs, 400)); return null; }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await pause(pollMs);
+    const now = tmuxCapture(target);
+    if (now === null) return null;
+    if (now !== before) return true;
+  }
+  return false;
+}
+
+// After a (re)launch, wait until the pane has drawn a screen that stays put
+// for two polls in a row: the harness is at its composer, not still booting.
+// Replaces a blind 6s sleep. Falls back to that sleep when unobservable.
+const TMUX_READY_TIMEOUT_MS = Number(process.env.FEATHER_TMUX_READY_TIMEOUT_MS || 15_000);
+async function waitForPaneSettled(target, { timeoutMs = TMUX_READY_TIMEOUT_MS, minMs = 1500, pollMs = 300 } = {}) {
+  const start = Date.now();
+  let previous;
+  while (Date.now() - start < timeoutMs) {
+    await pause(pollMs);
+    const now = tmuxCapture(target);
+    if (now === null) { await pause(Math.max(0, 6000 - (Date.now() - start))); return null; }
+    if (now === previous && Date.now() - start >= minMs) return true;
+    previous = now;
+  }
+  return false;
+}
+
+// One paste path for every harness (claude, codex, omp): a per-session named
+// buffer (the default buffer stack is global, so two sessions pasting at once
+// could swap texts) and -p so tmux wraps the text in bracketed-paste codes
+// exactly when the app asked for them. -d drops the buffer after the paste.
+function tmuxPaste(target, text, bufferName) {
+  const tmp = path.join(os.tmpdir(), `feather-send-${randomUUID()}.txt`);
+  fs.writeFileSync(tmp, text, { mode: 0o600 });
+  try {
+    tmuxRun(['load-buffer', '-b', bufferName, tmp]);
+    tmuxRun(['paste-buffer', '-p', '-d', '-b', bufferName, '-t', target]);
+  } finally { try { fs.unlinkSync(tmp); } catch {} }
+}
+
 function validateFreshSessionId(id) {
   if (typeof id !== 'string' || !UUID_RE.test(id)) throw httpError(400, 'session id must be a UUID');
   const assignments = readRoomAssignments();
@@ -1395,8 +1461,8 @@ async function sendInputIdempotent(id, text, messageId) {
     }
     prepareRalphForHumanInput(id);
 
-    await sendInputUnlocked(id, text);
-    const response = { ok: true, sentAt: new Date().toISOString() };
+    const { observed } = await sendInputUnlocked(id, text);
+    const response = { ok: true, sentAt: new Date().toISOString(), observed };
     MESSAGE_RECEIPTS_STATE.update((current) => ({
       ...current,
       [id]: {
@@ -1409,48 +1475,41 @@ async function sendInputIdempotent(id, text, messageId) {
 }
 
 async function sendInputUnlocked(id, text) {
+  const target = tmuxName(id);
   if (!tmuxIsActive(id)) {
     resumeSession(id);
-    // Wait for Claude CLI to fully load before sending input
-    await new Promise(r => setTimeout(r, 6000));
+    const settled = await waitForPaneSettled(target);
+    if (settled === false) console.warn(`[send] ${target}: pane still changing ${TMUX_READY_TIMEOUT_MS}ms after resume; sending anyway`);
   }
-  const target = tmuxName(id);
-  const agent = getAgentForSession(id);
-  // Codex: typing via send-keys -l after the first message leaves the input
-  // in a state where Enter inserts a newline instead of submitting. Routing
-  // the text through paste-buffer (bracketed paste) avoids that and submits
-  // reliably across many turns.
-  if (agent === 'codex') {
-    const tmp = `/tmp/feather-send-${Date.now()}.txt`;
-    fs.writeFileSync(tmp, text);
-    try {
-      execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
-      execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
-    } finally { try { fs.unlinkSync(tmp); } catch {} }
-    // Await (not fire-and-forget) so the lock is held until Enter submits.
-    await new Promise(r => setTimeout(r, 300));
-    try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
-    return;
-  }
-  // Multi-line text must go through paste-buffer too: send-keys -l types the
-  // literal \n, which Claude CLI treats as Enter — submitting after the first
-  // line (e.g. only the first of several [Attached image: …] markers).
-  if (text.length > 500 || text.includes('\n')) {
-    const tmp = `/tmp/feather-send-${Date.now()}.txt`;
-    fs.writeFileSync(tmp, text);
-    try {
-      execFileSync('tmux', ['load-buffer', tmp], { stdio: 'ignore' });
-      execFileSync('tmux', ['paste-buffer', '-t', target], { stdio: 'ignore' });
-    } finally { try { fs.unlinkSync(tmp); } catch {} }
-    // Give Claude CLI a moment to process the paste, then submit (awaited so the
-    // lock covers the Enter).
-    await new Promise(r => setTimeout(r, 500));
-    try { execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' }); } catch {}
+  const buffer = `feather-${id.slice(0, 8)}`;
 
-  } else {
-    execFileSync('tmux', ['send-keys', '-t', target, '-l', text], { stdio: 'ignore' });
-    execFileSync('tmux', ['send-keys', '-t', target, 'Enter'], { stdio: 'ignore' });
+  // Paste, then confirm the text reached the screen before submitting. A paste
+  // that lands in a dying or half-drawn pane shows no change; retry it once.
+  let before = tmuxCapture(target);
+  tmuxPaste(target, text, buffer);
+  let pasted = await waitForPaneChange(target, before, 1500);
+  if (pasted === false) {
+    console.warn(`[send] ${target}: paste not visible after 1.5s; pasting again`);
+    before = tmuxCapture(target);
+    tmuxPaste(target, text, buffer);
+    pasted = await waitForPaneChange(target, before, 1500);
   }
+  if (pasted === null) await pause(300);
+
+  // Submit, then confirm the screen moved (composer cleared, turn started or
+  // queued). Enter on an already-submitted composer is a no-op, so a second
+  // Enter is safe; a second paste is not, so we never re-paste here.
+  let mid = tmuxCapture(target);
+  tmuxRun(['send-keys', '-t', target, 'Enter']);
+  let submitted = await waitForPaneChange(target, mid, 2000);
+  if (submitted === false) {
+    console.warn(`[send] ${target}: no screen change after Enter; sending Enter again`);
+    mid = tmuxCapture(target);
+    tmuxRun(['send-keys', '-t', target, 'Enter']);
+    submitted = await waitForPaneChange(target, mid, 2000);
+  }
+  if (submitted === false) console.warn(`[send] ${target}: submission unconfirmed for ${text.length}-char message`);
+  return { observed: submitted === true };
 }
 
 const ralphCallbackTimers = new Map();

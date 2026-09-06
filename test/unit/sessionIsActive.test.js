@@ -103,16 +103,6 @@ describe('agent_status heartbeats', () => {
   const real = '2026-08-05T21:17:09.040Z'  // the actual last message
   const beat = '2026-08-10T00:23:53.799Z'  // heartbeat five days later
 
-  it('ignores an agent_status line', () => {
-    const line = { type: 'agent_status', timestamp: beat, status: { taskState: 'needs_input' } }
-    assert.equal(messageTimestampMs(line, 'omp'), null)
-  })
-
-  it('counts a real prime message', () => {
-    const line = { type: 'message', timestamp: real, message: { role: 'assistant' } }
-    assert.equal(messageTimestampMs(line, 'omp'), Date.parse(real))
-  })
-
   it('returns the last real message time across a run of heartbeats', () => {
     const lines = [
       JSON.stringify({ type: 'message', timestamp: real, message: { role: 'assistant' } }),

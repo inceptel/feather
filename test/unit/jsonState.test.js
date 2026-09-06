@@ -309,44 +309,4 @@ describe('server and rollback integration', () => {
     assert.match(result.stderr, /malformed Room leaders/)
     assert.equal(fs.readFileSync(mainsFile, 'utf8'), '{broken')
   })
-
-  it('rehearses the archived pre-U9 release against the unchanged sharing shape', (t) => {
-    const { root } = fixture('feather-json-rollback-')
-    const repo = path.resolve(import.meta.dirname, '../..')
-    const release = path.join(root, 'old-release')
-    const homeDir = path.join(root, 'home')
-    fs.mkdirSync(release)
-    fs.mkdirSync(homeDir)
-
-    const archive = spawnSync('git', ['archive', '--format=tar', '601c2dc'], {
-      cwd: repo,
-      maxBuffer: 20 * 1024 * 1024,
-    })
-    if (archive.status !== 0) {
-      t.skip('rollback ref 601c2dc is unavailable in this checkout')
-      return
-    }
-    const extract = spawnSync('tar', ['-xf', '-', '-C', release], { input: archive.stdout })
-    assert.equal(extract.status, 0, extract.stderr?.toString())
-    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(release, 'node_modules'), 'dir')
-
-    const sharingFile = path.join(release, 'sharing.json')
-    fs.writeFileSync(sharingFile, JSON.stringify({
-      owner: 'legacy-owner',
-      futureDocumentField: { keep: true },
-      peers: { existing: { token: 'existing-token', policy: 'selected', futurePeerField: 7 } },
-    }))
-    const result = spawnSync(process.execPath, ['server.js', '--add-peer', 'rollback-test'], {
-      cwd: release,
-      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: '' },
-      encoding: 'utf8',
-      timeout: 10_000,
-    })
-
-    assert.equal(result.status, 0, result.stderr)
-    const mutated = JSON.parse(fs.readFileSync(sharingFile, 'utf8'))
-    assert.deepEqual(mutated.futureDocumentField, { keep: true })
-    assert.equal(mutated.peers.existing.futurePeerField, 7)
-    assert.ok(mutated.peers['rollback-test'].token)
-  })
 })

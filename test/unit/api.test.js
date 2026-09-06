@@ -252,61 +252,32 @@ describe('POST /api/upload', () => {
 // ── Retired CoS surface ─────────────────────────────────────────────────────
 
 describe('retired CoS API', () => {
-  it('returns a JSON 404 for the exact API root', async () => {
-    const r = await fetch(`${BASE}/api`)
-    assert.equal(r.status, 404)
-    assert.ok(r.headers.get('content-type').includes('application/json'))
-    assert.deepEqual(await r.json(), { error: 'not found' })
-  })
-
-  for (const method of ['GET', 'POST']) {
-    it(`returns a JSON 404 for ${method} /api/cos/workstreams`, async () => {
-      const r = await fetch(`${BASE}/api/cos/workstreams`, { method })
-      assert.equal(r.status, 404)
+  it('returns a JSON 404 for the API root and the old CoS routes', async () => {
+    for (const [url, method] of [['/api', 'GET'], ['/api/cos/workstreams', 'GET'], ['/api/cos/workstreams', 'POST']]) {
+      const r = await fetch(`${BASE}${url}`, { method })
+      assert.equal(r.status, 404, `${method} ${url}`)
       assert.ok(r.headers.get('content-type').includes('application/json'))
       assert.deepEqual(await r.json(), { error: 'not found' })
-    })
-  }
+    }
+  })
 })
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 describe('GET /api/sessions', () => {
-  it('returns array of sessions', async () => {
-    const r = await fetch(`${BASE}/api/sessions`)
+  it('lists well-formed sessions newest first, honoring limit', async () => {
+    const r = await fetch(`${BASE}/api/sessions?limit=20`)
     assert.equal(r.status, 200)
     const { sessions } = await r.json()
-    assert.ok(Array.isArray(sessions))
-    assert.ok(sessions.length > 0, 'expected at least one session')
-  })
-
-  it('every session has id, title, updatedAt, isActive', async () => {
-    const { sessions } = await (await fetch(`${BASE}/api/sessions`)).json()
-    for (const s of sessions) {
+    assert.ok(sessions.length > 0 && sessions.length <= 20)
+    for (let i = 0; i < sessions.length; i++) {
+      const s = sessions[i]
       assert.ok(typeof s.id === 'string' && s.id.length > 0, 'bad id')
       assert.ok(typeof s.title === 'string' && s.title.length > 0, 'bad title')
-      assert.ok(typeof s.updatedAt === 'string', 'bad updatedAt')
       assert.ok(!isNaN(new Date(s.updatedAt).getTime()), 'updatedAt not valid ISO date')
       assert.ok(typeof s.isActive === 'boolean', 'isActive not boolean')
+      if (i > 0) assert.ok(new Date(sessions[i - 1].updatedAt) >= new Date(s.updatedAt), 'sessions not sorted')
     }
-  })
-
-  it('limit=3 returns at most 3 sessions', async () => {
-    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=3`)).json()
-    assert.ok(sessions.length <= 3)
-  })
-
-  it('sessions are sorted by updatedAt descending', async () => {
-    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=20`)).json()
-    for (let i = 1; i < sessions.length; i++) {
-      const prev = new Date(sessions[i - 1].updatedAt).getTime()
-      const curr = new Date(sessions[i].updatedAt).getTime()
-      assert.ok(prev >= curr, `sessions not sorted: ${sessions[i-1].updatedAt} < ${sessions[i].updatedAt}`)
-    }
-  })
-
-  it('our test session appears in the list', async () => {
-    const { sessions } = await (await fetch(`${BASE}/api/sessions?limit=50`)).json()
     const found = sessions.find(s => s.id === TEST_SESSION_ID)
     assert.ok(found, `test session ${TEST_SESSION_ID} not found`)
     assert.equal(found.title, 'What is the meaning of life?')
@@ -458,7 +429,7 @@ describe('POST /api/rooms/:name/send', () => {
       '#!/bin/sh',
       `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
       `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
-      `if [ "$1" = load-buffer ]; then cat "$2" >> ${JSON.stringify(tmuxLog)}; printf '\\n' >> ${JSON.stringify(tmuxLog)}; exit 0; fi`,
+      `if [ "$1" = load-buffer ]; then shift; [ "$1" = -b ] && shift 2; cat "$1" >> ${JSON.stringify(tmuxLog)}; printf '\\n' >> ${JSON.stringify(tmuxLog)}; exit 0; fi`,
       'case "$1" in paste-buffer|send-keys|set-option) exit 0;; esac',
       'exit 1',
       '',
