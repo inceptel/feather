@@ -491,8 +491,12 @@ cmd_pulse() {
   curl -sf -X POST "$FEATHER_URL/api/rooms/$ROOM_NAME/pulse" \
     -H 'Content-Type: application/json' -d "{\"enabled\":$enabled}" >/dev/null \
     || die "feather refused to change status reports for #$ROOM_NAME"
-  if [ "$enabled" = true ]; then echo "#${ROOM_NAME} status reports resumed"
-  else echo "#${ROOM_NAME} status reports paused"; fi
+  local paused=true; [ "$enabled" = true ] && paused=false
+  curl -sf -X POST "$FEATHER_URL/api/rooms/$ROOM_NAME/residents/pause" \
+    -H 'Content-Type: application/json' -d "{\"paused\":$paused}" >/dev/null \
+    || die "feather refused to change resident wakes for #$ROOM_NAME"
+  if [ "$enabled" = true ]; then echo "#${ROOM_NAME} resumed: status reports and resident wakes are back on"
+  else echo "#${ROOM_NAME} paused: no status reports, no resident wakes (chats stay open; room wake to resume)"; fi
 }
 
 

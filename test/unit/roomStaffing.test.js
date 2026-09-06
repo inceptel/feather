@@ -173,6 +173,34 @@ describe('Room staffing from the template', () => {
       }))
       await waitFor(() => (readSent().match(/\[Room wake · #ev-shop · updater/g) || []).length === 2 || null, { message: 'overdue updater wake' })
 
+      // Pausing the Room's residents stops scheduled wakes without touching
+      // their chats; resuming re-arms the schedule from now.
+      const pausedResponse = await fetch(`${base}/api/rooms/ev-shop/residents/pause`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: true }),
+      })
+      assert.equal(pausedResponse.status, 200, await pausedResponse.text())
+      assert.ok(Object.values(readResidents()['ev-shop']).every(resident => resident.paused === true))
+      const pausedSnapshot = await (await fetch(`${base}/api/rooms/ev-shop/residents`)).json()
+      assert.ok(pausedSnapshot.residents.filter(resident => resident.role !== 'leader').every(resident => resident.paused === true))
+      const wakesBeforePause = (readSent().match(/\[Room wake/g) || []).length
+      const pausedState = readResidents()['ev-shop']
+      fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
+        'ev-shop': { ...pausedState, caretaker: { ...pausedState.caretaker, nextWakeAtMs: 1 } },
+      }))
+      await new Promise(resolve => setTimeout(resolve, 300))
+      assert.equal((readSent().match(/\[Room wake/g) || []).length, wakesBeforePause, 'no wakes while paused')
+      const resumed = await fetch(`${base}/api/rooms/ev-shop/residents/pause`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: false }),
+      })
+      assert.equal(resumed.status, 200)
+      const resumedCaretaker = readResidents()['ev-shop'].caretaker
+      assert.equal(resumedCaretaker.paused, false)
+      assert.ok(resumedCaretaker.nextWakeAtMs > Date.now() + 800_000, 'resume re-arms from now')
+      const badPause = await fetch(`${base}/api/rooms/ev-shop/residents/pause`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: 'yes' }),
+      })
+      assert.equal(badPause.status, 400)
+
       // Feed comments: publish one card as the updater, then comment on it.
       const updaterId = updaterSessionId
       fs.writeFileSync(path.join(roomDir, 'artifacts/plan.png'),

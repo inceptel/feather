@@ -3779,6 +3779,9 @@ function isRoomResidentState(value) {
       if (nextMs !== undefined && nextMs !== null && !(Number.isFinite(nextMs) && nextMs >= 0 && nextMs <= 8.64e15)) return false;
       const lastAt = resident.lastWakeAt;
       if (lastAt !== undefined && lastAt !== null && (typeof lastAt !== 'string' || !Number.isFinite(Date.parse(lastAt)))) return false;
+      // Paused residents keep their session but get no scheduled wakes until
+      // the user resumes the Room.
+      if (resident.paused !== undefined && typeof resident.paused !== 'boolean') return false;
     }
   }
   return true;
@@ -4090,8 +4093,14 @@ function buildRoomsSnapshot() {
         agent: session?.agent || sessionMeta[configured.sessionId]?.agent || 'unknown',
         title: session?.title || role,
         status: session ? (session.isActive ? 'working' : 'waiting') : 'offline',
+        wakeIntervalMs: configured.wakeIntervalMs ?? null,
+        nextWakeAtMs: configured.paused ? null : (configured.nextWakeAtMs ?? null),
+        lastWakeAt: configured.lastWakeAt ?? null,
+        paused: configured.paused === true,
       });
     }
+    const configuredResidents = Object.values(residentState[name] || {});
+    const residentsPaused = configuredResidents.length > 0 && configuredResidents.every((resident) => resident.paused === true);
     let latest = leaderSession ? lastMessageSnippet(leaderSession.id, leaderSession.agent || 'omp') : null;
     let updatedAt = leaderSession?.updatedAt || null;
     if (!latest) {
@@ -4109,6 +4118,7 @@ function buildRoomsSnapshot() {
       sessions,
       leaderSessionId,
       residents,
+      residentsPaused,
       sidecarGroupId: leaderSessionId ? sidecar.roomGroupId(name) : null,
       active: sessions.some((s) => s.isActive),
       pulse,
@@ -4631,6 +4641,33 @@ app.post('/api/rooms/:name/assign', (req, res) => {
 });
 
 
+// Pause or resume every scheduled resident of a Room. Paused residents keep
+// their chats and can still be messaged; Feather just stops waking them.
+app.post('/api/rooms/:name/residents/pause', (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    if (typeof req.body?.paused !== 'boolean') throw httpError(400, 'paused must be true or false');
+    const paused = req.body.paused;
+    const now = Date.now();
+    ROOM_RESIDENTS_STATE.update((current) => {
+      const residents = current[name];
+      if (!residents) return current;
+      const next = {};
+      for (const [role, resident] of Object.entries(residents)) {
+        const entry = { ...resident, paused };
+        // Resuming re-arms the schedule from now so a long pause does not
+        // wake every resident at once.
+        if (!paused && Number.isFinite(resident.wakeIntervalMs)) entry.nextWakeAtMs = now + resident.wakeIntervalMs;
+        next[role] = entry;
+      }
+      return { ...current, [name]: next };
+    });
+    const room = roomSnapshotCache.refresh().find((candidate) => candidate.name === name);
+    res.json({ ok: true, paused, residents: room?.residents || [], residentsPaused: room?.residentsPaused ?? paused });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 app.post('/api/rooms/:name/pulse', (req, res) => {
   try {
     const { name } = req.params;
@@ -4786,6 +4823,7 @@ function checkRoomPulses() {
 // Ralph loop is still running from the previous wake. RALPH_COMPLETE only
 // puts a resident to sleep; the next wake re-arms it.
 function residentWakeDue(resident, sessionId, meta, now) {
+  if (resident?.paused) return false;
   const interval = Number(resident?.wakeIntervalMs);
   if (!Number.isFinite(interval) || interval <= 0) return false;
   const next = Number.isFinite(resident.nextWakeAtMs) ? resident.nextWakeAtMs : ROOM_PULSE_STARTED_AT + interval;
