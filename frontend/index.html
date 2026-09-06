@@ -63,12 +63,17 @@
       // (incl. iPhone Safari's own toolbar chrome) keeps the original visual-viewport
       // behavior, and a real on-screen keyboard (inset >= 150) still lifts the composer.
       var floatingBar = editing && inset > 0 && inset < 150;
-      var h = floatingBar ? layoutH : visualH;
+      // No focused editable means no software keyboard, so any inset the visual
+      // viewport still reports is stale (iOS keeps the old height after the keyboard
+      // closes in some paths). Use the full layout height so the app never stays
+      // pinned at keyboard size, which showed the feed clipped at about half the screen.
+      var stale = !editing && inset > 0;
+      var h = (floatingBar || stale) ? layoutH : visualH;
       var root = document.getElementById('root');
       document.documentElement.style.setProperty('--vh', h * 0.01 + 'px');
       if (root) {
         root.style.height = h + 'px';
-        root.style.top = (floatingBar ? 0 : (vv ? vv.offsetTop : 0)) + 'px';
+        root.style.top = ((floatingBar || stale) ? 0 : (vv ? vv.offsetTop : 0)) + 'px';
       }
       // Prevent iOS from scrolling the body
       window.scrollTo(0, 0);
@@ -78,6 +83,17 @@
       window.visualViewport.addEventListener('scroll', syncViewport);
     }
     window.addEventListener('resize', syncViewport);
+    // Re-sync a few times after focus changes, orientation changes, and returning to the
+    // app: iOS may fire the viewport resize before its final keyboard geometry is known.
+    function resyncSoon() {
+      syncViewport();
+      [60, 250, 600, 1200].forEach(function (ms) { setTimeout(syncViewport, ms); });
+    }
+    document.addEventListener('focusin', resyncSoon);
+    document.addEventListener('focusout', resyncSoon);
+    window.addEventListener('orientationchange', resyncSoon);
+    window.addEventListener('pageshow', resyncSoon);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) resyncSoon(); });
     // Prevent pinch-to-zoom (iOS Safari ignores user-scalable=no)
     document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
     document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
