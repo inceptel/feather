@@ -154,8 +154,8 @@ Sidecar posting remains resident-only; assigned non-resident chats use
 A registered `updater` OMP Ralph may publish one selected item from a JSON
 object using `room publish FILE`. The command presents its per-session bridge
 capability; the server binds that capability to the Room's current Updater,
-enforces stable evidence identity, idempotency, a 30-minute interval, and a
-three-per-UTC-day ceiling, then refreshes Super Feed. Requests without the
+enforces stable evidence identity and idempotency, then refreshes Super Feed.
+Requests without the
 current Updater capability are rejected. The current shared-UID deployment is
 an organizational boundary, not protection from another local process.
 

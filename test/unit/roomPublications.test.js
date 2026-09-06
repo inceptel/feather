@@ -31,7 +31,7 @@ function input(id = 'jax-ev-0001', sourceEvidenceId = 'https://example.test/evid
 }
 
 describe('Room publication store', () => {
-  it('publishes idempotently while rejecting duplicate evidence and rapid repeats', () => {
+  it('publishes idempotently while rejecting duplicate evidence', () => {
     const roomRoot = fixture()
     try {
       const first = appendRoomPublication({
@@ -48,31 +48,29 @@ describe('Room publication store', () => {
         roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
         input: input('jax-ev-0002'), now: new Date('2026-09-06T12:31:00Z'),
       }), /source evidence was already published/)
-      assert.throws(() => appendRoomPublication({
+      const rapid = appendRoomPublication({
         roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
         input: input('jax-ev-0003', 'https://example.test/evidence/3'), now: new Date('2026-09-06T12:10:00Z'),
-      }), /at least 30 minutes apart/)
-      assert.equal(readRoomPublications(roomRoot, 'jacksonville-ev').length, 1)
+      })
+      assert.equal(rapid.reused, false)
+      assert.equal(readRoomPublications(roomRoot, 'jacksonville-ev').length, 2)
     } finally {
       fs.rmSync(roomRoot, { recursive: true, force: true })
     }
   })
 
-  it('enforces the daily ceiling and confines visuals to regular Room artifact files', () => {
+  it('allows multiple same-day publications and confines visuals to regular Room artifact files', () => {
     const roomRoot = fixture()
     const outside = path.join(path.dirname(roomRoot), `outside-${path.basename(roomRoot)}.png`)
     try {
-      for (let index = 0; index < 3; index++) {
+      for (let index = 0; index < 4; index++) {
         appendRoomPublication({
           roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
           input: input(`jax-ev-000${index + 1}`, `evidence-${index + 1}`),
-          now: new Date(`2026-09-06T${String(12 + index).padStart(2, '0')}:00:00Z`),
+          now: new Date(`2026-09-06T12:00:0${index}Z`),
         })
       }
-      assert.throws(() => appendRoomPublication({
-        roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
-        input: input('jax-ev-0004', 'evidence-4'), now: new Date('2026-09-06T15:00:00Z'),
-      }), /daily limit/)
+      assert.equal(readRoomPublications(roomRoot, 'jacksonville-ev').length, 4)
 
       fs.writeFileSync(outside, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'))
       fs.symlinkSync(outside, path.join(roomRoot, 'artifacts', 'escape.png'))
