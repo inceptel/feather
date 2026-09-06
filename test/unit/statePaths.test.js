@@ -61,6 +61,7 @@ describe('state path classification', () => {
     assert.equal(paths.coordination.roomPulsesFile, '/home/tester/.feather/room-pulses.json')
     assert.equal(paths.harness.claudeProjectsDir, '/home/tester/.claude/projects')
     assert.equal(paths.harness.ompSessionsDir, '/home/tester/.feather/omp-sessions')
+    assert.equal(paths.harness.ompAgentDirsDir, '/home/tester/.feather/omp-agents')
     assert.equal(paths.harness.codexSessionsDir, '/home/tester/.codex/sessions')
     assert.equal(paths.workspace.roomsDir, '/home/tester/rooms')
     assert.deepEqual(paths.runtime, { managedExternally: ['process', 'tmux', 'temporary-files'] })

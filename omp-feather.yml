@@ -1,2 +1,4 @@
 ask:
   enabled: false
+startup:
+  setupWizard: false

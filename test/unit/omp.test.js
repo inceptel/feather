@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveOmpModel, resolveOmpThinking, ompModelFlags, sanitizeOmpModel } from '../../lib/omp.js'
+import {
+  OMP_GATEWAY_COMMAND,
+  ompGatewayModelsConfig,
+  ompModelFlags,
+  resolveOmpModel,
+  resolveOmpThinking,
+  sanitizeOmpModel,
+} from '../../lib/omp.js'
 
 describe('omp launch config', () => {
   it('defaults the model to gpt-5.6-sol and honors a valid override', () => {
@@ -39,5 +46,27 @@ describe('omp launch config', () => {
     assert.equal(ompModelFlags('', 'high'), '--thinking high ')
     assert.equal(ompModelFlags('gpt-5.6-sol', ''), '--model gpt-5.6-sol ')
     assert.equal(ompModelFlags('', ''), '')
+  })
+
+  it('routes configured providers through the gateway without embedding its token', () => {
+    const config = ompGatewayModelsConfig({
+      model: 'custom-provider/model',
+      baseUrl: 'http://127.0.0.1:4000',
+      tokenCommand: "!cat '/home/tester/.omp/auth-gateway.token'",
+    })
+    assert.match(config, /"anthropic":/)
+    assert.match(config, /"openai-codex":/)
+    assert.match(config, /"custom-provider":/)
+    assert.match(config, /transport: pi-native/)
+    assert.ok(config.includes(`apiKey: "!cat '/home/tester/.omp/auth-gateway.token'"`))
+  })
+
+  it('scrubs direct provider authority but preserves tool credentials', () => {
+    assert.match(OMP_GATEWAY_COMMAND, /^env /)
+    assert.match(OMP_GATEWAY_COMMAND, /-u OPENAI_API_KEY/)
+    assert.match(OMP_GATEWAY_COMMAND, /-u ANTHROPIC_OAUTH_TOKEN/)
+    assert.match(OMP_GATEWAY_COMMAND, /-u OMP_AUTH_BROKER_TOKEN/)
+    assert.ok(!OMP_GATEWAY_COMMAND.includes('EXA_API_KEY'))
+    assert.match(OMP_GATEWAY_COMMAND, / omp$/)
   })
 })

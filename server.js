@@ -16,7 +16,14 @@ import { createKeyedLock } from './lib/sendlock.js';
 import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
-import { resolveOmpModel, resolveOmpThinking, ompModelFlags, sanitizeOmpModel } from './lib/omp.js';
+import {
+  OMP_GATEWAY_COMMAND,
+  ompGatewayModelsConfig,
+  ompModelFlags,
+  resolveOmpModel,
+  resolveOmpThinking,
+  sanitizeOmpModel,
+} from './lib/omp.js';
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
@@ -87,6 +94,18 @@ const HOME = process.env.HOME || '/home/user';
 const STATE_PATHS = resolveStatePaths({ releaseDir: import.meta.dirname, homeDir: HOME });
 const CLAUDE_PROJECTS = STATE_PATHS.harness.claudeProjectsDir;
 const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
+const OMP_AGENT_DIRS = STATE_PATHS.harness.ompAgentDirsDir;
+let OMP_AUTH_GATEWAY_URL = String(process.env.FEATHER_OMP_AUTH_GATEWAY_URL || '').trim();
+if (OMP_AUTH_GATEWAY_URL) {
+  const parsed = new URL(OMP_AUTH_GATEWAY_URL);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('FEATHER_OMP_AUTH_GATEWAY_URL must be an HTTP(S) base URL without credentials, query, or fragment');
+  }
+  OMP_AUTH_GATEWAY_URL = OMP_AUTH_GATEWAY_URL.replace(/\/+$/, '');
+}
+const OMP_AUTH_GATEWAY_TOKEN_FILE = path.resolve(
+  process.env.FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE || path.join(HOME, '.omp/auth-gateway.token'),
+);
 // Every Feather-launched omp session gets an explicit model + reasoning level
 // (see lib/omp.js). Passing them on resume also migrates existing sessions.
 const OMP_MODEL = resolveOmpModel(process.env);
@@ -97,9 +116,7 @@ const OMP_COUNCIL_SKILL = path.join(import.meta.dirname, 'skills', 'council');
 const OMP_FEATHER_CONFIG = path.join(import.meta.dirname, 'omp-feather.yml');
 const ompBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
-const OMP_DISCOVERED_BRIDGE = path.join(HOME, '.omp/agent/extensions/feather-bridge.js');
-const OMP_DISCOVERED_PROTOCOL = path.join(HOME, '.omp/agent/extensions/feather-protocol-tools.js');
-const OMP_DISCOVERED_COUNCIL = path.join(HOME, '.omp/agent/skills/council');
+const OMP_SHARED_AGENT_DIR = path.join(HOME, '.omp/agent');
 const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
 // v1-v3 payloads remain accepted for compatibility, but only v4 marks the
 // mirror live. Older sessions therefore keep the existing turn-boundary
@@ -1021,24 +1038,24 @@ function ensureManagedOmpSymlink(discoveredPath, targetPath, expectedSuffix, lab
   return true;
 }
 
-function ensureOmpBridgeDiscovery() {
+function ensureOmpBridgeDiscovery(agentDir = OMP_SHARED_AGENT_DIR) {
   return ensureManagedOmpSymlink(
-    OMP_DISCOVERED_BRIDGE,
+    path.join(agentDir, 'extensions/feather-bridge.js'),
     OMP_BRIDGE_EXTENSION,
     path.join('omp-extensions', 'feather-bridge.js'),
     'bridge',
   );
 }
 
-function ensureOmpCouncilDiscovery() {
+function ensureOmpCouncilDiscovery(agentDir = OMP_SHARED_AGENT_DIR) {
   ensureManagedOmpSymlink(
-    OMP_DISCOVERED_PROTOCOL,
+    path.join(agentDir, 'extensions/feather-protocol-tools.js'),
     OMP_PROTOCOL_EXTENSION,
     path.join('omp-tools', 'feather-protocol-tools.js'),
     'protocols',
   );
   ensureManagedOmpSymlink(
-    OMP_DISCOVERED_COUNCIL,
+    path.join(agentDir, 'skills/council'),
     OMP_COUNCIL_SKILL,
     path.join('skills', 'council'),
     'council',
@@ -1098,6 +1115,27 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   if (!resume) resetOmpBridgeSessionState(id);
   const sessionDir = path.join(OMP_SESSIONS, id);
   fs.mkdirSync(sessionDir, { recursive: true });
+  const model = ompSessionModel(id);
+  const agentDir = OMP_AUTH_GATEWAY_URL ? path.join(OMP_AGENT_DIRS, id) : OMP_SHARED_AGENT_DIR;
+  if (OMP_AUTH_GATEWAY_URL) {
+    let tokenStat;
+    try { tokenStat = fs.statSync(OMP_AUTH_GATEWAY_TOKEN_FILE); } catch {}
+    if (!tokenStat?.isFile()) {
+      throw new Error(`OMP auth gateway token file is missing: ${OMP_AUTH_GATEWAY_TOKEN_FILE}`);
+    }
+    if ((tokenStat.mode & 0o077) !== 0) {
+      throw new Error(`OMP auth gateway token file must be owner-only: ${OMP_AUTH_GATEWAY_TOKEN_FILE}`);
+    }
+    fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(agentDir, 0o700);
+    const modelsPath = path.join(agentDir, 'models.yml');
+    fs.writeFileSync(modelsPath, ompGatewayModelsConfig({
+      model,
+      baseUrl: OMP_AUTH_GATEWAY_URL,
+      tokenCommand: `!cat ${shellQuote(OMP_AUTH_GATEWAY_TOKEN_FILE)}`,
+    }), { mode: 0o600 });
+    fs.chmodSync(modelsPath, 0o600);
+  }
   const systemPromptFile = writeSessionSystemPrompt(id);
   watchOmpSessionDir(sessionDir, id);
   const sourceOmpId = resume ? getOmpSessionId(id) : forkFrom ? getOmpSessionId(forkFrom) : null;
@@ -1106,8 +1144,8 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   const bridgeUrl = `http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`;
   ompBridgeTokens.set(id, bridgeToken);
   ompBridgeLastSeen.delete(id);
-  const bridgeDiscovered = ensureOmpBridgeDiscovery();
-  ensureOmpCouncilDiscovery();
+  const bridgeDiscovered = ensureOmpBridgeDiscovery(agentDir);
+  ensureOmpCouncilDiscovery(agentDir);
   fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(OMP_BRIDGE_TOKENS_DIR, 0o700);
   fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
@@ -1117,12 +1155,14 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   }), { mode: 0o600 });
   fs.chmodSync(path.join(sessionDir, '.feather-bridge.json'), 0o600);
   const args = [
-    'omp',
-    ompModelFlags(ompSessionModel(id), OMP_THINKING).trim(),
+    OMP_AUTH_GATEWAY_URL ? OMP_GATEWAY_COMMAND : 'omp',
+    ompModelFlags(model, OMP_THINKING).trim(),
     resume ? `--resume ${shellQuote(sourceOmpId)}` : forkFrom ? `--fork ${shellQuote(sourceOmpId)}` : '',
     (appendSystemPromptFile || systemPromptFile) ? `--append-system-prompt ${shellQuote(appendSystemPromptFile || systemPromptFile)}` : '',
     promptFile ? `-p ${autoApprove ? '--auto-approve ' : ''}${shellQuote(`@${promptFile}`)}` : '',
-    bridgeDiscovered ? '' : `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}`,
+    OMP_AUTH_GATEWAY_URL ? '--no-extensions' : '',
+    OMP_AUTH_GATEWAY_URL || !bridgeDiscovered ? `--extension ${shellQuote(OMP_BRIDGE_EXTENSION)}` : '',
+    OMP_AUTH_GATEWAY_URL ? `--extension ${shellQuote(OMP_PROTOCOL_EXTENSION)}` : '',
     `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
     `--session-dir ${shellQuote(sessionDir)}`,
     '--allow-home',
@@ -1131,7 +1171,11 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
     `FEATHER_BRIDGE_URL=${shellQuote(bridgeUrl)}`,
     `FEATHER_BRIDGE_TOKEN=${shellQuote(bridgeToken)}`,
     `FEATHER_SESSION_ID=${shellQuote(id)}`,
-  ].join(' ');
+    OMP_AUTH_GATEWAY_URL ? `PI_CODING_AGENT_DIR=${shellQuote(agentDir)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_SMOL_MODEL=${shellQuote(model)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_SLOW_MODEL=${shellQuote(model)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_PLAN_MODEL=${shellQuote(model)}` : '',
+  ].filter(Boolean).join(' ');
   const command = `bash --rcfile ~/.bashrc -ic ${shellQuote(`${env} ${args}`)}`;
   launchInTmux(tmuxName(id), command, cwd);
 }
@@ -2923,6 +2967,7 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
       ompBridgeTokens.delete(id);
       try { fs.unlinkSync(ompBridgeTokenPath(id)); } catch {}
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(path.join(OMP_AGENT_DIRS, id), { recursive: true, force: true }); } catch {}
     } else {
       const fpath = findJsonlPath(id, agent);
       if (fpath) fs.unlinkSync(fpath);
@@ -4594,9 +4639,11 @@ app.get('/api/rooms/:name/friction', (req, res) => {
 // marketer). The mission sentence is stamped verbatim into AGENTS.md, the
 // Wiki, notes.md, and the Leader's first message.
 const ROOM_KICKOFF_DELAY_MS = Math.max(0, Number(process.env.FEATHER_ROOM_KICKOFF_DELAY_MS) || 8_000);
-// OMP keeps one SQLite database per user; four processes opening it in the
-// same second can lose one to "database is locked". Space the launches out.
-const ROOM_STAFF_STAGGER_MS = Math.max(0, Number(process.env.FEATHER_ROOM_STAFF_STAGGER_MS ?? 2_500));
+// Gateway-backed sessions have private agent.db files and can start together.
+// Keep the legacy delay only when the deployment has not enabled isolation.
+const ROOM_STAFF_STAGGER_MS = Math.max(0, Number(
+  process.env.FEATHER_ROOM_STAFF_STAGGER_MS ?? (OMP_AUTH_GATEWAY_URL ? 0 : 2_500),
+));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function staffRoom(name, mission) {

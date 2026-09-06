@@ -89,6 +89,18 @@ one chronological timeline; each subagent is a selectable child with its own
 Todo and execution inspector. Current state is replayed after browser reconnects,
 while the durable JSONL transcript remains the historical source of truth.
 
+Production OMP launches can isolate mutable runtime state by setting
+`FEATHER_OMP_AUTH_GATEWAY_URL` to an `omp auth-gateway` endpoint. Feather then
+sets a stable `PI_CODING_AGENT_DIR=~/.feather/omp-agents/<session-id>` for each
+session, routes model calls through the gateway's canonical token file
+(`~/.omp/auth-gateway.token`, override with
+`FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE`), and starts Room staff without the legacy
+SQLite launch delay. The gateway keeps provider access tokens out of those
+directories; its upstream `omp auth-broker` is the sole writer of the shared
+credential database. `infra/feather.supervisor.conf` includes the three-process
+broker → gateway → Feather launch order. Without the gateway URL, Feather keeps
+the shared OMP directory and conservative launch stagger for compatibility.
+
 ## Rooms — durable workspaces
 
 A Room is a folder under `~/rooms/` that gives related Feather chats a shared

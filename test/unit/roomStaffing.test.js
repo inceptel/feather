@@ -26,9 +26,12 @@ describe('Room staffing from the template', () => {
     const binDir = path.join(root, 'bin')
     const tmuxReg = path.join(root, 'tmux.reg')
     const sentLog = path.join(root, 'sent.log')
+    const commandLog = path.join(root, 'commands.log')
     fs.mkdirSync(path.join(home, 'rooms'), { recursive: true })
     fs.mkdirSync(path.join(home, '.feather'), { recursive: true })
     fs.mkdirSync(stateDir, { recursive: true })
+    fs.mkdirSync(path.join(home, '.omp'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.omp/auth-gateway.token'), 'gateway-test-token\n', { mode: 0o600 })
     fs.mkdirSync(binDir, { recursive: true })
     // Fake tmux: every launched session stays "live"; pasted input is logged.
     fs.writeFileSync(path.join(binDir, 'tmux'), [
@@ -36,7 +39,7 @@ describe('Room staffing from the template', () => {
       'case "$1" in',
       '  list-sessions) if [ -f "$TMUX_REG" ]; then now=$(date +%s); while IFS= read -r n; do printf "%s|%s\\n" "$n" "$now"; done < "$TMUX_REG"; fi; exit 0 ;;',
       '  has-session) if [ -f "$TMUX_REG" ] && grep -qxF "$3" "$TMUX_REG"; then exit 0; fi; exit 1 ;;',
-      '  new-session) name=""; while [ $# -gt 0 ]; do [ "$1" = "-s" ] && name="$2"; shift; done; [ -n "$name" ] && printf "%s\\n" "$name" >> "$TMUX_REG"; exit 0 ;;',
+      '  new-session) printf "%s\\n" "$*" >> "$TMUX_COMMAND_LOG"; name=""; while [ $# -gt 0 ]; do [ "$1" = "-s" ] && name="$2"; shift; done; [ -n "$name" ] && printf "%s\\n" "$name" >> "$TMUX_REG"; exit 0 ;;',
       '  load-buffer) cat "$2" >> "$TMUX_SENT_LOG"; printf "\\n---\\n" >> "$TMUX_SENT_LOG"; exit 0 ;;',
       '  send-keys) if [ "$3" = "-l" ]; then printf "%s\\n---\\n" "$4" >> "$TMUX_SENT_LOG"; fi; exit 0 ;;',
       'esac',
@@ -53,8 +56,9 @@ describe('Room staffing from the template', () => {
       cwd: REPO,
       env: {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
-        FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_KICKOFF_DELAY_MS: '100', FEATHER_ROOM_STAFF_STAGGER_MS: '0', FEATHER_RESIDENT_RELAUNCH_SETTLE_MS: '50',
-        PATH: `${binDir}:${process.env.PATH}`, TMUX_REG: tmuxReg, TMUX_SENT_LOG: sentLog,
+        FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_KICKOFF_DELAY_MS: '100', FEATHER_RESIDENT_RELAUNCH_SETTLE_MS: '50',
+        FEATHER_OMP_AUTH_GATEWAY_URL: 'http://127.0.0.1:14000',
+        PATH: `${binDir}:${process.env.PATH}`, TMUX_REG: tmuxReg, TMUX_SENT_LOG: sentLog, TMUX_COMMAND_LOG: commandLog,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
@@ -116,6 +120,26 @@ describe('Room staffing from the template', () => {
       for (const resident of room.residents) assert.equal(assignments[resident.sessionId], 'ev-shop')
       const snapshot = await (await fetch(`${base}/api/rooms/ev-shop/residents`)).json()
       assert.deepEqual(snapshot.residents.map(resident => resident.role).sort(), ['caretaker', 'marketer', 'updater'])
+      const ompIds = [room.leaderSessionId, ...room.residents.map(resident => resident.sessionId)]
+      const commands = fs.readFileSync(commandLog, 'utf8')
+      assert.equal((commands.match(/--no-extensions/g) || []).length, 4)
+      assert.equal((commands.match(/-u OPENAI_API_KEY/g) || []).length, 4)
+      assert.ok((commands.match(/feather-bridge\.js/g) || []).length >= 4)
+      assert.ok((commands.match(/feather-protocol-tools\.js/g) || []).length >= 4)
+      for (const sessionId of ompIds) {
+        const agentDir = path.join(home, '.feather/omp-agents', sessionId)
+        assert.equal(fs.statSync(agentDir).mode & 0o777, 0o700)
+        assert.equal(fs.statSync(path.join(agentDir, 'models.yml')).mode & 0o777, 0o600)
+        assert.match(commands, new RegExp(`PI_CODING_AGENT_DIR=.*${sessionId}`))
+        assert.equal(fs.readlinkSync(path.join(agentDir, 'extensions/feather-bridge.js')), path.join(REPO, 'omp-extensions/feather-bridge.js'))
+        assert.equal(fs.readlinkSync(path.join(agentDir, 'extensions/feather-protocol-tools.js')), path.join(REPO, 'omp-tools/feather-protocol-tools.js'))
+        assert.equal(fs.readlinkSync(path.join(agentDir, 'skills/council')), path.join(REPO, 'skills/council'))
+        const models = fs.readFileSync(path.join(agentDir, 'models.yml'), 'utf8')
+        assert.ok(models.includes('baseUrl: \"http://127.0.0.1:14000\"'))
+        assert.ok(models.includes(`apiKey: \"!cat '${path.join(home, '.omp/auth-gateway.token')}'\"`))
+        assert.ok(!models.includes('gateway-test-token'))
+      }
+      assert.equal(new Set(ompIds.map(sessionId => path.join(home, '.feather/omp-agents', sessionId))).size, 4)
 
       // The Leader gets the mission, verbatim, once the session has settled.
       const kickoff = await waitFor(() => readSent().includes('[Room kickoff · #ev-shop]') ? readSent() : null, { message: 'kickoff prompt' })
