@@ -57,6 +57,8 @@ describe('Room template', () => {
     assert.ok(files['UPDATER.md'].includes('**By the way**'))
     assert.ok(files['UPDATER.md'].includes('never enter Review, create an alert badge, or require a visual'))
     assert.ok(files['UPDATER.md'].includes('"attention": "briefing"'))
+    assert.ok(files['UPDATER.md'].includes('Do not wait for the judge'))
+    assert.ok(files['UPDATER.md'].includes('it does not mean a judge verdict'))
     assert.ok(files['MARKETER.md'].includes('"attention": "briefing|by-the-way"'))
     assert.ok(files['REPLYGUY.md'].includes('room dispatch --to leader'))
     assert.ok(files['REPLYGUY.md'].includes('Reply first'))
