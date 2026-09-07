@@ -171,11 +171,11 @@ describe('Super Feed projection', () => {
       publications: [{
         room: 'trading', id: 'pons-guard-4', occurredAt: '2026-09-07T09:00:00Z',
         sourceEvidenceId: 'wiki/PONS.md#official-channels-resolved-2026-09-07-guard-4',
-        title: 'PONS guard 4 resolved', summary: 's'.repeat(1_001), detail: 'd'.repeat(3_001),
+        title: 'PONS guard 4 resolved', summary: 's'.repeat(9_001), detail: 'd'.repeat(9_001),
       }],
     })
-    assert.equal(item.summary.length, 1_000)
-    assert.equal(item.detail.length, 3_000)
+    assert.equal(item.summary.length, 9_000)
+    assert.equal(item.detail.length, 9_000)
     assert.equal(item.wikiPage, 'PONS')
   })
   it('projects By-the-way publications without review attention or a visual', () => {
