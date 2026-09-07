@@ -6009,8 +6009,55 @@ function schedulerRunStatus(run, rule) {
   const last = lastActivityMs(file, agent, 0);
   return last > Date.parse(run.startedAt) && Date.now() - last > SCHEDULER_RUN_QUIET_MS ? 'done' : 'running';
 }
+// Records from our wake marker to the end of the transcript. A busy chat
+// writes far more than the fixed tail, so a tail read loses the marker and
+// the run can only end by timeout. The marker's byte offset is cached per
+// file; later reads start there.
+const ompMarkerOffsets = new Map();
+function ompTranscriptSince(sessionId, marker) {
+  const file = findOmpJsonlPath(sessionId);
+  if (!file || !marker) return null;
+  const key = `${file}\n${marker}`;
+  let offset = ompMarkerOffsets.get(key);
+  try {
+    if (offset === undefined) {
+      const text = fs.readFileSync(file, 'utf8');
+      offset = -1;
+      let pos = 0;
+      while (pos < text.length) {
+        const end = text.indexOf('\n', pos);
+        const stop = end === -1 ? text.length : end;
+        const line = text.slice(pos, stop);
+        if (line.includes(marker)) {
+          try {
+            const record = JSON.parse(line);
+            if (record?.type === 'message' && record.message?.role === 'user' && ompMessageText(record.message).startsWith(marker)) { offset = Buffer.byteLength(text.slice(0, pos), 'utf8'); break; }
+          } catch {}
+        }
+        pos = stop + 1;
+      }
+      if (offset === -1) return null;
+      if (ompMarkerOffsets.size > 500) ompMarkerOffsets.clear();
+      ompMarkerOffsets.set(key, offset);
+    }
+    const fd = fs.openSync(file, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const buf = Buffer.alloc(Math.max(0, size - offset));
+      if (buf.length) fs.readSync(fd, buf, 0, buf.length, offset);
+      const records = [];
+      for (const line of buf.toString('utf8').split('\n')) {
+        if (!line.trim()) continue;
+        try { records.push(JSON.parse(line)); } catch {}
+      }
+      return records;
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+
 function sessionTurnEndedAfter(sessionId, marker) {
-  const records = ompTranscriptTail(sessionId);
+  const records = ompTranscriptSince(sessionId, marker);
+  if (!records) return false;
   let sawMarker = false;
   let ended = false;
   for (const record of records) {
