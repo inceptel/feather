@@ -178,6 +178,39 @@ describe('room assignment CLI', () => {
     }
   })
 
+  it('steers a Room through the Feather API with literal text', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-steer-'))
+    roots.push(root)
+    const roomsDir = path.join(root, 'rooms')
+    const roomDir = path.join(roomsDir, 'health')
+    fs.mkdirSync(roomDir, { recursive: true })
+    fs.writeFileSync(path.join(roomDir, 'AGENTS.md'), '# Room: #health\n')
+    const requests = []
+    const server = http.createServer((request, response) => {
+      const chunks = []
+      request.on('data', (chunk) => chunks.push(chunk))
+      request.on('end', () => {
+        requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString()) })
+        response.writeHead(201, { 'Content-Type': 'application/json' })
+        response.end('{"ok":true,"room":"health","leaderSessionId":"leader-1","woke":true}')
+      })
+    })
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const env = { ...process.env, HOME: root, ROOMS_DIR: roomsDir, FEATHER_URL: `http://127.0.0.1:${server.address().port}` }
+    const cli = path.resolve(import.meta.dirname, '../../bin/room')
+    try {
+      const out = await run(cli, ['steer', 'Price the "equipment" first; skip the lease.'], { cwd: roomDir, env })
+      assert.match(out.stdout, /#health steered: line added to Steering, Leader woken \(leader-1\)/)
+      await runWithInput(cli, ['steer', '--stdin'], { cwd: roomDir, env }, 'Line one\n  indented $HOME `code`\n')
+      assert.deepEqual(requests.map((r) => r.url), ['/api/rooms/health/steer', '/api/rooms/health/steer'])
+      assert.equal(requests[0].body.text, 'Price the "equipment" first; skip the lease.')
+      assert.equal(requests[1].body.text, 'Line one\n  indented $HOME `code`\n')
+      await assert.rejects(run(cli, ['steer', '   '], { cwd: roomDir, env }), /text is empty/)
+    } finally {
+      await new Promise((resolve) => server.close(resolve))
+    }
+  })
+
   it('deduplicates native-tool complaints by tool-call id', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-complaint-id-'))
     roots.push(root)

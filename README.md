@@ -155,9 +155,20 @@ everything else), **Open** (gaps to close), **Working**, **Review**, and
   Open, and may add new Open lines ending `(judge)`. It tells the Leader what it
   reopened with `room dispatch --to leader "[judge] …"`. Only the judge moves a
   line to Done. A wake whose turn never ends is judged one interval later.
-- The user steers by editing Steering or adding Open lines. `room autonomy
-  --now` wakes the Leader at once, `--judge` wakes the judge at once,
+- When Open holds fewer than three lines the Leader can work alone (nothing
+  waiting on the user, money, credentials, or an install), the Leader plans
+  before it picks: it expands the mission into new Open lines, each with what
+  done looks like. It asks the user once per line, tagged `needs:`, not every wake.
+- The user steers from the feed: **Steer** on any of a Room's cards (or
+  `room steer "..."`, or `POST /api/rooms/<name>/steer` with `text`) appends a
+  dated line under Steering in `FRONTIER.md`, notes it, and wakes the Leader at
+  once as `[Room steer …]`; the judge grades that turn like any wake. Editing
+  Steering or adding Open lines by hand still works. `room autonomy --now`
+  wakes the Leader at once, `--judge` wakes the judge at once,
   `--pause`/`--resume` hold and release the schedule, `--off` switches it off.
+- Every judge verdict names the file it opened (`✓ judged 2026-09-07
+  (wiki/PONS.md): …`); a verdict without one is not a verdict. The judge edits
+  nothing but `FRONTIER.md`, and never Steering.
 
 When a Leader's last turn died on a usage limit (or its provider window is at
 its cap), the scheduler retires that Leader with a handoff and seats a new one

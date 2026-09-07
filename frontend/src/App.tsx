@@ -185,7 +185,7 @@ export default function App() {
   const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
   // or a Room page. Kept in the hash so reloads and back buttons work.
-  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string }>({ kind: 'rooms' })
+  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
@@ -1085,8 +1085,14 @@ export default function App() {
 
   function applyHomeHash(hash: string): boolean {
     if (hash === 'costs') { setHomeRoute({ kind: 'costs' }); return true }
-    const room = hash.match(/^room\/([a-z0-9][a-z0-9-]{0,63})$/)
-    if (room) { setHomeRoute({ kind: 'room', name: room[1] }); return true }
+    // #room/<name> opens a Room; #room/<name>/wiki/<Page> opens it on that wiki page.
+    const room = hash.match(/^room\/([a-z0-9][a-z0-9-]{0,63})(?:\/wiki\/(.+))?$/)
+    if (room) {
+      let wiki: string | undefined
+      try { wiki = room[2] ? decodeURIComponent(room[2]) : undefined } catch { wiki = undefined }
+      setHomeRoute(wiki ? { kind: 'room', name: room[1], wiki } : { kind: 'room', name: room[1] })
+      return true
+    }
     if (hash === '') { setHomeRoute({ kind: 'rooms' }); return true }
     return false
   }
@@ -1100,7 +1106,7 @@ export default function App() {
       applyHomeHash(hash)
     }
   }
-  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string }) {
+  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string, wiki?: string }) {
     if (currentId()) goHome()
     setHomeRoute(route)
     location.hash = route.kind === 'rooms' ? '' : route.kind === 'costs' ? 'costs' : `room/${route.name}`
@@ -2133,7 +2139,7 @@ export default function App() {
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
                 <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} onOpenRoom={(name) => showHome({ kind: 'room', name })} />
               }>
-                {(name) => <RoomPage name={name()} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
+                {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
               </Show>
             }>
               <CostsView onOpenSession={select} />

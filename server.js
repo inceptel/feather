@@ -42,6 +42,7 @@ import {
   judgeWakePrompt,
   leaderFallbackPrompt,
   leaderKickoffPrompt,
+  leaderSteerPrompt,
   leaderWakePrompt,
   normalizeRoomMission,
   parseRoomMission,
@@ -49,6 +50,7 @@ import {
   scaffoldRoom,
   roomTemplateFiles,
 } from './lib/room-template.js';
+import { appendSteering, normalizeSteerText } from './lib/room-frontier.js';
 import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, commentDelivered, feedCommentPrompt, feedReplyNudgePrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
@@ -5257,6 +5259,30 @@ app.post('/api/rooms/:name/residents/pause', (req, res) => {
 
 // Room autonomy: how often Feather wakes the Leader to work FRONTIER.md.
 // `wakeIntervalMs: null` switches it off; `now: true` sends one wake at once.
+// The user steers a Room: the text lands as a dated line under Steering in
+// FRONTIER.md (the one section agents never write), is noted, and the Leader
+// is woken at once to re-plan around it. Works whether or not autonomy is on.
+app.post('/api/rooms/:name/steer', async (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    let text;
+    try { text = normalizeSteerText(req.body?.text); }
+    catch (error) { throw httpError(400, error.message); }
+    const now = Date.now();
+    const at = new Date(now);
+    ensureRoomFrontier(name);
+    const frontierPath = path.join(ROOMS_HOME_DIR, name, 'FRONTIER.md');
+    fs.writeFileSync(frontierPath, appendSteering(fs.readFileSync(frontierPath, 'utf8'), text, at));
+    const stamp = at.toISOString().slice(0, 16).replace('T', ' ');
+    fs.appendFileSync(path.join(ROOMS_HOME_DIR, name, 'notes.md'), `- ${stamp} [steer] ${text.replace(/\n/g, ' ')}\n`);
+    const leaderSessionId = await wakeRoomLeader(name, now, { prompt: leaderSteerPrompt({ roomName: name, text, at }) });
+    res.status(201).json({ ok: true, room: name, text, at: at.toISOString(), leaderSessionId, woke: Boolean(leaderSessionId) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 app.post('/api/rooms/:name/leader/wake', async (req, res) => {
   try {
     const { name } = req.params;
@@ -5582,9 +5608,10 @@ function leaderWakeDue(entry, sessionId, now) {
 
 const leaderWakesInFlight = new Set();
 
-async function wakeRoomLeader(name, now = Date.now()) {
+async function wakeRoomLeader(name, now = Date.now(), { prompt = null } = {}) {
   if (leaderWakesInFlight.has(name)) return null;
   leaderWakesInFlight.add(name);
+  const wakePrompt = () => prompt || leaderWakePrompt({ roomName: name, at: new Date(now) });
   try {
     // Record the wake before the paste (which can take seconds), as
     // residents do, so a slow paste cannot look like a missed wake.
@@ -5596,11 +5623,11 @@ async function wakeRoomLeader(name, now = Date.now()) {
     if (!sessionId || !validRoomLeaderDesignation(name, sessionId)) {
       // No Leader: seat one (no handoff to write) and let its opening be the wake.
       const model = ROOM_LEADER_WAKES_STATE.read()[name]?.fallback?.model || '';
-      const seated = await succeedRoomLeader(name, { model, handoff: false, opening: () => leaderWakePrompt({ roomName: name, at: new Date(now) }) });
+      const seated = await succeedRoomLeader(name, { model, handoff: false, opening: wakePrompt });
       sessionId = seated.leaderSessionId;
     } else {
       await readyRoomLeader(name);
-      await sendInput(sessionId, leaderWakePrompt({ roomName: name, at: new Date(now) }));
+      await sendInput(sessionId, wakePrompt());
     }
     return sessionId;
   } finally {
@@ -5620,7 +5647,7 @@ function ompMessageText(message) {
 const LEADER_TURN_ENDED = new Set(['stop', 'error', 'aborted', 'length']);
 function leaderWakeTurnEnded(name, sessionId) {
   const records = ompTranscriptTail(sessionId);
-  const openers = [`[Room wake · #${name} · leader`, `[Room handover · #${name}`];
+  const openers = [`[Room wake · #${name} · leader`, `[Room handover · #${name}`, `[Room steer · #${name}`];
   let sawWake = false;
   let ended = false;
   for (const record of records) {

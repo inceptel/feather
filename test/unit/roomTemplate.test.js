@@ -6,7 +6,7 @@ import path from 'path'
 
 import {
   ROOM_MISSION_MAX_CHARS, ROOM_STANDARD_RESIDENTS, ROOM_TEMPLATE_DIRS,
-  leaderKickoffPrompt, normalizeRoomMission, residentWakePrompt, roomTemplateFiles, scaffoldRoom,
+  judgeWakePrompt, leaderKickoffPrompt, leaderSteerPrompt, leaderWakePrompt, normalizeRoomMission, residentWakePrompt, roomTemplateFiles, scaffoldRoom,
   parseRoomMission,
 } from '../../lib/room-template.js'
 
@@ -39,7 +39,15 @@ describe('Room template', () => {
     }
     assert.ok(files['UPDATER.md'].includes('room publish'))
     assert.ok(files['JUDGE.md'].includes('Review → Done'))
+    assert.ok(files['JUDGE.md'].includes('(<file you opened>)'), 'judge verdicts name the opened file')
+    assert.ok(files['JUDGE.md'].includes('Never touch Steering'))
     assert.ok(files['FRONTIER.md'].includes('## Steering'))
+    assert.ok(files['FRONTIER.md'].includes('`room steer`'))
+    assert.ok(files['AGENTS.md'].includes('fewer than three lines the Leader can work alone'))
+    assert.ok(files['AGENTS.md'].includes('`room steer "..."`'))
+    assert.ok(files['MARKETER.md'].includes('summary (≤900 chars'))
+    assert.ok(files['MARKETER.md'].includes('detail (optional, ≤2500 chars'))
+    assert.ok(files['MARKETER.md'].includes('`wiki/<Page>.md#<anchor>`'))
     assert.ok(files['MARKETER.md'].includes('room visual --out ~/rooms/ev-shop/artifacts/<slug>.png'))
     assert.ok(files['MARKETER.md'].includes('notes-md-2026-09-06t18-12-mission-outcome'))
     assert.ok(files['MARKETER.md'].includes('"sourceEvidenceId": "<evidence-id>"'))
@@ -99,5 +107,21 @@ describe('Room template', () => {
     assert.equal(parseRoomMission(roomTemplateFiles({ name: 'bare' })['AGENTS.md']), null)
     assert.equal(parseRoomMission('# Room: #x\n\nfree text only\n'), null)
     assert.equal(parseRoomMission('## Mission (verbatim from the user)\n\n> line one\n> line two\n\nEvery session...\n## Next\n'), 'line one\nline two')
+  })
+})
+
+describe('Room autonomy prompts', () => {
+  it('tells the Leader to plan when Open runs thin, and to re-plan on a steer', () => {
+    const wake = leaderWakePrompt({ roomName: 'ev-shop', at: new Date('2026-09-07T10:00:00Z') })
+    assert.ok(wake.startsWith('[Room wake · #ev-shop · leader · 2026-09-07T10:00:00.000Z]'))
+    assert.ok(wake.includes('fewer than three'))
+    assert.ok(wake.includes('what done looks like'))
+    assert.ok(wake.includes('`needs: <one question>`'))
+    const steer = leaderSteerPrompt({ roomName: 'ev-shop', text: 'Price the equipment first.\nNo purchases.', at: new Date('2026-09-07T10:05:00Z') })
+    assert.ok(steer.startsWith('[Room steer · #ev-shop · 2026-09-07T10:05:00.000Z]'))
+    assert.ok(steer.includes('> Price the equipment first.\n> No purchases.'))
+    assert.ok(steer.includes('Steering outranks everything below it'))
+    const judge = judgeWakePrompt({ roomName: 'ev-shop', leaderSessionId: 'abc', leaderWakeAt: '2026-09-07T10:00:00.000Z', at: new Date('2026-09-07T10:30:00Z') })
+    assert.ok(judge.includes('names the file you opened'))
   })
 })

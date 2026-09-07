@@ -39,6 +39,7 @@
 #   room handoff [session-id]          distill latest (or given) room session into notes.md
 #   room succeed [--model M] [--no-handoff] [--force]  retire the Leader and seat a new one
 #   room autonomy [--every 30m|--off] [--pause|--resume] [--now] [--judge]  Leader wakes + judge (actor-critic loop)
+#   room steer TEXT | --stdin | --file PATH   Add to Steering in FRONTIER.md and wake the Leader now
 #
 # Room resolution: -r <name> flag, $ROOM env, or cwd under ~/rooms/<name>.
 set -u
@@ -785,6 +786,29 @@ print(f"retired {r.get(\"retiredSessionId\") or \"nobody\"}; handoff {r[\"handof
 ' "$response"
 }
 
+cmd_steer() {
+  resolve_room
+  ensure_feather_url
+  read_room_text steer "$@"
+  [ -n "$(printf '%s' "$ROOM_TEXT" | tr -d '[:space:]')" ] || die "room steer: text is empty"
+  local payload response
+  payload=$(python3 -c 'import json, sys; print(json.dumps({"text": sys.argv[1]}))' "$ROOM_TEXT") || exit 1
+  response=$(curl -s -m 900 -X POST "$FEATHER_URL/api/rooms/$ROOM_NAME/steer" \
+    -H 'Content-Type: application/json' -d "$payload") || die "feather unreachable"
+  python3 -c '
+import json, sys
+name = sys.argv[1]
+try:
+    body = json.loads(sys.argv[2])
+except Exception:
+    sys.exit(f"room steer: unexpected reply from feather: {sys.argv[2][:200]}")
+if "error" in body:
+    sys.exit("room steer: " + str(body["error"]))
+who = body.get("leaderSessionId") or "no Leader"
+print(f"#{name} steered: line added to Steering, Leader woken ({who})")
+' "$ROOM_NAME" "$response"
+}
+
 cmd_autonomy() {
   resolve_room
   ensure_feather_url
@@ -875,5 +899,6 @@ case "$cmd" in
   handoff) cmd_handoff "$@" ;;
   succeed) cmd_succeed "$@" ;;
   autonomy) cmd_autonomy "$@" ;;
+  steer) cmd_steer "$@" ;;
   *) die "unknown command: $cmd" ;;
 esac

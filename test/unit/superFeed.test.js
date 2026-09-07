@@ -160,9 +160,23 @@ describe('Super Feed projection', () => {
     assert.equal(item.sessionId, null)
     assert.equal(item.visualHref, '/api/rooms/jacksonville-ev/publications/jax-ev-0001/visual')
     assert.equal(item.visualAlt, 'A map-style Jacksonville EV briefing.')
+    assert.equal(item.wikiPage, null)
 
     const [stale] = mergeSuperFeed([item], [], [])
     assert.equal(stale.sourceState, 'stale')
+  })
+  it('bounds publication text at the deeper card limits and links the wiki page behind the evidence id', () => {
+    const [item] = buildSuperFeed({
+      rooms: [{ name: 'trading' }],
+      publications: [{
+        room: 'trading', id: 'pons-guard-4', occurredAt: '2026-09-07T09:00:00Z',
+        sourceEvidenceId: 'wiki/PONS.md#official-channels-resolved-2026-09-07-guard-4',
+        title: 'PONS guard 4 resolved', summary: 's'.repeat(1_001), detail: 'd'.repeat(3_001),
+      }],
+    })
+    assert.equal(item.summary.length, 1_000)
+    assert.equal(item.detail.length, 3_000)
+    assert.equal(item.wikiPage, 'PONS')
   })
   it('projects By-the-way publications without review attention or a visual', () => {
     const [item] = buildSuperFeed({

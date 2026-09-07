@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js'
-import { fetchSuperFeed, postFeedComment, setFeedFollowing, FeedComment, SuperFeedItem, SuperFeedView } from '../api'
+import { fetchSuperFeed, postFeedComment, postRoomSteer, setFeedFollowing, FeedComment, SuperFeedItem, SuperFeedView } from '../api'
 import { appUrl } from '../lib/appPath'
 import { markdownCSS, renderWikiMarkdown } from './MessageView'
 
@@ -36,6 +36,12 @@ function headline(item: SuperFeedItem) {
   return item.title.startsWith(prefix) ? item.title.slice(prefix.length) : item.title
 }
 
+const SteerIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="1.5" /><path d="M8 2.5v4M8 9.5v4M2.5 8h4M9.5 8h4" />
+  </svg>
+)
+
 const CommentIcon = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
     <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
@@ -54,6 +60,11 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
   const [commentBusy, setCommentBusy] = createSignal(false)
   const [pendingComments, setPendingComments] = createSignal<Record<string, FeedComment[]>>({})
   const [expandedReplies, setExpandedReplies] = createSignal<Record<string, boolean>>({})
+  // Steer box: one open at a time, keyed by card; `steered` remembers the receipt per card.
+  const [steerOpen, setSteerOpen] = createSignal<string | null>(null)
+  const [steerDraft, setSteerDraft] = createSignal('')
+  const [steerBusy, setSteerBusy] = createSignal(false)
+  const [steered, setSteered] = createSignal<Record<string, string>>({})
 
   let timer: ReturnType<typeof setInterval>
   let requestInFlight = false
@@ -148,6 +159,31 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setCommentBusy(false)
+    }
+  }
+
+  function toggleSteer(item: SuperFeedItem, event: MouseEvent) {
+    event.stopPropagation()
+    setSteerOpen(steerOpen() === item.evidenceId ? null : item.evidenceId)
+    setSteerDraft('')
+  }
+
+  async function submitSteer(item: SuperFeedItem, event: Event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const text = steerDraft().trim()
+    if (!text || steerBusy()) return
+    setSteerBusy(true)
+    try {
+      const receipt = await postRoomSteer(item.room, text)
+      setSteered(current => ({ ...current, [item.evidenceId]: receipt.woke ? `Added to #${item.room} Steering · Leader woken` : `Added to #${item.room} Steering` }))
+      setSteerDraft('')
+      setSteerOpen(null)
+      setError(null)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setSteerBusy(false)
     }
   }
 
@@ -250,6 +286,36 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
     )
   }
 
+  // Steer box under a card: the text goes to the Room's Steering section and
+  // wakes its Leader. Unlike a comment it expects no answer under the card.
+  const SteerBox = (boxProps: { item: SuperFeedItem }) => (
+    <div onClick={(event) => event.stopPropagation()}>
+      <Show when={steered()[boxProps.item.evidenceId]}>
+        <div data-testid={`feed-steer-receipt-${boxProps.item.evidenceId}`} style={{ color: green, 'font-size': '12px', 'font-weight': '700', 'margin-top': '8px' }}>{steered()[boxProps.item.evidenceId]}</div>
+      </Show>
+      <Show when={steerOpen() === boxProps.item.evidenceId}>
+        <form onSubmit={(event) => submitSteer(boxProps.item, event)} style={{ display: 'flex', gap: '6px', 'align-items': 'flex-end', 'margin-top': '10px' }}>
+          <textarea data-testid={`feed-steer-input-${boxProps.item.evidenceId}`} value={steerDraft()} onInput={(event) => setSteerDraft(event.currentTarget.value)}
+            placeholder={`Steer #${boxProps.item.room}: what to do next, or differently…`} rows={2} autofocus
+            onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitSteer(boxProps.item, event) }}
+            style={{ flex: '1', 'min-width': '0', background: '#0b0e13', border: '1px solid #2a3442', 'border-radius': '8px', color: ink, 'font-size': '14px', padding: '8px 10px', resize: 'vertical', 'font-family': 'inherit' }} />
+          <button type="submit" disabled={steerBusy() || !steerDraft().trim()}
+            style={{ background: '#243044', border: 'none', color: ink, 'font-size': '13px', 'font-weight': '700', padding: '9px 13px', 'border-radius': '8px', cursor: 'pointer' }}>{steerBusy() ? '…' : 'Steer'}</button>
+          <button type="button" onClick={(event) => toggleSteer(boxProps.item, event)}
+            style={{ background: 'none', border: 'none', color: muted, 'font-size': '13px', padding: '9px 4px', cursor: 'pointer' }}>Cancel</button>
+        </form>
+      </Show>
+    </div>
+  )
+
+  const SteerButton = (buttonProps: { item: SuperFeedItem }) => (
+    <button data-testid={`feed-steer-open-${buttonProps.item.evidenceId}`} onClick={(event) => toggleSteer(buttonProps.item, event)}
+      aria-expanded={steerOpen() === buttonProps.item.evidenceId} title={`Add a line to #${buttonProps.item.room}'s Steering and wake its Leader`}
+      style={{ display: 'inline-flex', 'align-items': 'center', gap: '5px', background: 'none', border: `1px solid ${line}`, 'border-radius': '999px', color: muted, 'font-size': '12px', 'font-weight': '700', padding: '4px 10px', cursor: 'pointer', 'white-space': 'nowrap' }}>
+      <SteerIcon />Steer
+    </button>
+  )
+
   const CommentButton = (buttonProps: { item: SuperFeedItem, items: SuperFeedItem[] }) => {
     const count = () => commentsFor(buttonProps.items).length
     return (
@@ -345,15 +411,21 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
                 <h3 style={{ margin: '8px 0 0', color: ink, 'font-size': '16px', 'font-weight': '700', 'line-height': '1.3', 'word-break': 'break-word' }}>{headline(item)}</h3>
                 <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px', 'margin-top': '6px' }} />
                 <Show when={item.detail}>
-                  <details style={{ 'margin-top': '6px' }}>
-                    <summary style={{ color: muted, 'font-size': '12px', 'font-weight': '700', cursor: 'pointer', 'user-select': 'none' }}>Details</summary>
-                    <div class="markdown" innerHTML={renderWikiMarkdown(item.detail!)} style={{ color: body, 'font-size': '13px', 'margin-top': '6px' }} />
-                  </details>
+                  <div data-testid={`feed-detail-${item.evidenceId}`} class="markdown" innerHTML={renderWikiMarkdown(item.detail!)}
+                    style={{ color: body, 'font-size': '13px', 'margin-top': '8px', 'padding-top': '8px', 'border-top': `1px solid ${line}` }} />
                 </Show>
-                <div style={{ display: 'flex', 'align-items': 'center', gap: '10px', 'margin-top': '10px' }}>
+                <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'margin-top': '10px', 'flex-wrap': 'wrap' }}>
                   <Show when={item.sourceState === 'available'}><CommentButton item={item} items={[item]} /></Show>
-                  <Show when={item.sourceState === 'available'}><span style={{ 'margin-left': 'auto' }}><EvidenceLink item={item} label="Published evidence ↗" /></span></Show>
+                  <Show when={item.sourceState === 'available'}><SteerButton item={item} /></Show>
+                  <span style={{ 'margin-left': 'auto', display: 'inline-flex', gap: '10px', 'align-items': 'center' }}>
+                    <Show when={item.sourceState === 'available' && item.wikiPage}>
+                      <a data-testid={`feed-wiki-${item.evidenceId}`} href={`#room/${encodeURIComponent(item.room)}/wiki/${encodeURIComponent(item.wikiPage!)}`} onClick={(event) => event.stopPropagation()}
+                        style={{ color: green, 'font-size': '12px', 'font-weight': '700', 'text-decoration': 'none', 'white-space': 'nowrap' }}>Read the page →</a>
+                    </Show>
+                    <Show when={item.sourceState === 'available'}><EvidenceLink item={item} label="Published evidence ↗" /></Show>
+                  </span>
                 </div>
+                <Show when={item.sourceState === 'available'}><SteerBox item={item} /></Show>
                 <Show when={item.sourceState === 'available'}><Thread item={item} items={[item]} /></Show>
               </article>
             )

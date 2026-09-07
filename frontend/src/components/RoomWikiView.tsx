@@ -2,7 +2,9 @@ import { createEffect, createSignal, For, Show } from 'solid-js'
 import { fetchRoomWiki, fetchRoomWikiPage, RoomWikiPageMeta } from '../api'
 import { renderWikiMarkdown } from './MessageView'
 
-export function RoomWikiView(props: { room?: string }) {
+// `page` opens the view on that page (a feed card's "Read the page" link)
+// instead of Home.
+export function RoomWikiView(props: { room?: string, page?: string }) {
   const [pages, setPages] = createSignal<RoomWikiPageMeta[]>([])
   const [selected, setSelected] = createSignal<string | null>(null)
   const [content, setContent] = createSignal('')
@@ -33,6 +35,7 @@ export function RoomWikiView(props: { room?: string }) {
 
   createEffect(() => {
     const room = props.room
+    const wanted = props.page
     const ownGeneration = ++generation
     ++pageGeneration
     setPages([])
@@ -44,7 +47,7 @@ export function RoomWikiView(props: { room?: string }) {
     fetchRoomWiki(room).then(async (next) => {
       if (ownGeneration !== generation) return
       setPages(next)
-      const first = next.find((page) => page.name === 'Home') || next[0]
+      const first = (wanted && next.find((page) => page.name === wanted)) || next.find((page) => page.name === 'Home') || next[0]
       if (first) await selectPage(first.name, room)
       else setLoading(false)
     }).catch((cause) => {

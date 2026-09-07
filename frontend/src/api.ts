@@ -323,6 +323,7 @@ export interface SuperFeedItem {
   resolvedAt?: string | null
   resolution?: string | null
   publicationId?: string
+  wikiPage?: string | null
   attention?: 'briefing' | 'by-the-way'
   visualHref?: string
   visualAlt?: string
@@ -375,6 +376,17 @@ export async function postFeedComment(evidenceId: string, text: string): Promise
     body: JSON.stringify({ evidenceId, text }),
   })
   return (await responseJson<{ ok: true, comment: FeedComment }>(response)).comment
+}
+
+// Steer a Room from a card: the text lands under Steering in its FRONTIER.md
+// and the Leader is woken at once.
+export async function postRoomSteer(room: string, text: string): Promise<{ ok: true, room: string, at: string, leaderSessionId: string | null, woke: boolean }> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/steer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+  return responseJson(response)
 }
 
 export async function fetchRoomFriction(room: string): Promise<FrictionComplaint[]> {

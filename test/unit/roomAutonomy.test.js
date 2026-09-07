@@ -182,6 +182,17 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       assert.equal((await post(`${base}/api/rooms/ev-shop/leader/wake`, { now: true })).status, 200)
       assert.equal(count(readSent(), /\[Room wake · #ev-shop · leader/g), 2)
 
+      // A steer lands under Steering in FRONTIER.md, is noted, and wakes the Leader at once with the text.
+      assert.equal((await post(`${base}/api/rooms/ev-shop/steer`, { text: 'Price the equipment first.' })).status, 201)
+      const frontier = fs.readFileSync(path.join(home, 'rooms/ev-shop/FRONTIER.md'), 'utf8')
+      assert.match(frontier, /## Steering\n[\s\S]*?- \d{4}-\d{2}-\d{2} \d{2}:\d{2} Price the equipment first\.\n\n## Open\n/)
+      assert.match(fs.readFileSync(path.join(home, 'rooms/ev-shop/notes.md'), 'utf8'), /\[steer\] Price the equipment first\./)
+      assert.equal(count(readSent(), /\[Room steer · #ev-shop/g), 1)
+      assert.ok(readSent().includes('> Price the equipment first.'))
+      assert.equal(readWakes()['ev-shop'].judgeDue, true, 'a steer turn is judged like a wake')
+      assert.equal((await post(`${base}/api/rooms/ev-shop/steer`, { text: '   ' })).status, 400)
+      assert.equal((await post(`${base}/api/rooms/no-such-room/steer`, { text: 'x' })).status, 404)
+
       // Usage-limit fallback: the Leader's last turn died on a limit, so the
       // scheduler retires it (handoff written) and seats a Leader on the
       // fallback model, whose opening says why and keeps working.

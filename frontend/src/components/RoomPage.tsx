@@ -51,7 +51,7 @@ const buttonStyle = (accent = false) => ({
   'font-size': '12px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent',
 })
 
-export function RoomPage(props: { name: string, onOpenSession: (id: string) => void, onBack: () => void, onSessionsChanged?: () => void }) {
+export function RoomPage(props: { name: string, wikiPage?: string, onOpenSession: (id: string) => void, onBack: () => void, onSessionsChanged?: () => void }) {
   const [room, setRoom] = createSignal<RoomInfo | null>(null)
   const [missing, setMissing] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
@@ -303,7 +303,7 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
             </button>
             <Show when={showWiki()}>
               <div style={{ height: '60vh', 'border-top': `1px solid ${line}`, background: '#0a0d13' }}>
-                <RoomWikiView room={props.name} />
+                <RoomWikiView room={props.name} page={props.wikiPage} />
               </div>
             </Show>
           </section>
