@@ -65,6 +65,16 @@ describe('scheduler decisions', () => {
     assert.match(again.reason, /^next 2026-09-07T13:00/)
   })
 
+  it('markStarted keeps the previous run time so wakes can look back one run', () => {
+    const before = new Date(T0 - H).toISOString()
+    const runtime = { ...emptyRuntime(), lastRunAt: before }
+    const started = markStarted(runtime, { runId: 'r1', at: T0 })
+    assert.equal(started.previousRunAt, before)
+    assert.equal(started.lastRunAt, new Date(T0).toISOString())
+    const again = markStarted(markFinished(started, { outcome: 'done', at: T0 + 1000 }), { runId: 'r2', at: T0 + H })
+    assert.equal(again.previousRunAt, new Date(T0).toISOString())
+  })
+
   it('holds everything during boot grace', () => {
     const rule = normalizeRule(leader)
     const runtime = { ...emptyRuntime(), lastRunAt: new Date(T0 - 5 * H).toISOString() }

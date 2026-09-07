@@ -6014,7 +6014,9 @@ function schedulerPrompt(rule, { at, runtime }) {
   const roomName = rule.room;
   const role = rule.target.kind === 'resident' ? rule.target.role : rule.target.kind === 'leader' ? 'leader' : 'chat';
   const parent = rule.after ? runtimeOf(SCHEDULER_STATE.read(), rule.after) : null;
-  const changedRooms = roomsWithWikiWritesSince(Date.parse(runtime?.lastRunAt || '') || 0);
+  // markStarted already stamped lastRunAt for this run; the wake message
+  // must look back to the run before it, or every wake says "none".
+  const changedRooms = roomsWithWikiWritesSince(Date.parse(runtime?.previousRunAt || '') || 0);
   const values = { room: roomName, role, at: at.toISOString(), ruleId: rule.id, after: rule.after || '', afterAt: parent?.lastRunAt || '', changed: changedRooms.join(', ') };
   const header = `[Room wake · #${roomName} · ${role} · ${at.toISOString()}]`;
   if (rule.prompt) {
