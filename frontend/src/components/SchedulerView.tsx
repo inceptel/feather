@@ -198,7 +198,7 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
                       <td style={{ ...cell, 'white-space': 'nowrap', color: muted }}>{clock(run.finishedAt || run.startedAt)}</td>
                       <td style={cell}>{run.ruleId}</td>
                       <td style={{ ...cell, color: run.event === 'finished' ? outcomeColor(run.outcome) : green, 'white-space': 'nowrap' }}>
-                        {run.event === 'finished' ? `${run.outcome} · ${Math.round((run.durationMs || 0) / 60000)}m` : 'started'}
+                        {run.event === 'finished' ? `${run.outcome} · ${Math.round((run.durationMs || 0) / 60000)}m` : run.event === 'nudged' ? 'wrap-up nudge' : 'started'}
                       </td>
                       <td style={{ ...cell, color: muted }}>{run.reason}{run.detail ? ` · ${run.detail}` : ''}</td>
                       <td style={cell}>

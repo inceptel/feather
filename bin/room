@@ -1065,6 +1065,8 @@ for r in runs:
         mins = round((r.get("durationMs") or 0) / 60000)
         detail = ("  [" + r["detail"] + "]") if r.get("detail") else ""
         print("%s  %-28s %-8s %dm  %s%s" % (clock(r["finishedAt"]), r["ruleId"], r["outcome"], mins, r.get("reason", ""), detail))
+    elif r.get("event") == "nudged":
+        print("%s  %-28s wrap-up   nudged at %d min" % (clock(r["nudgedAt"]), r["ruleId"], round((datetime.fromisoformat(r["nudgedAt"].replace("Z", "+00:00")) - datetime.fromisoformat(r["startedAt"].replace("Z", "+00:00"))).total_seconds() / 60)))
     else:
         print("%s  %-28s started   %s" % (clock(r["startedAt"]), r["ruleId"], r.get("reason", "")))
 ' "$response"

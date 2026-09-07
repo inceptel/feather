@@ -29,7 +29,7 @@ import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } 
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import {
   validateRules, normalizeRule, planTick, findIncidents, expiredRuns, markStarted, markFinished,
-  runtimeOf, describeRule, SCHEDULER_TICK_MS, BOOT_GRACE_MS,
+  runtimeOf, describeRule, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS,
 } from './lib/scheduler.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
@@ -6026,6 +6026,40 @@ function sessionTurnEndedAfter(sessionId, marker) {
   return sawMarker && ended;
 }
 
+// A fresh chat that is still busy at three quarters of its timeout gets one
+// wrap-up message: write the note and move the line before the kill. Without
+// it a long scan ends as 'timeout' with nothing recorded and the next wake
+// starts the same gap from zero.
+const SCHEDULER_NUDGE_FRACTION = 0.75;
+function schedulerNudgeDue(run, rule, now) {
+  if (run.nudgedAt || !run.sessionId || rule.mode !== 'fresh') return false;
+  const timeout = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  return now - Date.parse(run.startedAt) >= timeout * SCHEDULER_NUDGE_FRACTION;
+}
+function schedulerWrapUpPrompt(rule, run, now) {
+  const timeout = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const left = Math.max(1, Math.round((Date.parse(run.startedAt) + timeout - now) / 60_000));
+  return [
+    `[Room wake · #${rule.room} · wrap-up · ${new Date(now).toISOString()}]`,
+    `About ${left} minutes remain before this chat is retired. Stop the current work now. Record what you have and where it is with \`room note\`, move the FRONTIER line with that evidence (partial is fine: say what is left and where the data sits), and end your turn.`,
+  ].join('\n');
+}
+async function schedulerNudge(run, rule, now) {
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, nudgedAt: new Date(now).toISOString() } : candidate),
+  }));
+  try {
+    const prompt = schedulerWrapUpPrompt(rule, run, now);
+    if (getAgentForSession(run.sessionId) === 'omp') await wakeResident(run.sessionId, rule.room, prompt);
+    else await sendInput(run.sessionId, prompt);
+    appendSchedulerRun({ ...run, event: 'nudged', nudgedAt: new Date(now).toISOString() });
+    console.log(`[scheduler] ${rule.id} wrap-up nudge sent to ${run.sessionId}`);
+  } catch (error) {
+    console.warn(`[scheduler] ${rule.id} nudge failed:`, error.message);
+  }
+}
+
 function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = null } = {}) {
   SCHEDULER_STATE.update((current) => ({
     ...current,
@@ -6106,7 +6140,8 @@ function schedulerTick(now = Date.now()) {
       if (schedulerLaunchesInFlight.has(rule.id)) continue;
       if (expiredRuns([run], rules, now).length) { schedulerFinishRun(run, 'timeout', { rule, now }); continue; }
       const status = schedulerRunStatus(run, rule);
-      if (status !== 'running') schedulerFinishRun(run, status, { rule, now });
+      if (status !== 'running') { schedulerFinishRun(run, status, { rule, now }); continue; }
+      if (schedulerNudgeDue(run, rule, now)) schedulerNudge(run, rule, now);
     }
     // 2. Plan and launch.
     const fresh = SCHEDULER_STATE.read();
