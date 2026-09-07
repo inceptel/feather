@@ -149,8 +149,9 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       assert.equal((await post(`${base}/api/scheduler/rules/ev-shop/leader/fire`)).status, 409, 'no overlap')
 
       // The agent rule waits for an Open line in wiki/TODO.md.
-      const agentRule = await json(await put(`${base}/api/scheduler/rules/ev-shop/agent`, { target: { kind: 'agent', builder: { engine: 'omp' }, checker: { engine: 'codex' }, roundMs: '1m' }, every: '1m', when: [{ type: 'todo-has', section: 'Open' }] }))
+      const agentRule = await json(await put(`${base}/api/scheduler/rules/ev-shop/agent`, { target: { kind: 'agent', builder: { engine: 'omp' }, checker: { engine: 'codex', model: 'gpt-6-astra' }, roundMs: '1m' }, every: '1m', when: [{ type: 'todo-has', section: 'Open' }] }))
       assert.equal(agentRule.status, 200, agentRule.text)
+      assert.equal(agentRule.body.rule.target.checker.model, 'gpt-6-astra')
       assert.equal(agentRule.body.rule.target.roundMs, 60_000)
       assert.equal(agentRule.body.rule.mode, 'fresh')
       // The Leader's turn ends.
@@ -195,6 +196,7 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
         return entry.runtime.running === null && entry.runtime.lastOutcome === 'done' ? entry : null
       }, { message: 'agent run done' })
       const kills = fs.readFileSync(commandLog, 'utf8')
+      assert.ok(/new-session .*codex .*-m .*gpt-6-astra/.test(kills), 'checker launched with its model')
       assert.ok(kills.includes(`kill-session -t feather-${builderId.slice(0, 8)}`), 'builder retired')
       assert.ok(kills.includes(`kill-session -t feather-${checkerId.slice(0, 8)}`), 'checker retired')
       assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.feather/sidecars/groups.json'), 'utf8'))[groupId]?.status, 'done', 'group torn down')

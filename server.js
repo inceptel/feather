@@ -1269,9 +1269,11 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   launchInTmux(tmuxName(id), command, cwd);
 }
 
-function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null } = {}) {
+function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, model: engineModel = '' } = {}) {
   const name = tmuxName(id);
   const model = agent === 'omp' ? sanitizeOmpModel(ompModel) : '';
+  // Codex and Claude take a model slug too (same character rules as OMP).
+  const cliModel = agent === 'omp' ? '' : sanitizeOmpModel(engineModel);
   updateMeta((meta) => ({
     ...meta,
     [id]: {
@@ -1305,6 +1307,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null } 
     const args = [
       'codex',
       '-c check_for_update_on_startup=false',
+      cliModel ? `-m ${shellQuote(cliModel)}` : '',
       ralphFlag,
       '--dangerously-bypass-approvals-and-sandbox',
     ].filter(Boolean).join(' ');
@@ -1317,6 +1320,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null } 
       'claude',
       `--session-id ${shellQuote(id)}`,
       systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
+      cliModel ? `--model ${shellQuote(cliModel)}` : '',
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
@@ -1400,6 +1404,7 @@ function resumeSession(id, cwd) {
     const args = [
       'codex',
       '-c check_for_update_on_startup=false',
+      cliModel ? `-m ${shellQuote(cliModel)}` : '',
       ralphFlag,
       resumeArg,
       `--cd ${shellQuote(sessionCwd)}`,
@@ -1428,6 +1433,7 @@ function resumeSession(id, cwd) {
       'claude',
       `--resume ${shellQuote(id)}`,
       systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
+      cliModel ? `--model ${shellQuote(cliModel)}` : '',
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
@@ -6084,8 +6090,8 @@ async function schedulerStartFreshSession({ id, cwd, room, engine, model = null,
     launchOmpSession(id, cwd, { promptFile, autoApprove: true });
     return;
   }
-  spawnSession(id, cwd, engine);
-  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title } }));
+  spawnSession(id, cwd, engine, { model: model || '' });
+  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title, ...(model ? { model: sanitizeOmpModel(model) } : {}) } }));
   await sleep(ROOM_KICKOFF_DELAY_MS);
   await sendInput(id, prompt);
 }
