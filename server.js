@@ -38,7 +38,11 @@ import { appendRoomPublication, readRoomPublications, verifiedPublicationVisual 
 import {
   ROOM_STANDARD_RESIDENTS,
   ROOM_TEMPLATE_DIRS,
+  frontierTemplate,
+  judgeWakePrompt,
+  leaderFallbackPrompt,
   leaderKickoffPrompt,
+  leaderWakePrompt,
   normalizeRoomMission,
   parseRoomMission,
   residentWakePrompt,
@@ -3967,6 +3971,7 @@ const ROOMS_HOME_DIR = STATE_PATHS.workspace.roomsDir;
 const ROOM_ASSIGN_FILE = STATE_PATHS.coordination.roomAssignmentsFile;
 const ROOM_LEADERS_FILE = STATE_PATHS.coordination.roomLeadersFile;
 const ROOM_RESIDENTS_FILE = STATE_PATHS.coordination.roomResidentsFile;
+const ROOM_LEADER_WAKES_FILE = STATE_PATHS.coordination.roomLeaderWakesFile;
 const ROOM_PULSES_FILE = STATE_PATHS.coordination.roomPulsesFile;
 const ROOM_ASSIGN_STATE = createJsonState({
   file: ROOM_ASSIGN_FILE, root: path.dirname(ROOM_ASSIGN_FILE), document: 'Room assignments',
@@ -4013,6 +4018,53 @@ const ROOM_RESIDENTS_STATE = createJsonState({
   file: ROOM_RESIDENTS_FILE, root: path.dirname(ROOM_RESIDENTS_FILE), document: 'Room residents',
   defaultValue: {}, validate: isRoomResidentState,
 });
+// Leader wakes (Room autonomy): per Room, how often Feather wakes the Leader
+// to work its FRONTIER.md, plus the usage-limit fallback it is running on.
+function isRoomLeaderWakeState(value) {
+  if (!isJsonRecord(value)) return false;
+  return Object.values(value).every((entry) => {
+    if (!isJsonRecord(entry)) return false;
+    if (entry.wakeIntervalMs !== null && !(Number.isFinite(entry.wakeIntervalMs) && entry.wakeIntervalMs > 0)) return false;
+    if (entry.nextWakeAtMs !== null && !(Number.isFinite(entry.nextWakeAtMs) && entry.nextWakeAtMs >= 0)) return false;
+    if (entry.lastWakeAt !== null && (typeof entry.lastWakeAt !== 'string' || !Number.isFinite(Date.parse(entry.lastWakeAt)))) return false;
+    if (typeof entry.paused !== 'boolean') return false;
+    if (entry.fallbackAttempts !== undefined && !(Number.isFinite(entry.fallbackAttempts) && entry.fallbackAttempts >= 0)) return false;
+    if (entry.judgeDue !== undefined && typeof entry.judgeDue !== 'boolean') return false;
+    if (entry.lastJudgeAt !== undefined && entry.lastJudgeAt !== null
+      && (typeof entry.lastJudgeAt !== 'string' || !Number.isFinite(Date.parse(entry.lastJudgeAt)))) return false;
+    if (entry.fallback === null || entry.fallback === undefined) return true;
+    const fallback = entry.fallback;
+    return isJsonRecord(fallback)
+      && typeof fallback.model === 'string' && typeof fallback.primaryModel === 'string'
+      && typeof fallback.since === 'string' && Number.isFinite(Date.parse(fallback.since))
+      && Number.isFinite(fallback.retryAtMs)
+      && (fallback.reason === null || typeof fallback.reason === 'string')
+      && Number.isFinite(fallback.attempts);
+  });
+}
+const ROOM_LEADER_WAKES_STATE = createJsonState({
+  file: ROOM_LEADER_WAKES_FILE, root: path.dirname(ROOM_LEADER_WAKES_FILE), document: 'Room Leader wakes',
+  defaultValue: {}, validate: isRoomLeaderWakeState,
+});
+function leaderWakeRecord(current = {}, changes = {}) {
+  return {
+    wakeIntervalMs: current.wakeIntervalMs ?? null,
+    nextWakeAtMs: current.nextWakeAtMs ?? null,
+    lastWakeAt: current.lastWakeAt ?? null,
+    paused: current.paused === true,
+    fallback: current.fallback ?? null,
+    fallbackAttempts: current.fallbackAttempts ?? 0,
+    judgeDue: current.judgeDue === true,
+    lastJudgeAt: current.lastJudgeAt ?? null,
+    ...changes,
+  };
+}
+function ensureRoomFrontier(name) {
+  const file = path.join(ROOMS_HOME_DIR, name, 'FRONTIER.md');
+  if (fs.existsSync(file)) return false;
+  fs.writeFileSync(file, frontierTemplate(name));
+  return true;
+}
 const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
 function isRoomPulseState(value) {
   if (!isJsonRecord(value)) return false;
@@ -4290,11 +4342,38 @@ function readRoomMission(name) {
   }
 }
 
+function leaderWakeFields(entry) {
+  const record = leaderWakeRecord(entry);
+  return {
+    wakeIntervalMs: record.wakeIntervalMs,
+    nextWakeAtMs: record.paused ? null : record.nextWakeAtMs,
+    lastWakeAt: record.lastWakeAt,
+    paused: record.paused,
+  };
+}
+function leaderWakeSummary(entry) {
+  const record = leaderWakeRecord(entry);
+  return {
+    ...leaderWakeFields(record),
+    enabled: Boolean(record.wakeIntervalMs) && !record.paused,
+    judgeDue: record.judgeDue,
+    lastJudgeAt: record.lastJudgeAt,
+    fallback: record.fallback ? {
+      model: record.fallback.model,
+      primaryModel: record.fallback.primaryModel,
+      since: record.fallback.since,
+      reason: record.fallback.reason,
+      retryAt: new Date(record.fallback.retryAtMs).toISOString(),
+    } : null,
+  };
+}
+
 function buildRoomsSnapshot() {
   const names = listRoomDirs();
   const assignments = readRoomAssignments();
   const leaders = ROOM_LEADERS_STATE.read();
   const residentState = ROOM_RESIDENTS_STATE.read();
+  const leaderWakeState = ROOM_LEADER_WAKES_STATE.read();
   const sessionMeta = readMeta();
   const pulseState = ROOM_PULSES_STATE.read();
   const pulseSessionIds = Object.values(pulseState).map((pulse) => pulse?.sessionId).filter(Boolean);
@@ -4340,7 +4419,9 @@ function buildRoomsSnapshot() {
         agent: leaderSession.agent,
         title: leaderSession.title,
         status: leaderSession.isActive ? 'working' : 'waiting',
+        model: ompSessionModel(leaderSession.id),
         ...leaderTelemetry(leaderSession.id),
+        ...leaderWakeFields(leaderWakeState[name]),
       });
     } else if (startingLeaderId) {
       residents.push({
@@ -4349,7 +4430,9 @@ function buildRoomsSnapshot() {
         agent: sessionMeta[startingLeaderId]?.agent || 'omp',
         title: sessionMeta[startingLeaderId]?.title || `#${name}`,
         status: 'starting',
+        model: ompSessionModel(startingLeaderId),
         ...leaderTelemetry(startingLeaderId),
+        ...leaderWakeFields(leaderWakeState[name]),
       });
     }
     for (const [role, configured] of Object.entries(residentState[name] || {}).sort(([a], [b]) => a.localeCompare(b))) {
@@ -4387,6 +4470,7 @@ function buildRoomsSnapshot() {
       leaderSessionId,
       residents,
       residentsPaused,
+      leaderWake: leaderWakeSummary(leaderWakeState[name]),
       sidecarGroupId: leaderSessionId ? sidecar.roomGroupId(name) : null,
       active: sessions.some((s) => s.isActive),
       pulse,
@@ -4845,6 +4929,19 @@ app.get('/api/rooms/:name/friction', (req, res) => {
 // New Room Leaders default to Claude Fable unless the caller names a model.
 const ROOM_LEADER_DEFAULT_MODEL = sanitizeOmpModel(process.env.FEATHER_ROOM_LEADER_MODEL ?? 'anthropic/claude-fable-5-1');
 const ROOM_KICKOFF_DELAY_MS = Math.max(0, Number(process.env.FEATHER_ROOM_KICKOFF_DELAY_MS) || 8_000);
+// Room autonomy: the Leader wake floor, and the models a Leader falls back to
+// (in order) when its provider reports a usage limit. Empty disables fallback.
+const ROOM_LEADER_WAKE_MIN_MS = Math.max(1, Number(process.env.FEATHER_ROOM_LEADER_WAKE_MIN_MS) || 5 * 60_000);
+const ROOM_LEADER_FALLBACK_MODELS = String(process.env.FEATHER_ROOM_LEADER_FALLBACK_MODELS ?? 'openai-codex/gpt-5.6-sol')
+  .split(',').map((model) => sanitizeOmpModel(model.trim())).filter(Boolean);
+const ROOM_LEADER_FALLBACK_RETRY_MS = Math.max(1, Number(process.env.FEATHER_ROOM_LEADER_FALLBACK_RETRY_MS) || 60 * 60_000);
+const ROOM_LEADER_FALLBACK_RETRY_MAX_MS = Math.max(ROOM_LEADER_FALLBACK_RETRY_MS, Number(process.env.FEATHER_ROOM_LEADER_FALLBACK_RETRY_MAX_MS) || 6 * 60 * 60_000);
+// The judge runs on the other harness by default so the critic never shares
+// the Leader's blind spots (Council and the h5i court do the same).
+const ROOM_JUDGE_MODEL = sanitizeOmpModel(process.env.FEATHER_ROOM_JUDGE_MODEL ?? 'openai-codex/gpt-5.6-sol');
+function residentModelFor(role) {
+  return role === 'judge' ? ROOM_JUDGE_MODEL : '';
+}
 // Gateway-backed sessions have private agent.db files and can start together.
 // Keep the legacy delay only when the deployment has not enabled isolation.
 const ROOM_STAFF_STAGGER_MS = Math.max(0, Number(
@@ -4859,7 +4956,7 @@ async function staffRoom(name, mission) {
   for (const spec of ROOM_STANDARD_RESIDENTS) {
     if (ROOM_STAFF_STAGGER_MS) await sleep(ROOM_STAFF_STAGGER_MS);
     const created = createSessionForRequest({
-      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE,
+      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE, model: residentModelFor(spec.role),
       roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
     });
     updateMeta((meta) => ({ ...meta, [created.id]: { ...(meta[created.id] || {}), title: `${spec.role}: #${name}` } }));
@@ -4906,7 +5003,7 @@ async function staffExistingRoom(name, specialistWakeIntervals = {}) {
     const before = ROOM_RESIDENTS_STATE.read()[name]?.[spec.role]?.sessionId || null;
     if (!before && ROOM_STAFF_STAGGER_MS) await sleep(ROOM_STAFF_STAGGER_MS);
     const resident = createSessionForRequest({
-      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE,
+      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE, model: residentModelFor(spec.role),
       roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
     });
     if (resident.status !== 'existing') created.push(spec.role);
@@ -5066,7 +5163,7 @@ function successionPrompt(roomName, { retiredSessionId, handoff }) {
   ].join(' ');
 }
 
-async function succeedRoomLeader(name, { model = '', handoff = true, force = false } = {}) {
+async function succeedRoomLeader(name, { model = '', handoff = true, force = false, opening = null } = {}) {
   const cwd = path.join(ROOMS_HOME_DIR, name);
   if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
   if (roomSuccessions.has(name)) throw httpError(409, `#${name} succession already in progress`);
@@ -5099,9 +5196,11 @@ async function succeedRoomLeader(name, { model = '', handoff = true, force = fal
     });
     updateMeta((meta) => ({ ...meta, [created.id]: { ...(meta[created.id] || {}), title: `#${name}` } }));
     roomSnapshotCache.refresh();
-    const opening = successionPrompt(name, { retiredSessionId, handoff: handoffStatus });
+    const openingPrompt = typeof opening === 'function'
+      ? opening({ retiredSessionId, handoff: handoffStatus })
+      : successionPrompt(name, { retiredSessionId, handoff: handoffStatus });
     setTimeout(() => {
-      sendInput(created.id, opening)
+      sendInput(created.id, openingPrompt)
         .catch((error) => console.warn(`[room] #${name} succession opening failed:`, error.message));
     }, ROOM_KICKOFF_DELAY_MS);
     return {
@@ -5153,6 +5252,47 @@ app.post('/api/rooms/:name/residents/pause', (req, res) => {
     });
     const room = roomSnapshotCache.refresh().find((candidate) => candidate.name === name);
     res.json({ ok: true, paused, residents: room?.residents || [], residentsPaused: room?.residentsPaused ?? paused });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Room autonomy: how often Feather wakes the Leader to work FRONTIER.md.
+// `wakeIntervalMs: null` switches it off; `now: true` sends one wake at once.
+app.post('/api/rooms/:name/leader/wake', async (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+    const body = req.body || {};
+    if (body.wakeIntervalMs !== undefined && body.wakeIntervalMs !== null
+      && !(Number.isFinite(body.wakeIntervalMs) && body.wakeIntervalMs >= ROOM_LEADER_WAKE_MIN_MS)) {
+      throw httpError(400, `wakeIntervalMs must be null or at least ${ROOM_LEADER_WAKE_MIN_MS}`);
+    }
+    if (body.paused !== undefined && typeof body.paused !== 'boolean') throw httpError(400, 'paused must be true or false');
+    if (body.now !== undefined && typeof body.now !== 'boolean') throw httpError(400, 'now must be true or false');
+    if (body.judge !== undefined && typeof body.judge !== 'boolean') throw httpError(400, 'judge must be true or false');
+    const now = Date.now();
+    ROOM_LEADER_WAKES_STATE.update((current) => {
+      const entry = leaderWakeRecord(current[name]);
+      if (body.wakeIntervalMs !== undefined) {
+        entry.wakeIntervalMs = body.wakeIntervalMs;
+        entry.nextWakeAtMs = body.wakeIntervalMs === null ? null : now + body.wakeIntervalMs;
+      }
+      if (body.paused !== undefined) {
+        entry.paused = body.paused;
+        if (!body.paused && entry.wakeIntervalMs) entry.nextWakeAtMs = now + entry.wakeIntervalMs;
+      }
+      return { ...current, [name]: entry };
+    });
+    if (ROOM_LEADER_WAKES_STATE.read()[name]?.wakeIntervalMs) ensureRoomFrontier(name);
+    if (body.now === true) {
+      ensureRoomFrontier(name);
+      await wakeRoomLeader(name, now);
+    }
+    if (body.judge === true) {
+      ensureRoomFrontier(name);
+      if (!(await wakeRoomJudge(name, now, { force: true }))) throw httpError(409, `#${name} has no judge to wake`);
+    }
+    const room = roomSnapshotCache.refresh().find((candidate) => candidate.name === name);
+    res.json({ ok: true, leaderWake: room?.leaderWake || null, leaderSessionId: room?.leaderSessionId || null });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -5376,6 +5516,283 @@ function checkResidentWakes() {
   }
 }
 
+// Leader wakes (Room autonomy). The Leader is a plain OMP chat, not a Ralph
+// loop: "mid-turn" means its transcript ends in a user message or a tool
+// call. Like residents, one whole interval past due it is woken anyway.
+const LEADER_LIMIT_RE = /rate.?limit|usage limit|limit reached|too many requests|\b429\b|quota|insufficient.?(credits|balance)|overloaded|resource.?exhausted/i;
+const LEADER_TAIL_BYTES = 256 * 1024;
+
+function ompTranscriptTail(sessionId) {
+  const file = findOmpJsonlPath(sessionId);
+  if (!file) return [];
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(LEADER_TAIL_BYTES, size);
+      const buf = Buffer.alloc(length);
+      fs.readSync(fd, buf, 0, length, size - length);
+      const lines = buf.toString('utf8').split('\n');
+      if (length < size) lines.shift(); // partial first line
+      const records = [];
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try { records.push(JSON.parse(line)); } catch {}
+      }
+      return records;
+    } finally { fs.closeSync(fd); }
+  } catch { return []; }
+}
+
+function ompLastMessage(sessionId) {
+  const records = ompTranscriptTail(sessionId);
+  for (let index = records.length - 1; index >= 0; index--) {
+    const record = records[index];
+    if (record?.type === 'message' && record.message && typeof record.message === 'object') return record.message;
+  }
+  return null;
+}
+
+// A Leader whose last assistant turn ended in a provider limit error.
+function leaderLimitHit(sessionId) {
+  const message = ompLastMessage(sessionId);
+  if (!message || message.role !== 'assistant' || message.stopReason !== 'error') return null;
+  const text = String(message.errorMessage || '');
+  if (!LEADER_LIMIT_RE.test(text)) return null;
+  return { reason: text.slice(0, 200), provider: message.provider || null, model: message.model || null };
+}
+
+function leaderMidTurn(sessionId) {
+  if (!tmuxIsActive(sessionId)) return false;
+  const message = ompLastMessage(sessionId);
+  if (!message) return false;
+  if (message.role === 'user') return true;
+  return message.role === 'assistant' && message.stopReason === 'toolUse';
+}
+
+function leaderWakeDue(entry, sessionId, now) {
+  if (!entry || entry.paused) return false;
+  const interval = Number(entry.wakeIntervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) return false;
+  const next = Number.isFinite(entry.nextWakeAtMs) ? entry.nextWakeAtMs : ROOM_PULSE_STARTED_AT + interval;
+  if (now < next) return false;
+  if (sessionId && leaderMidTurn(sessionId) && now < next + interval) return false;
+  return true;
+}
+
+const leaderWakesInFlight = new Set();
+
+async function wakeRoomLeader(name, now = Date.now()) {
+  if (leaderWakesInFlight.has(name)) return null;
+  leaderWakesInFlight.add(name);
+  try {
+    // Record the wake before the paste (which can take seconds), as
+    // residents do, so a slow paste cannot look like a missed wake.
+    ROOM_LEADER_WAKES_STATE.update((current) => {
+      const entry = leaderWakeRecord(current[name]);
+      return { ...current, [name]: { ...entry, lastWakeAt: new Date(now).toISOString(), nextWakeAtMs: entry.wakeIntervalMs ? now + entry.wakeIntervalMs : entry.nextWakeAtMs, judgeDue: true } };
+    });
+    let sessionId = ROOM_LEADERS_STATE.read()[name] || null;
+    if (!sessionId || !validRoomLeaderDesignation(name, sessionId)) {
+      // No Leader: seat one (no handoff to write) and let its opening be the wake.
+      const model = ROOM_LEADER_WAKES_STATE.read()[name]?.fallback?.model || '';
+      const seated = await succeedRoomLeader(name, { model, handoff: false, opening: () => leaderWakePrompt({ roomName: name, at: new Date(now) }) });
+      sessionId = seated.leaderSessionId;
+    } else {
+      await readyRoomLeader(name);
+      await sendInput(sessionId, leaderWakePrompt({ roomName: name, at: new Date(now) }));
+    }
+    return sessionId;
+  } finally {
+    leaderWakesInFlight.delete(name);
+  }
+}
+
+// The critic. After a Leader wake, once that turn has ended, the Room's judge
+// resident is woken to grade what the Leader put up for Review. A wake whose
+// turn never ends is judged anyway one whole interval later.
+function ompMessageText(message) {
+  const content = message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((part) => (typeof part === 'string' ? part : part?.type === 'text' ? String(part.text || '') : '')).join('\n');
+}
+const LEADER_TURN_ENDED = new Set(['stop', 'error', 'aborted', 'length']);
+function leaderWakeTurnEnded(name, sessionId) {
+  const records = ompTranscriptTail(sessionId);
+  const openers = [`[Room wake · #${name} · leader`, `[Room handover · #${name}`];
+  let sawWake = false;
+  let ended = false;
+  for (const record of records) {
+    if (record?.type !== 'message' || !record.message || typeof record.message !== 'object') continue;
+    const message = record.message;
+    if (message.role === 'user') {
+      if (openers.some((opener) => ompMessageText(message).startsWith(opener))) sawWake = true;
+      ended = false;
+    } else if (message.role === 'assistant' && sawWake) {
+      ended = LEADER_TURN_ENDED.has(message.stopReason);
+    }
+  }
+  return sawWake && ended;
+}
+// A judge turn that has run past JUDGE_TURN_MAX_MS is treated as over, so a
+// judge that hung can never block every later grading.
+const JUDGE_TURN_MAX_MS = 2 * 60 * 60 * 1000;
+function judgeMidTurn(sessionId, meta, lastWakeAt = null) {
+  const ralph = meta[sessionId]?.ralph;
+  if (!ralph?.enabled || !(ralph.status === 'working' || ralph.status === 'scheduled') || !tmuxIsActive(sessionId)) return false;
+  const since = Date.parse(lastWakeAt || '');
+  return !(Number.isFinite(since) && Date.now() - since > JUDGE_TURN_MAX_MS);
+}
+const judgeWakesInFlight = new Map();
+async function wakeRoomJudge(name, now = Date.now(), { force = false } = {}) {
+  if (judgeWakesInFlight.has(name)) {
+    if (!force) return false;
+    await judgeWakesInFlight.get(name).catch(() => {});
+  }
+  const judge = ROOM_RESIDENTS_STATE.read()[name]?.judge;
+  if (!judge?.sessionId) return false;
+  const meta = readMeta();
+  if (meta[judge.sessionId]?.mode !== RALPH_MODE) return false;
+  if (!force && (judge.paused || judgeMidTurn(judge.sessionId, meta, judge.lastWakeAt))) return false;
+  const entry = leaderWakeRecord(ROOM_LEADER_WAKES_STATE.read()[name]);
+  const leaderSessionId = ROOM_LEADERS_STATE.read()[name] || null;
+  const at = new Date(now);
+  const wake = (async () => {
+    ROOM_LEADER_WAKES_STATE.update((current) => ({ ...current, [name]: { ...leaderWakeRecord(current[name]), judgeDue: false, lastJudgeAt: at.toISOString() } }));
+    ROOM_RESIDENTS_STATE.update((current) => {
+      const resident = current[name]?.judge;
+      if (!resident || resident.sessionId !== judge.sessionId) return current;
+      return { ...current, [name]: { ...current[name], judge: { ...resident, lastWakeAt: at.toISOString() } } };
+    });
+    roomSnapshotCache.refresh();
+    prepareRalphForHumanInput(judge.sessionId);
+    await wakeResident(judge.sessionId, name, judgeWakePrompt({ roomName: name, leaderSessionId, leaderWakeAt: entry.lastWakeAt, at }));
+    return true;
+  })();
+  judgeWakesInFlight.set(name, wake);
+  try { return await wake; } finally { judgeWakesInFlight.delete(name); }
+}
+// True when the judge should be woken now for a pending Leader wake.
+function judgeWakeDue(name, entry, sessionId, now) {
+  if (!entry.judgeDue) return false;
+  if (sessionId && leaderWakeTurnEnded(name, sessionId)) return true;
+  const interval = Number(entry.wakeIntervalMs);
+  const since = Date.parse(entry.lastWakeAt || '') || now;
+  if (!Number.isFinite(interval) || interval <= 0) return false;
+  return now >= since + interval && !(sessionId && leaderMidTurn(sessionId));
+}
+
+function leaderProviderOf(model) {
+  return String(model || '').split('/')[0] || null;
+}
+
+// Provider windows from the last usage snapshot (never fetched here, so a
+// scheduler tick stays cheap): 'codex' is what the ledger calls openai-codex.
+function providerWindowExhausted(model) {
+  const key = { anthropic: 'anthropic', 'openai-codex': 'codex' }[leaderProviderOf(model)];
+  const windows = key ? usageSnapshot?.providers?.[key]?.windows : null;
+  if (!Array.isArray(windows)) return null;
+  const hit = windows.find((window) => Number.isFinite(window?.utilization) && window.utilization >= 0.99);
+  if (!hit) return null;
+  return { reason: `${key} ${hit.name || 'window'} at ${Math.round(hit.utilization * 100)}%`, resetsAt: hit.resetsAt || null };
+}
+
+function nextLeaderFallbackModel(currentModel, tried = []) {
+  return ROOM_LEADER_FALLBACK_MODELS.find((model) => model !== currentModel && !tried.includes(model)) || null;
+}
+
+async function switchRoomLeaderModel(name, { model, previousModel, reason, restoring }) {
+  const outcome = await succeedRoomLeader(name, {
+    model, handoff: true, force: true,
+    opening: ({ retiredSessionId, handoff }) => leaderFallbackPrompt({ roomName: name, model, previousModel, reason, retiredSessionId, handoff, restoring }),
+  });
+  console.warn(`[room autonomy] #${name}: ${restoring ? 'restored' : 'fell back to'} ${model} (was ${previousModel}${reason ? `: ${reason}` : ''})`);
+  return outcome;
+}
+
+// Called each scheduler tick for Rooms with autonomy on. Falls forward when
+// the Leader's provider is out of credit; falls back to the primary when the
+// retry time (doubling up to a cap) has passed.
+async function reconcileLeaderFallback(name, entry, now) {
+  const sessionId = ROOM_LEADERS_STATE.read()[name] || null;
+  if (!sessionId || roomSuccessions.has(name)) return false;
+  const currentModel = ompSessionModel(sessionId);
+  const primaryModel = entry.fallback?.primaryModel || currentModel;
+  const limit = leaderLimitHit(sessionId) || providerWindowExhausted(currentModel);
+  if (limit) {
+    const tried = entry.fallback ? [entry.fallback.model] : [];
+    const model = nextLeaderFallbackModel(currentModel, tried);
+    if (!model) return false;
+    const attempts = Math.max(entry.fallbackAttempts || 0, entry.fallback?.attempts || 0) + 1;
+    const retryAfter = Math.min(ROOM_LEADER_FALLBACK_RETRY_MAX_MS, ROOM_LEADER_FALLBACK_RETRY_MS * 2 ** (attempts - 1));
+    const resetAt = Date.parse(limit.resetsAt || '') || 0;
+    const retryAtMs = Math.max(now + retryAfter, resetAt);
+    await switchRoomLeaderModel(name, { model, previousModel: currentModel, reason: limit.reason, restoring: false });
+    ROOM_LEADER_WAKES_STATE.update((current) => ({
+      ...current,
+      [name]: { ...leaderWakeRecord(current[name]), fallbackAttempts: attempts, fallback: { model, primaryModel, since: new Date(now).toISOString(), reason: limit.reason || null, retryAtMs, attempts } },
+    }));
+    return true;
+  }
+  if (entry.fallback && now >= entry.fallback.retryAtMs && !providerWindowExhausted(entry.fallback.primaryModel)) {
+    await switchRoomLeaderModel(name, { model: entry.fallback.primaryModel, previousModel: currentModel, reason: null, restoring: true });
+    // fallbackAttempts stays on the record so a primary that trips again
+    // backs off further; a full turn on the primary clears it.
+    ROOM_LEADER_WAKES_STATE.update((current) => ({ ...current, [name]: { ...leaderWakeRecord(current[name]), fallback: null } }));
+    return true;
+  }
+  if (!entry.fallback && entry.fallbackAttempts > 0 && ompLastMessage(sessionId)?.stopReason === 'stop') {
+    ROOM_LEADER_WAKES_STATE.update((current) => ({ ...current, [name]: { ...leaderWakeRecord(current[name]), fallbackAttempts: 0 } }));
+  }
+  return false;
+}
+
+const leaderReconcilesInFlight = new Set();
+const ROOM_LEADER_USAGE_CHECK = !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_ROOM_LEADER_USAGE_CHECK || '').trim());
+// Keep the provider windows fresh while any Room runs autonomously, so the
+// fallback can act before a Leader burns a wake on a dead provider.
+function refreshUsageSnapshotInBackground() {
+  if (!ROOM_LEADER_USAGE_CHECK || usageSnapshotPending) return;
+  if (usageSnapshot && Date.now() - Date.parse(usageSnapshot.generatedAt) < USAGE_SNAPSHOT_TTL_MS * 5) return;
+  usageSnapshotPending = buildUsageSnapshot()
+    .then((snapshot) => { usageSnapshot = snapshot; })
+    .catch((error) => console.warn('[room autonomy] usage snapshot:', error.message))
+    .finally(() => { usageSnapshotPending = null; });
+}
+function checkLeaderWakes() {
+  if (!ROOM_PULSES_ENABLED) return;
+  const now = Date.now();
+  const state = ROOM_LEADER_WAKES_STATE.read();
+  const roomNames = new Set(listRoomDirs());
+  const autonomous = Object.entries(state).filter(([name, entry]) => roomNames.has(name) && entry.wakeIntervalMs && !entry.paused);
+  if (autonomous.length > 0) refreshUsageSnapshotInBackground();
+  for (const [name, entry] of autonomous) {
+    if (leaderReconcilesInFlight.has(name) || leaderWakesInFlight.has(name)) continue;
+    leaderReconcilesInFlight.add(name);
+    reconcileLeaderFallback(name, entry, now)
+      .then((switched) => {
+        if (switched) {
+          ROOM_LEADER_WAKES_STATE.update((current) => {
+            const record = leaderWakeRecord(current[name]);
+            // The handover opening is a working turn; the judge grades it too.
+            return { ...current, [name]: { ...record, nextWakeAtMs: record.wakeIntervalMs ? now + record.wakeIntervalMs : record.nextWakeAtMs, lastWakeAt: new Date(now).toISOString(), judgeDue: true } };
+          });
+          roomSnapshotCache.refresh();
+          return null;
+        }
+        const sessionId = ROOM_LEADERS_STATE.read()[name] || null;
+        if (judgeWakeDue(name, entry, sessionId, now)) {
+          return wakeRoomJudge(name, now);
+        }
+        if (!leaderWakeDue(entry, sessionId, now)) return null;
+        return wakeRoomLeader(name, now).then(() => roomSnapshotCache.refresh());
+      })
+      .catch((error) => console.warn(`[room autonomy] #${name}:`, error.message))
+      .finally(() => leaderReconcilesInFlight.delete(name));
+  }
+}
+
 // Validate every durable JSON document before accepting traffic. Only truly
 // missing files receive their documented defaults; corruption fails startup.
 for (const state of [
@@ -5389,6 +5806,7 @@ for (const state of [
   ROOM_LEADERS_STATE,
   ROOM_PULSES_STATE,
   ROOM_RESIDENTS_STATE,
+  ROOM_LEADER_WAKES_STATE,
   MESSAGE_RECEIPTS_STATE,
 ]) state.read();
 if (!READ_ONLY_MODE) syncAllRoomSidecars();
@@ -5529,5 +5947,6 @@ server.listen(PORT, '0.0.0.0', () => {
     setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));
     setInterval(checkRoomPulses, ROOM_PULSE_CHECK_MS);
     setInterval(checkResidentWakes, ROOM_PULSE_CHECK_MS);
+    setInterval(checkLeaderWakes, ROOM_PULSE_CHECK_MS);
   }
 });

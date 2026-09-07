@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { fetchRooms, fetchRoomFriction, fetchSuperFeed, setRoomPulse, setRoomResidentsPaused, succeedRoomLeader, createSession, RoomInfo, RoomResident, FrictionComplaint, SuperFeedItem } from '../api'
+import { fetchRooms, fetchRoomFriction, fetchSuperFeed, setRoomPulse, setRoomResidentsPaused, setRoomLeaderWake, succeedRoomLeader, createSession, RoomInfo, RoomResident, FrictionComplaint, SuperFeedItem } from '../api'
 import { RoomWikiView } from './RoomWikiView'
 import { renderWikiMarkdown } from './MessageView'
 
@@ -144,11 +144,33 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
     finally { setBusy(false) }
   }
 
+  const AUTONOMY_CHOICES: Array<{ label: string, ms: number | null }> = [
+    { label: 'Off', ms: null }, { label: '15m', ms: 15 * 60_000 }, { label: '30m', ms: 30 * 60_000 }, { label: '1h', ms: 3_600_000 }, { label: '2h', ms: 2 * 3_600_000 },
+  ]
+  const leaderWake = createMemo(() => room()?.leaderWake || null)
+  const autonomyOn = createMemo(() => Boolean(leaderWake()?.wakeIntervalMs))
+
+  async function autonomy(body: { wakeIntervalMs?: number | null, paused?: boolean, now?: boolean, judge?: boolean }) {
+    const current = room()
+    if (!current || busy()) return
+    if (body.wakeIntervalMs === null && autonomyOn() && !confirm(`Switch off autonomy for #${current.name}? The Leader stops waking on its own.`)) return
+    setBusy(true)
+    try {
+      await setRoomLeaderWake(current.name, body)
+      await refresh()
+    } catch (caught) { alert(caught instanceof Error ? caught.message : String(caught)) }
+    finally { setBusy(false) }
+  }
+
   function residentStatus(resident: RoomResident) {
     if (resident.status === 'working') return { text: 'working now', color: green }
     if (resident.status === 'offline') return { text: 'offline', color: muted }
     if (resident.paused) return { text: 'paused', color: amber }
-    if (resident.wakeIntervalMs === null || resident.wakeIntervalMs === undefined) return { text: 'woken by the updater', color: muted }
+    if (resident.wakeIntervalMs === null || resident.wakeIntervalMs === undefined) {
+      if (resident.role === 'judge') return { text: leaderWake()?.judgeDue ? 'grading due after this Leader wake' : 'woken after each Leader wake', color: muted }
+      if (resident.role === 'replyguy') return { text: 'woken by each comment', color: muted }
+      return { text: 'woken by the updater', color: muted }
+    }
     return { text: `wakes ${timeUntilMs(resident.nextWakeAtMs)}`, color: body }
   }
 
@@ -183,6 +205,31 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
               </button>
               <Show when={paused()}><span style={{ color: amber, 'font-size': '12px', 'align-self': 'center' }}>Paused: no wakes, no status reports</span></Show>
             </div>
+            <div data-testid="room-autonomy" style={{ display: 'flex', 'flex-wrap': 'wrap', 'align-items': 'center', gap: '6px', 'margin-top': '12px' }}>
+              <span style={{ color: muted, 'font-size': '12px', 'margin-right': '4px' }}>Leader wakes</span>
+              <For each={AUTONOMY_CHOICES}>{(choice) => {
+                const selected = () => (leaderWake()?.wakeIntervalMs ?? null) === choice.ms
+                return <button data-testid={`room-autonomy-${choice.label.toLowerCase()}`} onClick={() => autonomy({ wakeIntervalMs: choice.ms })} disabled={busy() || selected()} aria-pressed={selected()} style={{ ...buttonStyle(selected()), padding: '4px 9px' }}>{choice.label}</button>
+              }}</For>
+              <Show when={autonomyOn()}>
+                <button data-testid="room-autonomy-pause" onClick={() => autonomy({ paused: !leaderWake()!.paused })} disabled={busy()} style={{ ...buttonStyle(), padding: '4px 9px' }}>{leaderWake()!.paused ? 'Resume' : 'Pause'}</button>
+                <button data-testid="room-autonomy-now" onClick={() => autonomy({ now: true })} disabled={busy() || !leader()} style={{ ...buttonStyle(), padding: '4px 9px' }}>Wake now</button>
+                <button data-testid="room-autonomy-judge" onClick={() => autonomy({ judge: true })} disabled={busy()} style={{ ...buttonStyle(), padding: '4px 9px' }}>Judge now</button>
+              </Show>
+            </div>
+            <Show when={autonomyOn()}>
+              <div style={{ color: leaderWake()!.paused ? amber : muted, 'font-size': '12px', 'margin-top': '6px' }}>
+                {leaderWake()!.paused ? 'Autonomy paused.' : `Next wake ${timeUntilMs(leaderWake()!.nextWakeAtMs)}.`}
+                {leaderWake()!.lastWakeAt ? ` Last wake ${timeAgo(leaderWake()!.lastWakeAt!)} ago.` : ''}
+                {leaderWake()!.lastJudgeAt ? ` Last judged ${timeAgo(leaderWake()!.lastJudgeAt!)} ago.` : ''}
+                {' '}Work comes from FRONTIER.md; put your own steering at the top of it.
+              </div>
+            </Show>
+            <Show when={leaderWake()?.fallback}>{(fallback) => (
+              <div data-testid="room-autonomy-fallback" style={{ color: amber, 'font-size': '12px', 'margin-top': '6px' }}>
+                On fallback model {fallback().model} since {whenLabel(fallback().since)} ({fallback().reason}). Retries {fallback().primaryModel} at {whenLabel(fallback().retryAt)}.
+              </div>
+            )}</Show>
           </section>
 
           <section data-testid="room-residents" style={cardStyle}>
@@ -194,9 +241,12 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
               <Show when={leaderContext() !== null}>
                 <span data-testid="room-leader-context" title={leaderEntry()?.model ? `model ${leaderEntry()!.model}` : undefined} style={{ color: (leaderContext() ?? 0) >= 85 ? '#e0605a' : (leaderContext() ?? 0) >= 60 ? amber : muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leaderContext()}% ctx</span>
               </Show>
+              <Show when={leaderEntry()?.model}>
+                <span data-testid="room-leader-model" style={{ color: leaderWake()?.fallback ? amber : muted, 'font-size': '11px', 'font-family': 'monospace', 'white-space': 'nowrap' }}>{leaderWake()?.fallback ? 'fallback · ' : ''}{leaderEntry()!.model!.split('/').pop()}</span>
+              </Show>
               <span style={{ color: muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leaderStarting() ? 'starting' : leader() ? timeAgo(leader()!.updatedAt) : ''}</span>
             </div>
-            <Show when={residents().length === 0}><div style={{ color: muted, 'font-size': '12px', padding: '8px 0 2px' }}>No residents. Rooms created with a mission get a caretaker, an updater, a marketer, and a replyguy.</div></Show>
+            <Show when={residents().length === 0}><div style={{ color: muted, 'font-size': '12px', padding: '8px 0 2px' }}>No residents. Rooms created with a mission get a caretaker, an updater, a marketer, a replyguy, and a judge.</div></Show>
             <For each={residents()}>{(resident) => {
               const status = residentStatus(resident)
               const session = current().sessions.find(candidate => candidate.id === resident.sessionId)

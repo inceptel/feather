@@ -38,6 +38,7 @@
 #   room detach <session-id>            remove its explicit Room assignment
 #   room handoff [session-id]          distill latest (or given) room session into notes.md
 #   room succeed [--model M] [--no-handoff] [--force]  retire the Leader and seat a new one
+#   room autonomy [--every 30m|--off] [--pause|--resume] [--now] [--judge]  Leader wakes + judge (actor-critic loop)
 #
 # Room resolution: -r <name> flag, $ROOM env, or cwd under ~/rooms/<name>.
 set -u
@@ -784,6 +785,67 @@ print(f"retired {r.get(\"retiredSessionId\") or \"nobody\"}; handoff {r[\"handof
 ' "$response"
 }
 
+cmd_autonomy() {
+  resolve_room
+  ensure_feather_url
+  local every="" off=false paused="" now=false judge=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --every) every="${2:-}"; shift 2 ;;
+      --off) off=true; shift ;;
+      --pause) paused=true; shift ;;
+      --resume) paused=false; shift ;;
+      --now) now=true; shift ;;
+      --judge) judge=true; shift ;;
+      *) die "usage: room autonomy [--every 30m|--off] [--pause|--resume] [--now] [--judge]" ;;
+    esac
+  done
+  local payload
+  payload=$(python3 -c '
+import json, re, sys
+every, off, paused, now, judge = sys.argv[1:6]
+body = {}
+if every:
+    m = re.fullmatch(r"(\d+)\s*([smhd]?)", every.strip())
+    if not m:
+        sys.exit("room autonomy: --every takes a duration like 30m, 2h, 90s")
+    unit = {"": 60_000, "s": 1_000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}[m.group(2)]
+    body["wakeIntervalMs"] = int(m.group(1)) * unit
+if off == "true":
+    body["wakeIntervalMs"] = None
+if paused:
+    body["paused"] = paused == "true"
+if now == "true":
+    body["now"] = True
+if judge == "true":
+    body["judge"] = True
+print(json.dumps(body))
+' "$every" "$off" "$paused" "$now" "$judge") || exit 1
+  local response
+  response=$(curl -s -m 900 -X POST "$FEATHER_URL/api/rooms/$ROOM_NAME/leader/wake" \
+    -H 'Content-Type: application/json' -d "$payload") || die "feather unreachable"
+  python3 -c '
+import json, sys
+from datetime import datetime, timezone
+r = json.loads(sys.argv[1])
+if "error" in r:
+    sys.exit("room: " + r["error"])
+w = r.get("leaderWake") or {}
+name = sys.argv[2]
+if not w.get("wakeIntervalMs"):
+    print(f"#{name} autonomy off (Leader only works when spoken to)")
+else:
+    every = w["wakeIntervalMs"] // 60000
+    state = "paused" if w.get("paused") else "on"
+    nxt = w.get("nextWakeAtMs")
+    when = datetime.fromtimestamp(nxt / 1000, tz=timezone.utc).strftime("%H:%M UTC") if nxt else "-"
+    fb = w.get("fallback")
+    extra = f"; on fallback {fb['model']} until {fb['retryAt'][:16]}Z ({fb.get('reason') or 'limit'})" if fb else ""
+    judge = "; judge pending" if w.get("judgeDue") else ""
+    print(f"#{name} autonomy {state}: Leader wakes every {every}m, next {when}{judge}{extra}")
+' "$response" "$ROOM_NAME"
+}
+
 # ── Dispatch ────────────────────────────────────────────────────────────────
 [ $# -ge 1 ] || { print_usage; exit 1; }
 while [ "${1:-}" = "-r" ]; do ROOM_NAME="$2"; ROOM_PATH="$ROOMS_DIR/$2"; shift 2; done
@@ -812,5 +874,6 @@ case "$cmd" in
   attach|detach) cmd_assignment "$cmd" "$@" ;;
   handoff) cmd_handoff "$@" ;;
   succeed) cmd_succeed "$@" ;;
+  autonomy) cmd_autonomy "$@" ;;
   *) die "unknown command: $cmd" ;;
 esac

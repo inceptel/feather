@@ -234,6 +234,20 @@ export interface RoomInfo {
     sessionId: string | null
     error?: string | null
   }
+  leaderWake?: RoomLeaderWake
+}
+
+// The Leader's autonomy: a wake schedule for working FRONTIER.md, the judge
+// that grades each wake, and the usage-limit fallback the Leader may be on.
+export interface RoomLeaderWake {
+  enabled: boolean
+  wakeIntervalMs: number | null
+  nextWakeAtMs: number | null
+  lastWakeAt: string | null
+  paused: boolean
+  judgeDue: boolean
+  lastJudgeAt: string | null
+  fallback: { model: string, primaryModel: string, since: string, reason: string, retryAt: string } | null
 }
 
 export interface RoomSessionContext {
@@ -391,6 +405,15 @@ export async function setRoomPulse(room: string, enabled: boolean): Promise<Room
     body: JSON.stringify({ enabled }),
   })
   return (await responseJson<{ ok: true, pulse: RoomInfo['pulse'] }>(response)).pulse
+}
+
+export async function setRoomLeaderWake(room: string, body: { wakeIntervalMs?: number | null, paused?: boolean, now?: boolean, judge?: boolean }): Promise<RoomLeaderWake | null> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/leader/wake`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return (await responseJson<{ ok: true, leaderWake: RoomLeaderWake | null }>(response)).leaderWake
 }
 
 export async function fetchAgents(): Promise<AgentInfo[]> {

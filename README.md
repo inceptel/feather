@@ -120,8 +120,8 @@ room new ev-shop --mission "build me a business plan for an EV-only auto shop at
 ```
 
 Feather scaffolds the folder (`AGENTS.md` with the mission verbatim, one charter
-per resident, `notes.md`, `wiki/Home.md`), opens an OMP Leader, and registers
-four OMP Ralph residents: a **caretaker** that wakes every 15 minutes and keeps
+per resident, `notes.md`, `FRONTIER.md`, `wiki/Home.md`), opens an OMP Leader, and registers
+five OMP Ralph residents: a **caretaker** that wakes every 15 minutes and keeps
 `wiki/` current from the other sessions' logs, an **updater** that wakes every
 30 minutes and decides what is worth publishing to Super Feed, a
 **marketer** the updater briefs over Sidecar to write the card and render its
@@ -129,11 +129,45 @@ image with `room visual` (any configured image provider, with a plain text card
 as the fallback; see Optional services), and a **replyguy** that is woken by
 each comment the user leaves under one of the Room's cards and answers it with
 `room reply` from what the Room already knows, handing anything harder to the
-Leader with `room dispatch --to leader`. Rooms without a replyguy route comments
+Leader with `room dispatch --to leader`, and a **judge** that grades the
+Leader's work (see Autonomy below). Rooms without a replyguy route comments
 to the Leader. The Leader receives the mission as its first message. A resident
 that ends a wake with `RALPH_COMPLETE` simply sleeps until its next slot.
 `room new <name>` without a mission scaffolds the same files locally and starts
 nothing; the Rooms home's **New room** button asks for the mission as well.
+
+### Autonomy: the Leader works, the judge checks
+
+`FRONTIER.md` is the Room's list of work. It has five sections: **Steering**
+(the user's standing instructions; only the user edits it, and it outranks
+everything else), **Open** (gaps to close), **Working**, **Review**, and
+**Done**. The Leader and the judge form an actor-critic loop over it:
+
+- `room autonomy --every 30m` (or the **Leader wakes** buttons on the Room page)
+  wakes the Leader on that cadence. Each wake it re-reads Steering, takes the
+  first Open gap to Working, closes it with real artifacts (wiki pages, files,
+  `notes.md` entries), and moves the line to Review with its evidence on it.
+- Once that Leader turn has ended, Feather wakes the **judge**: a fresh Ralph
+  session on the other harness (`FEATHER_ROOM_JUDGE_MODEL`, default
+  `openai-codex/gpt-5.6-sol`) that grades every Review line against the
+  artifacts. It moves a line to Done with `✓ judged <date>: …`, or back to Open
+  with `↩ judged <date>: …` and what is missing, returns stalled Working lines to
+  Open, and may add new Open lines ending `(judge)`. It tells the Leader what it
+  reopened with `room dispatch --to leader "[judge] …"`. Only the judge moves a
+  line to Done. A wake whose turn never ends is judged one interval later.
+- The user steers by editing Steering or adding Open lines. `room autonomy
+  --now` wakes the Leader at once, `--judge` wakes the judge at once,
+  `--pause`/`--resume` hold and release the schedule, `--off` switches it off.
+
+When a Leader's last turn died on a usage limit (or its provider window is at
+its cap), the scheduler retires that Leader with a handoff and seats a new one
+on the first model in `FEATHER_ROOM_LEADER_FALLBACK_MODELS` (default
+`openai-codex/gpt-5.6-sol`). The fallback Leader's opening says why and keeps
+working the frontier. After the retry time (one hour, doubling to six) the
+primary model is restored the same way. The Room page shows the current model
+and any fallback next to the Leader. The API is
+`POST /api/rooms/<name>/leader/wake` with any of `wakeIntervalMs` (`null` for
+off), `paused`, `now`, and `judge`.
 
 An existing pre-template Room can be migrated with
 `POST /api/rooms/<name>/staff`. The operation preserves its Leader and existing

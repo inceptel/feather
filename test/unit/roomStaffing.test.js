@@ -19,7 +19,7 @@ async function waitFor(predicate, { attempts = 200, delay = 25, message = 'condi
 }
 
 describe('Room staffing from the template', () => {
-  it('creates a Leader and four Ralph residents, kicks off the mission, wakes residents on schedule, and routes feed comments to the replyguy', async () => {
+  it('creates a Leader and five Ralph residents, kicks off the mission, wakes residents on schedule, and routes feed comments to the replyguy', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-staffing-'))
     const home = path.join(root, 'home')
     const stateDir = path.join(root, 'state')
@@ -88,7 +88,7 @@ describe('Room staffing from the template', () => {
       assert.equal(room.mission, MISSION)
       assert.match(room.leaderSessionId, /^[0-9a-f-]{36}$/)
       assert.deepEqual(room.residents.map(resident => [resident.role, resident.wakeIntervalMs]),
-        [['caretaker', 900_000], ['updater', 1_800_000], ['marketer', null], ['replyguy', null]])
+        [['caretaker', 900_000], ['updater', 1_800_000], ['marketer', null], ['replyguy', null], ['judge', null]])
       const roomDir = path.join(home, 'rooms/ev-shop')
       assert.ok(fs.readFileSync(path.join(roomDir, 'AGENTS.md'), 'utf8').includes(`> ${MISSION}`))
       assert.equal(fs.readlinkSync(path.join(roomDir, 'CLAUDE.md')), 'AGENTS.md')
@@ -119,14 +119,14 @@ describe('Room staffing from the template', () => {
       const assignments = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-sessions.json'), 'utf8'))
       for (const resident of room.residents) assert.equal(assignments[resident.sessionId], 'ev-shop')
       const snapshot = await (await fetch(`${base}/api/rooms/ev-shop/residents`)).json()
-      assert.deepEqual(snapshot.residents.map(resident => resident.role).sort(), ['caretaker', 'leader', 'marketer', 'replyguy', 'updater'])
+      assert.deepEqual(snapshot.residents.map(resident => resident.role).sort(), ['caretaker', 'judge', 'leader', 'marketer', 'replyguy', 'updater'])
       assert.equal(snapshot.residents.find(resident => resident.role === 'leader').status, 'starting')
       const ompIds = [room.leaderSessionId, ...room.residents.map(resident => resident.sessionId)]
       const commands = fs.readFileSync(commandLog, 'utf8')
-      assert.equal((commands.match(/--no-extensions/g) || []).length, 5)
-      assert.equal((commands.match(/-u OPENAI_API_KEY/g) || []).length, 5)
-      assert.ok((commands.match(/feather-bridge\.js/g) || []).length >= 5)
-      assert.ok((commands.match(/feather-protocol-tools\.js/g) || []).length >= 5)
+      assert.equal((commands.match(/--no-extensions/g) || []).length, 6)
+      assert.equal((commands.match(/-u OPENAI_API_KEY/g) || []).length, 6)
+      assert.ok((commands.match(/feather-bridge\.js/g) || []).length >= 6)
+      assert.ok((commands.match(/feather-protocol-tools\.js/g) || []).length >= 6)
       for (const sessionId of ompIds) {
         const agentDir = path.join(home, '.feather/omp-agents', sessionId)
         assert.equal(fs.statSync(agentDir).mode & 0o777, 0o700)
@@ -140,7 +140,11 @@ describe('Room staffing from the template', () => {
         assert.ok(models.includes(`apiKey: \"!cat '${path.join(home, '.omp/auth-gateway.token')}'\"`))
         assert.ok(!models.includes('gateway-test-token'))
       }
-      assert.equal(new Set(ompIds.map(sessionId => path.join(home, '.feather/omp-agents', sessionId))).size, 5)
+      assert.equal(new Set(ompIds.map(sessionId => path.join(home, '.feather/omp-agents', sessionId))).size, 6)
+      // The judge is seated on the other harness so it never shares the Leader's blind spots.
+      assert.equal(readMeta()[residents.judge.sessionId].ompModel, 'openai-codex/gpt-5.6-sol')
+      assert.ok(fs.existsSync(path.join(roomDir, 'JUDGE.md')))
+      assert.ok(fs.existsSync(path.join(roomDir, 'FRONTIER.md')))
 
       // A pre-template Room can be migrated without replacing its Leader or
       // specialist. Standard charters and cadence are applied idempotently.
@@ -170,9 +174,9 @@ describe('Room staffing from the template', () => {
       assert.equal(migratedResponse.status, 200, migratedText)
       const migrated = JSON.parse(migratedText)
       assert.equal(migrated.leaderSessionId, frictionLeader.id)
-      assert.deepEqual(migrated.created, ['updater', 'marketer', 'replyguy'])
+      assert.deepEqual(migrated.created, ['updater', 'marketer', 'replyguy', 'judge'])
       assert.deepEqual(migrated.residents.map(resident => resident.role).sort(),
-        ['caretaker', 'leader', 'marketer', 'replyguy', 'resolver', 'updater'])
+        ['caretaker', 'judge', 'leader', 'marketer', 'replyguy', 'resolver', 'updater'])
       const frictionResidents = readResidents().friction
       assert.equal(frictionResidents.caretaker.sessionId, legacyCaretaker.id)
       assert.equal(frictionResidents.caretaker.wakeIntervalMs, 900_000)
@@ -188,6 +192,7 @@ describe('Room staffing from the template', () => {
       assert.match(fs.readFileSync(path.join(frictionDir, 'CARETAKER.md'), 'utf8'), /resident caretaker/)
       assert.match(fs.readFileSync(path.join(frictionDir, 'UPDATER.md'), 'utf8'), /\*\*By the way\*\*/)
       assert.ok(fs.existsSync(path.join(frictionDir, 'MARKETER.md')))
+      assert.match(fs.readFileSync(path.join(frictionDir, 'JUDGE.md'), 'utf8'), /Review → Done/)
       assert.equal(fs.readFileSync(path.join(frictionDir, 'RESOLVER.md'), 'utf8'), 'specialist contract\n')
       for (const sub of ['wiki', 'artifacts', '.caretaker', '.updater']) {
         assert.ok(fs.statSync(path.join(frictionDir, sub)).isDirectory(), sub)

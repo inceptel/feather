@@ -26,7 +26,7 @@ describe('Room template', () => {
 
   it('stamps the mission verbatim into AGENTS.md, notes, and the Wiki home', () => {
     const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION, now: new Date('2026-09-06T12:00:00Z') })
-    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'notes.md', 'wiki/Home.md'])
+    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'FRONTIER.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'notes.md', 'wiki/Home.md'])
     assert.match(files['AGENTS.md'], /^# Room: #ev-shop\n/)
     assert.ok(files['AGENTS.md'].includes('## Mission (verbatim from the user)'))
     assert.ok(files['AGENTS.md'].includes(`> ${MISSION}`))
@@ -38,6 +38,8 @@ describe('Room template', () => {
       assert.ok(files[spec.charter].includes('~/rooms/ev-shop'), `${spec.charter} names the room path`)
     }
     assert.ok(files['UPDATER.md'].includes('room publish'))
+    assert.ok(files['JUDGE.md'].includes('Review → Done'))
+    assert.ok(files['FRONTIER.md'].includes('## Steering'))
     assert.ok(files['MARKETER.md'].includes('room visual --out ~/rooms/ev-shop/artifacts/<slug>.png'))
     assert.ok(files['MARKETER.md'].includes('notes-md-2026-09-06t18-12-mission-outcome'))
     assert.ok(files['MARKETER.md'].includes('"sourceEvidenceId": "<evidence-id>"'))
@@ -81,7 +83,7 @@ describe('Room template', () => {
       const dir = path.join(root, 'ev-shop')
       fs.mkdirSync(dir)
       const files = scaffoldRoom(dir, { name: 'ev-shop', mission: MISSION })
-      assert.deepEqual(files, ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'notes.md', 'wiki/Home.md'])
+      assert.deepEqual(files, ['AGENTS.md', 'FRONTIER.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'notes.md', 'wiki/Home.md'])
       for (const file of files) assert.ok(fs.existsSync(path.join(dir, file)), file)
       for (const sub of ROOM_TEMPLATE_DIRS) assert.ok(fs.statSync(path.join(dir, sub)).isDirectory(), sub)
       assert.equal(fs.readlinkSync(path.join(dir, 'CLAUDE.md')), 'AGENTS.md')
