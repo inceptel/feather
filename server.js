@@ -5925,7 +5925,7 @@ function schedulerPrompt(rule, { at, runtime }) {
     return body.startsWith('[') ? body : `${header}\n${body}`;
   }
   if (rule.target.kind === 'leader') {
-    const wake = leaderWakePrompt({ roomName, at });
+    const wake = leaderWakePrompt({ roomName, at, budgetMs: rule.timeoutMs ?? DEFAULT_TIMEOUT_MS });
     if (rule.mode !== 'fresh') return wake;
     return [
       wake,
