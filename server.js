@@ -5891,7 +5891,10 @@ app.use(express.static(STATIC_DIR, {
 }));
 app.get('/{*path}', (_req, res) => {
   const index = path.join(STATIC_DIR, 'index.html');
-  if (fs.existsSync(index)) res.sendFile(index);
+  // Send relative to the static root: `send` refuses any absolute path that
+  // crosses a dot-directory (a release under ~/.local/share did), and that
+  // turned every deep link into a 404 while `/` still worked.
+  if (fs.existsSync(index)) res.sendFile('index.html', { root: STATIC_DIR });
   else res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
 });
 

@@ -1383,6 +1383,16 @@ describe('static files', () => {
     assert.ok(html.includes('<!DOCTYPE html>') || html.includes('<html'))
     assert.ok(html.includes('</html>'))
   })
+
+  it('serves index.html for deep links so a reload inside the app works', async () => {
+    const staticDir = path.join(__dirname, '..', '..', 'static')
+    if (!fs.existsSync(path.join(staticDir, 'index.html'))) return
+
+    const r = await fetch(`${BASE}/rooms/trading`)
+    assert.equal(r.status, 200)
+    assert.ok(r.headers.get('content-type').includes('text/html'))
+    assert.ok((await r.text()).includes('</html>'))
+  })
 })
 
 // ── /api/file (serves local files for chat image embeds and links) ──────────
