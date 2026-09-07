@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { INTAKE_ROOM, pickIntakeSession } from '../../frontend/src/lib/intake.js'
+import { INTAKE_ROOM, pickIntakeSession } from '../../lib/intake.js'
 
 describe('intake chat picker', () => {
   it('names the intake Room', () => {

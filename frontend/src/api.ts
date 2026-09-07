@@ -1,4 +1,4 @@
-import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js'
+import { INTAKE_ROOM, pickIntakeSession } from '../../lib/intake.js'
 import { appBasePath } from './lib/appPath.js'
 
 export const BASE = appBasePath()

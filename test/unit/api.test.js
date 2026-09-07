@@ -457,11 +457,87 @@ describe('POST /api/rooms/:name/send', () => {
       const retry = await deliver()
       assert.equal(first.status, 200)
       assert.equal(retry.status, 200)
-      assert.deepEqual(await retry.json(), await first.json())
+      const firstReceipt = await first.json()
+      assert.deepEqual(await retry.json(), firstReceipt)
+      assert.equal(firstReceipt.recipientSessionId, leaderId)
+      assert.equal(firstReceipt.leaderSessionId, leaderId)
+      assert.equal(firstReceipt.recipientRole, 'leader')
       const delivered = fs.readFileSync(tmuxLog, 'utf8')
       assert.equal(delivered.split('[Cross-Room').length - 1, 1)
       assert.match(delivered, new RegExp(`\\[Cross-Room · #${sourceRoom} → #${targetRoom}\\]`))
       assert.match(delivered, /Check the live risk limit\./)
+      assert.match(delivered, new RegExp(`room send ${sourceRoom} --stdin`))
+    } finally {
+      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    }
+  })
+
+  it('delivers replies to the current Intake chat without a Leader designation', async () => {
+    if (EXTERNAL_SERVER) return
+    const suffix = Date.now().toString(36)
+    const sourceRoom = `intake-source-${suffix}`
+    let intakeCwd = ''
+    for (const name of [sourceRoom, 'intake']) {
+      const created = await fetch(`${BASE}/api/rooms`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      })
+      assert.equal(created.status, 200)
+      const createdRoom = await created.json()
+      if (name === 'intake') intakeCwd = createdRoom.cwd
+    }
+    const intakeSessionId = randomUUID()
+    const tmuxLog = path.join(fixtureRoot, 'intake-send-tmux.log')
+    const tmuxRegistry = path.join(fixtureRoot, 'intake-send-tmux.reg')
+    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+      '#!/bin/sh',
+      `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
+      `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
+      `if [ "$1" = load-buffer ]; then shift; [ "$1" = -b ] && shift 2; cat "$1" >> ${JSON.stringify(tmuxLog)}; printf '\\n' >> ${JSON.stringify(tmuxLog)}; exit 0; fi`,
+      'case "$1" in paste-buffer|send-keys|set-option) exit 0;; esac',
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const session = await fetch(`${BASE}/api/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: intakeSessionId, cwd: intakeCwd, agent: 'claude' }),
+      })
+      assert.equal(session.status, 200, await session.text())
+      const intakeProjectDir = path.join(fixtureHome, '.claude/projects', intakeCwd.replace(/[/.]/g, '-'))
+      fs.mkdirSync(intakeProjectDir, { recursive: true })
+      fs.writeFileSync(path.join(intakeProjectDir, `${intakeSessionId}.jsonl`), `${JSON.stringify({
+        type: 'user',
+        uuid: randomUUID(),
+        timestamp: new Date().toISOString(),
+        isSidechain: false,
+        isMeta: false,
+        message: { role: 'user', content: 'Review this through Intake.' },
+      })}\n`)
+      const assigned = await fetch(`${BASE}/api/rooms/intake/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: intakeSessionId }),
+      })
+      assert.equal(assigned.status, 200, await assigned.text())
+      const messageId = 'intake-cross-room-message-0001'
+      const deliver = () => fetch(`${BASE}/api/rooms/intake/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Feather-Message-ID': messageId },
+        body: JSON.stringify({ fromRoom: sourceRoom, text: 'The requested review is complete.' }),
+      })
+      const first = await deliver()
+      const retry = await deliver()
+      assert.equal(first.status, 200)
+      assert.equal(retry.status, 200)
+      const firstReceipt = await first.json()
+      assert.deepEqual(await retry.json(), firstReceipt)
+      assert.equal(firstReceipt.recipientSessionId, intakeSessionId)
+      assert.equal(firstReceipt.leaderSessionId, null)
+      assert.equal(firstReceipt.recipientRole, 'intake')
+      const delivered = fs.readFileSync(tmuxLog, 'utf8')
+      assert.equal(delivered.split('[Cross-Room').length - 1, 1)
+      assert.match(delivered, /The requested review is complete\./)
       assert.match(delivered, new RegExp(`room send ${sourceRoom} --stdin`))
     } finally {
       fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })

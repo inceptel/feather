@@ -2,7 +2,7 @@ import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, openIntakeChat, setRoomPulse, fetchRoomFriction, renameSession, RoomInfo, SessionMeta, FrictionComplaint } from './api'
 import { RoomWikiView } from './components/RoomWikiView'
 import { SuperFeed } from './components/SuperFeed'
-import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js'
+import { INTAKE_ROOM, pickIntakeSession } from '../../lib/intake.js'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session

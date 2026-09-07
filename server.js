@@ -32,6 +32,7 @@ import {
   runtimeOf, describeRule, formatDuration, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_ROUND_MS,
 } from './lib/scheduler.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
+import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes, openFrictionComplaints } from './lib/friction.js';
@@ -4599,6 +4600,17 @@ app.get('/api/sessions/:id/room', (req, res) => {
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+function crossRoomRecipient(targetRoom) {
+  const leaderId = ROOM_LEADERS_STATE.read()[targetRoom] || null;
+  if (leaderId && validRoomLeaderDesignation(targetRoom, leaderId)) {
+    return { sessionId: leaderId, role: 'leader' };
+  }
+  if (targetRoom !== INTAKE_ROOM) return null;
+  const room = roomSnapshotCache.refresh().find((candidate) => candidate.name === targetRoom);
+  const session = pickIntakeSession(room?.sessions, { skipIds: [room?.pulse?.sessionId] });
+  return session ? { sessionId: session.id, role: 'intake' } : null;
+}
+
 app.post('/api/rooms/:name/send', async (req, res) => {
   try {
     const targetRoom = req.params.name;
@@ -4609,18 +4621,18 @@ app.post('/api/rooms/:name/send', async (req, res) => {
     if (sourceRoom === targetRoom) throw httpError(400, 'source and target rooms must differ');
     if (!text) throw httpError(400, 'message text is required');
     if (text.length > SIDECAR_MESSAGE_MAX_CHARS) throw httpError(413, `message exceeds ${SIDECAR_MESSAGE_MAX_CHARS} characters`);
-    const leaderId = ROOM_LEADERS_STATE.read()[targetRoom] || null;
-    if (!leaderId || !validRoomLeaderDesignation(targetRoom, leaderId)) throw httpError(409, `#${targetRoom} has no available Leader`);
-    if (!tmuxIsActive(leaderId)) {
-      resumeSession(leaderId, path.join(ROOMS_HOME_DIR, targetRoom));
-      for (let attempt = 0; attempt < 30 && !tmuxIsActive(leaderId); attempt++) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    }
-    if (!tmuxIsActive(leaderId)) throw httpError(503, `#${targetRoom} Leader did not become ready`);
     const requestedId = req.get('X-Feather-Message-ID');
     const messageId = requestedId || randomUUID().replaceAll('-', '');
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) throw httpError(400, 'invalid message id');
+    const recipient = crossRoomRecipient(targetRoom);
+    if (!recipient) throw httpError(409, `#${targetRoom} has no available Leader`);
+    if (!tmuxIsActive(recipient.sessionId)) {
+      resumeSession(recipient.sessionId, path.join(ROOMS_HOME_DIR, targetRoom));
+      for (let attempt = 0; attempt < 30 && !tmuxIsActive(recipient.sessionId); attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    if (!tmuxIsActive(recipient.sessionId)) throw httpError(503, `#${targetRoom} ${recipient.role === 'leader' ? 'Leader' : 'Intake chat'} did not become ready`);
     const tagged = [
       `[Cross-Room · #${sourceRoom} → #${targetRoom}]`,
       '',
@@ -4628,8 +4640,16 @@ app.post('/api/rooms/:name/send', async (req, res) => {
       '',
       `_Reply with: room send ${sourceRoom} --stdin_`,
     ].join('\n');
-    const receipt = await sendInputIdempotent(leaderId, tagged, messageId);
-    res.json({ ok: true, fromRoom: sourceRoom, room: targetRoom, leaderSessionId: leaderId, sentAt: receipt.sentAt });
+    const receipt = await sendInputIdempotent(recipient.sessionId, tagged, messageId);
+    res.json({
+      ok: true,
+      fromRoom: sourceRoom,
+      room: targetRoom,
+      leaderSessionId: recipient.role === 'leader' ? recipient.sessionId : null,
+      recipientSessionId: recipient.sessionId,
+      recipientRole: recipient.role,
+      sentAt: receipt.sentAt,
+    });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
