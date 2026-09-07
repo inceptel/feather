@@ -87,9 +87,17 @@ describe('Room staffing from the template', () => {
       const room = JSON.parse(createdText)
       assert.equal(room.mission, MISSION)
       assert.match(room.leaderSessionId, /^[0-9a-f-]{36}$/)
-      assert.deepEqual(room.residents.map(resident => [resident.role, resident.wakeIntervalMs]),
-        [['caretaker', 900_000], ['updater', 1_800_000], ['marketer', null], ['replyguy', null], ['judge', null]])
+      assert.deepEqual(room.residents, [], 'a new Room seats the Leader and one agent rule, no residents')
       const roomDir = path.join(home, 'rooms/ev-shop')
+      const agentRule = JSON.parse(fs.readFileSync(path.join(home, '.feather/scheduler.json'), 'utf8')).rules['ev-shop/agent']
+      assert.equal(agentRule.target.kind, 'agent')
+      assert.equal(agentRule.target.builder.engine, 'omp')
+      assert.equal(agentRule.target.checker.engine, 'codex')
+      assert.deepEqual(agentRule.when, [{ type: 'todo-has', section: 'Open' }])
+      assert.ok(fs.existsSync(path.join(roomDir, 'STEERING.md')))
+      assert.ok(fs.existsSync(path.join(roomDir, 'AGENT.md')))
+      assert.ok(fs.existsSync(path.join(roomDir, 'wiki/TODO.md')))
+      assert.ok(fs.existsSync(path.join(roomDir, 'wiki/Log.md')))
       assert.ok(fs.readFileSync(path.join(roomDir, 'AGENTS.md'), 'utf8').includes(`> ${MISSION}`))
       assert.equal(fs.readlinkSync(path.join(roomDir, 'CLAUDE.md')), 'AGENTS.md')
       assert.ok(fs.existsSync(path.join(roomDir, 'wiki/Home.md')))
@@ -100,8 +108,15 @@ describe('Room staffing from the template', () => {
       })
       assert.equal(duplicate.status, 409)
 
-      // Durable state: leader, residents with their wake schedule, pulse paused.
+      // Durable state: leader, pulse paused. Legacy residents can still be
+      // seated on an existing Room with /staff (the migration path).
       assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.feather/room-mains.json'), 'utf8'))['ev-shop'], room.leaderSessionId)
+      const staffed = await fetch(`${base}/api/rooms/ev-shop/staff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const staffedText = await staffed.text()
+      assert.equal(staffed.status, 200, staffedText)
+      room.residents = JSON.parse(staffedText).residents.filter(resident => resident.role !== 'leader')
+      assert.deepEqual(room.residents.map(resident => [resident.role, resident.wakeIntervalMs]).sort(),
+        [['caretaker', 900_000], ['judge', null], ['marketer', null], ['replyguy', null], ['updater', 1_800_000]])
       const residents = readResidents()['ev-shop']
       const caretakerId = residents.caretaker.sessionId
       assert.equal(residents.caretaker.wakeIntervalMs, 900_000)
@@ -144,7 +159,6 @@ describe('Room staffing from the template', () => {
       // The judge is seated on the other harness so it never shares the Leader's blind spots.
       assert.equal(readMeta()[residents.judge.sessionId].ompModel, 'openai-codex/gpt-5.6-sol')
       assert.ok(fs.existsSync(path.join(roomDir, 'JUDGE.md')))
-      assert.ok(fs.existsSync(path.join(roomDir, 'FRONTIER.md')))
 
       // A pre-template Room can be migrated without replacing its Leader or
       // specialist. Standard charters and cadence are applied idempotently.
@@ -218,7 +232,8 @@ describe('Room staffing from the template', () => {
       fs.writeFileSync(path.join(home, '.feather/room-residents.json'), JSON.stringify({
         'ev-shop': { ...residents, caretaker: { ...residents.caretaker, nextWakeAtMs: 1 } },
       }))
-      const woken = await waitFor(() => readSent().includes('[Room wake · #ev-shop · caretaker') ? readSent() : null, { message: 'caretaker wake' })
+      // The migration primed every resident over tmux just before; the wake queues behind those pastes.
+      const woken = await waitFor(() => readSent().includes('[Room wake · #ev-shop · caretaker') ? readSent() : null, { attempts: 800, message: 'caretaker wake' })
       assert.ok(woken.includes('Re-read CARETAKER.md'))
       await new Promise(resolve => setTimeout(resolve, 200))
       assert.equal((readSent().match(/\[Room wake/g) || []).length, 1, readSent())

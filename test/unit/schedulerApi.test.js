@@ -21,7 +21,7 @@ const put = (url, body) => fetch(url, { method: 'PUT', headers: { 'Content-Type'
 const count = (text, re) => (text.match(re) || []).length
 
 describe('Scheduler API: rules, chains, runs, and the handoff from the old wake code', () => {
-  it('fires a due rule once, waits for the turn to end, chains the judge, and blocks bad rules', async () => {
+  it('fires a due rule once, waits for the turn to end, runs an agent pair, and blocks bad rules', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-scheduler-'))
     const home = path.join(root, 'home')
     const stateDir = path.join(root, 'state')
@@ -102,13 +102,13 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       const leaderId = created.body.leaderSessionId
       const roomDir = path.join(home, 'rooms/ev-shop')
       await waitFor(() => readSent().includes('[Room kickoff · #ev-shop]') || null, { message: 'kickoff' })
-      const judgeId = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-residents.json'), 'utf8'))['ev-shop']?.judge?.sessionId
-      assert.ok(judgeId, 'judge resident exists')
-
-      // Empty table; bad rules never land.
+      // A new Room brings its agent rule; bad rules never land.
       let snapshot = (await json(await fetch(`${base}/api/scheduler`))).body
       assert.equal(snapshot.enabled, true)
-      assert.deepEqual(snapshot.rules, [])
+      assert.deepEqual(snapshot.rules.map(rule => rule.id), ['ev-shop/agent'])
+      assert.equal(snapshot.rules[0].target.kind, 'agent')
+      assert.equal((await put(`${base}/api/scheduler/rules/ev-shop/agent`, { target: { kind: 'agent' }, mode: 'inject', every: '1h' })).status, 400, 'agents run fresh chats')
+      assert.equal((await put(`${base}/api/scheduler/rules/ev-shop/agent`, { target: { kind: 'agent' }, when: [{ type: 'todo-has', section: 'Nope' }] })).status, 400, 'unknown TODO section')
       assert.equal((await put(`${base}/api/scheduler/rules/nowhere/leader`, { target: { kind: 'leader' }, every: '1h' })).status, 404)
       assert.equal((await put(`${base}/api/scheduler/rules/ev-shop/leader`, { target: { kind: 'leader' }, every: '5s' })).status, 400)
       assert.equal((await put(`${base}/api/scheduler/rules/ev-shop/judge`, { target: { kind: 'resident', role: 'judge' }, after: 'ev-shop/leader' })).status, 400, 'chain to a missing parent')
@@ -148,9 +148,11 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       const startedAt = leaderEntry.runtime.lastRunAt
       assert.equal((await post(`${base}/api/scheduler/rules/ev-shop/leader/fire`)).status, 409, 'no overlap')
 
-      // The judge rule chains on the Leader run, but only once Review has lines.
-      const judgeRule = await json(await put(`${base}/api/scheduler/rules/ev-shop/judge`, { target: { kind: 'resident', role: 'judge' }, after: 'ev-shop/leader', when: [{ type: 'frontier-has', section: 'Review' }] }))
-      assert.equal(judgeRule.status, 200, judgeRule.text)
+      // The agent rule waits for an Open line in wiki/TODO.md.
+      const agentRule = await json(await put(`${base}/api/scheduler/rules/ev-shop/agent`, { target: { kind: 'agent', builder: { engine: 'omp' }, checker: { engine: 'codex' }, roundMs: '1m' }, every: '1m', when: [{ type: 'todo-has', section: 'Open' }] }))
+      assert.equal(agentRule.status, 200, agentRule.text)
+      assert.equal(agentRule.body.rule.target.roundMs, 60_000)
+      assert.equal(agentRule.body.rule.mode, 'fresh')
       // The Leader's turn ends.
       const marker = `[Room wake · #ev-shop · leader · ${startedAt}]`
       writeTranscript(leaderId, [user('kickoff'), assistant('stop'), user(marker), assistant('toolUse')])
@@ -161,27 +163,46 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
         const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/leader')
         return entry.runtime.running === null && entry.runtime.lastOutcome === 'done' ? entry : null
       }, { message: 'leader run done' })
-      await new Promise(resolve => setTimeout(resolve, 200))
-      assert.equal(count(readSent(), /\[Room judge · #ev-shop/g), 0, 'judge waits for Review lines')
-      let judgeEntry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/judge')
-      assert.equal(judgeEntry.lastDecision, 'FRONTIER Review is empty')
-      const frontier = fs.readFileSync(path.join(roomDir, 'FRONTIER.md'), 'utf8')
-      fs.writeFileSync(path.join(roomDir, 'FRONTIER.md'), frontier.replace(/## Review\n/, '## Review\n- Shop pricing page drafted (wiki/Pricing.md)\n'))
-      await waitFor(() => readSent().includes('[Room judge · #ev-shop') || null, { message: 'judge wake' })
+      patchRuntime('ev-shop/agent', { lastRunAt: new Date(Date.now() - 3_600_000).toISOString() })
       await new Promise(resolve => setTimeout(resolve, 300))
-      assert.equal(count(readSent(), /\[Room judge · #ev-shop/g), 1, 'one judge wake per Leader run')
-      judgeEntry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/judge')
-      assert.ok(judgeEntry.runtime.running, 'ralph resident run stays open while working')
-      finishRalph(judgeId)
+      assert.equal(count(readSent(), /\[Room wake · #ev-shop · agent agent/g), 0, 'agent waits for an Open line')
+      let agentEntry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/agent')
+      assert.equal(agentEntry.lastDecision, 'TODO Open is empty')
+      const todo = fs.readFileSync(path.join(roomDir, 'wiki/TODO.md'), 'utf8')
+      fs.writeFileSync(path.join(roomDir, 'wiki/TODO.md'), todo.replace(/## Open\n/, '## Open\n- 2026-09-07 price the equipment — done: wiki/Pricing.md with a table\n'))
+      // Both halves start: the checker (codex) is primed over tmux, the
+      // builder (OMP) gets its wake prompt as the session's first message.
+      await waitFor(() => readSent().includes('[Room wake · #ev-shop · agent agent · checker') || null, { message: 'checker primed' })
+      agentEntry = await waitFor(async () => {
+        const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/agent')
+        return entry.runtime.running?.agent?.groupId ? entry : null
+      }, { message: 'agent run records its group' })
+      const builderId = agentEntry.runtime.running.sessionId
+      const checkerId = agentEntry.runtime.running.agent.checkerSessionId
+      const groupId = agentEntry.runtime.running.agent.groupId
+      assert.match(groupId, /^agent-ev-shop-agent-/)
+      assert.ok(fs.readFileSync(path.join(home, '.feather/omp-sessions', builderId, 'scheduled-prompt.md'), 'utf8').startsWith('[Room wake · #ev-shop · agent agent · builder'))
+      const groups = JSON.parse(fs.readFileSync(path.join(home, '.feather/sidecars/groups.json'), 'utf8'))
+      assert.deepEqual(groups[groupId].members.map(member => member.role).sort(), ['builder', 'checker'])
+      const meta = readMeta()
+      assert.equal(meta[builderId].title, 'builder agent: #ev-shop')
+      assert.equal(meta[checkerId].title, 'checker agent: #ev-shop')
+      assert.equal((await post(`${base}/api/scheduler/rules/ev-shop/agent/fire`)).status, 409, 'one wake per agent at a time')
+      // The builder's last word ends the wake; both chats are retired.
+      fs.appendFileSync(path.join(home, '.feather/sidecars', groupId, 'chat.jsonl'), JSON.stringify({ ts: Date.now(), seq: 1, from: 'builder', to: 'checker', text: '[DONE] approved; wiki/Pricing.md written' }) + '\n')
       await waitFor(async () => {
-        const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/judge')
-        return entry.runtime.lastOutcome === 'done' ? entry : null
-      }, { message: 'judge run done' })
+        const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/agent')
+        return entry.runtime.running === null && entry.runtime.lastOutcome === 'done' ? entry : null
+      }, { message: 'agent run done' })
+      const kills = fs.readFileSync(commandLog, 'utf8')
+      assert.ok(kills.includes(`kill-session -t feather-${builderId.slice(0, 8)}`), 'builder retired')
+      assert.ok(kills.includes(`kill-session -t feather-${checkerId.slice(0, 8)}`), 'checker retired')
+      assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.feather/sidecars/groups.json'), 'utf8'))[groupId]?.status, 'done', 'group torn down')
 
       // Ledger, pause, resume, fire.
       const runs = (await json(await fetch(`${base}/api/scheduler/runs?room=ev-shop`))).body.runs
       assert.ok(runs.some(run => run.ruleId === 'ev-shop/leader' && run.event === 'finished' && run.outcome === 'done'))
-      assert.ok(runs.some(run => run.ruleId === 'ev-shop/judge' && run.event === 'finished' && run.outcome === 'done'))
+      assert.ok(runs.some(run => run.ruleId === 'ev-shop/agent' && run.event === 'finished' && run.outcome === 'done'))
       const paused = await json(await post(`${base}/api/scheduler/rules/ev-shop/leader/pause`))
       assert.equal(paused.body.rule.runtime.paused, true)
       patchRuntime('ev-shop/leader', { lastRunAt: new Date(Date.now() - 5 * 3_600_000).toISOString() })

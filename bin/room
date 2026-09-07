@@ -13,7 +13,8 @@
 #                                      staffs it (Leader + caretaker/updater/marketer)
 #   room visual --out FILE.png "<prompt>" render a card image (any available provider, else text card)
 #   room list                          list rooms
-#   room note TEXT|--stdin|--file PATH   append durable working memory
+#   room note TEXT|--stdin|--file PATH   append one line to wiki/Log.md (legacy Rooms: notes.md)
+#   room lock -- CMD [ARGS...]          run CMD under this Room's lock (edits to shared files)
 #   room dispatch [--id ID] [--to ROLE] TEXT|--stdin|--file PATH
 #                                      note work and wake a permanent resident
 #   room publish FILE                   publish selected JSON as Room updater
@@ -40,9 +41,9 @@
 #   room succeed [--model M] [--no-handoff] [--force]  retire the Leader and seat a new one
 #   room autonomy [--every 30m|--off] [--pause|--resume] [--now] [--judge]  Leader wakes + judge (actor-critic loop)
 #   room schedule [list [--all]]      Feather scheduler rules for this Room (or every Room)
-#   room schedule set <name> --target leader|<role>|new:<engine>[:<model>] [--fresh] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:RE|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH]
+#   room schedule set <name> --target agent[:<builder>[+<checker>]]|leader|<role>|new:<engine>[:<model>] [--round 8m] [--fresh] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:RE|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH]
 #   room schedule fire|pause|resume|rm <name>   act on one rule;  room schedule runs [--all] [-n N]  recent runs
-#   room steer TEXT | --stdin | --file PATH   Add to Steering in FRONTIER.md and wake the Leader now
+#   room steer TEXT | --stdin | --file PATH   Add a dated line to STEERING.md and fire the Room's agents now
 #
 # Room resolution: -r <name> flag, $ROOM env, or cwd under ~/rooms/<name>.
 set -u
@@ -256,11 +257,25 @@ cmd_list() {
   done
 }
 
+# The Room lock: one flock per Room for edits to shared files (TODO.md,
+# Log.md, Home.md). `room lock -- CMD` runs CMD holding it.
+room_lock_path() { printf '%s/.%s.lock' "$ROOMS_DIR" "$ROOM_NAME"; }
+
+cmd_lock() {
+  resolve_room
+  [ "${1:-}" = "--" ] && shift
+  [ "$#" -ge 1 ] || die "usage: room lock -- CMD [ARGS...]"
+  flock -w 60 "$(room_lock_path)" "$@"
+}
+
 cmd_note() {
   resolve_room
   read_room_text note "$@"
-  printf -- '- %s %s\n' "$(date -u +%Y-%m-%d\ %H:%M)" "$ROOM_TEXT" >>"$ROOM_PATH/notes.md"
-  echo "noted in #$ROOM_NAME"
+  local line file
+  line=$(printf -- '- %s %s' "$(date -u +%Y-%m-%d\ %H:%M)" "$ROOM_TEXT")
+  if [ -f "$ROOM_PATH/wiki/Log.md" ]; then file="$ROOM_PATH/wiki/Log.md"; else file="$ROOM_PATH/notes.md"; fi
+  flock -w 60 "$(room_lock_path)" sh -c 'printf "%s\n" "$1" >>"$2"' _ "$line" "$file"
+  echo "noted in #$ROOM_NAME (${file#"$ROOM_PATH"/})"
 }
 
 cmd_dispatch() {
@@ -807,8 +822,12 @@ except Exception:
     sys.exit(f"room steer: unexpected reply from feather: {sys.argv[2][:200]}")
 if "error" in body:
     sys.exit("room steer: " + str(body["error"]))
-who = body.get("leaderSessionId") or "no Leader"
-print(f"#{name} steered: line added to Steering, Leader woken ({who})")
+if body.get("file") == "STEERING.md":
+    fired = body.get("fired") or []
+    print(f"#{name} steered: line added to STEERING.md, " + (("agents fired: " + ", ".join(fired)) if fired else "no agent rule to fire (room schedule set agent --target agent)"))
+else:
+    who = body.get("leaderSessionId") or "no Leader"
+    print(f"#{name} steered: line added to Steering, Leader woken ({who})")
 ' "$ROOM_NAME" "$response"
 }
 
@@ -920,6 +939,9 @@ def target(r):
     if k == "resident": return t["role"]
     if k == "session": return "session " + t["sessionId"][:8]
     if k == "new": return "new " + t.get("engine", "omp") + (" " + t["model"] if t.get("model") else "")
+    if k == "agent":
+        party = lambda p: p.get("engine", "omp") + (":" + p["model"] if p.get("model") else "")
+        return "agent " + party(t.get("builder") or {}) + "+" + party(t.get("checker") or {}) + " round " + str(round((t.get("roundMs") or 0) / 60000)) + "m"
     return k
 def cadence(r):
     parts = []
@@ -931,6 +953,8 @@ def cadence(r):
         if k == "idle": parts.append("when idle")
         elif k in ("file-changed", "file-matches"): parts.append("when " + c["path"] + (" changed" if k == "file-changed" else " matches"))
         elif k == "frontier-has": parts.append("when FRONTIER " + c["section"] + " has lines")
+        elif k == "todo-has": parts.append("when TODO " + c["section"] + " has lines")
+        elif k == "wiki-approved": parts.append("when any wiki was written")
     return ", ".join(parts)
 def status(r):
     rt = r["runtime"]
@@ -957,13 +981,14 @@ for r in rules:
 }
 
 schedule_set() {
-  local id="${1:-}"; [ -n "$id" ] || die "usage: room schedule set <name> --target leader|<role>|new:<engine>[:<model>]|session:<id> [--fresh|--inject] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:REGEX|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH] [--timeout 1h] [--max-per-hour N] [--disabled] [--note TEXT]"
+  local id="${1:-}"; [ -n "$id" ] || die "usage: room schedule set <name> --target agent[:<builder-engine>[:<model>][+<checker-engine>[:<model>]]]|leader|<role>|new:<engine>[:<model>]|session:<id> [--round 8m] [--fresh|--inject] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:REGEX|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH] [--timeout 1h] [--max-per-hour N] [--disabled] [--note TEXT]"
   shift
   local path; path=$(schedule_rule_path "$id") || exit 1
-  local target="" mode="" every="" cron="" after="" prompt="" prompt_file="" timeout="" maxph="" enabled=true note="" when=()
+  local target="" mode="" every="" cron="" after="" prompt="" prompt_file="" timeout="" maxph="" enabled=true note="" round="" when=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --target) target="${2:-}"; shift 2 ;;
+      --round) round="${2:-}"; shift 2 ;;
       --fresh) mode=fresh; shift ;;
       --inject) mode=inject; shift ;;
       --every) every="${2:-}"; shift 2 ;;
@@ -982,14 +1007,23 @@ schedule_set() {
   [ -n "$prompt_file" ] && { prompt=$(cat "$prompt_file") || die "cannot read $prompt_file"; }
   local room="${path#/api/scheduler/rules/}"; room="${room%%/*}"
   local payload
-  payload=$(ROOM_OF_RULE="$room" python3 -c '
+  payload=$(ROOM_OF_RULE="$room" AGENT_ROUND="$round" python3 -c '
 import json, os, sys
 target, mode, every, cron, after, prompt, timeout, maxph, enabled, note = sys.argv[1:11]
 when = sys.argv[11:]
 room = os.environ["ROOM_OF_RULE"]
 body = {"enabled": enabled == "true"}
 if not target: sys.exit("room schedule set: --target is required")
-if target == "leader": body["target"] = {"kind": "leader"}
+def party(spec, default):
+    if not spec: return {"engine": default}
+    engine, *model = spec.split(":", 1)
+    return {"engine": engine or default, **({"model": model[0]} if model else {})}
+if target == "agent" or target.startswith("agent:"):
+    spec = target[6:] if target.startswith("agent:") else ""
+    builder, *checker = spec.split("+", 1)
+    body["target"] = {"kind": "agent", "builder": party(builder, "omp"), "checker": party(checker[0] if checker else "", "codex"),
+                      **({"roundMs": os.environ["AGENT_ROUND"]} if os.environ.get("AGENT_ROUND") else {})}
+elif target == "leader": body["target"] = {"kind": "leader"}
 elif target.startswith("new:"):
     _, engine, *model = target.split(":", 2)
     body["target"] = {"kind": "new", "engine": engine, **({"model": model[0]} if model else {})}
@@ -1008,7 +1042,10 @@ for w in when:
         _, path, pattern = w.split(":", 2)
         crit.append({"type": "file-matches", "path": path, "pattern": pattern})
     elif w.startswith("frontier:"): crit.append({"type": "frontier-has", "section": w.split(":", 1)[1]})
-    else: sys.exit("room schedule set: unknown --when " + w + " (idle, idle:30m, changed:PATH, matches:PATH:REGEX, frontier:SECTION)")
+    elif w.startswith("todo:"): crit.append({"type": "todo-has", "section": w.split(":", 1)[1]})
+    elif w == "todo": crit.append({"type": "todo-has", "section": "Open"})
+    elif w == "wiki-approved": crit.append({"type": "wiki-approved"})
+    else: sys.exit("room schedule set: unknown --when " + w + " (idle, idle:30m, changed:PATH, matches:PATH:REGEX, todo:SECTION, wiki-approved, frontier:SECTION)")
 if crit: body["when"] = crit
 if prompt: body["prompt"] = prompt
 if timeout: body["timeoutMs"] = timeout
@@ -1081,7 +1118,8 @@ case "$cmd" in
   new) cmd_new "$@" ;;
   visual) cmd_visual "$@" ;;
   list) cmd_list "$@" ;;
-  note) cmd_note "$@" ;;
+  note|log) cmd_note "$@" ;;
+  lock) cmd_lock "$@" ;;
   dispatch) cmd_dispatch "$@" ;;
   publish) cmd_publish "$@" ;;
   reply) cmd_reply "$@" ;;

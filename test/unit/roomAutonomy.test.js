@@ -109,6 +109,9 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       const roomDir = path.join(home, 'rooms/ev-shop')
       const rooms = async () => (await (await fetch(`${base}/api/rooms`)).json()).rooms.find(candidate => candidate.name === 'ev-shop')
       await waitFor(() => readSent().includes('[Room kickoff · #ev-shop]') || null, { message: 'kickoff' })
+      // New Rooms seat the Leader plus an agent rule; the legacy residents (judge
+      // included) come from the /staff migration path.
+      assert.equal((await post(`${base}/api/rooms/ev-shop/staff`, {})).status, 200)
 
       // Validation and the off state.
       assert.equal((await post(`${base}/api/rooms/nowhere/leader/wake`, { wakeIntervalMs: 60_000 })).status, 404)
@@ -117,7 +120,8 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       let snapshot = await rooms()
       assert.equal(snapshot.leaderWake.enabled, false)
       assert.equal(snapshot.leaderWake.wakeIntervalMs, null)
-      assert.ok(fs.existsSync(path.join(roomDir, 'FRONTIER.md')), 'new Rooms are scaffolded with a frontier')
+      assert.ok(fs.existsSync(path.join(roomDir, 'STEERING.md')), 'new Rooms are scaffolded with STEERING.md')
+      assert.ok(fs.existsSync(path.join(roomDir, 'wiki/TODO.md')), 'new Rooms are scaffolded with a TODO queue')
 
       // Switching autonomy on schedules the first wake one interval out.
       const on = await post(`${base}/api/rooms/ev-shop/leader/wake`, { wakeIntervalMs: 3_600_000 })
@@ -182,14 +186,29 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       assert.equal((await post(`${base}/api/rooms/ev-shop/leader/wake`, { now: true })).status, 200)
       assert.equal(count(readSent(), /\[Room wake · #ev-shop · leader/g), 2)
 
-      // A steer lands under Steering in FRONTIER.md, is noted, and wakes the Leader at once with the text.
-      assert.equal((await post(`${base}/api/rooms/ev-shop/steer`, { text: 'Price the equipment first.' })).status, 201)
-      const frontier = fs.readFileSync(path.join(home, 'rooms/ev-shop/FRONTIER.md'), 'utf8')
-      assert.match(frontier, /## Steering\n[\s\S]*?- \d{4}-\d{2}-\d{2} \d{2}:\d{2} Price the equipment first\.\n\n## Open\n/)
-      assert.match(fs.readFileSync(path.join(home, 'rooms/ev-shop/notes.md'), 'utf8'), /\[steer\] Price the equipment first\./)
-      assert.equal(count(readSent(), /\[Room steer · #ev-shop/g), 1)
-      assert.ok(readSent().includes('> Price the equipment first.'))
-      assert.equal(readWakes()['ev-shop'].judgeDue, true, 'a steer turn is judged like a wake')
+      // A steer lands under Steers in STEERING.md, is logged, and fires the
+      // Room's agents at once instead of waking the Leader.
+      const steered = await post(`${base}/api/rooms/ev-shop/steer`, { text: 'Price the equipment first.' })
+      const steeredText = await steered.text()
+      assert.equal(steered.status, 201, steeredText)
+      const steerBody = JSON.parse(steeredText)
+      assert.equal(steerBody.file, 'STEERING.md')
+      assert.deepEqual(steerBody.fired, ['ev-shop/agent'])
+      assert.equal(steerBody.leaderSessionId, null)
+      const steering = fs.readFileSync(path.join(home, 'rooms/ev-shop/STEERING.md'), 'utf8')
+      assert.match(steering, /## Steers\n[\s\S]*- \d{4}-\d{2}-\d{2} \d{2}:\d{2} Price the equipment first\.\n$/)
+      assert.match(fs.readFileSync(path.join(home, 'rooms/ev-shop/wiki/Log.md'), 'utf8'), /\[steer\] Price the equipment first\./)
+      assert.equal(count(readSent(), /\[Room steer · #ev-shop/g), 0, 'the Leader is not woken by a steer')
+      await waitFor(() => readSent().includes('[Room wake · #ev-shop · agent agent · checker') ? readSent() : null, { message: 'checker primed after steer' })
+      // The builder starts once the checker is primed; its wake prompt is the OMP session's first message.
+      const builderPrompts = () => [path.join(home, '.feather/omp-sessions'), path.join(stateDir, 'omp-sessions')]
+        .filter(dir => fs.existsSync(dir))
+        .flatMap(dir => fs.readdirSync(dir, { withFileTypes: true })
+          .filter(entry => entry.isDirectory())
+          .map(entry => path.join(dir, entry.name, 'scheduled-prompt.md')))
+        .filter(file => fs.existsSync(file))
+        .map(file => fs.readFileSync(file, 'utf8'))
+      await waitFor(() => builderPrompts().some(prompt => prompt.startsWith('[Room wake · #ev-shop · agent agent · builder')) || null, { attempts: 400, message: 'builder started with its wake prompt' })
       assert.equal((await post(`${base}/api/rooms/ev-shop/steer`, { text: '   ' })).status, 400)
       assert.equal((await post(`${base}/api/rooms/no-such-room/steer`, { text: 'x' })).status, 404)
 

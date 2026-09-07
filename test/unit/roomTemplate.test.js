@@ -6,6 +6,7 @@ import path from 'path'
 
 import {
   ROOM_MISSION_MAX_CHARS, ROOM_STANDARD_RESIDENTS, ROOM_TEMPLATE_DIRS,
+  agentCharter, builderWakePrompt, checkerPrimePrompt, houseRoomFiles, houseWakePrompt,
   judgeWakePrompt, leaderKickoffPrompt, leaderSteerPrompt, leaderWakePrompt, normalizeRoomMission, residentWakePrompt, roomTemplateFiles, scaffoldRoom,
   parseRoomMission,
 } from '../../lib/room-template.js'
@@ -24,14 +25,21 @@ describe('Room template', () => {
     assert.throws(() => normalizeRoomMission('bad\x07bell'), /control characters/)
   })
 
-  it('stamps the mission verbatim into AGENTS.md, notes, and the Wiki home', () => {
+  it('stamps the mission verbatim into AGENTS.md, STEERING.md, the Log, and the Wiki home', () => {
     const files = roomTemplateFiles({ name: 'ev-shop', mission: MISSION, now: new Date('2026-09-06T12:00:00Z') })
-    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'FRONTIER.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'notes.md', 'wiki/Home.md'])
+    assert.deepEqual(Object.keys(files), ['AGENTS.md', 'STEERING.md', 'AGENT.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'wiki/Home.md', 'wiki/TODO.md', 'wiki/Log.md'])
     assert.match(files['AGENTS.md'], /^# Room: #ev-shop\n/)
     assert.ok(files['AGENTS.md'].includes('## Mission (verbatim from the user)'))
     assert.ok(files['AGENTS.md'].includes(`> ${MISSION}`))
     assert.ok(files['AGENTS.md'].includes('[Super Feed comment'))
-    assert.ok(files['notes.md'].includes(`- 2026-09-06 12:00 Mission (verbatim from the user): ${MISSION}`))
+    assert.ok(files['wiki/Log.md'].includes(`- 2026-09-06 12:00 [user] Mission: ${MISSION}`))
+    assert.ok(files['STEERING.md'].includes(`> ${MISSION}`))
+    for (const section of ['## Mission', '## Priorities', '## Parked', '## Off-limits', '## Steers']) assert.ok(files['STEERING.md'].includes(section), section)
+    for (const section of ['## Open', '## Working', '## Parked', '## Done']) assert.ok(files['wiki/TODO.md'].includes(section), section)
+    assert.ok(files['AGENT.md'].includes('[APPROVED]'))
+    assert.ok(files['AGENT.md'].includes('room lock'))
+    assert.ok(files['AGENT.md'].includes('drafts/'))
+    assert.equal(files['AGENT.md'], agentCharter('ev-shop'))
     assert.ok(files['wiki/Home.md'].includes(`> ${MISSION}`))
     for (const spec of ROOM_STANDARD_RESIDENTS) {
       assert.ok(files[spec.charter].includes('room-ev-shop'), `${spec.charter} names the Sidecar group`)
@@ -41,9 +49,9 @@ describe('Room template', () => {
     assert.ok(files['JUDGE.md'].includes('Review → Done'))
     assert.ok(files['JUDGE.md'].includes('(<file you opened>)'), 'judge verdicts name the opened file')
     assert.ok(files['JUDGE.md'].includes('Never touch Steering'))
-    assert.ok(files['FRONTIER.md'].includes('## Steering'))
-    assert.ok(files['FRONTIER.md'].includes('`room steer`'))
-    assert.ok(files['AGENTS.md'].includes('fewer than three lines the Leader can work alone'))
+    assert.ok(files['AGENTS.md'].includes('## Who works here'))
+    assert.ok(files['AGENTS.md'].includes('never edit it'))
+    assert.ok(files['AGENTS.md'].includes('wiki/TODO.md'))
     assert.ok(files['AGENTS.md'].includes('`room steer "..."`'))
     assert.ok(files['MARKETER.md'].includes('summary (≤900 chars'))
     assert.ok(files['MARKETER.md'].includes('detail (optional, ≤2500 chars'))
@@ -62,14 +70,14 @@ describe('Room template', () => {
     assert.ok(files['MARKETER.md'].includes('"attention": "briefing|by-the-way"'))
     assert.ok(files['REPLYGUY.md'].includes('room dispatch --to leader'))
     assert.ok(files['REPLYGUY.md'].includes('Reply first'))
-    assert.ok(files['AGENTS.md'].includes('**replyguy**'))
     assert.ok(files['CARETAKER.md'].includes('RALPH_COMPLETE'))
   })
 
   it('leaves an editable placeholder when there is no mission', () => {
     const files = roomTemplateFiles({ name: 'bare', mission: null })
     assert.ok(files['AGENTS.md'].includes('## Mission\n\n<!-- One sentence'))
-    assert.ok(!files['notes.md'].includes('Mission (verbatim'))
+    assert.ok(!files['wiki/Log.md'].includes('Mission:'))
+    assert.ok(!files['STEERING.md'].includes('> '))
     assert.ok(!files['wiki/Home.md'].includes('Mission:'))
   })
 
@@ -93,7 +101,7 @@ describe('Room template', () => {
       const dir = path.join(root, 'ev-shop')
       fs.mkdirSync(dir)
       const files = scaffoldRoom(dir, { name: 'ev-shop', mission: MISSION })
-      assert.deepEqual(files, ['AGENTS.md', 'FRONTIER.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'notes.md', 'wiki/Home.md'])
+      assert.deepEqual(files, ['AGENTS.md', 'STEERING.md', 'AGENT.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'JUDGE.md', 'wiki/Home.md', 'wiki/TODO.md', 'wiki/Log.md'])
       for (const file of files) assert.ok(fs.existsSync(path.join(dir, file)), file)
       for (const sub of ROOM_TEMPLATE_DIRS) assert.ok(fs.statSync(path.join(dir, sub)).isDirectory(), sub)
       assert.equal(fs.readlinkSync(path.join(dir, 'CLAUDE.md')), 'AGENTS.md')
@@ -125,5 +133,26 @@ describe('Room autonomy prompts', () => {
     assert.ok(steer.includes('Steering outranks everything below it'))
     const judge = judgeWakePrompt({ roomName: 'ev-shop', leaderSessionId: 'abc', leaderWakeAt: '2026-09-07T10:00:00.000Z', at: new Date('2026-09-07T10:30:00Z') })
     assert.ok(judge.includes('names the file you opened'))
+  })
+
+  it('primes the builder and checker halves of an agent, and the house helpers', () => {
+    const at = new Date('2026-09-07T10:00:00Z')
+    const builder = builderWakePrompt({ roomName: 'ev-shop', agentName: 'agent', group: 'g1', at, budgetMs: 1_800_000, roundMs: 480_000, checkerEngine: 'codex' })
+    assert.equal(builder.split('\n')[0], '[Room wake · #ev-shop · agent agent · builder · 2026-09-07T10:00:00.000Z]')
+    assert.ok(builder.includes('sidecar post --to checker'))
+    assert.ok(builder.includes('codex chat in sidecar group `g1`'))
+    assert.ok(builder.includes('30 minutes'))
+    assert.ok(builder.includes('8 minutes'))
+    const checker = checkerPrimePrompt({ roomName: 'ev-shop', agentName: 'agent', group: 'g1', at, budgetMs: 1_800_000, roundMs: 480_000, builderEngine: 'omp' })
+    assert.equal(checker.split('\n')[0], '[Room wake · #ev-shop · agent agent · checker · 2026-09-07T10:00:00.000Z]')
+    assert.ok(checker.includes('sidecar post --to builder'))
+    assert.ok(checker.includes('never build'))
+    const house = houseRoomFiles({ now: at })
+    assert.deepEqual(Object.keys(house), ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'briefs/QUEUE.md', 'wiki/Home.md', 'wiki/Log.md'])
+    assert.ok(house['UPDATER.md'].includes('room -r <room> publish'))
+    assert.ok(house['MARKETER.md'].includes('room -r <room> visual --out'))
+    const wake = houseWakePrompt({ role: 'caretaker', changedRooms: ['trading', 'life'], at, budgetMs: 900_000 })
+    assert.equal(wake.split('\n')[0], '[Room wake · #house · caretaker · 2026-09-07T10:00:00.000Z]')
+    assert.ok(wake.includes('#trading, #life'))
   })
 })

@@ -237,7 +237,7 @@ export interface RoomInfo {
   leaderWake?: RoomLeaderWake
 }
 
-// The Leader's autonomy: a wake schedule for working FRONTIER.md, the judge
+// The Leader's autonomy (legacy Rooms): a wake schedule for working FRONTIER.md, the judge
 // that grades each wake, and the usage-limit fallback the Leader may be on.
 export interface RoomLeaderWake {
   enabled: boolean
@@ -378,9 +378,10 @@ export async function postFeedComment(evidenceId: string, text: string): Promise
   return (await responseJson<{ ok: true, comment: FeedComment }>(response)).comment
 }
 
-// Steer a Room from a card: the text lands under Steering in its FRONTIER.md
-// and the Leader is woken at once.
-export async function postRoomSteer(room: string, text: string): Promise<{ ok: true, room: string, at: string, leaderSessionId: string | null, woke: boolean }> {
+// Steer a Room from a card: the text lands under Steers in its STEERING.md and
+// the Room's agents are fired (legacy Rooms: under Steering in FRONTIER.md,
+// and the Leader is woken).
+export async function postRoomSteer(room: string, text: string): Promise<{ ok: true, room: string, at: string, file?: string, fired?: string[], leaderSessionId: string | null, woke: boolean }> {
   const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/steer`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1056,11 +1057,12 @@ export async function fetchUsage(refresh = false): Promise<UsageSnapshot> {
 }
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
-export interface SchedulerCriterion { type: 'idle' | 'file-changed' | 'file-matches' | 'frontier-has', path?: string, pattern?: string, section?: string, forceAfterMs?: number | null }
+export interface SchedulerCriterion { type: 'idle' | 'file-changed' | 'file-matches' | 'frontier-has' | 'todo-has' | 'wiki-approved', path?: string, pattern?: string, section?: string, forceAfterMs?: number | null }
 export interface SchedulerRule {
   id: string
   room: string
   target: { kind: 'leader' } | { kind: 'resident', role: string } | { kind: 'session', sessionId: string } | { kind: 'new', engine: string, model?: string | null, title?: string | null }
+    | { kind: 'agent', builder: { engine: string, model?: string | null }, checker: { engine: string, model?: string | null }, roundMs?: number | null }
   mode: 'inject' | 'fresh'
   every: string | null
   everyMs: number | null

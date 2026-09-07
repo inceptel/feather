@@ -29,7 +29,7 @@ import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } 
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import {
   validateRules, normalizeRule, planTick, findIncidents, expiredRuns, markStarted, markFinished,
-  runtimeOf, describeRule, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS,
+  runtimeOf, describeRule, formatDuration, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_ROUND_MS,
 } from './lib/scheduler.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
@@ -40,10 +40,20 @@ import { createProviderLimits } from './lib/provider-limits.js';
 import { buildSuperFeed, mergeSuperFeed, superFeedCursor } from './lib/super-feed.js';
 import { appendRoomPublication, readRoomPublications, verifiedPublicationVisual } from './lib/room-publications.js';
 import {
+  HOUSE_ROOM_DIRS,
+  HOUSE_ROOM_NAME,
   ROOM_STANDARD_RESIDENTS,
   ROOM_TEMPLATE_DIRS,
+  agentCharter,
+  builderWakePrompt,
+  checkerPrimePrompt,
   frontierTemplate,
+  houseRoomFiles,
+  houseWakePrompt,
   judgeWakePrompt,
+  logTemplate,
+  steeringTemplate,
+  todoTemplate,
   leaderFallbackPrompt,
   leaderKickoffPrompt,
   leaderSteerPrompt,
@@ -4072,6 +4082,47 @@ function ensureRoomFrontier(name) {
   fs.writeFileSync(file, frontierTemplate(name));
   return true;
 }
+// The agent model's files: STEERING.md (the user's), AGENT.md (the pair's
+// charter), wiki/TODO.md (queue), wiki/Log.md (memory). Missing ones are
+// created; existing ones are never touched.
+function ensureRoomFiles(name) {
+  const dir = path.join(ROOMS_HOME_DIR, name);
+  const created = [];
+  for (const sub of ['wiki', 'drafts', 'artifacts']) fs.mkdirSync(path.join(dir, sub), { recursive: true });
+  const mission = readRoomMission(name);
+  const files = {
+    'STEERING.md': () => steeringTemplate(name, mission),
+    'AGENT.md': () => agentCharter(name),
+    'wiki/TODO.md': () => todoTemplate(name),
+    'wiki/Log.md': () => logTemplate(name, { mission }),
+  };
+  for (const [relative, make] of Object.entries(files)) {
+    const file = path.join(dir, relative);
+    if (fs.existsSync(file)) continue;
+    fs.writeFileSync(file, make());
+    created.push(relative);
+  }
+  return created;
+}
+function roomUsesAgentModel(name) {
+  return fs.existsSync(path.join(ROOMS_HOME_DIR, name, 'STEERING.md'));
+}
+// #house holds the global helpers (caretaker, updater, marketer). Created on
+// demand; charters are rewritten from the template so they stay current.
+function ensureHouseRoom() {
+  const dir = path.join(ROOMS_HOME_DIR, HOUSE_ROOM_NAME);
+  const fresh = !fs.existsSync(dir);
+  for (const sub of HOUSE_ROOM_DIRS) fs.mkdirSync(path.join(dir, sub), { recursive: true });
+  const files = houseRoomFiles();
+  for (const [relative, content] of Object.entries(files)) {
+    const file = path.join(dir, relative);
+    if (fresh || /^(AGENTS|CARETAKER|UPDATER|MARKETER)\.md$/.test(relative) || !fs.existsSync(file)) fs.writeFileSync(file, content);
+  }
+  const claudePath = path.join(dir, 'CLAUDE.md');
+  if (!fs.existsSync(claudePath)) fs.symlinkSync('AGENTS.md', claudePath);
+  if (fresh) roomSnapshotCache.refresh();
+  return fresh;
+}
 const ROOM_PULSE_STATUSES = new Set(['waiting', 'working', 'paused', 'error']);
 function isRoomPulseState(value) {
   if (!isJsonRecord(value)) return false;
@@ -4862,10 +4913,11 @@ app.get('/api/rooms/:name/residents', (req, res) => {
 });
 function requireRoomUpdaterCapability(req, roomName) {
   const sessionId = String(req.get('X-Feather-Session-ID') || '');
+  const tokenOk = bridgeTokenValid(sessionId, req.get('X-Feather-Bridge-Token'));
+  // A house helper (a chat assigned to #house) publishes for every Room.
+  if (tokenOk && ROOM_ASSIGN_STATE.read()[sessionId] === HOUSE_ROOM_NAME) return sessionId;
   const updater = ROOM_RESIDENTS_STATE.read()[roomName]?.updater;
-  if (!updater || updater.sessionId !== sessionId
-    || !bridgeTokenValid(sessionId, req.get('X-Feather-Bridge-Token'))
-    || readMeta()[sessionId]?.mode !== RALPH_MODE) {
+  if (!updater || updater.sessionId !== sessionId || !tokenOk || readMeta()[sessionId]?.mode !== RALPH_MODE) {
     throw httpError(403, 'invalid Room updater capability');
   }
   return sessionId;
@@ -4956,19 +5008,31 @@ const ROOM_STAFF_STAGGER_MS = Math.max(0, Number(
 ));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A new Room gets one Leader chat (the user's) and one agent rule. The
+// global house helpers cover the wiki and the feed; no per-Room residents.
+function defaultAgentRule(name) {
+  return normalizeRule({
+    id: `${name}/agent`, target: { kind: 'agent', builder: { engine: 'omp' }, checker: { engine: 'codex' }, roundMs: 8 * 60_000 },
+    mode: 'fresh', every: '30m', when: [{ type: 'todo-has', section: 'Open' }], timeoutMs: 30 * 60_000, maxRunsPerHour: 2,
+    note: 'builder + checker pair; takes one Open line per wake',
+  });
+}
+function ensureAgentRule(name) {
+  const id = `${name}/agent`;
+  if (SCHEDULER_STATE.read().rules?.[id]) return false;
+  const rule = defaultAgentRule(name);
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    rules: { ...(current.rules || {}), [id]: rule },
+    runtime: { ...(current.runtime || {}), [id]: { ...runtimeOf(current, id), lastRunAt: new Date().toISOString() } },
+  }));
+  return true;
+}
 async function staffRoom(name, mission) {
   const cwd = path.join(ROOMS_HOME_DIR, name);
   const leader = createSessionForRequest({ id: randomUUID(), cwd, agent: 'omp', roomName: name, roomRole: 'leader' });
   const residents = [];
-  for (const spec of ROOM_STANDARD_RESIDENTS) {
-    if (ROOM_STAFF_STAGGER_MS) await sleep(ROOM_STAFF_STAGGER_MS);
-    const created = createSessionForRequest({
-      id: randomUUID(), cwd, agent: 'omp', mode: RALPH_MODE, model: residentModelFor(spec.role),
-      roomName: name, roomRole: spec.role, wakeIntervalMs: spec.wakeIntervalMs,
-    });
-    updateMeta((meta) => ({ ...meta, [created.id]: { ...(meta[created.id] || {}), title: `${spec.role}: #${name}` } }));
-    residents.push({ role: spec.role, sessionId: created.id, wakeIntervalMs: spec.wakeIntervalMs });
-  }
+  ensureAgentRule(name);
   updateMeta((meta) => ({ ...meta, [leader.id]: { ...(meta[leader.id] || {}), title: `#${name}` } }));
   // The caretaker covers what the status reporter used to; keep the Room
   // pulse quiet so a fresh Room runs four sessions, not five.
@@ -5276,13 +5340,24 @@ app.post('/api/rooms/:name/steer', async (req, res) => {
     catch (error) { throw httpError(400, error.message); }
     const now = Date.now();
     const at = new Date(now);
+    const stamp = at.toISOString().slice(0, 16).replace('T', ' ');
+    if (roomUsesAgentModel(name)) {
+      // Agent model: the line lands under Steers in STEERING.md, the Log gets
+      // a line, and every enabled agent rule of the Room fires now.
+      ensureRoomFiles(name);
+      const steeringPath = path.join(ROOMS_HOME_DIR, name, 'STEERING.md');
+      fs.writeFileSync(steeringPath, appendSteering(fs.readFileSync(steeringPath, 'utf8'), text, at, { heading: 'Steers' }));
+      fs.appendFileSync(path.join(ROOMS_HOME_DIR, name, 'wiki', 'Log.md'), `- ${stamp} [steer] ${text.replace(/\n/g, ' ')}\n`);
+      const fired = schedulerFireRoomAgents(name, now, 'steer');
+      res.status(201).json({ ok: true, room: name, text, at: at.toISOString(), file: 'STEERING.md', fired, leaderSessionId: null, woke: fired.length > 0 });
+      return;
+    }
     ensureRoomFrontier(name);
     const frontierPath = path.join(ROOMS_HOME_DIR, name, 'FRONTIER.md');
     fs.writeFileSync(frontierPath, appendSteering(fs.readFileSync(frontierPath, 'utf8'), text, at));
-    const stamp = at.toISOString().slice(0, 16).replace('T', ' ');
     fs.appendFileSync(path.join(ROOMS_HOME_DIR, name, 'notes.md'), `- ${stamp} [steer] ${text.replace(/\n/g, ' ')}\n`);
     const leaderSessionId = await wakeRoomLeader(name, now, { prompt: leaderSteerPrompt({ roomName: name, text, at }) });
-    res.status(201).json({ ok: true, room: name, text, at: at.toISOString(), leaderSessionId, woke: Boolean(leaderSessionId) });
+    res.status(201).json({ ok: true, room: name, text, at: at.toISOString(), file: 'FRONTIER.md', fired: [], leaderSessionId, woke: Boolean(leaderSessionId) });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -5857,10 +5932,13 @@ function schedulerRules() {
   const state = SCHEDULER_STATE.read();
   return validateRules(state.rules || {});
 }
+// The legacy Leader-wake and resident-wake loops stand down once the
+// scheduler has a Leader or resident rule for the Room. Agent rules run
+// beside the legacy loops until those are removed.
 function schedulerOwnsRoom(name) {
   if (!SCHEDULER_ENABLED) return false;
   const rules = SCHEDULER_STATE.read().rules || {};
-  return Object.values(rules).some((rule) => rule.enabled !== false && rule.room === name);
+  return Object.values(rules).some((rule) => rule.enabled !== false && rule.room === name && (rule.target?.kind === 'leader' || rule.target?.kind === 'resident'));
 }
 function appendSchedulerRun(record) {
   try { fs.appendFileSync(SCHEDULER_RUNS_FILE, `${JSON.stringify(record)}\n`, { mode: 0o600 }); }
@@ -5903,11 +5981,23 @@ function schedulerTargetIdle(rule) {
 function schedulerRoomFile(rule, relative) {
   return path.join(ROOMS_HOME_DIR, rule.room, relative);
 }
+// Rooms whose wiki/Log.md was written after `since` (the house helpers' trigger).
+function roomsWithWikiWritesSince(since) {
+  const rooms = [];
+  for (const name of listRoomDirs()) {
+    if (name === HOUSE_ROOM_NAME) continue;
+    try {
+      if (fs.statSync(path.join(ROOMS_HOME_DIR, name, 'wiki', 'Log.md')).mtimeMs > since) rooms.push(name);
+    } catch {}
+  }
+  return rooms;
+}
 function schedulerContextFor(rule) {
   return {
     targetIdle: () => schedulerTargetIdle(rule),
     fileMtime: (relative) => { try { return fs.statSync(schedulerRoomFile(rule, relative)).mtimeMs; } catch { return null; } },
     fileText: (relative) => { try { return fs.readFileSync(schedulerRoomFile(rule, relative), 'utf8'); } catch { return null; } },
+    wikiWrittenSince: (since) => roomsWithWikiWritesSince(since),
   };
 }
 
@@ -5918,11 +6008,15 @@ function schedulerPrompt(rule, { at, runtime }) {
   const roomName = rule.room;
   const role = rule.target.kind === 'resident' ? rule.target.role : rule.target.kind === 'leader' ? 'leader' : 'chat';
   const parent = rule.after ? runtimeOf(SCHEDULER_STATE.read(), rule.after) : null;
-  const values = { room: roomName, role, at: at.toISOString(), ruleId: rule.id, after: rule.after || '', afterAt: parent?.lastRunAt || '' };
+  const changedRooms = roomsWithWikiWritesSince(Date.parse(runtime?.lastRunAt || '') || 0);
+  const values = { room: roomName, role, at: at.toISOString(), ruleId: rule.id, after: rule.after || '', afterAt: parent?.lastRunAt || '', changed: changedRooms.join(', ') };
   const header = `[Room wake · #${roomName} · ${role} · ${at.toISOString()}]`;
   if (rule.prompt) {
     const body = fillSchedulerPrompt(rule.prompt, values);
     return body.startsWith('[') ? body : `${header}\n${body}`;
+  }
+  if (roomName === HOUSE_ROOM_NAME && rule.target.kind === 'new') {
+    return houseWakePrompt({ role: rule.id.split('/')[1], changedRooms, at, budgetMs: rule.timeoutMs ?? DEFAULT_TIMEOUT_MS });
   }
   if (rule.target.kind === 'leader') {
     const wake = leaderWakePrompt({ roomName, at, budgetMs: rule.timeoutMs ?? DEFAULT_TIMEOUT_MS });
@@ -5953,24 +6047,13 @@ async function schedulerLaunch(rule, run) {
     const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt });
     return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
   }
+  if (rule.mode === 'fresh' && rule.target.kind === 'agent') return schedulerLaunchAgent(rule, run, at);
   if (rule.mode === 'fresh') {
-    if (!rule.prompt) throw new Error('a fresh session rule needs a prompt');
+    if (!rule.prompt && rule.room !== HOUSE_ROOM_NAME) throw new Error('a fresh session rule needs a prompt');
+    if (rule.room === HOUSE_ROOM_NAME) ensureHouseRoom();
     const id = randomUUID();
     const title = rule.target.title || `Scheduled: ${rule.id}`;
-    ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: rule.room }));
-    if (rule.target.engine === 'omp') {
-      const sessionDir = path.join(OMP_SESSIONS, id);
-      fs.mkdirSync(sessionDir, { recursive: true });
-      const promptFile = path.join(sessionDir, 'scheduled-prompt.md');
-      fs.writeFileSync(promptFile, prompt, { mode: 0o600 });
-      updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title, ...(rule.target.model ? { ompModel: sanitizeOmpModel(rule.target.model) } : {}) } }));
-      launchOmpSession(id, cwd, { promptFile, autoApprove: true });
-    } else {
-      spawnSession(id, cwd, rule.target.engine);
-      updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title } }));
-      await sleep(ROOM_KICKOFF_DELAY_MS);
-      await sendInput(id, prompt);
-    }
+    await schedulerStartFreshSession({ id, cwd, room: rule.room, engine: rule.target.engine, model: rule.target.model, title, prompt });
     roomSnapshotCache.refresh();
     return { sessionId: id, marker: prompt.split('\n')[0] };
   }
@@ -5987,12 +6070,142 @@ async function schedulerLaunch(rule, run) {
   return { sessionId, marker: prompt.split('\n')[0] };
 }
 
+// One fresh chat on any harness, assigned to a Room, opened with a prompt.
+// OMP takes the prompt as a file at launch; Claude and Codex get it typed
+// in once the CLI is up.
+async function schedulerStartFreshSession({ id, cwd, room, engine, model = null, title, prompt }) {
+  ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: room }));
+  if (engine === 'omp') {
+    const sessionDir = path.join(OMP_SESSIONS, id);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const promptFile = path.join(sessionDir, 'scheduled-prompt.md');
+    fs.writeFileSync(promptFile, prompt, { mode: 0o600 });
+    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title, ...(model ? { ompModel: sanitizeOmpModel(model) } : {}) } }));
+    launchOmpSession(id, cwd, { promptFile, autoApprove: true });
+    return;
+  }
+  spawnSession(id, cwd, engine);
+  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title } }));
+  await sleep(ROOM_KICKOFF_DELAY_MS);
+  await sendInput(id, prompt);
+}
+
+// One agent = a builder chat plus a checker chat in one sidecar group. The
+// builder is the group's driver (sidecar GC kills the checker if it dies).
+// The run record carries both ids and the group so the tick can read the
+// thread, enforce the round limit, and retire both at the end.
+async function schedulerLaunchAgent(rule, run, at) {
+  const agentName = rule.id.split('/')[1];
+  const cwd = path.join(ROOMS_HOME_DIR, rule.room);
+  ensureRoomFiles(rule.room);
+  const builderId = randomUUID();
+  const checkerId = randomUUID();
+  const groupId = `agent-${rule.room}-${agentName}-${run.runId.slice(0, 8)}`;
+  const budgetMs = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const roundMs = rule.target.roundMs;
+  sidecar.createGroup({
+    id: groupId,
+    members: [
+      { sessionId: builderId, role: 'builder', spawned: false },
+      { sessionId: checkerId, role: 'checker', spawned: true },
+    ],
+    agent: rule.target.builder.engine,
+    task: `#${rule.room} agent ${agentName}`,
+  });
+  const builderPrompt = builderWakePrompt({ roomName: rule.room, agentName, group: groupId, at, budgetMs, roundMs, checkerEngine: rule.target.checker.engine });
+  const checkerPrompt = checkerPrimePrompt({ roomName: rule.room, agentName, group: groupId, at, budgetMs, roundMs, builderEngine: rule.target.builder.engine });
+  try {
+    await schedulerStartFreshSession({ id: checkerId, cwd, room: rule.room, engine: rule.target.checker.engine, model: rule.target.checker.model, title: `checker ${agentName}: #${rule.room}`, prompt: checkerPrompt });
+    await schedulerStartFreshSession({ id: builderId, cwd, room: rule.room, engine: rule.target.builder.engine, model: rule.target.builder.model, title: `builder ${agentName}: #${rule.room}`, prompt: builderPrompt });
+  } catch (error) {
+    schedulerRetireAgent({ sessionId: builderId, agent: { groupId, checkerSessionId: checkerId } });
+    throw error;
+  }
+  roomSnapshotCache.refresh();
+  return { sessionId: builderId, marker: builderPrompt.split('\n')[0], agent: { groupId, checkerSessionId: checkerId, roundMs } };
+}
+
+function schedulerAgentThread(run) {
+  try { return run.agent?.groupId ? sidecar.readThread(run.agent.groupId) : []; } catch { return []; }
+}
+function schedulerAgentLastMessage(run) {
+  const thread = schedulerAgentThread(run);
+  return thread.length ? thread[thread.length - 1] : null;
+}
+const AGENT_END_RE = /^\s*\[(DONE|STOPPED)\]/i;
+// The builder's last word ends the wake: [DONE] after approval, [STOPPED]
+// on budget. Both chats gone also ends it; a dead builder with no last word
+// is a failure.
+function schedulerAgentStatus(run) {
+  const last = schedulerAgentLastMessage(run);
+  if (last && last.from === 'builder' && AGENT_END_RE.test(last.text || '')) return 'done';
+  if (!tmuxIsActive(run.sessionId)) {
+    const thread = schedulerAgentThread(run);
+    return thread.some((m) => m.from === 'builder' && AGENT_END_RE.test(m.text || '')) ? 'done' : 'failed';
+  }
+  return 'running';
+}
+// Round limit: the party a message is waiting on gets one reminder at
+// roundMs and the wake ends as 'timeout' at twice that. Returns 'timeout'
+// when the tick should close the run.
+async function schedulerAgentRoundCheck(run, rule, now) {
+  const last = schedulerAgentLastMessage(run);
+  if (!last || AGENT_END_RE.test(last.text || '')) return null;
+  const roundMs = run.agent?.roundMs || rule.target.roundMs || DEFAULT_ROUND_MS;
+  const waited = now - (last.ts || Date.parse(run.startedAt));
+  if (waited < roundMs) return null;
+  const waitingOn = last.from === 'builder' ? 'checker' : 'builder';
+  if (waited >= 2 * roundMs) return `${waitingOn} did not answer within ${formatDuration(2 * roundMs)}`;
+  if (run.agent?.roundNudgeSeq === last.seq) return null;
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, agent: { ...candidate.agent, roundNudgeSeq: last.seq } } : candidate),
+  }));
+  const target = waitingOn === 'builder' ? run.sessionId : run.agent?.checkerSessionId;
+  const text = waitingOn === 'checker'
+    ? `[round limit · #${rule.room}] The builder has been waiting ${formatDuration(roundMs)} for your verdict. Post it now with \`sidecar post --to builder\`: a short [REVISE] or [APPROVED], or the rubric if that is what is pending. Feather ends this wake in ${formatDuration(roundMs)}.`
+    : `[round limit · #${rule.room}] The checker has been waiting ${formatDuration(roundMs)} for you. Answer now with \`sidecar post --to checker\`: revised work, a question, or [STOPPED] with your progress recorded on the Working line. Feather ends this wake in ${formatDuration(roundMs)}.`;
+  try {
+    if (target) {
+      if (getAgentForSession(target) === 'omp') await wakeResident(target, rule.room, text);
+      else await sendInput(target, text);
+    }
+    appendSchedulerRun({ ...run, event: 'round-nudged', waitingOn, seq: last.seq, at: new Date(now).toISOString() });
+  } catch (error) { console.warn(`[scheduler] ${rule.id} round nudge failed:`, error.message); }
+  return null;
+}
+function schedulerRetireAgent(run) {
+  for (const id of [run.sessionId, run.agent?.checkerSessionId]) {
+    if (!id) continue;
+    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
+  }
+  if (run.agent?.groupId) {
+    try { sidecar.teardownGroup(run.agent.groupId); } catch {}
+    sidecarClients.delete(run.agent.groupId);
+  }
+}
+// The user steered: every enabled, idle agent rule of the Room fires now.
+function schedulerFireRoomAgents(room, now, reason) {
+  const fired = [];
+  let rules;
+  try { rules = schedulerRules(); } catch { return fired; }
+  const state = SCHEDULER_STATE.read();
+  for (const rule of Object.values(rules)) {
+    if (rule.room !== room || rule.target.kind !== 'agent' || !rule.enabled) continue;
+    if ((state.active || []).some((run) => run.ruleId === rule.id) || schedulerLaunchesInFlight.has(rule.id)) continue;
+    schedulerStartRun(rule, { reason }, now);
+    fired.push(rule.id);
+  }
+  return fired;
+}
+
 // How a run ends. OMP chats: the turn after our marker stopped. Ralph
 // residents: the loop went back to sleep. Fresh one-shots: tmux is gone.
 // Other engines: the transcript went quiet. Anything else keeps running.
 function schedulerRunStatus(run, rule) {
   const sessionId = run.sessionId;
   if (!sessionId) return 'running';
+  if (rule.target.kind === 'agent') return schedulerAgentStatus(run);
   const active = tmuxIsActive(sessionId);
   if (rule.mode === 'fresh' && rule.target.kind === 'new') return active ? 'running' : 'done';
   if (!active) return 'failed';
@@ -6086,9 +6299,15 @@ function schedulerNudgeDue(run, rule, now) {
 function schedulerWrapUpPrompt(rule, run, now) {
   const timeout = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const left = Math.max(1, Math.round((Date.parse(run.startedAt) + timeout - now) / 60_000));
+  if (rule.target.kind === 'agent') {
+    return [
+      `[Room wake · #${rule.room} · wrap-up · ${new Date(now).toISOString()}]`,
+      `About ${left} minutes remain before both chats are retired. Stop building now. If the checker already posted [APPROVED], finish the approval steps (wiki, Done line, Log line, [DONE]). Otherwise record on the Working line \`progress: ... next: ... drafts: ...\`, append a Log line with \`room note\`, post [STOPPED] to the checker, and end your turn.`,
+    ].join('\n');
+  }
   return [
     `[Room wake · #${rule.room} · wrap-up · ${new Date(now).toISOString()}]`,
-    `About ${left} minutes remain before this chat is retired. Stop the current work now. Record what you have and where it is with \`room note\`, move the FRONTIER line with that evidence (partial is fine: say what is left and where the data sits), and end your turn.`,
+    `About ${left} minutes remain before this chat is retired. Stop the current work now. Record what you have and where it is with \`room note\`, move the ${roomUsesAgentModel(rule.room) ? 'TODO' : 'FRONTIER'} line with that evidence (partial is fine: say what is left and where the data sits), and end your turn.`,
   ].join('\n');
 }
 async function schedulerNudge(run, rule, now) {
@@ -6114,6 +6333,7 @@ function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = nul
     active: (current.active || []).filter((candidate) => candidate.runId !== run.runId),
   }));
   appendSchedulerRun({ ...run, room: run.room || rule?.room || run.ruleId.split('/')[0], event: 'finished', outcome, finishedAt: new Date(now).toISOString(), durationMs: now - Date.parse(run.startedAt), ...(detail ? { detail } : {}) });
+  if (rule?.target.kind === 'agent' || run.agent) { schedulerRetireAgent(run); return; }
   if (outcome === 'timeout' && rule?.mode === 'fresh' && rule.target.kind === 'new' && run.sessionId) {
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(run.sessionId)], { stdio: 'ignore' }); } catch {}
   }
@@ -6131,10 +6351,10 @@ function schedulerStartRun(rule, decision, now) {
   appendSchedulerRun({ ...run, event: 'started' });
   schedulerLaunchesInFlight.add(rule.id);
   schedulerLaunch(rule, run)
-    .then(({ sessionId, marker }) => {
+    .then(({ sessionId, marker, ...extra }) => {
       SCHEDULER_STATE.update((current) => ({
         ...current,
-        active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, sessionId, marker } : candidate),
+        active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, sessionId, marker, ...extra } : candidate),
       }));
       console.log(`[scheduler] ${rule.id} started (${decision.reason}) in ${sessionId}`);
     })
@@ -6188,6 +6408,11 @@ function schedulerTick(now = Date.now()) {
       if (expiredRuns([run], rules, now).length) { schedulerFinishRun(run, 'timeout', { rule, now }); continue; }
       const status = schedulerRunStatus(run, rule);
       if (status !== 'running') { schedulerFinishRun(run, status, { rule, now }); continue; }
+      if (rule.target.kind === 'agent' && run.sessionId) {
+        schedulerAgentRoundCheck(run, rule, now).then((stalled) => {
+          if (stalled) schedulerFinishRun(run, 'timeout', { rule, now: Date.now(), detail: stalled });
+        }).catch((error) => console.warn(`[scheduler] ${rule.id} round check:`, error.message));
+      }
       if (schedulerNudgeDue(run, rule, now)) schedulerNudge(run, rule, now);
     }
     // 2. Plan and launch.
@@ -6260,7 +6485,9 @@ app.put('/api/scheduler/rules/:room/:name', (req, res) => {
       }
       return { ...current, rules, runtime };
     });
-    if (rule.enabled) ensureRoomFrontier(req.params.room);
+    if (rule.enabled && rule.target.kind === 'leader') ensureRoomFrontier(req.params.room);
+    if (rule.enabled && rule.target.kind === 'agent') ensureRoomFiles(req.params.room);
+    if (rule.room === HOUSE_ROOM_NAME) ensureHouseRoom();
     res.json({ ok: true, rule: schedulerSnapshot({ room: req.params.room }).rules.find((candidate) => candidate.id === id) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

@@ -120,7 +120,7 @@ export function RoomPage(props: { name: string, wikiPage?: string, onOpenSession
     const current = room()
     if (!current || busy() || !leader()) return
     const context = leaderContext()
-    if (!confirm(`Retire the Leader of #${current.name}${context !== null ? ` (${context}% context used)` : ''}?\n\nFeather writes its handoff into notes.md, closes the chat, and seats a fresh Leader. The old chat stays visible in the Room.`)) return
+    if (!confirm(`Retire the Leader of #${current.name}${context !== null ? ` (${context}% context used)` : ''}?\n\nFeather writes its handoff into the Room log, closes the chat, and seats a fresh Leader. The old chat stays visible in the Room.`)) return
     setBusy(true)
     try {
       const result = await succeedRoomLeader(current.name)
@@ -222,7 +222,7 @@ export function RoomPage(props: { name: string, wikiPage?: string, onOpenSession
                 {leaderWake()!.paused ? 'Autonomy paused.' : `Next wake ${timeUntilMs(leaderWake()!.nextWakeAtMs)}.`}
                 {leaderWake()!.lastWakeAt ? ` Last wake ${timeAgo(leaderWake()!.lastWakeAt!)} ago.` : ''}
                 {leaderWake()!.lastJudgeAt ? ` Last judged ${timeAgo(leaderWake()!.lastJudgeAt!)} ago.` : ''}
-                {' '}Work comes from FRONTIER.md; put your own steering at the top of it.
+                {' '}Work comes from the queue in wiki/TODO.md; your steering lives in STEERING.md.
               </div>
             </Show>
             <Show when={leaderWake()?.fallback}>{(fallback) => (

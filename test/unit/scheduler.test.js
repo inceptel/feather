@@ -139,6 +139,25 @@ describe('scheduler decisions', () => {
     assert.equal(evaluateRule(changed, runtime, ctx({ fileMtime: () => T0 + 5 })).fire, true)
   })
 
+  it('agent targets: a builder plus a checker, fresh only, with a round limit', () => {
+    const rule = normalizeRule({ id: 'trading/agent', target: { kind: 'agent', builder: { engine: 'omp' }, roundMs: '5m' }, every: '30m', when: [{ type: 'todo-has' }] })
+    assert.equal(rule.mode, 'fresh')
+    assert.deepEqual(rule.target, { kind: 'agent', builder: { engine: 'omp', model: null }, checker: { engine: 'codex', model: null }, roundMs: 300_000 })
+    assert.deepEqual(rule.when, [{ type: 'todo-has', section: 'Open' }])
+    assert.throws(() => normalizeRule({ id: 'trading/agent', target: { kind: 'agent' }, mode: 'inject', every: '1h' }), /mode fresh/)
+    assert.throws(() => normalizeRule({ id: 'trading/agent', target: { kind: 'agent', builder: { engine: 'nope' } }, every: '1h' }), SchedulerError)
+    const todo = '# TODO\n\n## Open\n\n## Working\n- [working agent] thing\n\n## Done\n'
+    const held = evaluateRule(rule, { ...emptyRuntime(), lastRunAt: new Date(T0).toISOString() }, ctx({ fileText: () => todo }))
+    assert.equal(held.fire, false)
+    assert.equal(held.reason, 'TODO Open is empty')
+    assert.equal(evaluateRule(rule, { ...emptyRuntime(), lastRunAt: new Date(T0).toISOString() }, ctx({ fileText: () => todo.replace('## Open\n', '## Open\n- price the equipment\n') })).fire, true)
+    assert.equal(evaluateRule(rule, { ...emptyRuntime(), lastRunAt: new Date(T0).toISOString() }, ctx({ fileText: () => undefined })).reason, 'wiki/TODO.md missing')
+    const helper = normalizeRule({ id: 'house/caretaker', target: { kind: 'new', engine: 'omp' }, every: '10m', when: [{ type: 'wiki-approved' }] })
+    const runtime = { ...emptyRuntime(), lastRunAt: new Date(T0).toISOString() }
+    assert.equal(evaluateRule(helper, runtime, ctx({ wikiWrittenSince: () => [] })).reason, 'no approved wiki writes since last run')
+    assert.equal(evaluateRule(helper, runtime, ctx({ wikiWrittenSince: (since) => since === T0 ? ['trading'] : [] })).fire, true)
+  })
+
   it('backs off after failures and pauses itself after MAX_FAILURES', () => {
     const rule = normalizeRule({ ...leader, every: '1m', maxRunsPerHour: 60 })
     let runtime = emptyRuntime()

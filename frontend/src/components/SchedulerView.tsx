@@ -39,6 +39,7 @@ function targetText(rule: SchedulerRule) {
   if (t.kind === 'resident') return t.role
   if (t.kind === 'session') return `session ${t.sessionId.slice(0, 8)}`
   if (t.kind === 'new') return `new ${t.engine}${t.model ? ` ${t.model}` : ''}`
+  if (t.kind === 'agent') return `agent ${t.builder.engine}+${t.checker.engine}${t.roundMs ? ` round ${Math.round(t.roundMs / 60000)}m` : ''}`
   return 'leader'
 }
 function cadenceText(rule: SchedulerRule) {
@@ -51,6 +52,8 @@ function cadenceText(rule: SchedulerRule) {
     else if (c.type === 'file-changed') parts.push(`when ${c.path} changed`)
     else if (c.type === 'file-matches') parts.push(`when ${c.path} matches`)
     else if (c.type === 'frontier-has') parts.push(`when FRONTIER ${c.section} has lines`)
+    else if (c.type === 'todo-has') parts.push(`when TODO ${c.section} has lines`)
+    else if (c.type === 'wiki-approved') parts.push('when a wiki was written')
   }
   return parts.join(', ')
 }
