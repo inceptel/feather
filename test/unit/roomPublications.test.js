@@ -66,6 +66,31 @@ describe('Room publication store', () => {
     }
   })
 
+  it('updates a card in place when the same id is republished with new content', () => {
+    const roomRoot = fixture()
+    try {
+      const first = appendRoomPublication({
+        roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'updater-1',
+        input: { ...input(), visual: undefined, visualAlt: undefined }, now: new Date('2026-09-06T12:00:00Z'),
+      })
+      assert.equal(first.record.visual, null)
+      const edited = appendRoomPublication({
+        roomRoot, roomName: 'jacksonville-ev', publisherSessionId: 'marketer-1',
+        input: { ...input(), title: 'Charging terms changed for local drivers' }, now: new Date('2026-09-06T12:30:00Z'),
+      })
+      assert.equal(edited.updated, true)
+      assert.equal(edited.record.title, 'Charging terms changed for local drivers')
+      assert.equal(edited.record.visual, 'artifacts/brief.png')
+      assert.equal(edited.record.occurredAt, '2026-09-06T12:00:00.000Z')
+      assert.equal(edited.record.updatedAt, '2026-09-06T12:30:00.000Z')
+      const stored = readRoomPublications(roomRoot, 'jacksonville-ev')
+      assert.equal(stored.length, 1)
+      assert.equal(stored[0].title, 'Charging terms changed for local drivers')
+    } finally {
+      fs.rmSync(roomRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps legacy publications without an attention field as briefing-compatible evidence', () => {
     const roomRoot = fixture()
     try {
