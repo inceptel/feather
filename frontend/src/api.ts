@@ -1054,3 +1054,58 @@ export async function fetchUsage(refresh = false): Promise<UsageSnapshot> {
   const response = await fetch(`${BASE}/api/usage${refresh ? '?refresh=1' : ''}`)
   return responseJson(response)
 }
+
+// ── Scheduler ───────────────────────────────────────────────────────────────
+export interface SchedulerCriterion { type: 'idle' | 'file-changed' | 'file-matches' | 'frontier-has', path?: string, pattern?: string, section?: string, forceAfterMs?: number | null }
+export interface SchedulerRule {
+  id: string
+  room: string
+  target: { kind: 'leader' } | { kind: 'resident', role: string } | { kind: 'session', sessionId: string } | { kind: 'new', engine: string, model?: string | null, title?: string | null }
+  mode: 'inject' | 'fresh'
+  every: string | null
+  everyMs: number | null
+  cron: string | null
+  after: string | null
+  when: SchedulerCriterion[]
+  prompt: string | null
+  timeoutMs: number
+  maxRunsPerHour: number
+  enabled: boolean
+  note: string | null
+  targetSessionId: string | null
+  lastDecision: string | null
+  runtime: {
+    lastRunAt: string | null
+    lastRunId: string | null
+    lastOutcome: string | null
+    lastFinishedAt?: string | null
+    nextDueAt: string | null
+    consecutiveFailures: number
+    paused: boolean
+    pausedReason: string | null
+    overdue: boolean
+    running: { runId: string, startedAt: string, sessionId: string | null } | null
+  }
+}
+export interface SchedulerSnapshot { enabled: boolean, bootAt: string, tickMs: number, lastTickAt: string | null, rules: SchedulerRule[] }
+export interface SchedulerRun {
+  runId: string, ruleId: string, room: string, mode: string, event: 'started' | 'finished', reason: string,
+  startedAt: string, finishedAt?: string, durationMs?: number, outcome?: string, detail?: string, sessionId?: string | null
+}
+
+export async function fetchScheduler(room?: string | null): Promise<SchedulerSnapshot> {
+  return responseJson(await fetch(`${BASE}/api/scheduler${room ? `?room=${encodeURIComponent(room)}` : ''}`))
+}
+export async function fetchSchedulerRuns(opts: { room?: string | null, limit?: number } = {}): Promise<SchedulerRun[]> {
+  const params = new URLSearchParams()
+  if (opts.room) params.set('room', opts.room)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  const query = params.toString()
+  return (await responseJson<{ runs: SchedulerRun[] }>(await fetch(`${BASE}/api/scheduler/runs${query ? `?${query}` : ''}`))).runs
+}
+export async function schedulerRuleAction(ruleId: string, action: 'fire' | 'pause' | 'resume'): Promise<SchedulerRule> {
+  return (await responseJson<{ ok: true, rule: SchedulerRule }>(await fetch(`${BASE}/api/scheduler/rules/${ruleId}/${action}`, { method: 'POST' }))).rule
+}
+export async function deleteSchedulerRule(ruleId: string): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/scheduler/rules/${ruleId}`, { method: 'DELETE' }))
+}

@@ -27,6 +27,10 @@ import {
 } from './lib/omp.js';
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
+import {
+  validateRules, normalizeRule, planTick, findIncidents, expiredRuns, markStarted, markFinished,
+  runtimeOf, describeRule, SCHEDULER_TICK_MS, BOOT_GRACE_MS,
+} from './lib/scheduler.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
@@ -2336,6 +2340,7 @@ const READ_ONLY_API_ROUTES = [
   /^\/api\/rooms$/,
   /^\/api\/feed$/,
   /^\/api\/usage$/,
+  /^\/api\/scheduler(?:\/runs)?$/,
   /^\/api\/rooms\/[^/]+\/(updates|friction|wiki|wiki\/page|residents)$/,
   /^\/api\/rooms\/[^/]+\/publications\/[^/]+(?:\/visual)?$/,
 ];
@@ -5434,6 +5439,7 @@ function checkRoomPulses() {
   const due = [];
   let inFlight = 0;
   for (const name of listRoomDirs()) {
+    if (schedulerOwnsRoom(name)) continue;
     let saved = isJsonRecord(pulseState[name]) ? pulseState[name] : {};
     if (saved.status === 'working' && saved.sessionId && !tmuxIsActive(saved.sessionId)) {
       ROOM_PULSES_STATE.update((current) => ({
@@ -5514,7 +5520,7 @@ function checkResidentWakes() {
   const residentState = ROOM_RESIDENTS_STATE.read();
   const roomNames = new Set(listRoomDirs());
   for (const [roomName, residents] of Object.entries(residentState)) {
-    if (!roomNames.has(roomName)) continue;
+    if (!roomNames.has(roomName) || schedulerOwnsRoom(roomName)) continue;
     for (const [role, resident] of Object.entries(residents)) {
       const sessionId = resident.sessionId;
       if (residentWakesInFlight.has(sessionId)) continue;
@@ -5792,7 +5798,7 @@ function checkLeaderWakes() {
   const now = Date.now();
   const state = ROOM_LEADER_WAKES_STATE.read();
   const roomNames = new Set(listRoomDirs());
-  const autonomous = Object.entries(state).filter(([name, entry]) => roomNames.has(name) && entry.wakeIntervalMs && !entry.paused);
+  const autonomous = Object.entries(state).filter(([name, entry]) => roomNames.has(name) && entry.wakeIntervalMs && !entry.paused && !schedulerOwnsRoom(name));
   if (autonomous.length > 0) refreshUsageSnapshotInBackground();
   for (const [name, entry] of autonomous) {
     if (leaderReconcilesInFlight.has(name) || leaderWakesInFlight.has(name)) continue;
@@ -5820,6 +5826,405 @@ function checkLeaderWakes() {
   }
 }
 
+// ── Scheduler ───────────────────────────────────────────────────────────────
+// One rule table for every chat Feather wakes. The pure core lives in
+// lib/scheduler.js; this block is the adapter: it resolves targets to
+// sessions, launches, watches runs end, and keeps the ledger. A Room with
+// any enabled rule is owned by the scheduler; the older per-Room wake
+// checkers (pulses, resident wakes, Leader wakes) leave it alone.
+const SCHEDULER_ENABLED = !READ_ONLY_MODE && !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_SCHEDULER || '').trim());
+const SCHEDULER_BOOT_AT = Date.now();
+const SCHEDULER_BOOT_GRACE_MS = Math.max(0, Number(process.env.FEATHER_SCHEDULER_BOOT_GRACE_MS ?? BOOT_GRACE_MS));
+const SCHEDULER_CHECK_MS = Math.max(50, Number(process.env.FEATHER_SCHEDULER_CHECK_MS) || SCHEDULER_TICK_MS);
+const SCHEDULER_RUNS_FILE = STATE_PATHS.coordination.schedulerRunsFile;
+const SCHEDULER_PUBLISHER = 'feather-scheduler';
+const SCHEDULER_RUN_QUIET_MS = Math.max(10_000, Number(process.env.FEATHER_SCHEDULER_RUN_QUIET_MS) || 3 * 60_000);
+
+function isSchedulerState(value) {
+  if (!isJsonRecord(value)) return false;
+  try { validateRules(value.rules ?? {}); } catch { return false; }
+  if (value.runtime !== undefined && !isJsonRecord(value.runtime)) return false;
+  if (value.active !== undefined && !Array.isArray(value.active)) return false;
+  return true;
+}
+const SCHEDULER_STATE = createJsonState({
+  file: STATE_PATHS.coordination.schedulerFile,
+  defaultValue: () => ({ rules: {}, runtime: {}, active: [] }),
+  validate: isSchedulerState,
+});
+
+function schedulerRules() {
+  const state = SCHEDULER_STATE.read();
+  return validateRules(state.rules || {});
+}
+function schedulerOwnsRoom(name) {
+  if (!SCHEDULER_ENABLED) return false;
+  const rules = SCHEDULER_STATE.read().rules || {};
+  return Object.values(rules).some((rule) => rule.enabled !== false && rule.room === name);
+}
+function appendSchedulerRun(record) {
+  try { fs.appendFileSync(SCHEDULER_RUNS_FILE, `${JSON.stringify(record)}\n`, { mode: 0o600 }); }
+  catch (error) { console.warn('[scheduler] ledger:', error.message); }
+}
+function readSchedulerRuns({ room = null, limit = 100 } = {}) {
+  let text = '';
+  try { text = fs.readFileSync(SCHEDULER_RUNS_FILE, 'utf8'); } catch { return []; }
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try { rows.push(JSON.parse(line)); } catch {}
+  }
+  const filtered = room ? rows.filter((row) => row.room === room) : rows;
+  return filtered.slice(-limit).reverse();
+}
+
+function schedulerTargetSessionId(rule) {
+  if (rule.target.kind === 'leader') {
+    const id = ROOM_LEADERS_STATE.read()[rule.room] || null;
+    return id && validRoomLeaderDesignation(rule.room, id) ? id : null;
+  }
+  if (rule.target.kind === 'resident') return ROOM_RESIDENTS_STATE.read()[rule.room]?.[rule.target.role]?.sessionId || null;
+  if (rule.target.kind === 'session') return rule.target.sessionId;
+  return null;
+}
+// Idle means the target can take a message now. Unknown targets count as
+// idle; a dead tmux counts as idle (sendInput resumes it).
+function schedulerTargetIdle(rule) {
+  const sessionId = schedulerTargetSessionId(rule);
+  if (!sessionId || !tmuxIsActive(sessionId)) return true;
+  const meta = readMeta();
+  const ralph = meta[sessionId]?.ralph;
+  if (ralph?.enabled && (ralph.status === 'working' || ralph.status === 'scheduled')) return false;
+  if (getAgentForSession(sessionId) === 'omp') return !leaderMidTurn(sessionId);
+  const file = findJsonlPath(sessionId, getAgentForSession(sessionId));
+  if (!file) return true;
+  return Date.now() - lastActivityMs(file, getAgentForSession(sessionId), 0) > SCHEDULER_RUN_QUIET_MS;
+}
+function schedulerRoomFile(rule, relative) {
+  return path.join(ROOMS_HOME_DIR, rule.room, relative);
+}
+function schedulerContextFor(rule) {
+  return {
+    targetIdle: () => schedulerTargetIdle(rule),
+    fileMtime: (relative) => { try { return fs.statSync(schedulerRoomFile(rule, relative)).mtimeMs; } catch { return null; } },
+    fileText: (relative) => { try { return fs.readFileSync(schedulerRoomFile(rule, relative), 'utf8'); } catch { return null; } },
+  };
+}
+
+function fillSchedulerPrompt(template, values) {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key) => (values[key] ?? ''));
+}
+function schedulerPrompt(rule, { at, runtime }) {
+  const roomName = rule.room;
+  const role = rule.target.kind === 'resident' ? rule.target.role : rule.target.kind === 'leader' ? 'leader' : 'chat';
+  const parent = rule.after ? runtimeOf(SCHEDULER_STATE.read(), rule.after) : null;
+  const values = { room: roomName, role, at: at.toISOString(), ruleId: rule.id, after: rule.after || '', afterAt: parent?.lastRunAt || '' };
+  const header = `[Room wake · #${roomName} · ${role} · ${at.toISOString()}]`;
+  if (rule.prompt) {
+    const body = fillSchedulerPrompt(rule.prompt, values);
+    return body.startsWith('[') ? body : `${header}\n${body}`;
+  }
+  if (rule.target.kind === 'leader') {
+    const wake = leaderWakePrompt({ roomName, at });
+    if (rule.mode !== 'fresh') return wake;
+    return [
+      wake,
+      'You are a fresh Leader chat: the previous Leader chat was retired at this wake to keep context small. Everything it knew is in notes.md, FRONTIER.md, and the wiki; trust those files, not memory.',
+    ].join('\n');
+  }
+  if (rule.target.kind === 'resident' && rule.target.role === 'judge') {
+    return judgeWakePrompt({ roomName, leaderSessionId: ROOM_LEADERS_STATE.read()[roomName] || null, leaderWakeAt: parent?.lastRunAt || null, at });
+  }
+  if (rule.target.kind === 'resident') {
+    const spec = ROOM_STANDARD_RESIDENTS.find((candidate) => candidate.role === role);
+    return residentWakePrompt({ roomName, role, charter: spec?.charter || `${role.toUpperCase()}.md`, at });
+  }
+  return `${header}\nRe-read AGENTS.md and notes.md. If there is something to do, do it now; otherwise say so in one line and stop.`;
+}
+
+const schedulerLaunchesInFlight = new Set();
+// Launch one run. The runtime already records the start, so a crash here
+// cannot double-fire; a thrown error closes the run as failed.
+async function schedulerLaunch(rule, run) {
+  const at = new Date(run.startedAt);
+  const prompt = schedulerPrompt(rule, { at, runtime: runtimeOf(SCHEDULER_STATE.read(), rule.id) });
+  const cwd = path.join(ROOMS_HOME_DIR, rule.room);
+  if (rule.mode === 'fresh' && rule.target.kind === 'leader') {
+    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt });
+    return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
+  }
+  if (rule.mode === 'fresh') {
+    if (!rule.prompt) throw new Error('a fresh session rule needs a prompt');
+    const id = randomUUID();
+    const title = rule.target.title || `Scheduled: ${rule.id}`;
+    ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: rule.room }));
+    if (rule.target.engine === 'omp') {
+      const sessionDir = path.join(OMP_SESSIONS, id);
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const promptFile = path.join(sessionDir, 'scheduled-prompt.md');
+      fs.writeFileSync(promptFile, prompt, { mode: 0o600 });
+      updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title, ...(rule.target.model ? { ompModel: sanitizeOmpModel(rule.target.model) } : {}) } }));
+      launchOmpSession(id, cwd, { promptFile, autoApprove: true });
+    } else {
+      spawnSession(id, cwd, rule.target.engine);
+      updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title } }));
+      await sleep(ROOM_KICKOFF_DELAY_MS);
+      await sendInput(id, prompt);
+    }
+    roomSnapshotCache.refresh();
+    return { sessionId: id, marker: prompt.split('\n')[0] };
+  }
+  // inject
+  let sessionId = schedulerTargetSessionId(rule);
+  if (!sessionId && rule.target.kind === 'leader') {
+    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt });
+    return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
+  }
+  if (!sessionId) throw new Error(`no ${rule.target.kind === 'resident' ? rule.target.role : 'target'} session in #${rule.room}`);
+  prepareRalphForHumanInput(sessionId);
+  if (getAgentForSession(sessionId) === 'omp') await wakeResident(sessionId, rule.room, prompt);
+  else await sendInput(sessionId, prompt);
+  return { sessionId, marker: prompt.split('\n')[0] };
+}
+
+// How a run ends. OMP chats: the turn after our marker stopped. Ralph
+// residents: the loop went back to sleep. Fresh one-shots: tmux is gone.
+// Other engines: the transcript went quiet. Anything else keeps running.
+function schedulerRunStatus(run, rule) {
+  const sessionId = run.sessionId;
+  if (!sessionId) return 'running';
+  const active = tmuxIsActive(sessionId);
+  if (rule.mode === 'fresh' && rule.target.kind === 'new') return active ? 'running' : 'done';
+  if (!active) return 'failed';
+  const meta = readMeta();
+  const ralph = meta[sessionId]?.ralph;
+  if (meta[sessionId]?.mode === RALPH_MODE) {
+    if (!ralph?.enabled || !(ralph.status === 'working' || ralph.status === 'scheduled')) return 'done';
+    return 'running';
+  }
+  const agent = getAgentForSession(sessionId);
+  if (agent === 'omp') return run.marker && sessionTurnEndedAfter(sessionId, run.marker) ? 'done' : 'running';
+  const file = findJsonlPath(sessionId, agent);
+  if (!file) return 'running';
+  const last = lastActivityMs(file, agent, 0);
+  return last > Date.parse(run.startedAt) && Date.now() - last > SCHEDULER_RUN_QUIET_MS ? 'done' : 'running';
+}
+function sessionTurnEndedAfter(sessionId, marker) {
+  const records = ompTranscriptTail(sessionId);
+  let sawMarker = false;
+  let ended = false;
+  for (const record of records) {
+    if (record?.type !== 'message' || !record.message || typeof record.message !== 'object') continue;
+    const message = record.message;
+    if (message.role === 'user') {
+      if (ompMessageText(message).startsWith(marker)) sawMarker = true;
+      ended = false;
+    } else if (message.role === 'assistant' && sawMarker) {
+      ended = LEADER_TURN_ENDED.has(message.stopReason);
+    }
+  }
+  return sawMarker && ended;
+}
+
+function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = null } = {}) {
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    runtime: { ...(current.runtime || {}), [run.ruleId]: markFinished(runtimeOf(current, run.ruleId), { outcome, at: now }) },
+    active: (current.active || []).filter((candidate) => candidate.runId !== run.runId),
+  }));
+  appendSchedulerRun({ ...run, room: run.room || rule?.room || run.ruleId.split('/')[0], event: 'finished', outcome, finishedAt: new Date(now).toISOString(), durationMs: now - Date.parse(run.startedAt), ...(detail ? { detail } : {}) });
+  if (outcome === 'timeout' && rule?.mode === 'fresh' && rule.target.kind === 'new' && run.sessionId) {
+    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(run.sessionId)], { stdio: 'ignore' }); } catch {}
+  }
+}
+
+function schedulerStartRun(rule, decision, now) {
+  // Inject targets are known up front; fresh sessions report theirs once launched.
+  const run = { runId: randomUUID(), ruleId: rule.id, room: rule.room, mode: rule.mode, startedAt: new Date(now).toISOString(), reason: decision.reason, sessionId: rule.mode === 'inject' ? schedulerTargetSessionId(rule) : null, marker: null };
+  const parentRunId = rule.after ? runtimeOf(SCHEDULER_STATE.read(), rule.after).lastRunId : null;
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    runtime: { ...(current.runtime || {}), [rule.id]: markStarted(runtimeOf(current, rule.id), { runId: run.runId, at: now, parentRunId }) },
+    active: [...(current.active || []), run],
+  }));
+  appendSchedulerRun({ ...run, event: 'started' });
+  schedulerLaunchesInFlight.add(rule.id);
+  schedulerLaunch(rule, run)
+    .then(({ sessionId, marker }) => {
+      SCHEDULER_STATE.update((current) => ({
+        ...current,
+        active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, sessionId, marker } : candidate),
+      }));
+      console.log(`[scheduler] ${rule.id} started (${decision.reason}) in ${sessionId}`);
+    })
+    .catch((error) => {
+      console.warn(`[scheduler] ${rule.id} launch failed:`, error.message);
+      schedulerFinishRun(run, 'failed', { rule, detail: error.message });
+    })
+    .finally(() => schedulerLaunchesInFlight.delete(rule.id));
+}
+
+function schedulerRaiseIncident(incident, now) {
+  const { rule, kind, detail } = incident;
+  SCHEDULER_STATE.update((current) => ({
+    ...current,
+    runtime: { ...(current.runtime || {}), [rule.id]: { ...runtimeOf(current, rule.id), incidentAt: new Date(now).toISOString() } },
+  }));
+  console.warn(`[scheduler] incident ${kind} ${rule.id}: ${detail}`);
+  try {
+    appendRoomPublication({
+      roomRoot: path.join(ROOMS_HOME_DIR, rule.room),
+      roomName: rule.room,
+      publisherSessionId: SCHEDULER_PUBLISHER,
+      input: {
+        id: `scheduler-${kind}-${rule.id.replace('/', '-')}-${Math.floor(now / 60_000)}`,
+        attention: 'by-the-way',
+        sourceEvidenceId: `scheduler:${rule.id}:${kind}:${new Date(now).toISOString()}`,
+        title: kind === 'paused' ? `Scheduler paused ${rule.id}` : `Scheduler: ${rule.id} is overdue`,
+        summary: kind === 'paused'
+          ? `${detail}. Feather stopped retrying. Fix the cause, then resume it from the Scheduler tab or with \`room schedule resume ${rule.id.split('/')[1]}\`.`
+          : `${detail}. Nothing has started it for two intervals; check the target chat and the Scheduler tab.`,
+      },
+    });
+    feedSnapshotCache.refresh();
+  } catch (error) { console.warn('[scheduler] incident card:', error.message); }
+}
+
+let schedulerTickRunning = false;
+let schedulerLastPlan = null;
+function schedulerTick(now = Date.now()) {
+  if (!SCHEDULER_ENABLED || schedulerTickRunning) return;
+  schedulerTickRunning = true;
+  try {
+    const state = SCHEDULER_STATE.read();
+    const rules = validateRules(state.rules || {});
+    const roomNames = new Set(listRoomDirs());
+    // 1. Close runs that ended, failed, or timed out.
+    for (const run of state.active || []) {
+      const rule = rules[run.ruleId];
+      if (!rule) { schedulerFinishRun(run, 'killed', { detail: 'rule removed' }); continue; }
+      if (schedulerLaunchesInFlight.has(rule.id)) continue;
+      if (expiredRuns([run], rules, now).length) { schedulerFinishRun(run, 'timeout', { rule, now }); continue; }
+      const status = schedulerRunStatus(run, rule);
+      if (status !== 'running') schedulerFinishRun(run, status, { rule, now });
+    }
+    // 2. Plan and launch.
+    const fresh = SCHEDULER_STATE.read();
+    const liveRules = Object.fromEntries(Object.entries(rules).filter(([, rule]) => roomNames.has(rule.room)));
+    const plan = planTick({
+      rules: liveRules, runtime: fresh.runtime || {}, activeRuns: fresh.active || [], now,
+      bootAt: SCHEDULER_BOOT_AT, bootGraceMs: SCHEDULER_BOOT_GRACE_MS, contextFor: schedulerContextFor,
+    });
+    schedulerLastPlan = { at: new Date(now).toISOString(), decisions: plan.decisions.map((d) => ({ ruleId: d.rule.id, fire: d.fire, reason: d.reason })) };
+    for (const decision of plan.launches) schedulerStartRun(decision.rule, decision, now);
+    // 3. Watchdog.
+    const latest = SCHEDULER_STATE.read();
+    for (const incident of findIncidents({ rules: liveRules, runtime: latest.runtime || {}, activeRuns: latest.active || [], now, bootAt: SCHEDULER_BOOT_AT })) {
+      schedulerRaiseIncident(incident, now);
+    }
+  } catch (error) {
+    console.warn('[scheduler] tick:', error.message);
+  } finally {
+    schedulerTickRunning = false;
+  }
+}
+
+function schedulerSnapshot({ room = null } = {}) {
+  const state = SCHEDULER_STATE.read();
+  const rules = validateRules(state.rules || {});
+  const now = Date.now();
+  const activeByRule = new Map((state.active || []).map((run) => [run.ruleId, run]));
+  const reasons = new Map((schedulerLastPlan?.decisions || []).map((d) => [d.ruleId, d.reason]));
+  const list = Object.values(rules)
+    .filter((rule) => !room || rule.room === room)
+    .map((rule) => ({
+      ...describeRule(rule, runtimeOf(state, rule.id), activeByRule.get(rule.id) || null, { now, bootAt: SCHEDULER_BOOT_AT }),
+      targetSessionId: schedulerTargetSessionId(rule),
+      lastDecision: reasons.get(rule.id) || null,
+    }))
+    .sort((a, b) => (a.room < b.room ? -1 : a.room > b.room ? 1 : a.id < b.id ? -1 : 1));
+  return { enabled: SCHEDULER_ENABLED, bootAt: new Date(SCHEDULER_BOOT_AT).toISOString(), tickMs: SCHEDULER_CHECK_MS, lastTickAt: schedulerLastPlan?.at || null, rules: list };
+}
+
+function schedulerRuleId(req) { return `${req.params.room}/${req.params.name}`; }
+function schedulerRuleOr404(req) {
+  const id = schedulerRuleId(req);
+  const rule = SCHEDULER_STATE.read().rules?.[id];
+  if (!rule) throw httpError(404, `no such rule ${id}`);
+  return { id, rule };
+}
+app.get('/api/scheduler', (req, res) => {
+  try { res.json(schedulerSnapshot({ room: req.query.room ? String(req.query.room) : null })); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+app.get('/api/scheduler/runs', (req, res) => {
+  try {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    res.json({ runs: readSchedulerRuns({ room: req.query.room ? String(req.query.room) : null, limit }) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+app.put('/api/scheduler/rules/:room/:name', (req, res) => {
+  try {
+    const id = schedulerRuleId(req);
+    if (!listRoomDirs().includes(req.params.room)) throw httpError(404, 'no such room');
+    const rule = normalizeRule({ ...(req.body || {}), id });
+    SCHEDULER_STATE.update((current) => {
+      const rules = { ...(current.rules || {}), [id]: rule };
+      validateRules(rules);
+      const runtime = { ...(current.runtime || {}) };
+      // A re-armed rule starts its clock now: never a burst from an old lastRunAt.
+      if (!runtime[id] || rule.enabled !== (current.rules?.[id]?.enabled ?? true)) {
+        runtime[id] = { ...runtimeOf(current, id), lastRunAt: runtimeOf(current, id).lastRunAt || new Date().toISOString(), paused: false, pausedReason: null, consecutiveFailures: 0, incidentAt: null };
+      }
+      return { ...current, rules, runtime };
+    });
+    if (rule.enabled) ensureRoomFrontier(req.params.room);
+    res.json({ ok: true, rule: schedulerSnapshot({ room: req.params.room }).rules.find((candidate) => candidate.id === id) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+app.delete('/api/scheduler/rules/:room/:name', (req, res) => {
+  try {
+    const { id } = schedulerRuleOr404(req);
+    SCHEDULER_STATE.update((current) => {
+      const rules = { ...(current.rules || {}) };
+      delete rules[id];
+      validateRules(rules);
+      const runtime = { ...(current.runtime || {}) };
+      delete runtime[id];
+      return { ...current, rules, runtime, active: (current.active || []).filter((run) => run.ruleId !== id) };
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+app.post('/api/scheduler/rules/:room/:name/:action', (req, res) => {
+  try {
+    const { id } = schedulerRuleOr404(req);
+    const action = req.params.action;
+    const now = Date.now();
+    if (action === 'pause' || action === 'resume') {
+      SCHEDULER_STATE.update((current) => ({
+        ...current,
+        runtime: {
+          ...(current.runtime || {}),
+          [id]: action === 'pause'
+            ? { ...runtimeOf(current, id), paused: true, pausedReason: 'paused by user' }
+            : { ...runtimeOf(current, id), paused: false, pausedReason: null, consecutiveFailures: 0, incidentAt: null, lastRunAt: new Date(now).toISOString() },
+        },
+      }));
+    } else if (action === 'fire') {
+      const rules = schedulerRules();
+      const rule = rules[id];
+      const state = SCHEDULER_STATE.read();
+      if ((state.active || []).some((run) => run.ruleId === id)) throw httpError(409, `${id} is already running`);
+      if (schedulerLaunchesInFlight.has(id)) throw httpError(409, `${id} is launching`);
+      schedulerStartRun(rule, { reason: 'fired by user' }, now);
+    } else {
+      throw httpError(404, 'unknown action');
+    }
+    res.json({ ok: true, rule: schedulerSnapshot({ room: req.params.room }).rules.find((candidate) => candidate.id === id) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Validate every durable JSON document before accepting traffic. Only truly
 // missing files receive their documented defaults; corruption fails startup.
 for (const state of [
@@ -5835,6 +6240,7 @@ for (const state of [
   ROOM_RESIDENTS_STATE,
   ROOM_LEADER_WAKES_STATE,
   MESSAGE_RECEIPTS_STATE,
+  SCHEDULER_STATE,
 ]) state.read();
 if (!READ_ONLY_MODE) syncAllRoomSidecars();
 if (!READ_ONLY_MODE) await reconcileProtocolRunOwners();
@@ -5979,4 +6385,5 @@ server.listen(PORT, '0.0.0.0', () => {
     setInterval(checkResidentWakes, ROOM_PULSE_CHECK_MS);
     setInterval(checkLeaderWakes, ROOM_PULSE_CHECK_MS);
   }
+  if (SCHEDULER_ENABLED) setInterval(schedulerTick, SCHEDULER_CHECK_MS);
 });

@@ -6,6 +6,7 @@ import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
 import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
+import { SchedulerView } from './components/SchedulerView'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { BtwItem, SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
@@ -185,7 +186,7 @@ export default function App() {
   const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
   // or a Room page. Kept in the hash so reloads and back buttons work.
-  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
+  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
@@ -1085,6 +1086,7 @@ export default function App() {
 
   function applyHomeHash(hash: string): boolean {
     if (hash === 'costs') { setHomeRoute({ kind: 'costs' }); return true }
+    if (hash === 'scheduler') { setHomeRoute({ kind: 'scheduler' }); return true }
     // #room/<name> opens a Room; #room/<name>/wiki/<Page> opens it on that wiki page.
     const room = hash.match(/^room\/([a-z0-9][a-z0-9-]{0,63})(?:\/wiki\/(.+))?$/)
     if (room) {
@@ -1098,7 +1100,7 @@ export default function App() {
   }
   function onHashChange() {
     const hash = location.hash.slice(1)
-    if (hash === '' || hash === 'costs' || hash.startsWith('room/')) {
+    if (hash === '' || hash === 'costs' || hash === 'scheduler' || hash.startsWith('room/')) {
       if (currentId()) {
         goHome()
         location.hash = hash
@@ -1106,10 +1108,10 @@ export default function App() {
       applyHomeHash(hash)
     }
   }
-  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'room', name: string, wiki?: string }) {
+  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }) {
     if (currentId()) goHome()
     setHomeRoute(route)
-    location.hash = route.kind === 'rooms' ? '' : route.kind === 'costs' ? 'costs' : `room/${route.name}`
+    location.hash = route.kind === 'rooms' ? '' : route.kind === 'costs' ? 'costs' : route.kind === 'scheduler' ? 'scheduler' : `room/${route.name}`
   }
   function goHome() {
     dismissMediaNotice()
@@ -2032,8 +2034,9 @@ export default function App() {
           <span data-testid="build-version" title={`Build ${__BUILD_VERSION__}`} style={{ position: 'absolute', top: '2px', right: '10px', color: 'var(--text-ghost)', 'font-size': '8px', 'font-family': "'SF Mono', Menlo, monospace", 'line-height': '1', 'letter-spacing': '0.02em', 'white-space': 'nowrap' }}>{__BUILD_TIME__}</span>
           <Show when={cur()} fallback={
             <div data-testid="home-nav" style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
-              <button data-testid="home-nav-rooms" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind !== 'costs')}>Rooms</button>
+              <button data-testid="home-nav-rooms" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind !== 'costs' && homeRoute().kind !== 'scheduler')}>Rooms</button>
               <button data-testid="home-nav-costs" onClick={() => showHome({ kind: 'costs' })} style={homeNavStyle(homeRoute().kind === 'costs')}>Costs</button>
+              <button data-testid="home-nav-scheduler" onClick={() => showHome({ kind: 'scheduler' })} style={homeNavStyle(homeRoute().kind === 'scheduler')}>Scheduler</button>
             </div>
           }>
             {(s) => <>
@@ -2136,10 +2139,14 @@ export default function App() {
         <div style={{ flex: '1', overflow: 'hidden', display: expanded() ? 'none' : 'block' }}>
           <Show when={currentId()} fallback={
             <Show when={homeRoute().kind === 'costs'} fallback={
+              <Show when={homeRoute().kind === 'scheduler'} fallback={
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
                 <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} onOpenRoom={(name) => showHome({ kind: 'room', name })} />
               }>
                 {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
+              </Show>
+              }>
+                <SchedulerView onOpenSession={select} onOpenRoom={(name) => showHome({ kind: 'room', name })} />
               </Show>
             }>
               <CostsView onOpenSession={select} />
