@@ -6473,6 +6473,7 @@ app.get('/api/scheduler/runs', (req, res) => {
 app.put('/api/scheduler/rules/:room/:name', (req, res) => {
   try {
     const id = schedulerRuleId(req);
+    if (req.params.room === HOUSE_ROOM_NAME) ensureHouseRoom();
     if (!listRoomDirs().includes(req.params.room)) throw httpError(404, 'no such room');
     const rule = normalizeRule({ ...(req.body || {}), id });
     SCHEDULER_STATE.update((current) => {
