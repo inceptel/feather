@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
-import { fetchRooms, fetchRoomFriction, fetchSuperFeed, setRoomPulse, setRoomResidentsPaused, createSession, RoomInfo, RoomResident, FrictionComplaint, SuperFeedItem } from '../api'
+import { fetchRooms, fetchRoomFriction, fetchSuperFeed, setRoomPulse, setRoomResidentsPaused, succeedRoomLeader, createSession, RoomInfo, RoomResident, FrictionComplaint, SuperFeedItem } from '../api'
 import { RoomWikiView } from './RoomWikiView'
 import { renderWikiMarkdown } from './MessageView'
 
@@ -81,9 +81,22 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
   onMount(() => { refresh(); timer = setInterval(refresh, 15_000) })
   onCleanup(() => clearInterval(timer))
 
+  const leaderEntry = createMemo(() => room()?.residents.find(resident => resident.role === 'leader') || null)
   const leader = createMemo(() => {
     const current = room()
-    return current ? current.sessions.find(session => session.id === current.leaderSessionId) || null : null
+    if (!current || !current.leaderSessionId) return null
+    const session = current.sessions.find(candidate => candidate.id === current.leaderSessionId)
+    if (session) return session
+    // Just appointed: no transcript yet, so discovery has nothing. The server
+    // still reports it as a 'starting' resident.
+    const entry = leaderEntry()
+    if (!entry) return null
+    return { id: entry.sessionId, title: entry.title, agent: entry.agent, isActive: false, updatedAt: '' }
+  })
+  const leaderStarting = createMemo(() => leaderEntry()?.status === 'starting')
+  const leaderContext = createMemo(() => {
+    const percent = leaderEntry()?.contextPercent
+    return typeof percent === 'number' ? Math.round(percent) : null
   })
   const residents = createMemo(() => (room()?.residents || []).filter(resident => resident.role !== 'leader'))
   const paused = createMemo(() => room()?.residentsPaused === true)
@@ -99,6 +112,21 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
       const id = await createSession(current.cwd, 'omp', { name: current.name, role: 'leader' })
       props.onSessionsChanged?.()
       props.onOpenSession(id)
+    } catch (caught) { alert(caught instanceof Error ? caught.message : String(caught)) }
+    finally { setBusy(false) }
+  }
+
+  async function retireLeader() {
+    const current = room()
+    if (!current || busy() || !leader()) return
+    const context = leaderContext()
+    if (!confirm(`Retire the Leader of #${current.name}${context !== null ? ` (${context}% context used)` : ''}?\n\nFeather writes its handoff into notes.md, closes the chat, and seats a fresh Leader. The old chat stays visible in the Room.`)) return
+    setBusy(true)
+    try {
+      const result = await succeedRoomLeader(current.name)
+      props.onSessionsChanged?.()
+      await refresh()
+      props.onOpenSession(result.leaderSessionId)
     } catch (caught) { alert(caught instanceof Error ? caught.message : String(caught)) }
     finally { setBusy(false) }
   }
@@ -147,6 +175,9 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
             </Show>
             <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', 'margin-top': '12px' }}>
               <button data-testid="room-open-leader" onClick={openLeader} disabled={busy()} style={buttonStyle(true)}>{leader() ? 'Open Leader chat' : 'Start Leader chat'}</button>
+              <Show when={leader()}>
+                <button data-testid="room-retire-leader" onClick={retireLeader} disabled={busy()} style={buttonStyle()}>{busy() ? 'Working…' : 'Retire Leader'}</button>
+              </Show>
               <button data-testid="room-toggle-paused" onClick={togglePaused} disabled={busy() || residents().length === 0} aria-pressed={paused()} style={buttonStyle()}>
                 {paused() ? 'Resume residents' : 'Pause residents'}
               </button>
@@ -160,7 +191,10 @@ export function RoomPage(props: { name: string, onOpenSession: (id: string) => v
               <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: leader()?.isActive ? green : '#333', 'flex-shrink': '0' }} />
               <span style={{ color: ink, 'font-size': '13px', 'font-weight': '600' }}>Leader</span>
               <span style={{ color: muted, 'font-size': '12px', flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{leader() ? `${leader()!.agent} · ${leader()!.title}` : 'not started'}</span>
-              <span style={{ color: muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leader() ? timeAgo(leader()!.updatedAt) : ''}</span>
+              <Show when={leaderContext() !== null}>
+                <span data-testid="room-leader-context" title={leaderEntry()?.model ? `model ${leaderEntry()!.model}` : undefined} style={{ color: (leaderContext() ?? 0) >= 85 ? '#e0605a' : (leaderContext() ?? 0) >= 60 ? amber : muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leaderContext()}% ctx</span>
+              </Show>
+              <span style={{ color: muted, 'font-size': '11px', 'font-family': 'monospace' }}>{leaderStarting() ? 'starting' : leader() ? timeAgo(leader()!.updatedAt) : ''}</span>
             </div>
             <Show when={residents().length === 0}><div style={{ color: muted, 'font-size': '12px', padding: '8px 0 2px' }}>No residents. Rooms created with a mission get a caretaker, an updater, a marketer, and a replyguy.</div></Show>
             <For each={residents()}>{(resident) => {

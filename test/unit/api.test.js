@@ -504,7 +504,8 @@ describe('Room Ralph publication capability', () => {
       const residentsResponse = await fetch(`${BASE}/api/rooms/${roomName}/residents`)
       assert.equal(residentsResponse.status, 200)
       const residents = (await residentsResponse.json()).residents
-      assert.deepEqual(residents.map(resident => resident.role), ['updater'])
+      // The Leader has no transcript yet but is still reported (status 'starting').
+      assert.deepEqual(residents.map(resident => [resident.role, resident.status]), [['leader', 'starting'], ['updater', 'offline']])
 
       fs.mkdirSync(path.join(cwd, 'artifacts'), { recursive: true })
       const visualBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')

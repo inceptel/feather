@@ -5,7 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
@@ -2072,6 +2072,17 @@ function rememberOmpBridgeEvent(sessionId, event) {
   }
 }
 
+// Latest bridge session_state for a session: model and context usage, the
+// two numbers succession decisions are made on.
+function leaderTelemetry(sessionId) {
+  const event = ompBridgeReplay.get(sessionId)?.entries.get('singleton:session_state')?.event;
+  if (!event) return {};
+  return {
+    ...(typeof event.modelId === 'string' ? { model: event.modelId } : {}),
+    ...(Number.isFinite(event.contextPercent) ? { contextPercent: event.contextPercent } : {}),
+  };
+}
+
 function replayOmpBridgeEvents(sessionId, clients, res) {
   const store = ompBridgeReplay.get(sessionId);
   if (!store) return;
@@ -2864,6 +2875,108 @@ function sessionStreamHandler(req, res) {
 
 app.get('/api/sessions/:id/stream', sessionStreamHandler);
 
+// /btw: a side question answered from the session's own context without
+// touching the session. OMP's builtin /btw lives only in its TUI, so Feather
+// runs `omp -p` on a copy of the transcript (same model and auth as the chat,
+// no tools, no extensions) and keeps the exchange in memory, off the record.
+const BTW_DIR = path.join(HOME, '.feather', 'btw');
+const BTW_TIMEOUT_MS = Math.max(10_000, Number(process.env.FEATHER_BTW_TIMEOUT_MS) || 120_000);
+const BTW_HISTORY_MAX = 20;
+const BTW_QUESTION_MAX = 4000;
+const btwHistory = new Map();
+const btwInFlight = new Set();
+
+function btwPrompt(question) {
+  return [
+    '<btw>',
+    'The user is asking a quick side question while your main task is paused.',
+    'Answer it directly and briefly from the conversation so far. Do not continue or restart the main task,',
+    'do not call tools, and do not treat the question as a new instruction.',
+    `Question: ${question}`,
+    '</btw>',
+  ].join('\n');
+}
+
+function runBtw(id, question) {
+  const source = findOmpJsonlPath(id);
+  const ompId = getOmpSessionId(id);
+  if (!source || !ompId) throw httpError(409, 'session has no transcript yet');
+  fs.mkdirSync(BTW_DIR, { recursive: true, mode: 0o700 });
+  const workDir = fs.mkdtempSync(path.join(BTW_DIR, `${id.slice(0, 8)}-`));
+  fs.copyFileSync(source, path.join(workDir, path.basename(source)));
+  const model = ompSessionModel(id);
+  const agentDir = OMP_AUTH_GATEWAY_URL ? path.join(OMP_AGENT_DIRS, id) : OMP_SHARED_AGENT_DIR;
+  const systemPromptFile = writeSessionSystemPrompt(id);
+  const args = [
+    OMP_AUTH_GATEWAY_URL ? OMP_GATEWAY_COMMAND : 'omp',
+    ompModelFlags(model, '').trim(),
+    '-p --no-tools --no-extensions --no-skills --no-rules --no-title',
+    systemPromptFile ? `--append-system-prompt ${shellQuote(systemPromptFile)}` : '',
+    `--config ${shellQuote(OMP_FEATHER_CONFIG)}`,
+    `--session-dir ${shellQuote(workDir)}`,
+    `--resume ${shellQuote(ompId)}`,
+    shellQuote(btwPrompt(question)),
+  ].filter(Boolean).join(' ');
+  const env = [
+    OMP_AUTH_GATEWAY_URL ? `PI_CODING_AGENT_DIR=${shellQuote(agentDir)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_SMOL_MODEL=${shellQuote(model)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_SLOW_MODEL=${shellQuote(model)}` : '',
+    OMP_AUTH_GATEWAY_URL && model ? `PI_PLAN_MODEL=${shellQuote(model)}` : '',
+  ].filter(Boolean).join(' ');
+  // The interactive shell (needed for the user's PATH, like the tmux launch)
+  // may print rc noise on stdout, so omp's answer goes to a file instead.
+  const answerPath = path.join(workDir, 'answer.txt');
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    let stderr = '';
+    const child = spawn('bash', ['--rcfile', path.join(HOME, '.bashrc'), '-ic', `${env} ${args} > ${shellQuote(answerPath)}`.trim()], {
+      cwd: getOmpSessionCwd(id) || HOME,
+      env: { ...process.env, FEATHER_BTW: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: BTW_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+    });
+    child.stdout.resume();
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => reject(httpError(500, `btw failed to start: ${error.message}`)));
+    child.on('close', (code, signal) => {
+      let answer = '';
+      try { answer = fs.readFileSync(answerPath, 'utf8').trim(); } catch {}
+      fs.rmSync(workDir, { recursive: true, force: true });
+      if (signal) return reject(httpError(504, 'btw timed out'));
+      if (code !== 0 && !answer) return reject(httpError(502, `btw failed: ${stderr.trim().split('\n').pop() || `exit ${code}`}`));
+      if (!answer) return reject(httpError(502, 'btw returned no answer'));
+      resolve({ answer, model, ms: Date.now() - startedAt, at: new Date(startedAt).toISOString() });
+    });
+  });
+}
+
+app.get('/api/sessions/:id/btw', (req, res) => {
+  const { id } = req.params;
+  if (!UUID_RE.test(id)) return res.status(400).json({ error: 'bad session id' });
+  res.json({ items: btwHistory.get(id) || [], pending: btwInFlight.has(id) });
+});
+
+app.post('/api/sessions/:id/btw', async (req, res) => {
+  const { id } = req.params;
+  try {
+    if (!UUID_RE.test(id)) throw httpError(400, 'bad session id');
+    if (getAgentForSession(id) !== 'omp') throw httpError(409, '/btw needs an OMP session');
+    const question = String(req.body?.question || '').trim();
+    if (!question) throw httpError(400, 'question required');
+    if (question.length > BTW_QUESTION_MAX) throw httpError(400, 'question too long');
+    if (btwInFlight.has(id)) throw httpError(409, 'a /btw is already running for this session');
+    btwInFlight.add(id);
+    let result;
+    try { result = await runBtw(id, question); }
+    finally { btwInFlight.delete(id); }
+    const item = { id: randomUUID(), question, ...result };
+    const items = [...(btwHistory.get(id) || []), item].slice(-BTW_HISTORY_MAX);
+    btwHistory.set(id, items);
+    res.json(item);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Create a session, optionally as a Room Leader or resident. Shared by
 // POST /api/sessions and Room staffing so both paths keep the same rules.
 // Returns the JSON body the API answers with; throws httpError on refusal.
@@ -2930,7 +3043,7 @@ function createSessionForRequest(body) {
         },
       }));
     }
-    spawnSession(id, body.cwd, agent, { ompModel: body.model || '', mode });
+    spawnSession(id, body.cwd, agent, { ompModel: body.model || (roomRole === 'leader' ? ROOM_LEADER_DEFAULT_MODEL : ''), mode });
     if (roomRole) {
       syncRoomSidecar(roomName, { primeNewResidents: true });
       roomSnapshotCache.refresh();
@@ -4204,8 +4317,20 @@ function buildRoomsSnapshot() {
       session.agent !== 'codex'
         && session.id !== pulse.sessionId
         && !/^(Keep working|Status): #/.test(String(session.title || ''));
-    const leaderSessionId = sessions.find((session) => session.id === requestedLeaderSessionId && isEligibleLeader(session))?.id
+    const discoveredLeaderId = sessions.find((session) => session.id === requestedLeaderSessionId && isEligibleLeader(session))?.id
       || null;
+    // A freshly appointed Leader has no transcript until its first turn, so
+    // discovery cannot see it. Keep reporting it (status 'starting') while its
+    // designation is valid, so a Room never looks leaderless right after
+    // succession.
+    const startingLeaderId = !discoveredLeaderId && requestedLeaderSessionId
+      && requestedLeaderSessionId !== pulse.sessionId
+      && assignments[requestedLeaderSessionId] === name
+      && ['omp', 'claude'].includes(sessionMeta[requestedLeaderSessionId]?.agent)
+      && (tmuxIsActive(requestedLeaderSessionId) || fs.existsSync(path.join(OMP_SESSIONS, requestedLeaderSessionId)))
+      ? requestedLeaderSessionId
+      : null;
+    const leaderSessionId = discoveredLeaderId || startingLeaderId;
     const leaderSession = sessions.find((session) => session.id === leaderSessionId) || null;
     const residents = [];
     if (leaderSession) {
@@ -4215,6 +4340,16 @@ function buildRoomsSnapshot() {
         agent: leaderSession.agent,
         title: leaderSession.title,
         status: leaderSession.isActive ? 'working' : 'waiting',
+        ...leaderTelemetry(leaderSession.id),
+      });
+    } else if (startingLeaderId) {
+      residents.push({
+        role: 'leader',
+        sessionId: startingLeaderId,
+        agent: sessionMeta[startingLeaderId]?.agent || 'omp',
+        title: sessionMeta[startingLeaderId]?.title || `#${name}`,
+        status: 'starting',
+        ...leaderTelemetry(startingLeaderId),
       });
     }
     for (const [role, configured] of Object.entries(residentState[name] || {}).sort(([a], [b]) => a.localeCompare(b))) {
@@ -4707,6 +4842,8 @@ app.get('/api/rooms/:name/friction', (req, res) => {
 // it: one OMP Leader plus the standard Ralph residents (caretaker, updater,
 // marketer). The mission sentence is stamped verbatim into AGENTS.md, the
 // Wiki, notes.md, and the Leader's first message.
+// New Room Leaders default to Claude Fable unless the caller names a model.
+const ROOM_LEADER_DEFAULT_MODEL = sanitizeOmpModel(process.env.FEATHER_ROOM_LEADER_MODEL ?? 'anthropic/claude-fable-5-1');
 const ROOM_KICKOFF_DELAY_MS = Math.max(0, Number(process.env.FEATHER_ROOM_KICKOFF_DELAY_MS) || 8_000);
 // Gateway-backed sessions have private agent.db files and can start together.
 // Keep the legacy delay only when the deployment has not enabled isolation.
@@ -4895,6 +5032,102 @@ app.post('/api/rooms/:name/assign', (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+
+// Leader succession: distill the retiring Leader's chat into notes.md (via
+// `room handoff`), retire it, and seat a fresh OMP Leader that starts from the
+// handoff. The old chat stays assigned to the Room so its history is visible.
+const ROOM_CLI = process.env.FEATHER_ROOM_CLI || path.join(import.meta.dirname, 'bin', 'room');
+const ROOM_HANDOFF_TIMEOUT_MS = Math.max(10_000, Number(process.env.FEATHER_ROOM_HANDOFF_TIMEOUT_MS) || 10 * 60_000);
+const roomSuccessions = new Set();
+
+function runRoomHandoff(name, sessionId) {
+  return new Promise((resolve) => {
+    let output = '';
+    const child = spawn(ROOM_CLI, ['-r', name, 'handoff', sessionId], {
+      cwd: path.join(ROOMS_HOME_DIR, name),
+      env: { ...process.env, FEATHER_URL: `http://127.0.0.1:${PORT}`, ROOM_TIMEOUT: String(Math.floor(ROOM_HANDOFF_TIMEOUT_MS / 1000)) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: ROOM_HANDOFF_TIMEOUT_MS,
+    });
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    child.on('error', (error) => resolve({ ok: false, detail: error.message }));
+    child.on('close', (code) => resolve({ ok: code === 0, detail: output.trim().slice(-2000) }));
+  });
+}
+
+function successionPrompt(roomName, { retiredSessionId, handoff }) {
+  return [
+    `You are the new Leader of #${roomName}. Your predecessor (chat ${retiredSessionId || 'unknown'}) was retired and you start fresh.`,
+    handoff === 'appended'
+      ? 'Its handoff is the last "## Handoff" section in notes.md; read it first.'
+      : 'No handoff was written; rely on notes.md and the wiki.',
+    'Read AGENTS.md and notes.md, then reply with a short summary of the current state and open threads, and wait for the user.',
+  ].join(' ');
+}
+
+async function succeedRoomLeader(name, { model = '', handoff = true, force = false } = {}) {
+  const cwd = path.join(ROOMS_HOME_DIR, name);
+  if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
+  if (roomSuccessions.has(name)) throw httpError(409, `#${name} succession already in progress`);
+  const requestedModel = sanitizeOmpModel(model);
+  if (model && !requestedModel) throw httpError(400, 'invalid model');
+  roomSuccessions.add(name);
+  try {
+    const retiredSessionId = ROOM_LEADERS_STATE.read()[name] || null;
+    let handoffStatus = 'skipped';
+    let handoffDetail = null;
+    if (retiredSessionId && handoff) {
+      const result = await runRoomHandoff(name, retiredSessionId);
+      handoffStatus = result.ok ? 'appended' : 'failed';
+      handoffDetail = result.detail || null;
+      if (!result.ok && !force) {
+        throw httpError(502, `handoff failed; Leader kept (pass force to retire anyway): ${handoffDetail || 'no output'}`);
+      }
+    }
+    if (retiredSessionId) {
+      try { execFileSync('tmux', ['kill-session', '-t', tmuxName(retiredSessionId)], { stdio: 'ignore' }); } catch {}
+      ROOM_LEADERS_STATE.update((current) => {
+        if (current[name] !== retiredSessionId) return current;
+        const next = { ...current };
+        delete next[name];
+        return next;
+      });
+    }
+    const created = createSessionForRequest({
+      id: randomUUID(), cwd, agent: 'omp', roomName: name, roomRole: 'leader', model: requestedModel,
+    });
+    updateMeta((meta) => ({ ...meta, [created.id]: { ...(meta[created.id] || {}), title: `#${name}` } }));
+    roomSnapshotCache.refresh();
+    const opening = successionPrompt(name, { retiredSessionId, handoff: handoffStatus });
+    setTimeout(() => {
+      sendInput(created.id, opening)
+        .catch((error) => console.warn(`[room] #${name} succession opening failed:`, error.message));
+    }, ROOM_KICKOFF_DELAY_MS);
+    return {
+      ok: true,
+      retiredSessionId,
+      leaderSessionId: created.id,
+      model: ompSessionModel(created.id),
+      handoff: handoffStatus,
+      ...(handoffDetail ? { handoffDetail } : {}),
+    };
+  } finally {
+    roomSuccessions.delete(name);
+  }
+}
+
+app.post('/api/rooms/:name/leader/succeed', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.model !== undefined && typeof body.model !== 'string') throw httpError(400, 'model must be a string');
+    res.json(await succeedRoomLeader(req.params.name, {
+      model: body.model || '',
+      handoff: body.handoff !== false,
+      force: body.force === true,
+    }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 
 // Pause or resume every scheduled resident of a Room. Paused residents keep
 // their chats and can still be messaged; Feather just stops waking them.

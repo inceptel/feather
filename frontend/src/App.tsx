@@ -8,8 +8,8 @@ import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
 import { RoomWikiView } from './components/RoomWikiView'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
-import type { SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
-import { fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns } from './api'
+import type { BtwItem, SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
+import { askBtw, fetchBtw, fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -139,6 +139,45 @@ export default function App() {
   const [peerControl, setPeerControl] = createSignal(false)
   const [sharingPeers, setSharingPeers] = createSignal<PeerInfo[]>([])
   const [messages, setMessages] = createSignal<Message[]>([])
+  // /btw asides for the open session: question + answer pairs that live beside
+  // the transcript, not in it. Mirrors OMP's own /btw panel, which Feather's
+  // chat view cannot reach.
+  type BtwAside = { id: string, question: string, answer: string | null, error: string | null, model?: string, ms?: number }
+  const [btwAsides, setBtwAsides] = createSignal<{ sessionId: string, items: BtwAside[] }>({ sessionId: '', items: [] })
+  const [btwOpen, setBtwOpen] = createSignal(true)
+  const [btwShowAll, setBtwShowAll] = createSignal(false)
+  const visibleBtw = createMemo(() => btwAsides().sessionId === currentId() ? btwAsides().items : [])
+  createEffect(() => {
+    const id = currentId()
+    setBtwShowAll(false)
+    if (!id) return
+    if (btwAsides().sessionId !== id) setBtwAsides({ sessionId: id, items: [] })
+    fetchBtw(id).then(({ items }) => {
+      if (currentId() !== id || items.length === 0) return
+      setBtwAsides(current => {
+        const known = new Set(current.items.map(item => item.id))
+        const restored = items.filter(item => !known.has(item.id)).map(item => ({ id: item.id, question: item.question, answer: item.answer, error: null, model: item.model, ms: item.ms }))
+        return { sessionId: id, items: [...restored, ...(current.sessionId === id ? current.items : [])] }
+      })
+      setBtwOpen(true)
+    }).catch(() => {})
+  })
+  async function askBtwAside(sessionId: string, question: string) {
+    const localId = `btw-${Date.now()}`
+    const upsert = (patch: Partial<BtwAside>) => setBtwAsides(current => ({
+      sessionId,
+      items: (current.sessionId === sessionId ? current.items : []).map(item => item.id === localId ? { ...item, ...patch } : item),
+    }))
+    setBtwAsides(current => ({ sessionId, items: [...(current.sessionId === sessionId ? current.items : []), { id: localId, question, answer: null, error: null }] }))
+    setBtwOpen(true)
+    if (!question) return upsert({ error: 'Usage: /btw <question>' })
+    try {
+      const item = await askBtw(sessionId, question)
+      upsert({ id: item.id, answer: item.answer, model: item.model, ms: item.ms })
+    } catch (caught) {
+      upsert({ error: caught instanceof Error ? caught.message : String(caught) })
+    }
+  }
   const [sidebar, setSidebar] = createSignal(false)
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
@@ -1485,6 +1524,13 @@ export default function App() {
     const fullText = rawText.trim()
     if (!fullText) return
     const { id: targetId, box: targetBox } = target
+    // "/btw <question>" never reaches the agent's input: it is answered on the
+    // side from a copy of the session and shown above the composer.
+    const btwMatch = /^\/btw(?:\s+([\s\S]+))?$/.exec(fullText)
+    if (btwMatch) {
+      await askBtwAside(targetId, (btwMatch[1] || '').trim())
+      return
+    }
     const targetIsCurrent = targetId === currentId() && targetBox === currentBox()
     const targetIsPeer = !!boxes().find(box => box.id === targetBox)?.peer
     const startsNewTurn = targetIsCurrent && !working()
@@ -2378,6 +2424,29 @@ export default function App() {
                 <div style={{ position: 'absolute', left: '10px', bottom: '4px', color: '#d0d0d0', 'font-size': '10px', 'font-weight': '700', 'font-family': "'SF Mono', Menlo, monospace", 'pointer-events': 'none' }}>{tossCalibrationSummary()}</div>
               </Show>
               <button onClick={toggleTossCalibration} title={tossCalibration() ? 'Turn off toss calibration' : 'Calibrate toss'} aria-pressed={tossCalibration()} style={{ position: 'absolute', right: '10px', top: '7px', height: '26px', padding: '0 9px', background: tossCalibration() ? '#c9a227' : 'rgba(255,255,255,0.06)', border: tossCalibration() ? '1px solid #c9a227' : '1px solid #333', 'border-radius': '6px', color: tossCalibration() ? '#05070b' : '#d0d0d0', 'font-size': '11px', 'font-weight': '800', 'font-family': 'inherit', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', 'z-index': '1' }}>Cal</button>
+            </div>
+          </Show>
+          <Show when={btwOpen() && visibleBtw().length > 0}>
+            <div data-testid="btw-panel" style={{ 'border-top': '1px solid #2a3346', background: '#0d1220', padding: '8px 12px', 'max-height': '40vh', 'overflow-y': 'auto', 'flex-shrink': '0' }}>
+              <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', 'margin-bottom': '4px' }}>
+                <span style={{ color: '#c9a227', 'font-size': '11px', 'font-weight': '700', 'letter-spacing': '0.04em' }}>BTW</span>
+                <span style={{ color: '#6b7585', 'font-size': '11px', flex: '1' }}>side question, not in the transcript</span>
+                <Show when={visibleBtw().length > 1}>
+                  <button onClick={() => setBtwShowAll(!btwShowAll())} style={{ background: 'none', border: 'none', color: '#8b97a8', 'font-size': '11px', cursor: 'pointer' }}>{btwShowAll() ? 'latest only' : `all ${visibleBtw().length}`}</button>
+                </Show>
+                <button onClick={() => setBtwOpen(false)} aria-label="Hide btw panel" style={{ background: 'none', border: 'none', color: '#8b97a8', 'font-size': '14px', cursor: 'pointer', 'line-height': '1' }}>&times;</button>
+              </div>
+              <For each={btwShowAll() ? visibleBtw() : visibleBtw().slice(-1)}>{(aside) => (
+                <div style={{ padding: '6px 0', 'border-top': btwShowAll() ? '1px solid #1a2130' : 'none' }}>
+                  <div style={{ color: '#d0d0d0', 'font-size': '13px', 'font-weight': '600', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{aside.question}</div>
+                  <Show when={aside.error}><div style={{ color: '#d45555', 'font-size': '12px', 'margin-top': '4px' }}>{aside.error}</div></Show>
+                  <Show when={!aside.error && aside.answer === null}><div style={{ color: '#8b97a8', 'font-size': '12px', 'margin-top': '4px' }}>thinking on the side…</div></Show>
+                  <Show when={aside.answer !== null}>
+                    <div class="prose" style={{ color: '#c9d1dc', 'font-size': '13px', 'line-height': '1.5', 'margin-top': '4px' }} innerHTML={renderWikiMarkdown(aside.answer || '')} />
+                    <div style={{ color: '#5c6676', 'font-size': '10px', 'margin-top': '3px', 'font-family': 'monospace' }}>{[aside.model, aside.ms ? `${(aside.ms / 1000).toFixed(1)}s` : ''].filter(Boolean).join(' · ')}</div>
+                  </Show>
+                </div>
+              )}</For>
             </div>
           </Show>
           <div style={{ padding: expanded() ? '0' : '8px 12px', 'padding-bottom': expanded() ? '0' : 'max(8px, env(safe-area-inset-bottom))', 'border-top': files().length ? 'none' : '1px solid #1e1e1e', background: '#0a0e14', display: 'flex', 'flex-direction': expanded() ? 'column' : 'row', gap: expanded() ? '0' : '8px', 'align-items': expanded() ? 'stretch' : 'flex-end', 'flex-shrink': '0', 'flex-grow': expanded() ? '1' : '0', position: 'relative', ...(expanded() ? { 'min-height': '0' } : {}) }}>

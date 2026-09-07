@@ -119,7 +119,8 @@ describe('Room staffing from the template', () => {
       const assignments = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-sessions.json'), 'utf8'))
       for (const resident of room.residents) assert.equal(assignments[resident.sessionId], 'ev-shop')
       const snapshot = await (await fetch(`${base}/api/rooms/ev-shop/residents`)).json()
-      assert.deepEqual(snapshot.residents.map(resident => resident.role).sort(), ['caretaker', 'marketer', 'replyguy', 'updater'])
+      assert.deepEqual(snapshot.residents.map(resident => resident.role).sort(), ['caretaker', 'leader', 'marketer', 'replyguy', 'updater'])
+      assert.equal(snapshot.residents.find(resident => resident.role === 'leader').status, 'starting')
       const ompIds = [room.leaderSessionId, ...room.residents.map(resident => resident.sessionId)]
       const commands = fs.readFileSync(commandLog, 'utf8')
       assert.equal((commands.match(/--no-extensions/g) || []).length, 5)
@@ -171,7 +172,7 @@ describe('Room staffing from the template', () => {
       assert.equal(migrated.leaderSessionId, frictionLeader.id)
       assert.deepEqual(migrated.created, ['updater', 'marketer', 'replyguy'])
       assert.deepEqual(migrated.residents.map(resident => resident.role).sort(),
-        ['caretaker', 'marketer', 'replyguy', 'resolver', 'updater'])
+        ['caretaker', 'leader', 'marketer', 'replyguy', 'resolver', 'updater'])
       const frictionResidents = readResidents().friction
       assert.equal(frictionResidents.caretaker.sessionId, legacyCaretaker.id)
       assert.equal(frictionResidents.caretaker.wakeIntervalMs, 900_000)

@@ -203,7 +203,9 @@ export interface RoomResident {
   sessionId: string
   agent: string
   title: string
-  status: 'working' | 'waiting' | 'offline'
+  status: 'working' | 'waiting' | 'offline' | 'starting'
+  model?: string
+  contextPercent?: number
   wakeIntervalMs?: number | null
   nextWakeAtMs?: number | null
   lastWakeAt?: string | null
@@ -902,6 +904,51 @@ export function subscribeMessages(id: string, options: SubscribeMessagesOptions)
       }
     },
   }
+}
+
+// One /btw exchange: a side question answered from the session's context,
+// never written into the transcript.
+export interface BtwItem {
+  id: string
+  question: string
+  answer: string
+  model: string
+  ms: number
+  at: string
+}
+
+export async function fetchBtw(sessionId: string): Promise<{ items: BtwItem[], pending: boolean }> {
+  const response = await fetch(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}/btw`)
+  return responseJson(response)
+}
+
+export async function askBtw(sessionId: string, question: string): Promise<BtwItem> {
+  const response = await fetch(`${BASE}/api/sessions/${encodeURIComponent(sessionId)}/btw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+  return responseJson(response)
+}
+
+export interface RoomSuccession {
+  ok: true
+  retiredSessionId: string | null
+  leaderSessionId: string
+  model: string
+  handoff: 'appended' | 'skipped' | 'failed'
+  handoffDetail?: string
+}
+
+// Retire the Room's Leader (after `room handoff` writes its notes) and seat a
+// fresh one. Long call: the handoff distiller can take minutes.
+export async function succeedRoomLeader(room: string, options: { model?: string, handoff?: boolean, force?: boolean } = {}): Promise<RoomSuccession> {
+  const response = await fetch(`${BASE}/api/rooms/${encodeURIComponent(room)}/leader/succeed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  })
+  return responseJson(response)
 }
 
 export async function setRoomResidentsPaused(room: string, paused: boolean): Promise<{ paused: boolean, residents: RoomResident[], residentsPaused: boolean }> {
