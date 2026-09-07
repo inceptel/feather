@@ -1,7 +1,8 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, setRoomPulse, fetchRoomFriction, renameSession, RoomInfo, SessionMeta, FrictionComplaint } from './api'
+import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, openIntakeChat, setRoomPulse, fetchRoomFriction, renameSession, RoomInfo, SessionMeta, FrictionComplaint } from './api'
 import { RoomWikiView } from './components/RoomWikiView'
 import { SuperFeed } from './components/SuperFeed'
+import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js'
 
 // Full-screen rooms home (iMessage model, phone-first): one row per room
 // folder under ~/rooms/, latest message snippet, status dot. Tap a session
@@ -146,6 +147,21 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
       // grouped after launch as before.
       if (!asLeader) await assignSessionToRoom(room.name, id)
       if (title) await renameSession(id, title)
+      props.onSessionsChanged?.()
+      props.onOpen(id)
+    } catch (e: any) { alert(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const intakeRoom = () => rooms()?.find((room) => room.name === INTAKE_ROOM) || null
+  const intakeSession = () => { const room = intakeRoom(); return room ? pickIntakeSession(room.sessions, { skipIds: [room.pulse?.sessionId] }) : null }
+  // Rooms the user works in; #intake lives in the pinned block above.
+  const listedRooms = () => (rooms() || []).filter((room) => room.name !== INTAKE_ROOM)
+
+  async function openIntake(fresh: boolean) {
+    setBusy(true)
+    try {
+      const id = await openIntakeChat(fresh)
       props.onSessionsChanged?.()
       props.onOpen(id)
     } catch (e: any) { alert(e.message) }
@@ -303,6 +319,24 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
         <span style={{ 'padding-bottom': '6px' }}>{pullRefreshing() ? 'Refreshing…' : pull() >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}</span>
       </div>
       <div style={{ 'max-width': '640px', margin: '0 auto', padding: '12px 12px 40px' }}>
+        <Show when={intakeRoom()}>
+          <div data-testid="intake-entry" style={{ background: '#101a2a', border: '1px solid #223047', 'border-radius': '12px', padding: '12px 16px', 'margin-bottom': '12px', display: 'flex', 'align-items': 'center', gap: '10px' }}>
+            <span style={{ width: '10px', height: '10px', 'border-radius': '50%', background: intakeSession()?.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
+            <div style={{ flex: '1', 'min-width': '0' }}>
+              <div style={{ 'font-size': '16px', 'font-weight': '700', color: '#e5e5e5' }}>Intake</div>
+              <div style={{ 'font-size': '12px', color: '#8b97a8', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
+                {intakeSession() ? `${intakeSession()!.title} · ${timeAgo(intakeSession()!.updatedAt)}` : 'Say what you want. It files into the right Room.'}
+              </div>
+            </div>
+            <Show when={intakeSession()}>
+              <button data-testid="intake-continue" onClick={() => openIntake(false)} disabled={busy()}
+                style={{ background: '#1b2430', border: '1px solid #2b3644', color: '#e6ebf2', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Continue</button>
+            </Show>
+            <button data-testid="intake-new" onClick={() => openIntake(true)} disabled={busy()}
+              style={{ background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>New</button>
+          </div>
+        </Show>
+
         <SuperFeed onOpenSession={props.onOpen} onOpenRoom={props.onOpenRoom} refreshKey={feedRefreshKey()} />
 
         <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '2px 4px 10px' }}>
@@ -316,12 +350,12 @@ export default function RoomsHome(props: { onOpen: (id: string) => void, onSessi
         </Show>
 
         <Show when={rooms()} fallback={<div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>Loading rooms…</div>}>
-          <Show when={rooms()!.length > 0} fallback={
+          <Show when={listedRooms().length > 0} fallback={
             <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>
               No rooms yet. A room is a folder under ~/rooms/ — create one to start.
             </div>
           }>
-            <For each={rooms()!}>{(room) => (
+            <For each={listedRooms()}>{(room) => (
               <div data-testid={`room-card-${room.name}`} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'margin-bottom': '10px', overflow: 'hidden' }}>
                 <div onClick={() => openRoom(room)} style={{ padding: '12px 16px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>

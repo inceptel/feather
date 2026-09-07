@@ -1,3 +1,4 @@
+import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js'
 import { appBasePath } from './lib/appPath.js'
 
 export const BASE = appBasePath()
@@ -399,6 +400,22 @@ export async function fetchRoomFriction(room: string): Promise<FrictionComplaint
 export async function createRoom(name: string, mission?: string): Promise<{ name: string, cwd: string, leaderSessionId?: string }> {
   const r = await fetch(`${BASE}/api/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, mission: mission || undefined }) })
   return responseJson(r)
+}
+
+// Intake is the one front door. Continue reopens the newest intake chat (a
+// live one wins); fresh starts a new chat in ~/rooms/intake so its charter
+// loads. Returns the session id to open.
+export async function openIntakeChat(fresh = false): Promise<string> {
+  const rooms = await fetchRooms()
+  const room = rooms.find((candidate) => candidate.name === INTAKE_ROOM)
+  if (!room) throw new Error('no #intake Room yet — create ~/rooms/intake first')
+  if (!fresh) {
+    const existing = pickIntakeSession(room.sessions, { skipIds: [room.pulse?.sessionId] })
+    if (existing) return existing.id
+  }
+  const id = await createSession(room.cwd, 'claude')
+  await assignSessionToRoom(INTAKE_ROOM, id)
+  return id
 }
 
 export const assignSessionToRoom = async (room: string, sessionId: string, remove = false) => {
