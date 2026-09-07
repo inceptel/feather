@@ -72,3 +72,15 @@ it('commentDelivered finds the tagged prompt only in user turns', () => {
   assert.equal(commentDelivered([{ role: 'user', content: [{ type: 'text', text: `${tag} hi` }] }], ID), true)
   assert.equal(commentDelivered([{ role: 'user', content: '[feed-comment:0000] other' }], ID), false)
 })
+
+describe('house replyguy queue line', () => {
+  it('packs the comment, card, and evidence into one open line', async () => {
+    const { feedCommentQueueLine } = await import('../../lib/feed-comments.js')
+    const line = feedCommentQueueLine({
+      commentId: 'ab'.repeat(16), roomName: 'trading', at: new Date('2026-09-07T23:03:00Z'),
+      item: { title: 'The "breakout" strategy\ndoes not hold up', evidenceId: 'publication:trading:breakout' },
+      text: 'why\n   no go?',
+    })
+    assert.equal(line, `- open ${'ab'.repeat(16)} #trading 2026-09-07 23:03 card="The 'breakout' strategy does not hold up" evidence=publication:trading:breakout :: why no go?`)
+  })
+})

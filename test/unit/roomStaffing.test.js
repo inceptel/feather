@@ -19,7 +19,7 @@ async function waitFor(predicate, { attempts = 200, delay = 25, message = 'condi
 }
 
 describe('Room staffing from the template', () => {
-  it('creates a Leader and five Ralph residents, kicks off the mission, wakes residents on schedule, and routes feed comments to the replyguy', async () => {
+  it('creates a Leader and five Ralph residents, kicks off the mission, wakes residents on schedule, and queues feed comments for the house replyguy', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-staffing-'))
     const home = path.join(root, 'home')
     const stateDir = path.join(root, 'state')
@@ -342,15 +342,17 @@ describe('Room staffing from the template', () => {
       assert.match(comment.id, /^[0-9a-f]{32}$/)
       assert.equal(comment.room, 'ev-shop')
       assert.equal(comment.reply, null)
-      const sent = readSent()
-      assert.ok(sent.includes(`[Super Feed comment · #ev-shop] [feed-comment:${comment.id}]`))
-      assert.ok(sent.includes('What rent did you assume?'))
-      assert.ok(sent.includes('Card: #ev-shop · EV shop business plan'))
+      // Every comment is a job for the house replyguy: a queue line, no chat
+      // message to the Room's Leader or its legacy replyguy resident.
+      const queue = fs.readFileSync(path.join(home, 'rooms/house/briefs/COMMENTS.md'), 'utf8')
+      assert.ok(queue.includes(`- open ${comment.id} #ev-shop `), queue)
+      assert.ok(queue.includes('card="#ev-shop · EV shop business plan"'), queue)
+      assert.ok(queue.includes(':: What rent did you assume?'))
+      assert.ok(!readSent().includes('[Super Feed comment'))
       const stored = JSON.parse(fs.readFileSync(path.join(stateDir, 'feed-comments.json'), 'utf8'))
-      assert.equal(stored.comments[0].leaderSessionId, room.leaderSessionId)
-      // A staffed Room routes the comment to its replyguy, not the Leader.
+      assert.equal(stored.comments[0].leaderSessionId, 'house')
       assert.equal(stored.comments[0].responderRole, 'replyguy')
-      assert.equal(stored.comments[0].responderSessionId, readResidents()['ev-shop'].replyguy.sessionId)
+      assert.equal(stored.comments[0].responderSessionId, null)
       const refreshed = await (await fetch(`${base}/api/feed`)).json()
       const withComment = refreshed.items.find(item => item.evidenceId === card.evidenceId)
       assert.equal(withComment.comments.length, 1)

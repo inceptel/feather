@@ -65,7 +65,7 @@ import {
   roomTemplateFiles,
 } from './lib/room-template.js';
 import { appendSteering, normalizeSteerText } from './lib/room-frontier.js';
-import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, commentDelivered, feedCommentPrompt, feedReplyNudgePrompt, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
+import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, feedCommentQueueLine, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -4122,7 +4122,7 @@ function ensureHouseRoom() {
   const files = houseRoomFiles();
   for (const [relative, content] of Object.entries(files)) {
     const file = path.join(dir, relative);
-    if (fresh || /^(AGENTS|CARETAKER|UPDATER|MARKETER)\.md$/.test(relative) || !fs.existsSync(file)) fs.writeFileSync(file, content);
+    if (fresh || /^(AGENTS|CARETAKER|UPDATER|MARKETER|REPLYGUY)\.md$/.test(relative) || !fs.existsSync(file)) fs.writeFileSync(file, content);
   }
   const claudePath = path.join(dir, 'CLAUDE.md');
   if (!fs.existsSync(claudePath)) fs.symlinkSync('AGENTS.md', claudePath);
@@ -4796,14 +4796,30 @@ app.post('/api/feed/following', (req, res) => {
   }
 });
 
-// A comment on a feed card goes to the Room's replyguy resident as chat (the
-// Leader when the Room has none); the reply comes back through the feed
-// projection (see attachFeedComments).
-function feedCommentResponder(roomName) {
-  const replyguy = ROOM_RESIDENTS_STATE.read()[roomName]?.replyguy;
-  if (replyguy?.sessionId && readMeta()[replyguy.sessionId]?.mode === RALPH_MODE) {
-    return { sessionId: replyguy.sessionId, role: 'replyguy' };
-  }
+// A comment on a feed card is a job for the house replyguy: one `- open`
+// line in ~/rooms/house/briefs/COMMENTS.md, and the house/replyguy rule is
+// fired at once (a running wake picks the line up itself; a leftover line
+// is caught by the rule's own schedule). The reply comes back through
+// `room reply` and the feed projection (see attachFeedComments).
+const HOUSE_COMMENTS_FILE = 'briefs/COMMENTS.md';
+const HOUSE_REPLYGUY_RULE = `${HOUSE_ROOM_NAME}/replyguy`;
+function queueFeedComment({ commentId, roomName, item, text, at }) {
+  ensureHouseRoom();
+  const file = path.join(ROOMS_HOME_DIR, HOUSE_ROOM_NAME, HOUSE_COMMENTS_FILE);
+  const line = feedCommentQueueLine({ commentId, roomName, item, text, at });
+  fs.appendFileSync(file, `${line}\n`);
+  return line;
+}
+// Start a rule now unless it is already running or launching. Returns why
+// it did not start, or null.
+function schedulerFireNow(id, reason) {
+  const rule = schedulerRules()[id];
+  if (!rule) return `no rule ${id}`;
+  if (!rule.enabled) return `${id} disabled`;
+  const state = SCHEDULER_STATE.read();
+  if ((state.active || []).some((run) => run.ruleId === id)) return `${id} is already running`;
+  if (schedulerLaunchesInFlight.has(id)) return `${id} is launching`;
+  schedulerStartRun(rule, { reason }, Date.now());
   return null;
 }
 app.post('/api/feed/comments', async (req, res) => {
@@ -4818,67 +4834,22 @@ app.post('/api/feed/comments', async (req, res) => {
     if (!item) throw httpError(404, 'no such feed item');
     const roomName = item.room;
     if (!listRoomDirs().includes(roomName)) throw httpError(404, 'no such room');
-    const leaderId = await readyRoomLeader(roomName);
-    const responder = feedCommentResponder(roomName);
-    const responderId = responder?.sessionId || leaderId;
     const commentId = randomUUID().replaceAll('-', '');
-    const prompt = feedCommentPrompt({ commentId, roomName, item, text });
-    if (responder) {
-      prepareRalphForHumanInput(responderId);
-      await ensureResidentRunning(responderId, roomName);
-    }
-    const receipt = await sendInputIdempotent(responderId, prompt, commentId);
+    const at = new Date();
+    queueFeedComment({ commentId, roomName, item, text, at });
     const comment = {
-      id: commentId, evidenceId, room: roomName, text, createdAt: receipt.sentAt || new Date().toISOString(),
-      leaderSessionId: leaderId, responderSessionId: responderId, responderRole: responder?.role || 'leader',
+      id: commentId, evidenceId, room: roomName, text, createdAt: at.toISOString(),
+      leaderSessionId: HOUSE_ROOM_NAME, responderSessionId: null, responderRole: 'replyguy',
     };
     FEED_COMMENTS_STATE.update((current) => ({ comments: [...current.comments, comment].slice(-FEED_COMMENTS_MAX) }));
     feedSnapshotCache.refresh();
-    scheduleFeedCommentDeliveryCheck({ leaderId: responderId, commentId, prompt });
-    scheduleFeedReplyNudge({ leaderId: responderId, commentId, roomName, text });
-    res.status(201).json({ ok: true, comment: publicFeedComment(comment) });
+    const skipped = schedulerFireNow(HOUSE_REPLYGUY_RULE, `comment ${commentId.slice(0, 8)} on #${roomName}`);
+    if (skipped) console.warn(`[feed] comment ${commentId.slice(0, 8)} queued for the house replyguy; not fired: ${skipped}`);
+    res.status(201).json({ ok: true, comment: publicFeedComment(comment), fired: !skipped });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
 });
-
-// A pasted prompt can vanish when the Leader's agent is busy or restarting
-// (seen 2026-09-06: the receipt said sent, the transcript never got it). Look
-// for the tagged prompt in the transcript after a delay and re-send once.
-const FEED_COMMENT_DELIVERY_CHECK_MS = Number(process.env.FEATHER_FEED_COMMENT_CHECK_MS || 25_000);
-function scheduleFeedCommentDeliveryCheck({ leaderId, commentId, prompt }) {
-  if (!(FEED_COMMENT_DELIVERY_CHECK_MS > 0)) return;
-  const timer = setTimeout(async () => {
-    try {
-      const { messages } = getMessages(leaderId, 60);
-      if (commentDelivered(messages, commentId)) return;
-      console.warn(`[feed] comment ${commentId} not seen in Leader ${leaderId.slice(0, 8)} transcript; re-sending once`);
-      await sendInputIdempotent(leaderId, prompt, `${commentId}-retry`);
-    } catch (error) {
-      console.warn(`[feed] comment ${commentId} delivery check failed: ${error.message}`);
-    }
-  }, FEED_COMMENT_DELIVERY_CHECK_MS);
-  timer.unref?.();
-}
-
-// A Leader that reads a comment and starts researching can take an hour to
-// answer (seen 2026-09-06, #trading). Remind it once if the card is still
-// unanswered after a while.
-const FEED_REPLY_NUDGE_MS = Number(process.env.FEATHER_FEED_REPLY_NUDGE_MS || 10 * 60_000);
-function scheduleFeedReplyNudge({ leaderId, commentId, roomName, text }) {
-  if (!(FEED_REPLY_NUDGE_MS > 0)) return;
-  const timer = setTimeout(async () => {
-    try {
-      const stored = FEED_COMMENTS_STATE.read().comments.find((comment) => comment.id === commentId);
-      if (!stored || stored.reply) return;
-      console.warn(`[feed] comment ${commentId} unanswered after ${FEED_REPLY_NUDGE_MS}ms; nudging Leader ${leaderId.slice(0, 8)}`);
-      await sendInputIdempotent(leaderId, feedReplyNudgePrompt({ commentId, roomName, text }), `${commentId}-nudge`);
-    } catch (error) {
-      console.warn(`[feed] comment ${commentId} nudge failed: ${error.message}`);
-    }
-  }, FEED_REPLY_NUDGE_MS);
-  timer.unref?.();
-}
 
 // The Room's answer to a comment. The Leader runs `room reply <id> ...`;
 // the id is a capability in itself (32 random hex chars from the tagged
@@ -6530,12 +6501,8 @@ app.post('/api/scheduler/rules/:room/:name/:action', (req, res) => {
         },
       }));
     } else if (action === 'fire') {
-      const rules = schedulerRules();
-      const rule = rules[id];
-      const state = SCHEDULER_STATE.read();
-      if ((state.active || []).some((run) => run.ruleId === id)) throw httpError(409, `${id} is already running`);
-      if (schedulerLaunchesInFlight.has(id)) throw httpError(409, `${id} is launching`);
-      schedulerStartRun(rule, { reason: 'fired by user' }, now);
+      const skipped = schedulerFireNow(id, 'fired by user');
+      if (skipped) throw httpError(409, skipped);
     } else {
       throw httpError(404, 'unknown action');
     }
