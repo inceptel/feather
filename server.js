@@ -6218,15 +6218,62 @@ function schedulerFireRoomAgents(room, now, reason) {
   return fired;
 }
 
+// A fresh Claude or Codex chat does not exit when its turn ends; the CLI
+// waits for the next prompt, so "tmux is gone" alone only ever arrives at
+// the timeout kill. Read the transcript instead. Claude's last assistant
+// record carries stop_reason 'end_turn' once the wake's turn is over (tool
+// calls carry 'tool_use', and a running tool leaves a user tool_result
+// last). A short grace lets the CLI finish writing before the run closes.
+// Other engines fall back to the quiet-transcript rule.
+const SCHEDULER_FRESH_END_GRACE_MS = 15_000;
+function schedulerFreshTurnEnded(run, agent) {
+  const file = findJsonlPath(run.sessionId, agent);
+  if (!file) return false;
+  const startedMs = Date.parse(run.startedAt);
+  if (agent !== 'claude') {
+    const last = lastActivityMs(file, agent, 0);
+    return last > startedMs && Date.now() - last > SCHEDULER_RUN_QUIET_MS;
+  }
+  let text;
+  try {
+    const size = fs.statSync(file).size;
+    const readLen = Math.min(size, 512 * 1024);
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(readLen);
+      fs.readSync(fd, buf, 0, readLen, size - readLen);
+      text = buf.toString('utf8');
+    } finally { fs.closeSync(fd); }
+  } catch { return false; }
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let record;
+    try { record = JSON.parse(line); } catch { continue; }
+    const message = record?.message;
+    if (!message || typeof message !== 'object' || !message.role) continue;
+    if (message.role !== 'assistant' || message.stop_reason !== 'end_turn') return false;
+    const ts = Date.parse(record.timestamp || '') || 0;
+    return ts > startedMs && Date.now() - ts >= SCHEDULER_FRESH_END_GRACE_MS;
+  }
+  return false;
+}
+
 // How a run ends. OMP chats: the turn after our marker stopped. Ralph
-// residents: the loop went back to sleep. Fresh one-shots: tmux is gone.
-// Other engines: the transcript went quiet. Anything else keeps running.
+// residents: the loop went back to sleep. Fresh one-shots: tmux is gone
+// (OMP exits on its own) or the turn ended (Claude, Codex). Other engines:
+// the transcript went quiet. Anything else keeps running.
 function schedulerRunStatus(run, rule) {
   const sessionId = run.sessionId;
   if (!sessionId) return 'running';
   if (rule.target.kind === 'agent') return schedulerAgentStatus(run);
   const active = tmuxIsActive(sessionId);
-  if (rule.mode === 'fresh' && rule.target.kind === 'new') return active ? 'running' : 'done';
+  if (rule.mode === 'fresh' && rule.target.kind === 'new') {
+    if (!active) return 'done';
+    const agent = getAgentForSession(sessionId);
+    return agent !== 'omp' && schedulerFreshTurnEnded(run, agent) ? 'done' : 'running';
+  }
   if (!active) return 'failed';
   const meta = readMeta();
   const ralph = meta[sessionId]?.ralph;
@@ -6353,7 +6400,9 @@ function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = nul
   }));
   appendSchedulerRun({ ...run, room: run.room || rule?.room || run.ruleId.split('/')[0], event: 'finished', outcome, finishedAt: new Date(now).toISOString(), durationMs: now - Date.parse(run.startedAt), ...(detail ? { detail } : {}) });
   if (rule?.target.kind === 'agent' || run.agent) { schedulerRetireAgent(run); return; }
-  if (outcome === 'timeout' && rule?.mode === 'fresh' && rule.target.kind === 'new' && run.sessionId) {
+  // A fresh one-shot that is still open (a Claude or Codex chat idling after
+  // its turn, or a timeout) is retired here so finished wakes do not pile up.
+  if (rule?.mode === 'fresh' && rule.target.kind === 'new' && run.sessionId && tmuxIsActive(run.sessionId)) {
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(run.sessionId)], { stdio: 'ignore' }); } catch {}
   }
 }
