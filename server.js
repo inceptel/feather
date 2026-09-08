@@ -139,10 +139,10 @@ const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'f
 const OMP_PROTOCOL_EXTENSION = path.join(import.meta.dirname, 'omp-tools', 'feather-protocol-tools.js');
 const OMP_COUNCIL_SKILL = path.join(import.meta.dirname, 'skills', 'council');
 const OMP_FEATHER_CONFIG = path.join(import.meta.dirname, 'omp-feather.yml');
-const ompBridgeTokens = new Map();
+const sessionBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_SHARED_AGENT_DIR = path.join(HOME, '.omp/agent');
-const OMP_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
+const SESSION_BRIDGE_TOKENS_DIR = path.join(OMP_SESSIONS, '.feather-bridge-tokens');
 // v1-v3 payloads remain accepted for compatibility, but only v4 marks the
 // mirror live. Older sessions therefore keep the existing turn-boundary
 // migration path into the current extension.
@@ -1098,9 +1098,33 @@ function ensureClaudeTrust(cwd) {
 function shellQuote(value) {
   return "'" + String(value).replaceAll("'", "'\"'\"'") + "'";
 }
-function ompBridgeTokenPath(sessionId) {
+function sessionBridgeTokenPath(sessionId) {
   const file = createHash('sha256').update(String(sessionId)).digest('hex');
-  return path.join(OMP_BRIDGE_TOKENS_DIR, file);
+  return path.join(SESSION_BRIDGE_TOKENS_DIR, file);
+}
+function issueSessionBridgeCapability(sessionId, { sessionDir = null } = {}) {
+  const token = randomUUID();
+  const url = `http://127.0.0.1:${PORT}/api/internal/sessions/${sessionId}/events`;
+  sessionBridgeTokens.set(sessionId, token);
+  ompBridgeLastSeen.delete(sessionId);
+  fs.mkdirSync(SESSION_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(SESSION_BRIDGE_TOKENS_DIR, 0o700);
+  fs.writeFileSync(sessionBridgeTokenPath(sessionId), token, { mode: 0o600 });
+  fs.chmodSync(sessionBridgeTokenPath(sessionId), 0o600);
+  if (sessionDir) {
+    const configPath = path.join(sessionDir, '.feather-bridge.json');
+    fs.writeFileSync(configPath, JSON.stringify({ url, token, sessionId }), { mode: 0o600 });
+    fs.chmodSync(configPath, 0o600);
+  }
+  return [
+    `FEATHER_BRIDGE_URL=${shellQuote(url)}`,
+    `FEATHER_BRIDGE_TOKEN=${shellQuote(token)}`,
+    `FEATHER_SESSION_ID=${shellQuote(sessionId)}`,
+  ].join(' ');
+}
+function revokeSessionBridgeCapability(sessionId) {
+  sessionBridgeTokens.delete(sessionId);
+  try { fs.unlinkSync(sessionBridgeTokenPath(sessionId)); } catch {}
 }
 function ensureManagedOmpSymlink(discoveredPath, targetPath, expectedSuffix, label) {
   fs.mkdirSync(path.dirname(discoveredPath), { recursive: true, mode: 0o700 });
@@ -1230,20 +1254,9 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   watchOmpSessionDir(sessionDir, id);
   const sourceOmpId = resume ? getOmpSessionId(id) : forkFrom ? getOmpSessionId(forkFrom) : null;
   if ((resume || forkFrom) && !sourceOmpId) throw new Error(`Cannot ${resume ? 'resume' : 'fork'} OMP session ${forkFrom || id}: exact OMP session id not found`);
-  const bridgeToken = randomUUID();
-  const bridgeUrl = `http://127.0.0.1:${PORT}/api/internal/sessions/${id}/events`;
-  ompBridgeTokens.set(id, bridgeToken);
-  ompBridgeLastSeen.delete(id);
+  const bridgeEnv = issueSessionBridgeCapability(id, { sessionDir });
   const bridgeDiscovered = ensureOmpBridgeDiscovery(agentDir);
   ensureOmpCouncilDiscovery(agentDir);
-  fs.mkdirSync(OMP_BRIDGE_TOKENS_DIR, { recursive: true, mode: 0o700 });
-  fs.chmodSync(OMP_BRIDGE_TOKENS_DIR, 0o700);
-  fs.writeFileSync(ompBridgeTokenPath(id), bridgeToken, { mode: 0o600 });
-  fs.chmodSync(ompBridgeTokenPath(id), 0o600);
-  fs.writeFileSync(path.join(sessionDir, '.feather-bridge.json'), JSON.stringify({
-    url: bridgeUrl, token: bridgeToken, sessionId: id,
-  }), { mode: 0o600 });
-  fs.chmodSync(path.join(sessionDir, '.feather-bridge.json'), 0o600);
   const args = [
     OMP_AUTH_GATEWAY_URL ? OMP_GATEWAY_COMMAND : 'omp',
     ompModelFlags(model, OMP_THINKING).trim(),
@@ -1258,9 +1271,7 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
     '--allow-home',
   ].filter(Boolean).join(' ');
   const env = [
-    `FEATHER_BRIDGE_URL=${shellQuote(bridgeUrl)}`,
-    `FEATHER_BRIDGE_TOKEN=${shellQuote(bridgeToken)}`,
-    `FEATHER_SESSION_ID=${shellQuote(id)}`,
+    bridgeEnv,
     OMP_AUTH_GATEWAY_URL ? `PI_CODING_AGENT_DIR=${shellQuote(agentDir)}` : '',
     OMP_AUTH_GATEWAY_URL && model ? `PI_SMOL_MODEL=${shellQuote(model)}` : '',
     OMP_AUTH_GATEWAY_URL && model ? `PI_SLOW_MODEL=${shellQuote(model)}` : '',
@@ -1296,6 +1307,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       } : {}),
     },
   }));
+  const bridgeEnv = agent === 'omp' ? '' : issueSessionBridgeCapability(id);
 
   if (agent === 'omp') {
     launchOmpSession(id, cwd);
@@ -1312,7 +1324,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       ralphFlag,
       '--dangerously-bypass-approvals-and-sandbox',
     ].filter(Boolean).join(' ');
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, cwd);
     adoptNewCodexUuid(id, before, cwd);
   } else {
     ensureClaudeTrust(cwd);
@@ -1325,7 +1337,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, cwd);
   }
 }
 
@@ -1385,6 +1397,7 @@ function resumeSession(id, cwd) {
   // Codex/Claude model slug persisted at launch (scheduler-created sessions);
   // empty for sessions launched without one.
   const cliModel = agent === 'omp' ? '' : sanitizeOmpModel(readMeta()[id]?.model || '');
+  const bridgeEnv = agent === 'omp' ? '' : issueSessionBridgeCapability(id);
   if (agent === 'omp') {
     launchOmpSession(id, cwd || getOmpSessionCwd(id), { resume: true });
   } else if (agent === 'codex') {
@@ -1414,7 +1427,7 @@ function resumeSession(id, cwd) {
       `--cd ${shellQuote(sessionCwd)}`,
       '--dangerously-bypass-approvals-and-sandbox',
     ].filter(Boolean).join(' ');
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, cwd || sessionCwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, cwd || sessionCwd);
   } else {
     // Claude resolves resumable sessions by project dir (cwd → ~/.claude/projects/<encoded>),
     // so launching from the wrong cwd makes --resume fail and the tmux session exits.
@@ -1441,7 +1454,7 @@ function resumeSession(id, cwd) {
       '--dangerously-skip-permissions',
       '--disallowed-tools AskUserQuestion',
     ].filter(Boolean).join(' ');
-    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, sessionCwd);
+    launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, sessionCwd);
   }
 }
 
@@ -2419,11 +2432,11 @@ app.get('/api/boxes', async (_req, res) => {
 
 function bridgeTokenValid(sessionId, value) {
   if (typeof value !== 'string') return false;
-  let expected = ompBridgeTokens.get(sessionId);
+  let expected = sessionBridgeTokens.get(sessionId);
   if (!expected) {
     try {
-      expected = fs.readFileSync(ompBridgeTokenPath(sessionId), 'utf8').trim();
-      if (expected) ompBridgeTokens.set(sessionId, expected);
+      expected = fs.readFileSync(sessionBridgeTokenPath(sessionId), 'utf8').trim();
+      if (expected) sessionBridgeTokens.set(sessionId, expected);
     } catch {
       return false;
     }
@@ -3168,10 +3181,9 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
     const agent = getAgentForSession(id);
     await protocolRuns.deleteSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
+    revokeSessionBridgeCapability(id);
     if (agent === 'omp') {
       const dir = path.join(OMP_SESSIONS, id);
-      ompBridgeTokens.delete(id);
-      try { fs.unlinkSync(ompBridgeTokenPath(id)); } catch {}
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
       try { fs.rmSync(path.join(OMP_AGENT_DIRS, id), { recursive: true, force: true }); } catch {}
     } else {

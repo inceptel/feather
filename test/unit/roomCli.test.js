@@ -450,7 +450,7 @@ describe('room assignment CLI', () => {
     assert.equal(fs.readFileSync(updatesPath, 'utf8'), updatesBeforeRejectedInput)
   })
 
-  it('publishes only with the current OMP session capability', async () => {
+  it('publishes only with the current Feather session capability', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-room-publish-'))
     roots.push(root)
     const roomsDir = path.join(root, 'rooms')
@@ -503,7 +503,7 @@ describe('room assignment CLI', () => {
       const { FEATHER_SESSION_ID: _session, FEATHER_BRIDGE_TOKEN: _token, ...withoutCapability } = env
       await assert.rejects(
         run(cli, ['publish', publicationFile], { cwd: roomDir, env: withoutCapability }),
-        /authenticated OMP session capability required/,
+        /authenticated Feather session capability required/,
       )
       assert.equal(requests.length, 1)
     } finally {

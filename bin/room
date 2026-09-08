@@ -359,7 +359,7 @@ cmd_publish() {
   [ "$#" -eq 1 ] || die "usage: room publish FILE"
   [ -f "$1" ] || die "room publish: input file not found: $1"
   [ -n "${FEATHER_SESSION_ID:-}" ] && [ -n "${FEATHER_BRIDGE_TOKEN:-}" ] \
-    || die "room publish: authenticated OMP session capability required"
+    || die "room publish: authenticated Feather session capability required"
   ensure_feather_url
   local payload
   payload=$(python3 -c '

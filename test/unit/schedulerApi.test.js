@@ -5,6 +5,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 
@@ -202,6 +203,72 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       assert.ok(kills.includes(`kill-session -t feather-${checkerId.slice(0, 8)}`), 'checker retired')
       assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.feather/sidecars/groups.json'), 'utf8'))[groupId]?.status, 'done', 'group torn down')
 
+      // Fresh Claude helpers receive the same scoped session capability as OMP.
+      // A #house updater can therefore publish the selected Room card.
+      const houseRule = await json(await put(`${base}/api/scheduler/rules/house/updater`, {
+        target: { kind: 'new', engine: 'claude' },
+        mode: 'fresh',
+        every: '1h',
+      }))
+      assert.equal(houseRule.status, 200, houseRule.text)
+      const houseFire = await json(await post(`${base}/api/scheduler/rules/house/updater/fire`))
+      assert.equal(houseFire.status, 200, houseFire.text)
+      const houseEntry = await waitFor(async () => {
+        const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'house/updater')
+        return entry.runtime.running?.sessionId ? entry : null
+      }, { message: 'fresh House updater starts' })
+      const houseSessionId = houseEntry.runtime.running.sessionId
+      const tokenFile = path.join(
+        home,
+        '.feather/omp-sessions/.feather-bridge-tokens',
+        createHash('sha256').update(houseSessionId).digest('hex'),
+      )
+      const houseToken = fs.readFileSync(tokenFile, 'utf8').trim()
+      const houseCommands = fs.readFileSync(commandLog, 'utf8')
+      assert.ok(houseCommands.includes('FEATHER_BRIDGE_TOKEN='))
+      assert.ok(houseCommands.includes('FEATHER_SESSION_ID='))
+      assert.ok(houseCommands.includes(houseSessionId))
+      const housePublication = {
+        id: 'scheduled-house-updater-capability',
+        sourceEvidenceId: 'https://example.test/evidence/scheduled-house-updater',
+        title: 'Scheduled helper publication',
+        summary: 'The scheduled House updater authenticated and published this card.',
+        attention: 'briefing',
+      }
+      const published = await json(await fetch(`${base}/api/internal/rooms/ev-shop/publications`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Feather-Session-ID': houseSessionId,
+          'X-Feather-Bridge-Token': houseToken,
+        },
+        body: JSON.stringify(housePublication),
+      }))
+      assert.equal(published.status, 201, published.text)
+      assert.equal(published.body.record.publisherSessionId, houseSessionId)
+
+      const resumeResponse = await json(await post(`${base}/api/sessions/${houseSessionId}/resume`, {
+        cwd: path.join(home, 'rooms/house'),
+      }))
+      assert.equal(resumeResponse.status, 200, resumeResponse.text)
+      const resumedToken = fs.readFileSync(tokenFile, 'utf8').trim()
+      assert.notEqual(resumedToken, houseToken)
+      const publishWithToken = (token) => fetch(`${base}/api/internal/rooms/ev-shop/publications`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Feather-Session-ID': houseSessionId,
+          'X-Feather-Bridge-Token': token,
+        },
+        body: JSON.stringify(housePublication),
+      })
+      assert.equal((await publishWithToken(houseToken)).status, 403, 'resume revokes the prior token')
+      assert.equal((await publishWithToken(resumedToken)).status, 200, 'resumed helper keeps its capability')
+
+      const deleted = await json(await post(`${base}/api/sessions/${houseSessionId}/delete`))
+      assert.equal(deleted.status, 200, deleted.text)
+      assert.equal(fs.existsSync(tokenFile), false, 'session deletion removes its capability')
+
       // Ledger, pause, resume, fire.
       const runs = (await json(await fetch(`${base}/api/scheduler/runs?room=ev-shop`))).body.runs
       assert.ok(runs.some(run => run.ruleId === 'ev-shop/leader' && run.event === 'finished' && run.outcome === 'done'))
@@ -219,7 +286,7 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       assert.equal(fired.status, 200, fired.text)
       await waitFor(() => count(readSent(), /\[Room wake · #ev-shop · leader/g) === 2 || null, { message: 'manual fire' })
       // The read-only snapshot lists every rule, and the state file validates.
-      assert.equal(Object.keys(readScheduler().rules).length, 2)
+      assert.equal(Object.keys(readScheduler().rules).length, 3)
     } finally {
       child.kill('SIGTERM')
       await new Promise(resolve => child.once('exit', resolve))
