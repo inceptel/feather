@@ -4640,7 +4640,12 @@ app.post('/api/rooms/:name/send', async (req, res) => {
     const messageId = requestedId || randomUUID().replaceAll('-', '');
     if (!/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) throw httpError(400, 'invalid message id');
     const recipient = crossRoomRecipient(targetRoom);
-    if (!recipient) throw httpError(409, `#${targetRoom} has no available Leader`);
+    if (!recipient) {
+      if (targetRoom === HOUSE_ROOM_NAME) {
+        throw httpError(409, '#house has no Leader by design; report House helper or scheduler failures to #friction with room complain --id <stable-id> --stdin');
+      }
+      throw httpError(409, `#${targetRoom} has no available Leader`);
+    }
     if (!tmuxIsActive(recipient.sessionId)) {
       resumeSession(recipient.sessionId, path.join(ROOMS_HOME_DIR, targetRoom));
       for (let attempt = 0; attempt < 30 && !tmuxIsActive(recipient.sessionId); attempt++) {

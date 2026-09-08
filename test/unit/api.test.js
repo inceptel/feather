@@ -543,6 +543,40 @@ describe('POST /api/rooms/:name/send', () => {
       fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
+
+  it('directs leaderless House helper failures to friction', async () => {
+    if (EXTERNAL_SERVER) return
+    const suffix = Date.now().toString(36)
+    const sourceRoom = `house-source-${suffix}`
+    const source = await fetch(`${BASE}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: sourceRoom }),
+    })
+    assert.equal(source.status, 200, await source.text())
+    const house = await fetch(`${BASE}/api/rooms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'house' }),
+    })
+    assert.ok([200, 409].includes(house.status), await house.text())
+
+    const response = await fetch(`${BASE}/api/rooms/house/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Feather-Message-ID': 'house-helper-failure-0001',
+      },
+      body: JSON.stringify({
+        fromRoom: sourceRoom,
+        text: 'The House updater timed out repeatedly.',
+      }),
+    })
+    assert.equal(response.status, 409)
+    assert.deepEqual(await response.json(), {
+      error: '#house has no Leader by design; report House helper or scheduler failures to #friction with room complain --id <stable-id> --stdin',
+    })
+  })
 })
 
 describe('Room Ralph publication capability', () => {
@@ -1515,7 +1549,7 @@ describe('GET /api/file', () => {
 // ── Council protocol runs ───────────────────────────────────────────────────
 
 describe('Council protocol-run APIs', () => {
-  const bridgeToken = 'council-test-bridge-token'
+  let bridgeToken = 'council-test-bridge-token'
   const ownerExecutionId = 'cafebabe'
   const invocationMessageId = 'deadbeef'
   const eventId = (number) => `20000000-0000-4000-8000-${String(number).padStart(12, '0')}`
@@ -1534,8 +1568,9 @@ describe('Council protocol-run APIs', () => {
   before(() => {
     const tokenDir = path.join(fixtureHome, '.feather', 'omp-sessions', '.feather-bridge-tokens')
     fs.mkdirSync(tokenDir, { recursive: true, mode: 0o700 })
-    const tokenFile = createHash('sha256').update(TEST_SESSION_ID).digest('hex')
-    fs.writeFileSync(path.join(tokenDir, tokenFile), bridgeToken, { mode: 0o600 })
+    const tokenFile = path.join(tokenDir, createHash('sha256').update(TEST_SESSION_ID).digest('hex'))
+    if (fs.existsSync(tokenFile)) bridgeToken = fs.readFileSync(tokenFile, 'utf8').trim()
+    else fs.writeFileSync(tokenFile, bridgeToken, { mode: 0o600 })
   })
 
   it('exposes read-only protocol history without a direct-launch endpoint', async () => {

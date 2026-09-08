@@ -151,6 +151,8 @@ describe('Room autonomy prompts', () => {
     assert.ok(checker.includes('never build'))
     const house = houseRoomFiles({ now: at })
     assert.deepEqual(Object.keys(house), ['AGENTS.md', 'CARETAKER.md', 'UPDATER.md', 'MARKETER.md', 'REPLYGUY.md', 'briefs/COMMENTS.md', 'briefs/QUEUE.md', 'wiki/Home.md', 'wiki/Log.md'])
+    assert.ok(house['AGENTS.md'].includes('#house` intentionally has no Leader'))
+    assert.ok(house['AGENTS.md'].includes('room complain --id <stable-id> --stdin'))
     assert.ok(house['UPDATER.md'].includes('room -r <room> publish'))
     assert.ok(house['MARKETER.md'].includes('room -r <room> visual --out'))
     assert.ok(house['REPLYGUY.md'].includes('briefs/COMMENTS.md'))
