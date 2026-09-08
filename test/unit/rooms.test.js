@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -146,7 +147,7 @@ describe('portable Room membership', () => {
       },
     }))
 
-    const port = 24_000 + (process.pid % 10_000)
+    const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: { ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port) },

@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -49,16 +50,30 @@ describe('Room status scheduler', () => {
     }))
     const due = (sessionId = null) => ({ enabled: true, status: 'waiting', lastRunAt: null, nextRunAtMs: 1, sessionId, error: null })
     fs.writeFileSync(path.join(home, '.feather/room-pulses.json'), JSON.stringify({ active: due(), resident: due(), idle: due(), broken: due() }))
-    fs.writeFileSync(path.join(binDir, 'tmux'), `#!/bin/sh\nif [ "$1" = list-sessions ]; then now="$(date +%s)"; printf 'feather-aaaaaaaa|%s\\nfeather-cccccccc|%s\\n' "$now" "$now"; exit 0; fi\nif [ "$1" = has-session ] && { [ "$3" = feather-aaaaaaaa ] || [ "$3" = feather-cccccccc ]; }; then exit 0; fi\nif [ "$1" = new-session ]; then case "$*" in *rooms/broken*) exit 1;; esac; printf '%s\\n' "$*" >>"$TMUX_TEST_LOG"; exit 0; fi\nif [ "$1" = set-option ]; then exit 0; fi\nexit 1\n`)
+    // Mock tmux: two pre-existing live sessions (active work + resident), and
+    // every launched session registers as live too, so the server does not
+    // reset a fresh status run to 'waiting' on the next tick. #broken refuses.
+    const tmuxReg = path.join(root, 'tmux.reg')
+    fs.writeFileSync(tmuxReg, 'feather-aaaaaaaa\nfeather-cccccccc\n')
+    fs.writeFileSync(path.join(binDir, 'tmux'), [
+      '#!/bin/sh',
+      'case "$1" in',
+      '  list-sessions) now=$(date +%s); while IFS= read -r n; do printf "%s|%s\\n" "$n" "$now"; done < "$TMUX_REG"; exit 0 ;;',
+      '  has-session) grep -qxF "$3" "$TMUX_REG" && exit 0; exit 1 ;;',
+      '  new-session) case "$*" in *rooms/broken*) exit 1;; esac; printf "%s\\n" "$*" >> "$TMUX_TEST_LOG"; name=""; while [ $# -gt 0 ]; do [ "$1" = "-s" ] && name="$2"; shift; done; printf "%s\\n" "$name" >> "$TMUX_REG"; exit 0 ;;',
+      '  set-option) exit 0 ;;',
+      'esac',
+      'exit 1',
+    ].join('\n'))
     fs.chmodSync(path.join(binDir, 'tmux'), 0o755)
 
-    const port = 29_000 + (process.pid % 1000)
+    const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
         FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_PULSE_INTERVAL_MS: '60000', FEATHER_ROOM_PULSE_MAX_CONCURRENT: '4',
-        PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog,
+        PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog, TMUX_REG: tmuxReg,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
@@ -69,7 +84,7 @@ describe('Room status scheduler', () => {
     }
     try {
       let state
-      for (let attempt = 0; attempt < 100; attempt++) {
+      for (let attempt = 0; attempt < 750; attempt++) {
         try { state = JSON.parse(fs.readFileSync(path.join(home, '.feather/room-pulses.json'), 'utf8')) } catch {}
         if (state?.active?.status === 'working' && state?.resident?.status === 'working' && state?.idle?.status === 'working' && state?.broken?.status === 'error' && readLaunches().length === 3) break
         await new Promise((resolve) => setTimeout(resolve, 20))
@@ -135,7 +150,7 @@ describe('Room status scheduler', () => {
     ].join('\n'))
     fs.chmodSync(path.join(binDir, 'tmux'), 0o755)
 
-    const port = 30_000 + (process.pid % 1000)
+    const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: {
@@ -152,7 +167,7 @@ describe('Room status scheduler', () => {
     const workingCount = (s) => rooms.filter((n) => s?.[n]?.status === 'working').length
     try {
       let state
-      for (let attempt = 0; attempt < 200; attempt++) {
+      for (let attempt = 0; attempt < 750; attempt++) {
         state = readState()
         if (workingCount(state) >= 2) break
         await new Promise((resolve) => setTimeout(resolve, 20))

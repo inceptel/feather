@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -50,7 +51,7 @@ describe('Room staffing from the template', () => {
     const readResidents = () => JSON.parse(fs.readFileSync(path.join(home, '.feather/room-residents.json'), 'utf8'))
     const readMeta = () => JSON.parse(fs.readFileSync(path.join(stateDir, 'session-meta.json'), 'utf8'))
 
-    const port = 31_000 + (process.pid % 1000)
+    const port = await freePort()
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: REPO,

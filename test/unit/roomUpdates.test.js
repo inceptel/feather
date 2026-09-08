@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -77,7 +78,7 @@ describe('room updates API', () => {
     fs.mkdirSync(stateDir, { recursive: true })
     makeRoom(root, 'demo')
 
-    const port = 31_000 + (process.pid % 1000)
+    const port = await freePort()
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),

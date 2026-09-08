@@ -28,7 +28,8 @@ describe('state path classification', () => {
   it('preserves every checkout-local path when FEATHER_STATE_DIR is unset', () => {
     const releaseDir = '/opt/feather/current'
     const homeDir = '/home/tester'
-    const paths = resolveStatePaths({ releaseDir, homeDir })
+    // Pass an empty stateDir so a FEATHER_STATE_DIR in the developer's shell cannot leak in.
+    const paths = resolveStatePaths({ releaseDir, homeDir, stateDir: '' })
 
     assert.equal(paths.instance.external, false)
     assert.equal(paths.instance.root, releaseDir)

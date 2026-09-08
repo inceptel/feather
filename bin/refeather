@@ -33,6 +33,22 @@ client configuration; pass the exact mounted health URL to --health-url.
 EOF
 }
 
+# System journal/lock paths when this user can write them (root installs);
+# otherwise the per-user paths under ~/.feather, so a non-root promote needs
+# no --journal-dir/--lock-file flags.
+default_journal_dir() {
+  if [ -w /var/lib/feather ] || { [ ! -e /var/lib/feather ] && [ -w /var/lib ]; }; then
+    printf '%s\n' /var/lib/feather/refeather
+  else
+    printf '%s\n' "${HOME:-/home/user}/.feather/refeather"
+  fi
+}
+default_lock_file() {
+  # Probe by opening: the file may already exist and belong to root.
+  if ( : >>/var/lock/feather-refeather.lock ) 2>/dev/null; then printf '%s\n' /var/lock/feather-refeather.lock
+  else printf '%s\n' "${HOME:-/home/user}/.feather/refeather.lock"; fi
+}
+
 need_command() { command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"; }
 
 realpath_existing() {
@@ -478,8 +494,8 @@ load_switch_options() {
   TX_SUPERVISORCTL="${REFEATHER_SUPERVISORCTL:-supervisorctl}"
   TX_SUPERVISOR_TIMEOUT="${REFEATHER_SUPERVISOR_TIMEOUT:-15s}"
   TX_CURL="${REFEATHER_CURL:-curl}"
-  TX_JOURNAL_DIR="${REFEATHER_JOURNAL_DIR:-/var/lib/feather/refeather}"
-  TX_LOCK_FILE="${REFEATHER_LOCK_FILE:-/var/lock/feather-refeather.lock}"
+  TX_JOURNAL_DIR="${REFEATHER_JOURNAL_DIR:-$(default_journal_dir)}"
+  TX_LOCK_FILE="${REFEATHER_LOCK_FILE:-$(default_lock_file)}"
   TX_PRECHECK="${REFEATHER_PRE_PROMOTE_CHECK:-}"
   TX_SKIP_CAPABILITIES=0
   while [ $# -gt 0 ]; do
@@ -553,8 +569,8 @@ run_switch() {
 }
 
 cmd_recover() {
-  local journal_dir="${REFEATHER_JOURNAL_DIR:-/var/lib/feather/refeather}"
-  local lock_file="${REFEATHER_LOCK_FILE:-/var/lock/feather-refeather.lock}"
+  local journal_dir="${REFEATHER_JOURNAL_DIR:-$(default_journal_dir)}"
+  local lock_file="${REFEATHER_LOCK_FILE:-$(default_lock_file)}"
   while [ $# -gt 0 ]; do case "$1" in
     --journal-dir) journal_dir="$2"; shift 2 ;; --lock-file) lock_file="$2"; shift 2 ;;
     *) die "unknown recover option: $1" ;; esac; done

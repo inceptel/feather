@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -61,7 +62,7 @@ describe('Super Feed API', () => {
     fs.mkdirSync(path.join(home, '.feather'), { recursive: true })
     fs.writeFileSync(path.join(home, '.feather/room-mains.json'), JSON.stringify({ health: leaderId }))
 
-    const port = 32_000 + (process.pid % 1000)
+    const port = await freePort()
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: REPO,

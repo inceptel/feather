@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -78,7 +79,7 @@ describe('safe OMP resume', () => {
     fs.writeFileSync(path.join(binDir, 'tmux'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TMUX_TEST_LOG"\nexit 0\n')
     fs.chmodSync(path.join(binDir, 'tmux'), 0o755)
 
-    const port = 32_000 + (process.pid % 1000)
+    const port = await freePort()
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),

@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -80,7 +81,7 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
     const user = (text) => ({ role: 'user', content: [{ type: 'text', text }] })
     const assistant = (stopReason, extra = {}) => ({ role: 'assistant', provider: 'anthropic', model: 'claude-fable-5-1', stopReason, content: [{ type: 'text', text: 'ok' }], ...extra })
 
-    const port = 33_000 + (process.pid % 1000)
+    const port = await freePort()
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: REPO,

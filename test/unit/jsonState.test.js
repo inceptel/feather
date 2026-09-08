@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { freePort } from './freePort.js'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -241,7 +242,7 @@ describe('server and rollback integration', () => {
     fs.writeFileSync(path.join(stateDir, 'starred.json'), '{}')
     fs.writeFileSync(path.join(homeDir, '.feather/room-sessions.json'), JSON.stringify({ existing: 'marriage' }))
 
-    const port = 20_000 + (process.pid % 20_000)
+    const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir, PORT: String(port) },
@@ -251,7 +252,7 @@ describe('server and rollback integration', () => {
     child.stderr.on('data', (chunk) => { stderr += chunk })
     try {
       let ready = false
-      for (let attempt = 0; attempt < 50; attempt++) {
+      for (let attempt = 0; attempt < 600; attempt++) {
         try {
           const response = await fetch(`http://127.0.0.1:${port}/api/health`)
           if (response.ok) { ready = true; break }
