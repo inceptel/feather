@@ -247,6 +247,32 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       assert.equal(published.status, 201, published.text)
       assert.equal(published.body.record.publisherSessionId, houseSessionId)
 
+      // Claude stays alive after an assistant end_turn. The scheduler must
+      // close the run from the transcript and retire the idle tmux session.
+      const scheduler = readScheduler()
+      const agedStart = new Date(Date.now() - 20_000).toISOString()
+      scheduler.active = scheduler.active.map(run => run.ruleId === 'house/updater' ? { ...run, startedAt: agedStart } : run)
+      scheduler.runtime['house/updater'].running = { ...scheduler.runtime['house/updater'].running, startedAt: agedStart }
+      fs.writeFileSync(schedulerFile, JSON.stringify(scheduler))
+      const claudeDir = path.join(home, '.claude/projects/-test')
+      const claudeTranscript = path.join(claudeDir, `${houseSessionId}.jsonl`)
+      fs.mkdirSync(claudeDir, { recursive: true })
+      const transcriptAt = new Date(Date.now() - 16_000).toISOString()
+      const writeClaudeTurn = (stopReason) => fs.writeFileSync(claudeTranscript, JSON.stringify({
+        type: 'assistant',
+        timestamp: transcriptAt,
+        message: { role: 'assistant', stop_reason: stopReason, content: [{ type: 'text', text: 'done' }] },
+      }) + '\n')
+      writeClaudeTurn('tool_use')
+      await new Promise(resolve => setTimeout(resolve, 200))
+      assert.ok((await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'house/updater').runtime.running, 'tool use keeps fresh Claude run open')
+      writeClaudeTurn('end_turn')
+      await waitFor(async () => {
+        const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'house/updater')
+        return entry.runtime.running === null && entry.runtime.lastOutcome === 'done' ? entry : null
+      }, { message: 'fresh Claude end_turn closes run' })
+      assert.ok(fs.readFileSync(commandLog, 'utf8').includes(`kill-session -t feather-${houseSessionId.slice(0, 8)}`), 'idle Claude tmux retired')
+
       const resumeResponse = await json(await post(`${base}/api/sessions/${houseSessionId}/resume`, {
         cwd: path.join(home, 'rooms/house'),
       }))
