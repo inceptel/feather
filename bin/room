@@ -265,16 +265,22 @@ cmd_lock() {
   resolve_room
   [ "${1:-}" = "--" ] && shift
   [ "$#" -ge 1 ] || die "usage: room lock -- CMD [ARGS...]"
-  flock -w 60 "$(room_lock_path)" "$@"
+  local lock
+  lock="$(room_lock_path)"
+  ROOM_LOCK_PATH_HELD="$lock" flock -w 60 "$lock" "$@"
 }
 
 cmd_note() {
   resolve_room
+  local line file lock
+  lock="$(room_lock_path)"
+  [ "${ROOM_LOCK_PATH_HELD:-}" != "$lock" ] ||
+    die "room note cannot run inside room lock; run it after the lock is released"
   read_room_text note "$@"
-  local line file
   line=$(printf -- '- %s %s' "$(date -u +%Y-%m-%d\ %H:%M)" "$ROOM_TEXT")
   if [ -f "$ROOM_PATH/wiki/Log.md" ]; then file="$ROOM_PATH/wiki/Log.md"; else file="$ROOM_PATH/notes.md"; fi
-  flock -w 60 "$(room_lock_path)" sh -c 'printf "%s\n" "$1" >>"$2"' _ "$line" "$file"
+  flock -w 60 "$lock" sh -c 'printf "%s\n" "$1" >>"$2"' _ "$line" "$file" ||
+    die "room note could not lock #$ROOM_NAME; note was not written"
   echo "noted in #$ROOM_NAME (${file#"$ROOM_PATH"/})"
 }
 

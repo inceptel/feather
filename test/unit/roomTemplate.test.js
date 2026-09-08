@@ -39,6 +39,8 @@ describe('Room template', () => {
     assert.ok(files['AGENT.md'].includes('[APPROVED]'))
     assert.ok(files['AGENT.md'].includes('room lock'))
     assert.ok(files['AGENT.md'].includes('drafts/'))
+    assert.ok(files['AGENT.md'].includes('never wrap it in `room lock`'))
+    assert.ok(files['AGENT.md'].includes('releases the lock, appends one Log line with `room note`'))
     assert.equal(files['AGENT.md'], agentCharter('ev-shop'))
     assert.ok(files['wiki/Home.md'].includes(`> ${MISSION}`))
     for (const spec of ROOM_STANDARD_RESIDENTS) {

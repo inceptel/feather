@@ -423,6 +423,30 @@ describe('room assignment CLI', () => {
       /usage/,
     )
     assert.equal(fs.readFileSync(notesPath, 'utf8'), notesBeforeRejectedInput)
+
+    const notesBeforeLockFailures = fs.readFileSync(notesPath, 'utf8')
+    const nested = await run(
+      cli,
+      ['lock', '--', cli, 'note', 'nested write must fail'],
+      { cwd: roomDir, env },
+    ).then(() => null, (error) => error)
+    assert.ok(nested)
+    assert.match(nested.stderr, /room note cannot run inside room lock/)
+    assert.doesNotMatch(nested.stdout, /noted in/)
+    assert.equal(fs.readFileSync(notesPath, 'utf8'), notesBeforeLockFailures)
+
+    const stubBin = path.join(root, 'stub-bin')
+    fs.mkdirSync(stubBin)
+    fs.writeFileSync(path.join(stubBin, 'flock'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    const contended = await run(
+      cli,
+      ['note', 'contended write must fail'],
+      { cwd: roomDir, env: { ...env, PATH: `${stubBin}:${env.PATH}` } },
+    ).then(() => null, (error) => error)
+    assert.ok(contended)
+    assert.match(contended.stderr, /room note could not lock #space; note was not written/)
+    assert.doesNotMatch(contended.stdout, /noted in/)
+    assert.equal(fs.readFileSync(notesPath, 'utf8'), notesBeforeLockFailures)
     assert.equal(fs.readFileSync(updatesPath, 'utf8'), updatesBeforeRejectedInput)
   })
 
