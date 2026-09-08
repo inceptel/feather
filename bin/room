@@ -944,9 +944,9 @@ def target(r):
     t = r["target"]; k = t["kind"]
     if k == "resident": return t["role"]
     if k == "session": return "session " + t["sessionId"][:8]
-    if k == "new": return "new " + t.get("engine", "omp") + (" " + t["model"] if t.get("model") else "")
+    if k == "new": return "new " + t.get("engine", "claude") + (" " + t["model"] if t.get("model") else "")
     if k == "agent":
-        party = lambda p: p.get("engine", "omp") + (":" + p["model"] if p.get("model") else "")
+        party = lambda p: p.get("engine", "claude") + (":" + p["model"] if p.get("model") else "")
         return "agent " + party(t.get("builder") or {}) + "+" + party(t.get("checker") or {}) + " round " + str(round((t.get("roundMs") or 0) / 60000)) + "m"
     return k
 def cadence(r):
@@ -1027,7 +1027,7 @@ def party(spec, default):
 if target == "agent" or target.startswith("agent:"):
     spec = target[6:] if target.startswith("agent:") else ""
     builder, *checker = spec.split("+", 1)
-    body["target"] = {"kind": "agent", "builder": party(builder, "omp"), "checker": party(checker[0] if checker else "", "codex"),
+    body["target"] = {"kind": "agent", "builder": party(builder, "claude"), "checker": party(checker[0] if checker else "", "codex"),
                       **({"roundMs": os.environ["AGENT_ROUND"]} if os.environ.get("AGENT_ROUND") else {})}
 elif target == "leader": body["target"] = {"kind": "leader"}
 elif target.startswith("new:"):

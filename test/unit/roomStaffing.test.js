@@ -92,7 +92,7 @@ describe('Room staffing from the template', () => {
       const roomDir = path.join(home, 'rooms/ev-shop')
       const agentRule = JSON.parse(fs.readFileSync(path.join(home, '.feather/scheduler.json'), 'utf8')).rules['ev-shop/agent']
       assert.equal(agentRule.target.kind, 'agent')
-      assert.equal(agentRule.target.builder.engine, 'omp')
+      assert.equal(agentRule.target.builder.engine, 'claude')
       assert.equal(agentRule.target.checker.engine, 'codex')
       assert.deepEqual(agentRule.when, [{ type: 'todo-has', section: 'Open' }])
       assert.ok(fs.existsSync(path.join(roomDir, 'STEERING.md')))

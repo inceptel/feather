@@ -5012,7 +5012,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // global house helpers cover the wiki and the feed; no per-Room residents.
 function defaultAgentRule(name) {
   return normalizeRule({
-    id: `${name}/agent`, target: { kind: 'agent', builder: { engine: 'omp' }, checker: { engine: 'codex' }, roundMs: 8 * 60_000 },
+    id: `${name}/agent`, target: { kind: 'agent', builder: { engine: 'claude' }, checker: { engine: 'codex' }, roundMs: 8 * 60_000 },
     mode: 'fresh', every: '30m', when: [{ type: 'todo-has', section: 'Open' }], timeoutMs: 30 * 60_000, maxRunsPerHour: 2,
     note: 'builder + checker pair; takes one Open line per wake',
   });
