@@ -1382,6 +1382,9 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
 function resumeSession(id, cwd) {
   const agent = getAgentForSession(id);
   const name = tmuxName(id);
+  // Codex/Claude model slug persisted at launch (scheduler-created sessions);
+  // empty for sessions launched without one.
+  const cliModel = agent === 'omp' ? '' : sanitizeOmpModel(readMeta()[id]?.model || '');
   if (agent === 'omp') {
     launchOmpSession(id, cwd || getOmpSessionCwd(id), { resume: true });
   } else if (agent === 'codex') {
