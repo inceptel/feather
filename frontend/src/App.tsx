@@ -186,7 +186,7 @@ export default function App() {
   const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
   // or a Room page. Kept in the hash so reloads and back buttons work.
-  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
+  const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' | 'wiki' | 'updates' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
   const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
   const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [wikiRetry, setWikiRetry] = createSignal(0)
@@ -984,14 +984,18 @@ export default function App() {
     setLoading(false)
   }
 
-  async function handleNew(agent?: string, mode?: 'ralph') {
+  async function handleNew(agent?: string, mode?: 'ralph', projectSessionId?: string, name?: string) {
+    if (creating()) return
     setCreating(true)
     setAgentDropdown(false)
     try {
-      const id = await createSession(undefined, agent, undefined, mode)
+      const response = await fetch(appUrl('/api/chats'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent, mode, projectSessionId, name }) })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not start chat')
+      const id = result.id
       select(id)
       refreshSessions()
-    } catch (e) { console.error(e) }
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not start chat') }
     finally { setCreating(false) }
   }
 
@@ -999,6 +1003,20 @@ export default function App() {
     await resumeSession(id)
     await refreshSessions()
     select(id)
+  }
+
+  async function handleProjectRename(id: string) {
+    const name = prompt('New project folder name')
+    if (!name?.trim()) return
+    setMenuOpen(false)
+    try {
+      const response = await fetch(appUrl(`/api/chats/${encodeURIComponent(id)}/project/rename`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not rename project')
+      await refreshSessions()
+    } catch (error) { alert(error instanceof Error ? error.message : 'Could not rename project') }
   }
 
   async function handleInterrupt(id: string) {
@@ -1085,8 +1103,9 @@ export default function App() {
   }
 
   function applyHomeHash(hash: string): boolean {
+    if (hash === 'wiki' || hash === 'updates') { setHomeRoute({ kind: hash }); return true }
     if (hash === 'costs') { setHomeRoute({ kind: 'costs' }); return true }
-    if (hash === 'scheduler') { setHomeRoute({ kind: 'scheduler' }); return true }
+    if (hash === 'scheduler' || hash === 'autopilot') { setHomeRoute({ kind: 'scheduler' }); return true }
     // #room/<name> opens a Room; #room/<name>/wiki/<Page> opens it on that wiki page.
     const room = hash.match(/^room\/([a-z0-9][a-z0-9-]{0,63})(?:\/wiki\/(.+))?$/)
     if (room) {
@@ -1100,7 +1119,7 @@ export default function App() {
   }
   function onHashChange() {
     const hash = location.hash.slice(1)
-    if (hash === '' || hash === 'costs' || hash === 'scheduler' || hash.startsWith('room/')) {
+    if (hash === '' || hash === 'costs' || hash === 'scheduler' || hash === 'autopilot' || hash === 'wiki' || hash === 'updates' || hash.startsWith('room/')) {
       if (currentId()) {
         goHome()
         location.hash = hash
@@ -1108,10 +1127,10 @@ export default function App() {
       applyHomeHash(hash)
     }
   }
-  function showHome(route: { kind: 'rooms' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }) {
+  function showHome(route: { kind: 'rooms' | 'wiki' | 'updates' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }) {
     if (currentId()) goHome()
     setHomeRoute(route)
-    location.hash = route.kind === 'rooms' ? '' : route.kind === 'costs' ? 'costs' : route.kind === 'scheduler' ? 'scheduler' : `room/${route.name}`
+    location.hash = route.kind === 'room' ? `room/${route.name}` : route.kind === 'rooms' ? '' : route.kind === 'scheduler' ? 'autopilot' : route.kind
   }
   function goHome() {
     dismissMediaNotice()
@@ -1820,7 +1839,7 @@ export default function App() {
             <div style={{ padding: '12px 16px', position: 'relative' }}>
               <div style={{ display: 'flex', 'border-radius': '8px', overflow: 'hidden' }}>
                 <button onClick={() => handleNew('claude')} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                  {creating() ? 'Starting...' : '+ New Session'}
+                  {creating() ? 'Starting...' : '+ New chat'}
                 </button>
                 <Show when={agents().some(a => a.available)}>
                   <button onClick={() => setAgentDropdown(!agentDropdown())} disabled={creating()} style={{ width: '36px', background: creating() ? '#1a1a2e' : agentDropdown() ? '#3a9a5a' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'border-left': '1px solid rgba(0,0,0,0.15)', cursor: creating() ? 'wait' : 'pointer', 'font-size': '12px', '-webkit-tap-highlight-color': 'transparent' }}>
@@ -2033,11 +2052,12 @@ export default function App() {
         <div style={{ position: 'relative', padding: '8px 16px 0 100px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
           <span data-testid="build-version" title={`Build ${__BUILD_VERSION__}`} style={{ position: 'absolute', top: '2px', right: '10px', color: 'var(--text-ghost)', 'font-size': '8px', 'font-family': "'SF Mono', Menlo, monospace", 'line-height': '1', 'letter-spacing': '0.02em', 'white-space': 'nowrap' }}>{__BUILD_TIME__}</span>
           <Show when={cur()} fallback={
-            <div data-testid="home-nav" style={{ display: 'flex', 'align-items': 'center', gap: '4px' }}>
-              <button data-testid="home-nav-intake" onClick={() => openIntakeChat(false).then(select).catch((e) => alert(e.message))} style={homeNavStyle(false)}>Intake</button>
-              <button data-testid="home-nav-rooms" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind !== 'costs' && homeRoute().kind !== 'scheduler')}>Rooms</button>
+            <div data-testid="home-nav" style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'overflow-x': 'auto' }}>
+              <button data-testid="home-nav-chats" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind === 'rooms')}>Chats</button>
+              <button onClick={() => showHome({ kind: 'wiki' })} style={homeNavStyle(homeRoute().kind === 'wiki')}>Wiki</button>
+              <button onClick={() => showHome({ kind: 'updates' })} style={homeNavStyle(homeRoute().kind === 'updates')}>Updates</button>
+              <button data-testid="home-nav-scheduler" onClick={() => showHome({ kind: 'scheduler' })} style={homeNavStyle(homeRoute().kind === 'scheduler')}>Autopilot</button>
               <button data-testid="home-nav-costs" onClick={() => showHome({ kind: 'costs' })} style={homeNavStyle(homeRoute().kind === 'costs')}>Costs</button>
-              <button data-testid="home-nav-scheduler" onClick={() => showHome({ kind: 'scheduler' })} style={homeNavStyle(homeRoute().kind === 'scheduler')}>Scheduler</button>
             </div>
           }>
             {(s) => <>
@@ -2096,6 +2116,12 @@ export default function App() {
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
                       <button data-testid="fork-chat" onClick={() => openForkDialog(s().title)}
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork chat</button>
+                      <Show when={s().chatRole === 'creator'}>
+                        <button data-testid="new-project-chat" onClick={() => { const name = prompt('Name this chat', 'Strategy B'); if (name?.trim()) { setMenuOpen(false); void handleNew(s().agent, s().mode, s().id, name) } }}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>New chat in this project</button>
+                        <button data-testid="rename-project" onClick={() => void handleProjectRename(s().id)}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename project folder</button>
+                      </Show>
                       <Show when={roomContext()?.forkOf}>
                         <button data-testid="share-fork-outcome" onClick={shareForkOutcome}
                           style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#8bc99c', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Bring outcome back…</button>
@@ -2142,7 +2168,7 @@ export default function App() {
             <Show when={homeRoute().kind === 'costs'} fallback={
               <Show when={homeRoute().kind === 'scheduler'} fallback={
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
-                <RoomsHome onOpen={select} onSessionsChanged={refreshSessions} onOpenRoom={(name) => showHome({ kind: 'room', name })} />
+                <RoomsHome view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew('claude')} onOpen={select} onSessionsChanged={refreshSessions} />
               }>
                 {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
               </Show>

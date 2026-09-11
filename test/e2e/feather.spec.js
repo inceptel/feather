@@ -112,9 +112,9 @@ async function selectTestSession(page) {
 test.describe('App shell', () => {
   test('shows empty state when no session selected', async ({ page }) => {
     await page.goto(BASE)
-    await expect(page.getByText('Rooms', { exact: true })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('heading', { name: 'Chats', exact: true })).toBeVisible({ timeout: 10000 })
     // No tabs should be visible
-    await expect(page.locator('button:has-text("Chat")')).not.toBeVisible()
+    await expect(page.getByRole('button', { name: 'Chat', exact: true })).not.toBeVisible()
     await expect(page.locator('button:has-text("Terminal")')).not.toBeVisible()
   })
 
@@ -123,7 +123,7 @@ test.describe('App shell', () => {
     await page.waitForLoadState('networkidle')
     await openSidebar(page)
     await expect(page.getByText('Feather', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: '+ New Session', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '+ New chat', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Auto', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'CoS', exact: true })).toHaveCount(0)
   })
@@ -464,7 +464,7 @@ test.describe('Tab switching', () => {
     await expect(page.locator('.markdown').first()).toBeVisible()
   })
 
-  test('navigation keeps curated Wiki and removes raw Prompts and Updates feeds', async ({ page }) => {
+  test('session navigation keeps curated Wiki without exposing raw Prompts', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Wiki', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Prompts', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Updates', exact: true })).toHaveCount(0)
@@ -899,7 +899,7 @@ test.describe('Mobile viewport', () => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
     await openSidebar(page)
-    await expect(page.getByRole('button', { name: '+ New Session', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '+ New chat', exact: true })).toBeVisible()
   })
 
   test('messages are readable on mobile', async ({ page }) => {

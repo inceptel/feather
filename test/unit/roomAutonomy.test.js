@@ -92,9 +92,10 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
         FEATHER_OMP_AUTH_GATEWAY_URL: 'http://127.0.0.1:14000', FEATHER_ROOM_CLI: roomCli,
         PATH: `${binDir}:${process.env.PATH}`, TMUX_REG: tmuxReg, TMUX_SENT_LOG: sentLog, TMUX_COMMAND_LOG: commandLog,
       },
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stderr = ''
+    child.stdout.on('data', chunk => { stderr += chunk })
     child.stderr.on('data', chunk => { stderr += chunk })
     try {
       let health
@@ -160,7 +161,10 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       assert.ok(judged.includes(wakes.lastWakeAt))
       await new Promise(resolve => setTimeout(resolve, 300))
       assert.equal(count(readSent(), /\[Room judge · #ev-shop/g), 1, readSent())
-      wakes = readWakes()['ev-shop']
+      wakes = await waitFor(() => {
+        const current = readWakes()['ev-shop']
+        return current.judgeDue === false && Number.isFinite(Date.parse(readResidents()['ev-shop'].judge.lastWakeAt)) ? current : null
+      }, { message: 'judge delivery bookkeeping' })
       assert.equal(wakes.judgeDue, false)
       assert.ok(Number.isFinite(Date.parse(wakes.lastJudgeAt)))
       const judgeId = readResidents()['ev-shop'].judge.sessionId
@@ -201,15 +205,8 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       assert.match(fs.readFileSync(path.join(home, 'rooms/ev-shop/wiki/Log.md'), 'utf8'), /\[steer\] Price the equipment first\./)
       assert.equal(count(readSent(), /\[Room steer · #ev-shop/g), 0, 'the Leader is not woken by a steer')
       await waitFor(() => readSent().includes('[Room wake · #ev-shop · agent agent · checker') ? readSent() : null, { message: 'checker primed after steer' })
-      // The builder starts once the checker is primed; its wake prompt is the OMP session's first message.
-      const builderPrompts = () => [path.join(home, '.feather/omp-sessions'), path.join(stateDir, 'omp-sessions')]
-        .filter(dir => fs.existsSync(dir))
-        .flatMap(dir => fs.readdirSync(dir, { withFileTypes: true })
-          .filter(entry => entry.isDirectory())
-          .map(entry => path.join(dir, entry.name, 'scheduled-prompt.md')))
-        .filter(file => fs.existsSync(file))
-        .map(file => fs.readFileSync(file, 'utf8'))
-      await waitFor(() => builderPrompts().some(prompt => prompt.startsWith('[Room wake · #ev-shop · agent agent · builder')) || null, { attempts: 400, message: 'builder started with its wake prompt' })
+      // The default Creator is Claude and receives its opening through tmux.
+      await waitFor(() => readSent().includes('[Room wake · #ev-shop · agent agent · builder') || null, { attempts: 400, message: 'creator started with its wake prompt' })
       assert.equal((await post(`${base}/api/rooms/ev-shop/steer`, { text: '   ' })).status, 400)
       assert.equal((await post(`${base}/api/rooms/no-such-room/steer`, { text: 'x' })).status, 404)
 
@@ -256,6 +253,9 @@ describe('Room autonomy: Leader wakes, the judge, and the usage-limit fallback',
       const off = await (await post(`${base}/api/rooms/ev-shop/leader/wake`, { wakeIntervalMs: null })).json()
       assert.equal(off.leaderWake.enabled, false)
       assert.equal(off.leaderWake.nextWakeAtMs, null)
+    } catch (error) {
+      error.message += `\nServer stderr: ${stderr}`
+      throw error
     } finally {
       child.kill('SIGKILL')
       fs.rmSync(root, { recursive: true, force: true })

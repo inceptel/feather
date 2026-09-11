@@ -13,8 +13,11 @@ import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent 
 import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
+import { createChatPair } from './lib/chat-pair.js';
+import { createProjectRenamer, managedChatProject } from './lib/chat-projects.js';
 import { createKeyedLock } from './lib/sendlock.js';
-import { resolveCodexWatchId, codexAdoptionPending } from './lib/codex-watch.js';
+import { stopScheduledRules, scheduledRunMayContinue, mayReenableRalph } from './lib/autopilot.js';
+import { resolveCodexWatchId, codexAdoptionPending, codexHeadHasChatIdentity } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
 import { ensureStateLayout, resolveStatePaths } from './lib/state-paths.js';
 import {
@@ -27,6 +30,7 @@ import {
 } from './lib/omp.js';
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from './lib/omp-session.js';
 import { createJsonState, isJsonRecord } from './lib/json-state.js';
+import { createChatPins } from './lib/chat-pins.js';
 import {
   validateRules, normalizeRule, planTick, findIncidents, expiredRuns, markStarted, markFinished,
   runtimeOf, describeRule, formatDuration, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_ROUND_MS,
@@ -34,6 +38,8 @@ import {
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js';
 import { listWikiPages, readWikiPage, verifiedWikiRoot } from './lib/room-wiki.js';
+import { listSharedWiki, readSharedWiki } from './lib/shared-wiki.js';
+import { chatUpdates } from './lib/chat-updates.js';
 import { ROOM_LEADER_PROMPT_VERSION, roomLeaderPrompt } from './lib/room-leader.js';
 import { parseFrictionNotes, openFrictionComplaints } from './lib/friction.js';
 import { createUsageLedger, summarizeUsage } from './lib/usage-ledger.js';
@@ -885,7 +891,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
     }
     try {
       const facts = inspectSessionCandidate(candidate);
-      if (facts.worker) continue;
+      if (facts.worker || (meta[id]?.chatRole === 'reviewer' && !required.has(id) && query !== id)) continue;
       const effectiveTitle = meta[id]?.title || facts.title || id.slice(0, 8);
       if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
 
@@ -901,6 +907,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
         projectId: facts.projectId || null,
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
+        ...(meta[id]?.chatPair ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair } : {}),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
       });
       required.delete(id);
@@ -1196,18 +1203,26 @@ function isRalphSession(id) {
   return readMeta()[id]?.mode === RALPH_MODE;
 }
 
-function writeSessionSystemPrompt(id) {
+function sessionSystemPrompt(id) {
   const parts = [];
   const roomName = roomLeaderNameForSession(id);
   if (roomName) parts.push(roomLeaderPrompt(roomName));
   if (isRalphSession(id)) parts.push(ralphSystemPrompt());
-  if (parts.length === 0) return null;
+  const rolePrompt = readMeta()[id]?.chatPairPrompt;
+  if (rolePrompt) parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
+  return parts.join('\n\n');
+}
+
+function writeSessionSystemPrompt(id) {
+  const prompt = sessionSystemPrompt(id);
+  if (!prompt) return null;
+  const roomName = roomLeaderNameForSession(id);
   const promptDir = path.join(HOME, '.feather', 'session-system-prompts');
   fs.mkdirSync(promptDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(promptDir, 0o700);
   const version = `leader-${roomName ? ROOM_LEADER_PROMPT_VERSION : 0}-ralph-${isRalphSession(id) ? RALPH_PROMPT_VERSION : 0}`;
   const promptPath = path.join(promptDir, `${id}-${version}.md`);
-  fs.writeFileSync(promptPath, parts.join('\n\n'), { mode: 0o600 });
+  fs.writeFileSync(promptPath, prompt, { mode: 0o600 });
   fs.chmodSync(promptPath, 0o600);
   return promptPath;
 }
@@ -1314,8 +1329,9 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
   } else if (agent === 'codex') {
     ensureCodexTrust(cwd);
     const before = new Set(listCodexJsonlFiles().map(f => f.uuid));
-    const ralphFlag = isRalphSession(id)
-      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(ralphSystemPrompt())}`)}`
+    const systemPrompt = sessionSystemPrompt(id);
+    const ralphFlag = systemPrompt
+      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(systemPrompt)}`)}`
       : '';
     const args = [
       'codex',
@@ -1367,7 +1383,10 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
           const buf = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, fs.fstatSync(fd).size));
           fs.readSync(fd, buf, 0, buf.length, 0);
           fs.closeSync(fd);
-          return extractCodexCwd(buf) === spawnCwd;
+          const chatPair = readMeta()[featherId]?.chatPair;
+          const transcriptCwd = extractCodexCwd(buf);
+          const sameWorkspace = transcriptCwd === spawnCwd || (transcriptCwd && fs.realpathSync(transcriptCwd) === fs.realpathSync(spawnCwd));
+          return sameWorkspace && (!chatPair || codexHeadHasChatIdentity(buf, featherId));
         } catch { return false; }
       });
     }
@@ -1392,6 +1411,7 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
 }
 
 function resumeSession(id, cwd) {
+  cwd ||= readMeta()[id]?.harnessCwd || readMeta()[id]?.cwd;
   const agent = getAgentForSession(id);
   const name = tmuxName(id);
   // Codex/Claude model slug persisted at launch (scheduler-created sessions);
@@ -1412,11 +1432,12 @@ function resumeSession(id, cwd) {
     if (!sessionCwd && fpath) {
       try { sessionCwd = extractCodexCwd(fs.readFileSync(fpath).slice(0, CODEX_HEAD_BYTES)); } catch {}
     }
-    sessionCwd = (sessionCwd || HOME).replace(/[^a-zA-Z0-9._\-/]/g, '');
+    sessionCwd = sessionCwd || HOME;
     ensureCodexTrust(sessionCwd);
     const resumeArg = codexUuid ? `resume ${codexUuid}` : 'resume --last';
-    const ralphFlag = isRalphSession(id)
-      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(ralphSystemPrompt())}`)}`
+    const systemPrompt = sessionSystemPrompt(id);
+    const ralphFlag = systemPrompt
+      ? `-c ${shellQuote(`developer_instructions=${JSON.stringify(systemPrompt)}`)}`
       : '';
     const args = [
       'codex',
@@ -1490,8 +1511,8 @@ function getOmpSessionCwd(featherId) {
 // lib/sendlock.js for the keyed-lock semantics and its tests.
 const sendLock = createKeyedLock();
 
-async function sendInput(id, text) {
-  return sendLock(id, () => sendInputUnlocked(id, text));
+async function sendInput(id, text, maySend = null) {
+  return sendLock(id, () => sendInputUnlocked(id, text, maySend));
 }
 
 async function sendInputIdempotent(id, text, messageId) {
@@ -1517,7 +1538,8 @@ async function sendInputIdempotent(id, text, messageId) {
   });
 }
 
-async function sendInputUnlocked(id, text) {
+async function sendInputUnlocked(id, text, maySend = null) {
+  if (maySend && !maySend()) return { observed: false, cancelled: true };
   const target = tmuxName(id);
   if (!tmuxIsActive(id)) {
     resumeSession(id);
@@ -1525,6 +1547,16 @@ async function sendInputUnlocked(id, text) {
     if (settled === false) console.warn(`[send] ${target}: pane still changing ${TMUX_READY_TIMEOUT_MS}ms after resume; sending anyway`);
   }
   const buffer = `feather-${id.slice(0, 8)}`;
+  if (maySend) {
+    if (!maySend()) return { observed: false, cancelled: true };
+    // Commit guarded automation synchronously: Stop cannot interleave between
+    // paste and Enter. Once submitted, leave the current turn alone.
+    const before = tmuxCapture(target);
+    tmuxPaste(target, text, buffer);
+    tmuxRun(['send-keys', '-t', target, 'Enter']);
+    const submitted = await waitForPaneChange(target, before, 2000);
+    return { observed: submitted === true, ...(!maySend() ? { cancelled: true } : {}) };
+  }
 
   // Paste, then confirm the text reached the screen before submitting. A paste
   // that lands in a dying or half-drawn pane shows no change; retry it once.
@@ -1587,6 +1619,8 @@ function stopRalphSession(id, status = 'stopped') {
   cancelRalphCallback(id);
   patchRalphState(id, {
     enabled: false,
+    stopToken: randomUUID(),
+    lastBoundaryKey: null,
     status,
     blockedReason: null,
     completionReason: null,
@@ -1595,11 +1629,13 @@ function stopRalphSession(id, status = 'stopped') {
   });
 }
 
-function prepareRalphForHumanInput(id) {
+function prepareRalphForHumanInput(id, source = 'human') {
   if (!isRalphSession(id)) return;
+  if (!mayReenableRalph(readMeta()[id]?.ralph, source)) return;
   cancelRalphCallback(id);
   patchRalphState(id, {
     enabled: true,
+    lastBoundaryKey: null,
     status: 'working',
     blockedReason: null,
     completionReason: null,
@@ -1619,7 +1655,12 @@ function armRalphCallback(id, boundaryKey, attempt = 0, delayMs = RALPH_CALLBACK
     if (!state?.enabled || state.lastBoundaryKey !== boundaryKey) return;
     const iteration = (Number.isSafeInteger(state.iteration) ? state.iteration : 0) + 1;
     try {
-      await sendInput(id, ralphContinuationPrompt(iteration));
+      const maySend = () => {
+        const current = readMeta()[id]?.ralph;
+        return current?.enabled && current.lastBoundaryKey === boundaryKey;
+      };
+      const result = await sendInput(id, ralphContinuationPrompt(iteration), maySend);
+      if (result.cancelled) return;
       const latest = readMeta()[id]?.ralph;
       if (!latest?.enabled || latest.lastBoundaryKey !== boundaryKey) return;
       patchRalphState(id, {
@@ -1630,6 +1671,8 @@ function armRalphCallback(id, boundaryKey, attempt = 0, delayMs = RALPH_CALLBACK
         callbackAttempt: 0,
       });
     } catch (error) {
+      const current = readMeta()[id]?.ralph;
+      if (!current?.enabled || current.lastBoundaryKey !== boundaryKey) return;
       const nextAttempt = attempt + 1;
       const message = error instanceof Error ? error.message : String(error);
       if (nextAttempt < RALPH_CALLBACK_MAX_ATTEMPTS && readMeta()[id]?.ralph?.enabled) {
@@ -1675,6 +1718,18 @@ function scheduleRalphCallback(id, boundary) {
       status: 'blocked',
       lastBoundaryKey: boundary.key,
       blockedReason: boundary.blocked,
+      completionReason: null,
+      error: null,
+      callbackAttempt: 0,
+    });
+    return;
+  }
+  if (boundary.waiting) {
+    cancelRalphCallback(id);
+    patchRalphState(id, {
+      status: 'waiting',
+      lastBoundaryKey: boundary.key,
+      blockedReason: null,
       completionReason: null,
       error: null,
       callbackAttempt: 0,
@@ -2353,6 +2408,8 @@ const app = express();
 // classified, while leaving static assets and existing non-API read surfaces
 // available for production-shaped canary inspection.
 const READ_ONLY_API_ROUTES = [
+  /^\/api\/wiki(?:\/page)?$/,
+  /^\/api\/chat-pins$/,
   /^\/api\/health$/,
   /^\/api\/boxes$/,
   /^\/api\/sessions$/,
@@ -2850,7 +2907,23 @@ app.use('/api/sessions', (req, res, next) => {
 });
 
 app.get('/api/sessions', (req, res) => {
-  try { res.json({ sessions: discoverSessions(parseInt(req.query.limit) || 50, (req.query.q || '').trim() || null) }); }
+  try {
+    const autonomous = req.query.mode === 'ralph';
+    const required = autonomous ? Object.entries(readMeta()).filter(([, entry]) => entry.mode === RALPH_MODE).map(([id]) => id) : [];
+    const sessions = discoverSessions(parseInt(req.query.limit) || 50, (req.query.q || '').trim() || null, required);
+    if (autonomous) {
+      const meta = readMeta();
+      for (const id of required) {
+        if (sessions.some(session => session.id === id)) continue;
+        // A newly starting or dormant chat may not have a readable transcript.
+        // Its durable Ralph state must still be visible and stoppable.
+        sessions.push({ id, title: meta[id].title || id.slice(0, 8), agent: meta[id].agent || 'claude',
+          updatedAt: meta[id].ralph?.lastCallbackAt || null, isActive: tmuxIsActive(id),
+          mode: RALPH_MODE, ralph: publicRalphState(meta[id]) });
+      }
+    }
+    res.json({ sessions: autonomous ? sessions.filter(session => session.mode === RALPH_MODE) : sessions });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3100,6 +3173,52 @@ function createSessionForRequest(body) {
     throw e;
   }
 }
+
+const CHAT_PROJECTS_ROOT = process.env.FEATHER_PROJECTS_DIR || path.join(os.homedir(), 'projects');
+const PROJECT_RENAMER = createProjectRenamer({
+  file: path.join(STATE_PATHS.instance.root, 'project-renames.json'), root: CHAT_PROJECTS_ROOT,
+  readMeta, saveMeta: updateMeta,
+});
+if (!READ_ONLY_MODE) PROJECT_RENAMER.recover();
+app.post('/api/chats/:id/project/rename', (req, res) => {
+  try { res.json(PROJECT_RENAMER.rename(req.params.id, req.body?.name)); }
+  catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+
+app.post('/api/chats', async (req, res) => {
+  try {
+    const result = await createChatPair(req.body || {}, {
+      root: CHAT_PROJECTS_ROOT,
+      resolveProject: (id) => managedChatProject(CHAT_PROJECTS_ROOT, readMeta(), id),
+      wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki'),
+      spawn: (id, cwd, agent, options) => spawnSession(id, cwd, agent, options),
+      prime: async (id, prompt) => {
+        await waitForPaneSettled(tmuxName(id));
+        await sendInput(id, prompt);
+      },
+      createGroup: (group) => sidecar.createGroup(group),
+      teardownGroup: (id) => sidecar.teardownGroup(id),
+      save: ({ id, reviewerSessionId, groupId, cwd, projectId, name, agent, reviewerAgent, rolePrompts }) => updateMeta((meta) => ({
+        ...meta,
+        [id]: { ...meta[id], agent, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: { groupId, creatorSessionId: id, reviewerSessionId } },
+        [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId } },
+      })),
+      stop: (id) => {
+        try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
+        revokeSessionBridgeCapability(id);
+      },
+      forget: (ids) => updateMeta((meta) => {
+        const next = { ...meta };
+        for (const id of ids) delete next[id];
+        return next;
+      }),
+    });
+    res.json(result);
+  } catch (e) {
+    console.warn('[chat-pair] creation failed:', e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not start the Creator–Reviewer pair' });
+  }
+});
 
 app.post('/api/sessions', (req, res) => {
   try { res.json(createSessionForRequest(req.body || {})); }
@@ -3355,7 +3474,7 @@ function sidecarBroadcast(groupId, msg) {
 function sidecarGcIfDriverGone(group) {
   const driver = group.members.find(m => !m.spawned);
   if (!driver || tmuxIsActive(driver.sessionId)) return false;
-  if (group.kind === 'room') return false;
+  if (group.kind === 'room' || group.durable) return false;
   for (const m of group.members) {
     if (m.spawned) { try { execFileSync('tmux', ['kill-session', '-t', tmuxName(m.sessionId)], { stdio: 'ignore' }); } catch {} }
   }
@@ -3376,7 +3495,7 @@ function sidecarDeliver(group, fromRole, to, text) {
   // HTTP caller isn't blocked on the ~6s resume-if-dormant path. The per-session
   // lock serializes concurrent fan-in into any one session.
   for (const t of targets) {
-    prepareRalphForHumanInput(t.sessionId);
+    prepareRalphForHumanInput(t.sessionId, 'agent');
     sendInput(t.sessionId, sidecar.formatInbound(group.id, msg))
       .catch(e => console.warn('[sidecar] route failed:', e.message));
   }
@@ -3754,6 +3873,15 @@ app.post('/api/quick-links', (req, res) => {
 // ── Starred messages ───────────────────────────────────────────────────────
 
 const STARRED_FILE = STATE_PATHS.instance.starredFile;
+const CHAT_PINS = createChatPins({ file: path.join(STATE_PATHS.instance.root, 'chat-pins.json'), root: STATE_PATHS.instance.root });
+app.get('/api/chat-pins', (_req, res) => {
+  try { res.json(CHAT_PINS.snapshot(roomSnapshotCache.get())); }
+  catch (error) { res.status(500).json({ error: error.message }); }
+});
+app.post('/api/chat-pins/:id', (req, res) => {
+  try { CHAT_PINS.set(req.params.id, req.body); res.json(CHAT_PINS.snapshot(roomSnapshotCache.get())); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
 const STARRED_STATE = createJsonState({
   file: STARRED_FILE, root: STATE_PATHS.instance.root, document: 'starred messages',
   defaultValue: {}, validate: isJsonRecord,
@@ -4721,6 +4849,7 @@ function buildFeedProjection() {
     complaints: readFrictionComplaints(),
     publications: roomFeedPublications(rooms),
   });
+  current.push(...chatUpdates(readMeta(), process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki')));
 
   feedHistory = mergeSuperFeed(feedHistory, current, rooms);
   const items = attachFeedComments(feedHistory);
@@ -4857,6 +4986,7 @@ function schedulerFireNow(id, reason) {
   if (!rule) return `no rule ${id}`;
   if (!rule.enabled) return `${id} disabled`;
   const state = SCHEDULER_STATE.read();
+  if (runtimeOf(state, id).paused) return `${id} paused; resume it first`;
   if ((state.active || []).some((run) => run.ruleId === id)) return `${id} is already running`;
   if (schedulerLaunchesInFlight.has(id)) return `${id} is launching`;
   schedulerStartRun(rule, { reason }, Date.now());
@@ -5251,7 +5381,7 @@ function successionPrompt(roomName, { retiredSessionId, handoff }) {
   ].join(' ');
 }
 
-async function succeedRoomLeader(name, { model = '', handoff = true, force = false, opening = null } = {}) {
+async function succeedRoomLeader(name, { model = '', handoff = true, force = false, opening = null, maySend = null } = {}) {
   const cwd = path.join(ROOMS_HOME_DIR, name);
   if (!listRoomDirs().includes(name)) throw httpError(404, 'no such room');
   if (roomSuccessions.has(name)) throw httpError(409, `#${name} succession already in progress`);
@@ -5288,7 +5418,7 @@ async function succeedRoomLeader(name, { model = '', handoff = true, force = fal
       ? opening({ retiredSessionId, handoff: handoffStatus })
       : successionPrompt(name, { retiredSessionId, handoff: handoffStatus });
     setTimeout(() => {
-      sendInput(created.id, openingPrompt)
+      sendInput(created.id, openingPrompt, maySend)
         .catch((error) => console.warn(`[room] #${name} succession opening failed:`, error.message));
     }, ROOM_KICKOFF_DELAY_MS);
     return {
@@ -5466,6 +5596,18 @@ app.post('/api/rooms/:name/updates', (req, res) => {
 // Room wiki: curated Markdown under <room>/wiki/. Read-only surface — agents
 // (and the caretaker) write via the filesystem, Feather only serves it, so
 // both routes are allowlisted in read-only canary mode.
+app.get('/api/wiki', (req, res) => {
+  const sharedDir = process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki');
+  res.json({ pages: listSharedWiki(sharedDir, ROOMS_HOME_DIR) });
+});
+
+app.get('/api/wiki/page', (req, res) => {
+  const sharedDir = process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki');
+  const page = readSharedWiki(sharedDir, ROOMS_HOME_DIR, String(req.query.source || 'shared'), String(req.query.name || ''));
+  if (!page) return res.status(404).json({ error: 'no such wiki page' });
+  res.json(page);
+});
+
 app.get('/api/rooms/:name/wiki', (req, res) => {
   try {
     const { name } = req.params;
@@ -5581,6 +5723,7 @@ function residentWakeDue(resident, sessionId, meta, now) {
   const next = Number.isFinite(resident.nextWakeAtMs) ? resident.nextWakeAtMs : ROOM_PULSE_STARTED_AT + interval;
   if (now < next) return false;
   const ralph = meta[sessionId]?.ralph;
+  if (ralph?.status === 'stopped') return false;
   // Mid-turn residents wait for their boundary, but not forever: one whole
   // interval past due, wake it anyway (OMP queues the message) so a turn
   // stuck on a blocking command cannot silence a resident for good.
@@ -5594,16 +5737,23 @@ const RESIDENT_RELAUNCH_SETTLE_MS = Math.max(0, Number(process.env.FEATHER_RESID
 
 // A resident whose OMP process died before it wrote a session file cannot be
 // resumed; start it fresh in the Room and give it time to load before pasting.
-async function ensureResidentRunning(sessionId, roomName) {
+async function ensureResidentRunning(sessionId, roomName, maySend = () => true) {
+  if (!maySend()) return;
   if (!tmuxIsActive(sessionId) && !getOmpSessionId(sessionId)) {
     console.warn(`[room wake] #${roomName}: relaunching ${sessionId} (no OMP session to resume)`);
     launchOmpSession(sessionId, path.join(ROOMS_HOME_DIR, roomName));
     await sleep(RESIDENT_RELAUNCH_SETTLE_MS);
   }
 }
-async function wakeResident(sessionId, roomName, prompt) {
-  await ensureResidentRunning(sessionId, roomName);
-  await sendInput(sessionId, prompt);
+async function wakeResident(sessionId, roomName, prompt, mayContinue = () => true) {
+  const stopToken = readMeta()[sessionId]?.ralph?.stopToken;
+  const maySend = () => {
+    const ralph = readMeta()[sessionId]?.ralph;
+    return mayContinue() && ralph?.status !== 'stopped' && ralph?.stopToken === stopToken;
+  };
+  if (!maySend()) return { observed: false, cancelled: true };
+  await ensureResidentRunning(sessionId, roomName, maySend);
+  return sendInput(sessionId, prompt, maySend);
 }
 function checkResidentWakes() {
   if (!ROOM_PULSES_ENABLED) return;
@@ -5625,15 +5775,23 @@ function checkResidentWakes() {
         if (!entry || entry.sessionId !== sessionId) return current;
         return {
           ...current,
-          [roomName]: { ...current[roomName], [role]: { ...entry, nextWakeAtMs: now + interval, lastWakeAt: at.toISOString() } },
+          [roomName]: { ...current[roomName], [role]: { ...entry, nextWakeAtMs: now + interval } },
         };
       });
       const spec = ROOM_STANDARD_RESIDENTS.find((candidate) => candidate.role === role);
       const charter = spec?.charter || `${role.toUpperCase()}.md`;
       const prompt = residentWakePrompt({ roomName, role, charter, at });
       residentWakesInFlight.add(sessionId);
-      prepareRalphForHumanInput(sessionId);
+      prepareRalphForHumanInput(sessionId, 'agent');
       wakeResident(sessionId, roomName, prompt)
+        .then(result => {
+          if (result.cancelled) return;
+          ROOM_RESIDENTS_STATE.update(current => {
+            const entry = current[roomName]?.[role];
+            if (!entry || entry.sessionId !== sessionId) return current;
+            return { ...current, [roomName]: { ...current[roomName], [role]: { ...entry, lastWakeAt: at.toISOString() } } };
+          });
+        })
         .catch((error) => console.warn(`[room wake] #${roomName} ${role}:`, error.message))
         .finally(() => residentWakesInFlight.delete(sessionId));
     }
@@ -5779,11 +5937,15 @@ async function wakeRoomJudge(name, now = Date.now(), { force = false } = {}) {
   if (!judge?.sessionId) return false;
   const meta = readMeta();
   if (meta[judge.sessionId]?.mode !== RALPH_MODE) return false;
+  if (meta[judge.sessionId]?.ralph?.status === 'stopped') return false;
   if (!force && (judge.paused || judgeMidTurn(judge.sessionId, meta, judge.lastWakeAt))) return false;
   const entry = leaderWakeRecord(ROOM_LEADER_WAKES_STATE.read()[name]);
   const leaderSessionId = ROOM_LEADERS_STATE.read()[name] || null;
   const at = new Date(now);
   const wake = (async () => {
+    prepareRalphForHumanInput(judge.sessionId, 'agent');
+    const delivered = await wakeResident(judge.sessionId, name, judgeWakePrompt({ roomName: name, leaderSessionId, leaderWakeAt: entry.lastWakeAt, at }));
+    if (delivered.cancelled) return false;
     ROOM_LEADER_WAKES_STATE.update((current) => ({ ...current, [name]: { ...leaderWakeRecord(current[name]), judgeDue: false, lastJudgeAt: at.toISOString() } }));
     ROOM_RESIDENTS_STATE.update((current) => {
       const resident = current[name]?.judge;
@@ -5791,8 +5953,6 @@ async function wakeRoomJudge(name, now = Date.now(), { force = false } = {}) {
       return { ...current, [name]: { ...current[name], judge: { ...resident, lastWakeAt: at.toISOString() } } };
     });
     roomSnapshotCache.refresh();
-    prepareRalphForHumanInput(judge.sessionId);
-    await wakeResident(judge.sessionId, name, judgeWakePrompt({ roomName: name, leaderSessionId, leaderWakeAt: entry.lastWakeAt, at }));
     return true;
   })();
   judgeWakesInFlight.set(name, wake);
@@ -6056,14 +6216,24 @@ function schedulerPrompt(rule, { at, runtime }) {
 }
 
 const schedulerLaunchesInFlight = new Set();
+function schedulerAssertActive(run) {
+  if (!scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) throw new Error('Autopilot run stopped');
+}
+function schedulerRecordLaunch(run, extra) {
+  schedulerAssertActive(run);
+  Object.assign(run, extra);
+  SCHEDULER_STATE.update(current => ({ ...current, active: (current.active || []).map(candidate => candidate.runId === run.runId ? { ...candidate, ...extra } : candidate) }));
+}
 // Launch one run. The runtime already records the start, so a crash here
 // cannot double-fire; a thrown error closes the run as failed.
 async function schedulerLaunch(rule, run) {
+  schedulerAssertActive(run);
+  const maySend = () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run);
   const at = new Date(run.startedAt);
   const prompt = schedulerPrompt(rule, { at, runtime: runtimeOf(SCHEDULER_STATE.read(), rule.id) });
   const cwd = path.join(ROOMS_HOME_DIR, rule.room);
   if (rule.mode === 'fresh' && rule.target.kind === 'leader') {
-    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt });
+    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt, maySend });
     return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
   }
   if (rule.mode === 'fresh' && rule.target.kind === 'agent') return schedulerLaunchAgent(rule, run, at);
@@ -6071,28 +6241,32 @@ async function schedulerLaunch(rule, run) {
     if (!rule.prompt && rule.room !== HOUSE_ROOM_NAME) throw new Error('a fresh session rule needs a prompt');
     if (rule.room === HOUSE_ROOM_NAME) ensureHouseRoom();
     const id = randomUUID();
+    schedulerRecordLaunch(run, { sessionId: id });
     const title = rule.target.title || `Scheduled: ${rule.id}`;
-    await schedulerStartFreshSession({ id, cwd, room: rule.room, engine: rule.target.engine, model: rule.target.model, title, prompt });
+    await schedulerStartFreshSession({ id, cwd, room: rule.room, engine: rule.target.engine, model: rule.target.model, title, prompt, run });
     roomSnapshotCache.refresh();
     return { sessionId: id, marker: prompt.split('\n')[0] };
   }
   // inject
   let sessionId = schedulerTargetSessionId(rule);
   if (!sessionId && rule.target.kind === 'leader') {
-    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt });
+    const seated = await succeedRoomLeader(rule.room, { handoff: false, force: true, opening: () => prompt, maySend });
     return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
   }
   if (!sessionId) throw new Error(`no ${rule.target.kind === 'resident' ? rule.target.role : 'target'} session in #${rule.room}`);
-  prepareRalphForHumanInput(sessionId);
-  if (getAgentForSession(sessionId) === 'omp') await wakeResident(sessionId, rule.room, prompt);
-  else await sendInput(sessionId, prompt);
+  prepareRalphForHumanInput(sessionId, 'agent');
+  const delivered = getAgentForSession(sessionId) === 'omp'
+    ? await wakeResident(sessionId, rule.room, prompt, maySend)
+    : await sendInput(sessionId, prompt, maySend);
+  if (delivered.cancelled) throw new Error('Autopilot run stopped');
   return { sessionId, marker: prompt.split('\n')[0] };
 }
 
 // One fresh chat on any harness, assigned to a Room, opened with a prompt.
 // OMP takes the prompt as a file at launch; Claude and Codex get it typed
 // in once the CLI is up.
-async function schedulerStartFreshSession({ id, cwd, room, engine, model = null, title, prompt }) {
+async function schedulerStartFreshSession({ id, cwd, room, engine, model = null, title, prompt, run }) {
+  if (run) schedulerAssertActive(run);
   ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: room }));
   if (engine === 'omp') {
     const sessionDir = path.join(OMP_SESSIONS, id);
@@ -6106,7 +6280,9 @@ async function schedulerStartFreshSession({ id, cwd, room, engine, model = null,
   spawnSession(id, cwd, engine, { model: model || '' });
   updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title, ...(model ? { model: sanitizeOmpModel(model) } : {}) } }));
   await sleep(ROOM_KICKOFF_DELAY_MS);
-  await sendInput(id, prompt);
+  if (run) schedulerAssertActive(run);
+  const delivered = await sendInput(id, prompt, run ? () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run) : null);
+  if (delivered.cancelled) throw new Error('Autopilot run stopped');
 }
 
 // One agent = a builder chat plus a checker chat in one sidecar group. The
@@ -6122,6 +6298,7 @@ async function schedulerLaunchAgent(rule, run, at) {
   const groupId = `agent-${rule.room}-${agentName}-${run.runId.slice(0, 8)}`;
   const budgetMs = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const roundMs = rule.target.roundMs;
+  schedulerRecordLaunch(run, { sessionId: builderId, agent: { groupId, checkerSessionId: checkerId, roundMs } });
   sidecar.createGroup({
     id: groupId,
     members: [
@@ -6134,10 +6311,10 @@ async function schedulerLaunchAgent(rule, run, at) {
   const builderPrompt = builderWakePrompt({ roomName: rule.room, agentName, group: groupId, at, budgetMs, roundMs, checkerEngine: rule.target.checker.engine });
   const checkerPrompt = checkerPrimePrompt({ roomName: rule.room, agentName, group: groupId, at, budgetMs, roundMs, builderEngine: rule.target.builder.engine });
   try {
-    await schedulerStartFreshSession({ id: checkerId, cwd, room: rule.room, engine: rule.target.checker.engine, model: rule.target.checker.model, title: `checker ${agentName}: #${rule.room}`, prompt: checkerPrompt });
-    await schedulerStartFreshSession({ id: builderId, cwd, room: rule.room, engine: rule.target.builder.engine, model: rule.target.builder.model, title: `builder ${agentName}: #${rule.room}`, prompt: builderPrompt });
+    await schedulerStartFreshSession({ id: checkerId, cwd, room: rule.room, engine: rule.target.checker.engine, model: rule.target.checker.model, title: `Reviewer ${agentName}: #${rule.room}`, prompt: checkerPrompt, run });
+    await schedulerStartFreshSession({ id: builderId, cwd, room: rule.room, engine: rule.target.builder.engine, model: rule.target.builder.model, title: `Creator ${agentName}: #${rule.room}`, prompt: builderPrompt, run });
   } catch (error) {
-    schedulerRetireAgent({ sessionId: builderId, agent: { groupId, checkerSessionId: checkerId } });
+    if (scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) schedulerRetireAgent({ sessionId: builderId, agent: { groupId, checkerSessionId: checkerId } });
     throw error;
   }
   roomSnapshotCache.refresh();
@@ -6168,6 +6345,7 @@ function schedulerAgentStatus(run) {
 // roundMs and the wake ends as 'timeout' at twice that. Returns 'timeout'
 // when the tick should close the run.
 async function schedulerAgentRoundCheck(run, rule, now) {
+  if (!scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) return null;
   const last = schedulerAgentLastMessage(run);
   if (!last || AGENT_END_RE.test(last.text || '')) return null;
   const roundMs = run.agent?.roundMs || rule.target.roundMs || DEFAULT_ROUND_MS;
@@ -6186,8 +6364,11 @@ async function schedulerAgentRoundCheck(run, rule, now) {
     : `[round limit · #${rule.room}] The checker has been waiting ${formatDuration(roundMs)} for you. Answer now with \`sidecar post --to checker\`: revised work, a question, or [STOPPED] with your progress recorded on the Working line. Feather ends this wake in ${formatDuration(roundMs)}.`;
   try {
     if (target) {
-      if (getAgentForSession(target) === 'omp') await wakeResident(target, rule.room, text);
-      else await sendInput(target, text);
+      const maySend = () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run);
+      const delivered = getAgentForSession(target) === 'omp'
+        ? await wakeResident(target, rule.room, text, maySend)
+        : await sendInput(target, text, maySend);
+      if (delivered.cancelled) return null;
     }
     appendSchedulerRun({ ...run, event: 'round-nudged', waitingOn, seq: last.seq, at: new Date(now).toISOString() });
   } catch (error) { console.warn(`[scheduler] ${rule.id} round nudge failed:`, error.message); }
@@ -6211,6 +6392,7 @@ function schedulerFireRoomAgents(room, now, reason) {
   const state = SCHEDULER_STATE.read();
   for (const rule of Object.values(rules)) {
     if (rule.room !== room || rule.target.kind !== 'agent' || !rule.enabled) continue;
+    if (runtimeOf(state, rule.id).paused) continue;
     if ((state.active || []).some((run) => run.ruleId === rule.id) || schedulerLaunchesInFlight.has(rule.id)) continue;
     schedulerStartRun(rule, { reason }, now);
     fired.push(rule.id);
@@ -6377,14 +6559,18 @@ function schedulerWrapUpPrompt(rule, run, now) {
   ].join('\n');
 }
 async function schedulerNudge(run, rule, now) {
+  if (!scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) return;
   SCHEDULER_STATE.update((current) => ({
     ...current,
     active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, nudgedAt: new Date(now).toISOString() } : candidate),
   }));
   try {
     const prompt = schedulerWrapUpPrompt(rule, run, now);
-    if (getAgentForSession(run.sessionId) === 'omp') await wakeResident(run.sessionId, rule.room, prompt);
-    else await sendInput(run.sessionId, prompt);
+    const maySend = () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run);
+    const delivered = getAgentForSession(run.sessionId) === 'omp'
+      ? await wakeResident(run.sessionId, rule.room, prompt, maySend)
+      : await sendInput(run.sessionId, prompt, maySend);
+    if (delivered.cancelled) return;
     appendSchedulerRun({ ...run, event: 'nudged', nudgedAt: new Date(now).toISOString() });
     console.log(`[scheduler] ${rule.id} wrap-up nudge sent to ${run.sessionId}`);
   } catch (error) {
@@ -6392,13 +6578,15 @@ async function schedulerNudge(run, rule, now) {
   }
 }
 
-function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = null } = {}) {
+function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = null, preserveChat = false } = {}) {
+  if (!(SCHEDULER_STATE.read().active || []).some(candidate => candidate.runId === run.runId)) return;
   SCHEDULER_STATE.update((current) => ({
     ...current,
     runtime: { ...(current.runtime || {}), [run.ruleId]: markFinished(runtimeOf(current, run.ruleId), { outcome, at: now }) },
     active: (current.active || []).filter((candidate) => candidate.runId !== run.runId),
   }));
   appendSchedulerRun({ ...run, room: run.room || rule?.room || run.ruleId.split('/')[0], event: 'finished', outcome, finishedAt: new Date(now).toISOString(), durationMs: now - Date.parse(run.startedAt), ...(detail ? { detail } : {}) });
+  if (preserveChat) return;
   if (rule?.target.kind === 'agent' || run.agent) { schedulerRetireAgent(run); return; }
   // A fresh one-shot that is still open (a Claude or Codex chat idling after
   // its turn, or a timeout) is retired here so finished wakes do not pile up.
@@ -6420,6 +6608,9 @@ function schedulerStartRun(rule, decision, now) {
   schedulerLaunchesInFlight.add(rule.id);
   schedulerLaunch(rule, run)
     .then(({ sessionId, marker, ...extra }) => {
+      if (!scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) {
+        return;
+      }
       SCHEDULER_STATE.update((current) => ({
         ...current,
         active: (current.active || []).map((candidate) => candidate.runId === run.runId ? { ...candidate, sessionId, marker, ...extra } : candidate),
@@ -6532,6 +6723,37 @@ app.get('/api/scheduler', (req, res) => {
   try { res.json(schedulerSnapshot({ room: req.query.room ? String(req.query.room) : null })); }
   catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// The stop is durable before teardown, including launches waiting for a CLI.
+function schedulerStopRules(ids, { pause = false } = {}) {
+  SCHEDULER_STATE.update(current => stopScheduledRules(current, ids, { pause }));
+  const state = SCHEDULER_STATE.read();
+  for (const run of state.active || []) {
+    if (!ids.includes(run.ruleId)) continue;
+    for (const id of [run.sessionId, run.agent?.checkerSessionId]) {
+      if (id && isRalphSession(id)) stopRalphSession(id);
+    }
+    schedulerFinishRun(run, 'stopped', { rule: state.rules[run.ruleId], detail: pause ? 'paused by user' : 'stopped by user', preserveChat: true });
+  }
+}
+app.post('/api/scheduler/stop-all', (req, res) => {
+  try {
+    const ids = Object.keys(SCHEDULER_STATE.read().rules || {});
+    schedulerStopRules(ids);
+    const ralphIds = Object.entries(readMeta()).filter(([, meta]) => meta.mode === 'ralph').map(([id]) => id);
+    for (const id of ralphIds) {
+      stopRalphSession(id);
+    }
+    res.json({ ok: true, stoppedRules: ids.length, stoppedChats: ralphIds.length });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+app.post('/api/scheduler/chats/:id/stop', (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!isRalphSession(id)) throw httpError(404, 'no such autonomous chat');
+    stopRalphSession(id);
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 app.get('/api/scheduler/runs', (req, res) => {
   try {
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
@@ -6563,6 +6785,11 @@ app.put('/api/scheduler/rules/:room/:name', (req, res) => {
 app.delete('/api/scheduler/rules/:room/:name', (req, res) => {
   try {
     const { id } = schedulerRuleOr404(req);
+    // Validate dependent rules before stopping or removing anything.
+    const remaining = { ...(SCHEDULER_STATE.read().rules || {}) };
+    delete remaining[id];
+    validateRules(remaining);
+    schedulerStopRules([id]);
     SCHEDULER_STATE.update((current) => {
       const rules = { ...(current.rules || {}) };
       delete rules[id];
@@ -6579,14 +6806,15 @@ app.post('/api/scheduler/rules/:room/:name/:action', (req, res) => {
     const { id } = schedulerRuleOr404(req);
     const action = req.params.action;
     const now = Date.now();
-    if (action === 'pause' || action === 'resume') {
+    if (action === 'stop' || action === 'pause') {
+      schedulerStopRules([id], { pause: action === 'pause' });
+    } else if (action === 'resume') {
       SCHEDULER_STATE.update((current) => ({
         ...current,
+        rules: { ...(current.rules || {}), [id]: { ...current.rules[id], enabled: true } },
         runtime: {
           ...(current.runtime || {}),
-          [id]: action === 'pause'
-            ? { ...runtimeOf(current, id), paused: true, pausedReason: 'paused by user' }
-            : { ...runtimeOf(current, id), paused: false, pausedReason: null, consecutiveFailures: 0, incidentAt: null, lastRunAt: new Date(now).toISOString() },
+          [id]: { ...runtimeOf(current, id), paused: false, pausedReason: null, consecutiveFailures: 0, incidentAt: null, lastRunAt: new Date(now).toISOString() },
         },
       }));
     } else if (action === 'fire') {

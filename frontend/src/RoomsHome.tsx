@@ -1,515 +1,293 @@
-import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, createRoom, createSession, assignSessionToRoom, openIntakeChat, setRoomPulse, fetchRoomFriction, renameSession, RoomInfo, SessionMeta, FrictionComplaint } from './api'
-import { RoomWikiView } from './components/RoomWikiView'
+import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, For } from 'solid-js'
+import { fetchRooms, fetchSessions, RoomInfo, SessionMeta } from './api'
+import { appUrl } from './lib/appPath.js'
+import { markdownCSS, renderWikiMarkdown } from './components/MessageView'
 import { SuperFeed } from './components/SuperFeed'
-import { INTAKE_ROOM, pickIntakeSession } from '../../lib/intake.js'
 
-// Full-screen rooms home (iMessage model, phone-first): one row per room
-// folder under ~/rooms/, latest message snippet, status dot. Tap a session
-// to open it in the normal session view. This is the default view when no
-// session is open; the sidebar stays untouched.
+type ChatPin = { id: string, title?: string, legacy?: boolean }
+type WikiPage = { source: string, name: string, size: number, updatedAt: string }
 
-function timeAgo(iso: string | null) {
+function SharedWiki(props: { source?: string, refreshKey: number }) {
+  const [pages, setPages] = createSignal<WikiPage[]>([])
+  const [query, setQuery] = createSignal('')
+  const [selected, setSelected] = createSignal<{ source: string, name: string } | null>(null)
+  const [content, setContent] = createSignal('')
+  const [loading, setLoading] = createSignal(false)
+  const [error, setError] = createSignal('')
+  let generation = 0
+  let pageGeneration = 0
+  onCleanup(() => { ++generation; ++pageGeneration })
+  const label = (source: string) => source === 'shared' ? 'Shared wiki' : source.replace(/^room:/, '')
+  const filtered = createMemo(() => pages().filter(page => `${label(page.source)} ${page.name}`.toLowerCase().includes(query().toLowerCase())))
+
+  async function openPage(page: { source: string, name: string }) {
+    const own = ++pageGeneration
+    setSelected(page)
+    setContent('')
+    setLoading(true)
+    setError('')
+    try {
+      const response = await fetch(appUrl(`/api/wiki/page?${new URLSearchParams(page)}`))
+      if (!response.ok) throw new Error('Could not load wiki page')
+      const data = await response.json()
+      if (own === pageGeneration) setContent(data.content)
+    } catch (cause) {
+      if (own === pageGeneration) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally { if (own === pageGeneration) setLoading(false) }
+  }
+
+  createEffect(() => {
+    props.refreshKey
+    const source = props.source ? `room:${props.source}` : 'shared'
+    const own = ++generation
+    const ownPage = ++pageGeneration
+    setLoading(true)
+    setError('')
+    fetch(appUrl('/api/wiki')).then(async response => {
+      if (!response.ok) throw new Error('Could not load wiki')
+      const data = await response.json()
+      if (own !== generation) return
+      setPages(data.pages)
+      if (ownPage !== pageGeneration) return
+      const first = data.pages.find((page: WikiPage) => page.source === source && page.name === 'Home') || data.pages.find((page: WikiPage) => page.source === source) || data.pages[0]
+      if (first) await openPage(first)
+      else { setSelected(null); setContent(''); setLoading(false) }
+    }).catch(cause => {
+      if (own === generation && ownPage === pageGeneration) { setError(cause instanceof Error ? cause.message : String(cause)); setLoading(false) }
+    })
+  })
+
+  function followLink(event: MouseEvent) {
+    const anchor = (event.target as HTMLElement).closest('a')
+    if (!anchor) return
+    const href = anchor.getAttribute('href') || ''
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//')) {
+      anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer'); return
+    }
+    if (href.startsWith('#')) return
+    event.preventDefault()
+    const current = selected()
+    if (!current) return
+    let raw: string
+    try { raw = decodeURIComponent(href.replace(/[#?].*$/, '')).replace(/\.md$/i, '') } catch { return }
+    const parts = raw.startsWith('/') ? [] : current.name.split('/').slice(0, -1)
+    for (const segment of raw.split('/')) {
+      if (!segment || segment === '.') continue
+      if (segment === '..') { if (!parts.length) return; parts.pop() }
+      else parts.push(segment)
+    }
+    if (parts.length) void openPage({ source: current.source, name: parts.join('/') })
+  }
+
+  return <section data-testid="shared-wiki">
+    <style>{markdownCSS}</style>
+    <p style={{ color: '#999', 'font-size': '13px' }}>Knowledge saved across your chats.</p>
+    <input type="search" aria-label="Search wiki pages" placeholder="Find a page by name or collection" value={query()} onInput={event => setQuery(event.currentTarget.value)} style={{ width: '100%', 'box-sizing': 'border-box', padding: '12px', background: '#191919', border: '1px solid #333', 'border-radius': '6px', color: '#ddd' }} />
+    <nav aria-label="Wiki pages" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '16px 0', 'max-height': '180px', overflow: 'auto' }}>
+      <For each={filtered()}>{page => <button onClick={() => void openPage(page)} aria-pressed={selected()?.source === page.source && selected()?.name === page.name} style={{ background: selected()?.source === page.source && selected()?.name === page.name ? '#243047' : '#191919', color: '#ddd', border: '1px solid #333', 'border-radius': '6px', padding: '9px 12px', cursor: 'pointer', 'text-align': 'left' }}>{page.name}<span style={{ display: 'block', color: '#999', 'font-size': '11px', 'margin-top': '3px' }}>{label(page.source)}</span></button>}</For>
+    </nav>
+    <Show when={error()}><p role="alert">{error()}</p></Show>
+    <Show when={loading()}><p role="status">Loading wiki…</p></Show>
+    <Show when={!loading() && !error() && !filtered().length}><p style={{ color: '#999' }}>{pages().length ? 'No matching pages.' : 'No wiki pages yet.'}</p></Show>
+    <Show when={!loading() && !error() && selected()}><article class="markdown wiki-markdown" onClick={followLink} style={{ 'overflow-wrap': 'anywhere', 'line-height': '1.6' }} innerHTML={renderWikiMarkdown(content())} /></Show>
+  </section>
+}
+
+function timeAgo(iso?: string | null) {
   if (!iso) return ''
-  const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
-  if (m < 1) return 'now'
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000))
+  if (!Number.isFinite(minutes)) return ''
+  if (minutes < 1) return 'now'
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`
+  return `${Math.floor(minutes / 1440)}d`
 }
 
-function timeUntil(iso: string | null) {
-  if (!iso) return 'later'
-  const m = Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 60000))
-  if (m < 1) return 'now'
-  if (m < 60) return `in ${m}m`
-  return `in ${Math.ceil(m / 60)}h`
-}
+// The legacy component name preserves callers and stored Room data. The home
+// itself is now chats; no Room creation or resident management is required.
+export default function RoomsHome(props: {
+  onOpen: (id: string) => void
+  onNewChat?: () => void
+  onSessionsChanged?: () => void
+  view?: 'chats' | 'wiki' | 'updates'
+}) {
+  const [rooms, setRooms] = createSignal<RoomInfo[]>([])
+  const [sessions, setSessions] = createSignal<SessionMeta[]>([])
+  const [pins, setPins] = createSignal<ChatPin[]>([])
+  const [archived, setArchived] = createSignal<string[]>([])
+  const [showArchived, setShowArchived] = createSignal(false)
+  const [query, setQuery] = createSignal('')
+  const [results, setResults] = createSignal<SessionMeta[]>([])
+  const [loading, setLoading] = createSignal(true)
+  const [searching, setSearching] = createSignal(false)
+  const [error, setError] = createSignal('')
+  const [pendingPins, setPendingPins] = createSignal<string[]>([])
+  const [wikiContext, setWikiContext] = createSignal('')
+  const [openedWiki, setOpenedWiki] = createSignal(false)
+  const [refreshKey, setRefreshKey] = createSignal(0)
+  let disposed = false
+  let searchGeneration = 0
+  let pinsGeneration = 0
+  let refreshing = false
 
-function snippetLabel(latest: { role: string, text: string } | null) {
-  if (!latest) return 'No messages yet'
-  const prefix = latest.role === 'user' ? 'Allan: ' : latest.role === 'notes' ? 'notes: ' : ''
-  return prefix + latest.text
-}
-
-function pulseLabel(room: RoomInfo) {
-  if (!room.pulse.enabled) return ''
-  const age = timeAgo(room.pulse.lastRunAt)
-  const started = age === 'now' ? 'Started now' : age ? `Started ${age} ago` : 'Not run yet'
-  if (room.pulse.status === 'working') return `${started} · collecting status`
-  if (room.pulse.status === 'error') return `Status failed · retries ${timeUntil(room.pulse.nextRunAt)}`
-  return `${started} · next ${timeUntil(room.pulse.nextRunAt)}`
-}
-
-function updateTimeLabel(iso: string | null) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const when = d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-  const ago = timeAgo(iso)
-  return ago && ago !== 'now' ? `${when} · ${ago} ago` : `${when} · just now`
-}
-
-function leaderRoomSession(room: RoomInfo) {
-  return room.sessions.find((session) => session.id === room.leaderSessionId) || null
-}
-
-function roleLabel(role: string) {
-  return role.split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : '').join(' ')
-}
-
-export default function RoomsHome(props: { onOpen: (id: string) => void, onSessionsChanged?: () => void, onOpenRoom?: (name: string) => void }) {
-  const [rooms, setRooms] = createSignal<RoomInfo[] | null>(null)
-  const [error, setError] = createSignal<string | null>(null)
-  const [expanded, setExpanded] = createSignal<string | null>(null)
-  const [managingRoom, setManagingRoom] = createSignal<string | null>(null)
-  const [busy, setBusy] = createSignal(false)
-  const [attachLoading, setAttachLoading] = createSignal(false)
-  const [attachingRoom, setAttachingRoom] = createSignal<string | null>(null)
-  const [attachCandidates, setAttachCandidates] = createSignal<SessionMeta[]>([])
-  const [attachError, setAttachError] = createSignal<string | null>(null)
-  const [attachQuery, setAttachQuery] = createSignal('')
-  const [wikiRoom, setWikiRoom] = createSignal<string | null>(null)
-  const [frictionRoom, setFrictionRoom] = createSignal<string | null>(null)
-  const [frictionList, setFrictionList] = createSignal<FrictionComplaint[]>([])
-  const [frictionLoading, setFrictionLoading] = createSignal(false)
-
-  let roomsEpoch = 0
-  const [frictionError, setFrictionError] = createSignal<string | null>(null)
   async function refresh() {
-    const epoch = roomsEpoch
-    try {
-      const next = await fetchRooms()
-      if (epoch === roomsEpoch) { setRooms(next); setError(null) }
-    } catch (error) {
-      if (epoch === roomsEpoch) setError(error instanceof Error ? error.message : String(error))
+    if (refreshing) return
+    refreshing = true
+    const generation = pinsGeneration
+    const responses = await Promise.allSettled([
+      fetchRooms(), fetchSessions(null, undefined, 150),
+      fetch(appUrl('/api/chat-pins')).then(async response => {
+        if (!response.ok) throw new Error('Could not load pinned chats')
+        return await response.json() as { pins: ChatPin[], archived?: string[] }
+      }),
+    ])
+    if (disposed) return
+    const [roomResponse, sessionResponse, pinResponse] = responses
+    if (roomResponse.status === 'fulfilled') {
+      setRooms(roomResponse.value)
     }
-  }
-
-  let timer: ReturnType<typeof setInterval>
-  onMount(() => { refresh(); timer = setInterval(() => { if (!wikiRoom()) refresh() }, 10000) })
-  onCleanup(() => clearInterval(timer))
-
-  // Pull-to-refresh on phones: drag down from the top of the list past the
-  // threshold and release. The feed re-fetches through refreshKey.
-  const PULL_THRESHOLD = 72
-  const [pull, setPull] = createSignal(0)
-  const [pullRefreshing, setPullRefreshing] = createSignal(false)
-  const [feedRefreshKey, setFeedRefreshKey] = createSignal(0)
-  let scroller: HTMLDivElement | undefined
-  let pullStartY: number | null = null
-  function onTouchStart(event: TouchEvent) {
-    pullStartY = scroller && scroller.scrollTop <= 0 && !pullRefreshing() ? event.touches[0].clientY : null
-  }
-  function onTouchMove(event: TouchEvent) {
-    if (pullStartY === null) return
-    const delta = event.touches[0].clientY - pullStartY
-    if (delta <= 0 || (scroller && scroller.scrollTop > 0)) { setPull(0); return }
-    setPull(Math.min(delta * 0.5, PULL_THRESHOLD * 1.5))
-  }
-  async function onTouchEnd() {
-    if (pullStartY === null) return
-    pullStartY = null
-    if (pull() < PULL_THRESHOLD) { setPull(0); return }
-    setPull(PULL_THRESHOLD * 0.6)
-    setPullRefreshing(true)
-    setFeedRefreshKey(feedRefreshKey() + 1)
-    try { await refresh() } finally {
-      setPullRefreshing(false)
-      setPull(0)
+    if (sessionResponse.status === 'fulfilled') setSessions(sessionResponse.value.sessions)
+    if (pinResponse.status === 'fulfilled' && generation === pinsGeneration) {
+      setPins(pinResponse.value.pins)
+      setArchived(pinResponse.value.archived || [])
     }
+    const failed = responses.find(response => response.status === 'rejected')
+    setError(failed?.status === 'rejected' ? String(failed.reason?.message || failed.reason) : '')
+    setLoading(false)
+    refreshing = false
   }
 
-  async function newRoom() {
-    const name = prompt('Room name (lowercase, digits, dashes):')?.trim()
-    if (!name) return
-    const mission = prompt('Mission, in your own words (one or two sentences). Leave empty for a bare folder with no agents.')
-    if (mission === null) return
-    setBusy(true)
+  onMount(() => {
+    void refresh()
+    const timer = setInterval(() => { if (!document.hidden) void refresh() }, 15000)
+    onCleanup(() => { disposed = true; clearInterval(timer); ++searchGeneration })
+  })
+
+  createEffect(() => {
+    props.view
+    setOpenedWiki(false)
+  })
+
+  createEffect(() => {
+    const search = query().trim()
+    const generation = ++searchGeneration
+    if (!search) { setResults([]); setSearching(false); return }
+    setSearching(true)
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetchSessions(null, search, 150)
+        if (!disposed && generation === searchGeneration) setResults(response.sessions)
+      } catch (cause) {
+        if (!disposed && generation === searchGeneration) {
+          setResults([])
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      } finally {
+        if (!disposed && generation === searchGeneration) setSearching(false)
+      }
+    }, 250)
+    onCleanup(() => clearTimeout(timer))
+  })
+
+  const allSessions = createMemo(() => {
+    const byId = new Map<string, SessionMeta>()
+    for (const room of rooms()) for (const session of room.sessions) byId.set(session.id, session)
+    for (const session of sessions()) byId.set(session.id, session)
+    return byId
+  })
+  const pinnedChats = createMemo(() => pins().filter(pin => !archived().includes(pin.id)).map(pin => {
+    const session = allSessions().get(pin.id)
+    return { ...session, id: pin.id, title: (pin.legacy ? pin.title : session?.title) || pin.title || 'Pinned chat', updatedAt: session?.updatedAt || '', isActive: session?.isActive || false } as SessionMeta
+  }))
+  const recentChats = createMemo(() => sessions().filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)))
+  const archivedChats = createMemo(() => archived().map(id => allSessions().get(id) || { id, title: pins().find(pin => pin.id === id)?.title || 'Archived chat', updatedAt: '', isActive: false }))
+  const searchResults = createMemo(() => results().filter(session => showArchived() || !archived().includes(session.id)))
+
+  async function toggleArchive(session: SessionMeta) {
+    if (pendingPins().includes(session.id)) return
+    const shouldArchive = !archived().includes(session.id)
+    ++pinsGeneration
+    setPendingPins(previous => [...previous, session.id])
     try {
-      const created = await createRoom(name, mission.trim())
-      await refresh()
-      setExpanded(name)
+      const response = await fetch(appUrl(`/api/chat-pins/${encodeURIComponent(session.id)}`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived: shouldArchive }),
+      })
+      if (!response.ok) throw new Error('Could not update archived chat')
+      ++pinsGeneration
+      setArchived(previous => shouldArchive ? [...previous, session.id] : previous.filter(id => id !== session.id))
       props.onSessionsChanged?.()
-      if (created.leaderSessionId) props.onOpen(created.leaderSessionId)
-    }
-    catch (e: any) { alert(e.message) }
-    finally { setBusy(false) }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { setPendingPins(previous => previous.filter(id => id !== session.id)) }
   }
 
-  async function newChat(room: RoomInfo, agent?: string, asLeader = false, title?: string) {
-    setBusy(true)
+  async function togglePin(session: SessionMeta) {
+    if (pendingPins().includes(session.id)) return
+    const pinned = !pins().some(pin => pin.id === session.id)
+    ++pinsGeneration
+    setPendingPins(previous => [...previous, session.id])
     try {
-      const id = await createSession(room.cwd, asLeader ? 'omp' : agent, asLeader ? { name: room.name, role: 'leader' } : undefined)
-      // Leader creation assigns membership atomically before OMP launches so
-      // its first system prompt already carries the role. Other harnesses are
-      // grouped after launch as before.
-      if (!asLeader) await assignSessionToRoom(room.name, id)
-      if (title) await renameSession(id, title)
+      const response = await fetch(appUrl(`/api/chat-pins/${encodeURIComponent(session.id)}`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned, title: session.title }),
+      })
+      if (!response.ok) throw new Error('Could not update pinned chat')
+      ++pinsGeneration
+      setPins(previous => pinned ? [...previous.filter(pin => pin.id !== session.id), { id: session.id, title: session.title }] : previous.filter(pin => pin.id !== session.id))
       props.onSessionsChanged?.()
-      props.onOpen(id)
-    } catch (e: any) { alert(e.message) }
-    finally { setBusy(false) }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally { setPendingPins(previous => previous.filter(id => id !== session.id)) }
   }
 
-  const intakeRoom = () => rooms()?.find((room) => room.name === INTAKE_ROOM) || null
-  const intakeSession = () => { const room = intakeRoom(); return room ? pickIntakeSession(room.sessions, { skipIds: [room.pulse?.sessionId] }) : null }
-  // Rooms the user works in; #intake lives in the pinned block above.
-  const listedRooms = () => (rooms() || []).filter((room) => room.name !== INTAKE_ROOM)
-
-  async function openIntake(fresh: boolean) {
-    setBusy(true)
-    try {
-      const id = await openIntakeChat(fresh)
-      props.onSessionsChanged?.()
-      props.onOpen(id)
-    } catch (e: any) { alert(e.message) }
-    finally { setBusy(false) }
-  }
-
-  async function newNamedChat(room: RoomInfo, preferredAgent?: string) {
-    const title = prompt('Chat name (for example RL, Ops, or Product):')?.trim()
-    if (!title) return
-    let agent = preferredAgent
-    if (!agent) {
-      const response = prompt('Agent (omp / claude / codex):', 'omp')
-      if (response === null) return
-      agent = response.trim() || 'omp'
-    }
-    if (!['omp', 'claude', 'codex'].includes(agent)) return alert('Agent must be omp, claude, or codex')
-    await newChat(room, agent, false, title)
-  }
-
-  async function loadAttachCandidates(query = '') {
-    setAttachError(null)
-    try {
-      setAttachLoading(true)
-      const sessions = (await fetchSessions(undefined, query || undefined, query ? undefined : 300)).sessions
-      const groupedIds = new Set((rooms() || []).flatMap((current) => current.sessions.map((session) => session.id)))
-      setAttachCandidates(sessions.filter((session) => !groupedIds.has(session.id)))
-    } catch (e: any) { setAttachError(e.message) }
-    finally { setAttachLoading(false) }
-  }
-
-  async function showAttach(room: RoomInfo) {
-    if (attachingRoom() === room.name) { setAttachingRoom(null); setAttachError(null); return }
-    setAttachingRoom(room.name)
-    setAttachQuery('')
-    setAttachCandidates([])
-    await loadAttachCandidates()
-  }
-
-  async function attachSession(room: RoomInfo, session: SessionMeta) {
-    setBusy(true)
-    try {
-      await assignSessionToRoom(room.name, session.id)
-      setAttachCandidates((sessions) => sessions.filter((candidate) => candidate.id !== session.id))
-      await refresh()
-      props.onSessionsChanged?.()
-    } catch (e: any) { setAttachError(e.message) }
-    finally { setBusy(false) }
-  }
-
-  async function detachSession(room: RoomInfo, session: SessionMeta, event: MouseEvent) {
-    event.stopPropagation()
-    setBusy(true)
-    try {
-      await assignSessionToRoom(room.name, session.id, true)
-      await refresh()
-      props.onSessionsChanged?.()
-    } catch (e: any) { alert(e.message) }
-    finally { setBusy(false) }
-  }
-
-
-  async function togglePulse(room: RoomInfo, event: MouseEvent) {
-    event.stopPropagation()
-    setBusy(true)
-    try {
-      const pulse = await setRoomPulse(room.name, !room.pulse.enabled)
-      setRooms((current) => current?.map((item) => item.name === room.name ? { ...item, pulse } : item) || null)
-    } catch (e: any) { alert(e.message) }
-    finally { setBusy(false) }
-  }
-
-  function openWiki(room: RoomInfo, event: MouseEvent) {
-    event.stopPropagation()
-    setFrictionRoom(null)
-    const opening = wikiRoom() !== room.name
-    if (opening) {
-      roomsEpoch++ // discard any in-flight poll that would remount the open reader
-      setWikiRoom(room.name)
-    } else {
-      setWikiRoom(null)
-      refresh()
-    }
-  }
-
-  async function openFriction(room: RoomInfo, event: MouseEvent) {
-    event.stopPropagation()
-    if (frictionRoom() === room.name) { setFrictionRoom(null); return }
-    setWikiRoom(null)
-    setFrictionRoom(room.name)
-    setFrictionError(null)
-    setFrictionLoading(true)
-    try { setFrictionList(await fetchRoomFriction(room.name)) }
-    catch (error) {
-      setFrictionError(error instanceof Error ? error.message : String(error))
-      setFrictionList([])
-    } finally {
-      setFrictionLoading(false)
-    }
-  }
-
-  // Opening the Room defaults to its high-level Leader conversation. The
-  // expanded organization exposes direct resident, named, and status chats.
-  function openRoom(room: RoomInfo) {
-    if (busy()) return
-    const leader = leaderRoomSession(room)
-    if (leader) props.onOpen(leader.id)
-    else newChat(room, 'omp', true)
-  }
-  function toggleExpand(name: string) {
-    const next = expanded() === name ? null : name
-    setExpanded(next)
-    if (managingRoom() !== next) setManagingRoom(null)
-  }
-
-  function pulseRoomSession(room: RoomInfo) {
-    return room.pulse.sessionId ? room.sessions.find(session => session.id === room.pulse.sessionId) || null : null
-  }
-
-  function otherRoomSessions(room: RoomInfo) {
-    const residentIds = new Set((room.residents || []).map((resident) => resident.sessionId))
-    const pulseId = room.pulse.sessionId
-    return room.sessions.filter((session) => !residentIds.has(session.id) && session.id !== pulseId)
-  }
-
-  function visibleRoomSessions(room: RoomInfo) {
-    const sessions = otherRoomSessions(room)
-    return managingRoom() === room.name ? sessions : sessions.slice(0, 5)
-  }
-
-  const agentColor = (a?: string) => a === 'codex' ? '#c084fc' : a === 'omp' ? '#e0a050' : '#73b8ff'
-  const agentBg = (a?: string) => a === 'codex' ? '#2a1e3a' : a === 'omp' ? '#3a2a1e' : '#1e2a3a'
-
-  const sessionRow = (room: RoomInfo, s: SessionMeta, label = s.title, badge?: string, detachable = false) => (
-    <div data-testid={`session-${s.id}`} onClick={(e) => { e.stopPropagation(); props.onOpen(s.id) }}
-      style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '9px 16px 9px 28px', 'border-top': '1px solid #16161f', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-      <span style={{ width: '7px', height: '7px', 'border-radius': '50%', background: s.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
-      <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: agentBg(s.agent), color: agentColor(s.agent), 'flex-shrink': '0', 'font-weight': '600' }}>{s.agent || 'claude'}</span>
-      <Show when={badge}>
-        <span data-testid={`${badge?.toLowerCase()}-${s.id}`} style={{ 'font-size': '9px', color: badge === 'Main' ? '#69c77f' : '#8090a4', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.05em' }}>{badge}</span>
-      </Show>
-      <span style={{ flex: '1', 'font-size': '13px', color: '#ccc', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>{label}</span>
-      <Show when={detachable && managingRoom() === room.name && s.roomAssigned && leaderRoomSession(room)?.id !== s.id}>
-        <button data-testid={`detach-${s.id}`} aria-label={`Detach ${s.title} from #${room.name}`} disabled={busy()}
-          onClick={(event) => detachSession(room, s, event)}
-          style={{ background: 'none', border: 'none', color: '#777', 'font-size': '11px', padding: '3px 5px', cursor: 'pointer', 'flex-shrink': '0' }}>Detach</button>
-      </Show>
-      <span style={{ 'font-size': '11px', color: '#555', 'font-family': 'monospace', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
+  function ChatRow(row: { session: SessionMeta }) {
+    const pinned = () => pins().some(pin => pin.id === row.session.id)
+    return <div class="chat-home-row" style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #222', gap: '8px' }}>
+      <button class="chat-home-open" onClick={() => props.onOpen(row.session.id)} style={{ flex: '1', 'min-width': '0', display: 'block', padding: '16px 4px', background: 'transparent', border: '0', color: '#ddd', 'text-align': 'left', cursor: 'pointer' }}>
+        <span style={{ display: 'flex', gap: '10px', 'align-items': 'center' }}>
+          <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '15px', 'font-weight': '500' }}>{row.session.title || 'Untitled chat'}</span>
+          <Show when={row.session.isActive}><span aria-label="Working" title="Working" style={{ width: '6px', height: '6px', background: '#72b68a', 'border-radius': '50%', 'flex-shrink': '0' }} /></Show>
+          <span style={{ 'margin-left': 'auto', 'flex-shrink': '0', color: '#888', 'font-size': '11px' }}>{timeAgo(row.session.updatedAt)}</span>
+        </span>
+        <Show when={row.session.projectLabel}><span style={{ display: 'block', 'margin-top': '5px', color: '#999', 'font-size': '12px' }}>{row.session.projectLabel}</span></Show>
+      </button>
+      <button class="chat-home-pin" aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${row.session.title || 'chat'}`} aria-pressed={pinned()} disabled={pendingPins().includes(row.session.id)} onClick={() => void togglePin(row.session)} style={{ padding: '10px', 'min-height': '44px', background: 'transparent', border: '0', color: pinned() ? '#a9c4ee' : '#999', cursor: 'pointer', 'font-size': '12px' }}>{pendingPins().includes(row.session.id) ? '…' : pinned() ? 'Unpin' : 'Pin'}</button>
+      <button class="chat-home-control" aria-label={`${archived().includes(row.session.id) ? 'Restore' : 'Archive'} ${row.session.title || 'chat'}`} disabled={pendingPins().includes(row.session.id)} onClick={() => void toggleArchive(row.session)} style={{ padding: '8px', 'min-height': '44px', background: 'transparent', border: '0', color: '#999', cursor: 'pointer', 'font-size': '12px' }}>{archived().includes(row.session.id) ? 'Restore' : 'Archive'}</button>
     </div>
-  )
+  }
 
-  return (
-    <div ref={scroller} data-testid="rooms-home" onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}
-      style={{ height: '100%', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch' }}>
-      <div data-testid="pull-indicator" style={{ height: `${pull()}px`, overflow: 'hidden', transition: pullStartY === null ? 'height 0.2s' : 'none', display: 'flex', 'align-items': 'flex-end', 'justify-content': 'center', color: '#8b97a8', 'font-size': '12px' }}>
-        <span style={{ 'padding-bottom': '6px' }}>{pullRefreshing() ? 'Refreshing…' : pull() >= PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}</span>
-      </div>
-      <div style={{ 'max-width': '640px', margin: '0 auto', padding: '12px 12px 40px' }}>
-        <Show when={intakeRoom()}>
-          <div data-testid="intake-entry" style={{ background: '#101a2a', border: '1px solid #223047', 'border-radius': '12px', padding: '12px 16px', 'margin-bottom': '12px', display: 'flex', 'align-items': 'center', gap: '10px' }}>
-            <span style={{ width: '10px', height: '10px', 'border-radius': '50%', background: intakeSession()?.isActive ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
-            <div style={{ flex: '1', 'min-width': '0' }}>
-              <div style={{ 'font-size': '16px', 'font-weight': '700', color: '#e5e5e5' }}>Intake</div>
-              <div style={{ 'font-size': '12px', color: '#8b97a8', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
-                {intakeSession() ? `${intakeSession()!.title} · ${timeAgo(intakeSession()!.updatedAt)}` : 'Say what you want. It files into the right Room.'}
-              </div>
-            </div>
-            <Show when={intakeSession()}>
-              <button data-testid="intake-continue" onClick={() => openIntake(false)} disabled={busy()}
-                style={{ background: '#1b2430', border: '1px solid #2b3644', color: '#e6ebf2', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Continue</button>
-            </Show>
-            <button data-testid="intake-new" onClick={() => openIntake(true)} disabled={busy()}
-              style={{ background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>New</button>
-          </div>
-        </Show>
-
-        <SuperFeed onOpenSession={props.onOpen} onOpenRoom={props.onOpenRoom} refreshKey={feedRefreshKey()} />
-
-        <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '2px 4px 10px' }}>
-          <span style={{ 'font-size': '15px', 'font-weight': '700', color: '#aeb7c4' }}>Rooms</span>
-          <button onClick={newRoom} disabled={busy()}
-            style={{ background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', 'font-size': '13px', 'font-weight': '600', padding: '6px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>+ New room</button>
-        </div>
-
-        <Show when={error()}>
-          <div style={{ color: '#d45555', 'font-size': '13px', padding: '8px 4px' }}>{error()}</div>
-        </Show>
-
-        <Show when={rooms()} fallback={<div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>Loading rooms…</div>}>
-          <Show when={listedRooms().length > 0} fallback={
-            <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>
-              No rooms yet. A room is a folder under ~/rooms/ — create one to start.
-            </div>
-          }>
-            <For each={listedRooms()}>{(room) => (
-              <div data-testid={`room-card-${room.name}`} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'margin-bottom': '10px', overflow: 'hidden' }}>
-                <div onClick={() => openRoom(room)} style={{ padding: '12px 16px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-                    <span style={{ width: '10px', height: '10px', 'border-radius': '50%', background: room.active ? '#4aba6a' : '#333', 'flex-shrink': '0' }} />
-                    <span style={{ 'font-size': '16px', 'font-weight': '700', color: '#e5e5e5' }}>#{room.name}</span>
-                    <Show when={leaderRoomSession(room)} fallback={<span style={{ 'font-size': '11px', color: '#806f55' }}>No Leader</span>}>
-                      {(leader) => <span style={{ 'font-size': '11px', color: '#69c77f' }}>Leader · {leader().agent} · {room.residents?.length || 1} resident{(room.residents?.length || 1) === 1 ? '' : 's'}</span>}
-                    </Show>
-                    <span style={{ 'margin-left': 'auto', 'font-size': '11px', color: '#555', 'font-family': 'monospace' }}>{timeAgo(room.updatedAt)}</span>
-                    <button onClick={(e) => { e.stopPropagation(); toggleExpand(room.name) }}
-                      style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '2px 6px', transform: expanded() === room.name ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', '-webkit-tap-highlight-color': 'transparent' }}>›</button>
-                  </div>
-                  <div style={{ 'margin-top': '6px', 'padding-left': '20px', 'font-size': '13px', color: room.latest ? '#999' : '#555', overflow: 'hidden', display: '-webkit-box', '-webkit-line-clamp': '2', '-webkit-box-orient': 'vertical', 'line-height': '1.4' }}>
-                    {snippetLabel(room.latest)}
-                  </div>
-                  <div style={{ 'margin-top': '9px', 'padding-left': '20px', display: 'flex', 'align-items': 'center', gap: '8px' }}>
-                    <button data-testid={`pulse-${room.name}`} onClick={(event) => togglePulse(room, event)} disabled={busy()}
-                      aria-pressed={room.pulse.enabled}
-                      style={{ background: room.pulse.enabled ? '#152a1c' : 'transparent', border: `1px solid ${room.pulse.enabled ? '#2a4a34' : '#333'}`, color: room.pulse.enabled ? '#69c77f' : '#777', 'font-size': '11px', 'font-weight': '600', padding: '3px 8px', 'border-radius': '999px', cursor: 'pointer' }}>
-                      {room.pulse.enabled ? 'Status on' : 'Status off'}
-                    </button>
-                    <span style={{ color: room.pulse.status === 'error' ? '#d48166' : '#666', 'font-size': '11px' }}>{pulseLabel(room)}</span>
-                    <Show when={props.onOpenRoom}>
-                      <button data-testid={`room-page-${room.name}`} onClick={(event) => { event.stopPropagation(); props.onOpenRoom?.(room.name) }}
-                        aria-label={`Open the #${room.name} Room page`}
-                        style={{ 'margin-left': 'auto', display: 'flex', 'align-items': 'center', background: 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                        Room
-                      </button>
-                    </Show>
-                    <button data-testid={`wiki-${room.name}`} onClick={(event) => openWiki(room, event)}
-                      aria-label={`Wiki for #${room.name}`}
-                      style={{ 'margin-left': props.onOpenRoom ? '0' : 'auto', display: 'flex', 'align-items': 'center', gap: '6px', background: wikiRoom() === room.name ? '#1a1f2e' : 'transparent', border: '1px solid #2a3346', color: '#9aa4b2', 'font-size': '11px', 'font-weight': '600', padding: '3px 9px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                      Wiki
-                    </button>
-                    <button data-testid={`friction-${room.name}`} onClick={(event) => openFriction(room, event)}
-                      aria-label={`Friction from #${room.name}`}
-                      style={{ display: 'flex', 'align-items': 'center', gap: '5px', background: frictionRoom() === room.name ? '#2a2115' : 'transparent', border: '1px solid #3a3328', color: '#b7a27d', 'font-size': '11px', 'font-weight': '600', padding: '3px 8px', 'border-radius': '999px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                      Friction <span style={{ color: '#6f6250', 'font-weight': '500' }}>{room.friction?.count || 0}</span>
-                    </button>
-                  </div>
-                </div>
-                <Show when={wikiRoom() === room.name}>
-                  <div data-testid={`wiki-panel-${room.name}`} style={{ height: '60vh', 'border-top': '1px solid #16161f', background: '#0a0d13' }}>
-                    <RoomWikiView room={room.name} />
-                  </div>
-                </Show>
-                <Show when={frictionRoom() === room.name}>
-                  <div data-testid={`friction-panel-${room.name}`} style={{ 'border-top': '1px solid #1c1a16', padding: '8px 16px 12px', background: '#0b0d10' }}>
-                    <Show when={frictionError()}>
-                      <div style={{ color: '#d45555', 'font-size': '12px', padding: '4px 0' }}>{frictionError()}</div>
-                    </Show>
-                    <Show when={frictionLoading()}>
-                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>Loading friction…</div>
-                    </Show>
-                    <Show when={!frictionLoading() && !frictionError() && frictionList().length === 0}>
-                      <div style={{ color: '#666', 'font-size': '12px', padding: '4px 0' }}>No friction reported from #{room.name}.</div>
-                    </Show>
-                    <For each={frictionList()}>{(complaint) => (
-                      <article style={{ padding: '9px 0', 'border-bottom': '1px solid #171713', opacity: complaint.resolvedAt ? '0.7' : '1' }}>
-                        <div style={{ color: '#5a6472', 'font-size': '10px', 'font-family': 'monospace', 'margin-bottom': '3px' }}>
-                          <Show when={complaint.resolvedAt}><span style={{ color: '#69c77f', 'font-weight': '700' }}>RESOLVED · </span></Show>{updateTimeLabel(complaint.timestamp)}
-                        </div>
-                        <div style={{ color: '#d0d4da', 'font-size': '13px', 'line-height': '1.45', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.summary}</div>
-                        <Show when={complaint.evidence}>
-                          <div style={{ color: '#77818f', 'font-size': '11px', 'font-family': 'monospace', 'line-height': '1.4', 'margin-top': '5px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{complaint.evidence}</div>
-                        </Show>
-                        <Show when={complaint.resolution}>
-                          <div style={{ color: '#9fb5a6', 'font-size': '12px', 'margin-top': '5px' }}>{complaint.resolution}</div>
-                        </Show>
-                      </article>
-                    )}</For>
-                  </div>
-                </Show>
-                <Show when={expanded() === room.name}>
-                  <div data-testid={`room-organization-${room.name}`} style={{ 'border-top': '1px solid #16161f' }}>
-                    <div style={{ color: '#596373', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', padding: '8px 16px 2px 28px' }}>Main</div>
-                    <Show when={leaderRoomSession(room)} fallback={<div style={{ color: '#666', 'font-size': '12px', padding: '7px 28px' }}>No Leader yet</div>}>
-                      {(leader) => <div data-testid={`resident-${room.name}-leader`}>{sessionRow(room, leader(), 'Main')}</div>}
-                    </Show>
-
-                    <Show when={(room.residents || []).some(resident => resident.role !== 'leader')}>
-                      <div style={{ color: '#596373', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', padding: '10px 16px 2px 28px' }}>People</div>
-                      <For each={(room.residents || []).filter(resident => resident.role !== 'leader')}>{(resident) => {
-                        const session = room.sessions.find(candidate => candidate.id === resident.sessionId)
-                        return session
-                          ? <div data-testid={`resident-${room.name}-${resident.role}`}>{sessionRow(room, session, roleLabel(resident.role))}</div>
-                          : <div data-testid={`resident-${room.name}-${resident.role}`} style={{ display: 'flex', gap: '8px', padding: '7px 28px', color: '#666', 'font-size': '12px' }}>
-                              <span>{roleLabel(resident.role)}</span><span style={{ 'margin-left': 'auto' }}>offline</span>
-                            </div>
-                      }}</For>
-                    </Show>
-
-                    <Show when={visibleRoomSessions(room).length > 0}>
-                      <div style={{ color: '#596373', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', padding: '10px 16px 2px 28px' }}>Chats</div>
-                      <For each={visibleRoomSessions(room)}>{(s) => sessionRow(room, s, s.title, undefined, true)}</For>
-                    </Show>
-
-                    <Show when={pulseRoomSession(room)}>
-                      {(status) => <>
-                        <div style={{ color: '#596373', 'font-size': '9px', 'font-weight': '700', 'text-transform': 'uppercase', 'letter-spacing': '0.06em', padding: '10px 16px 2px 28px' }}>Status</div>
-                        {sessionRow(room, status(), 'What everyone is working on')}
-                      </>}
-                    </Show>
-
-                    <Show when={otherRoomSessions(room).length > 0}>
-                      <button data-testid={`manage-chats-${room.name}`} onClick={() => setManagingRoom(managingRoom() === room.name ? null : room.name)}
-                        style={{ width: '100%', background: 'none', border: 'none', 'border-top': '1px solid #16161f', color: '#7f8996', 'font-size': '11px', 'font-weight': '600', padding: '8px 28px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}>
-                        {managingRoom() === room.name ? 'Done managing' : `Manage ${otherRoomSessions(room).length} chat${otherRoomSessions(room).length === 1 ? '' : 's'}`}
-                      </button>
-                    </Show>
-                    <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '10px 16px 12px 28px', 'border-top': '1px solid #16161f' }}>
-                      <button onClick={() => newNamedChat(room)} disabled={busy()}
-                        style={{ background: '#152a1c', border: '1px solid #2a4a34', color: '#4aba6a', 'font-size': '12px', 'font-weight': '600', padding: '5px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>+ Named chat</button>
-                      <button onClick={() => newNamedChat(room, 'codex')} disabled={busy()}
-                        style={{ background: 'none', border: '1px solid #333', color: '#c084fc', 'font-size': '12px', padding: '5px 12px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>+ Codex chat</button>
-                      <button data-testid={`attach-existing-${room.name}`} onClick={() => showAttach(room)} disabled={busy()}
-                        style={{ 'margin-left': 'auto', background: 'none', border: '1px solid #333', color: '#9aa4b2', 'font-size': '12px', padding: '5px 10px', 'border-radius': '8px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
-                        {attachingRoom() === room.name ? 'Close' : 'Attach existing'}
-                      </button>
-                    </div>
-                  </div>
-                  <Show when={attachingRoom() === room.name}>
-                    <div data-testid={`attach-picker-${room.name}`} style={{ 'border-top': '1px solid #16161f', padding: '6px 16px 10px 28px' }}>
-                      <form onSubmit={(event) => { event.preventDefault(); loadAttachCandidates(attachQuery().trim()) }}
-                        style={{ display: 'flex', gap: '6px', padding: '5px 0 3px' }}>
-                        <input data-testid={`attach-search-${room.name}`} value={attachQuery()} onInput={(event) => setAttachQuery(event.currentTarget.value)}
-                          aria-label={`Search chats to attach to #${room.name}`} placeholder="Search all chats"
-                          style={{ flex: '1', 'min-width': '0', background: '#090d12', border: '1px solid #292f38', color: '#ddd', 'font-size': '12px', padding: '6px 8px', 'border-radius': '7px', outline: 'none' }} />
-                        <button type="submit" disabled={attachLoading()}
-                          style={{ background: 'none', border: '1px solid #333', color: '#9aa4b2', 'font-size': '11px', padding: '5px 9px', 'border-radius': '7px', cursor: 'pointer' }}>Search</button>
-                      </form>
-                      <Show when={attachError()}>
-                        <div style={{ color: '#d45555', 'font-size': '12px', padding: '6px 0' }}>{attachError()}</div>
-                      </Show>
-                      <Show when={attachCandidates().length > 0} fallback={
-                        <div style={{ color: '#666', 'font-size': '12px', padding: '7px 0' }}>{attachLoading() ? 'Loading chats…' : attachQuery().trim() ? 'No matching ungrouped chats.' : 'No ungrouped recent chats.'}</div>
-                      }>
-                        <For each={attachCandidates()}>{(session) => (
-                          <button data-testid={`attach-${session.id}`} disabled={busy()} onClick={() => attachSession(room, session)}
-                            style={{ display: 'flex', width: '100%', 'align-items': 'center', gap: '8px', background: 'none', border: 'none', color: '#bbb', padding: '7px 0', cursor: 'pointer', 'text-align': 'left' }}>
-                            <span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: agentBg(session.agent), color: agentColor(session.agent), 'font-weight': '600' }}>{session.agent || 'claude'}</span>
-                            <span style={{ flex: '1', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '12px' }}>{session.title}</span>
-                            <span style={{ color: '#4aba6a', 'font-size': '11px' }}>Attach</span>
-                          </button>
-                        )}</For>
-                      </Show>
-                    </div>
-                  </Show>
-                </Show>
-              </div>
-            )}</For>
+  const view = () => openedWiki() ? 'wiki' : props.view || 'chats'
+  return <main data-testid="chats-home" style={{ height: '100%', overflow: 'auto', background: '#111', color: '#ddd', 'font-family': 'inherit' }}>
+    <style>{`.chat-home-row:hover { background: #171717; } .chat-home-open:focus-visible, .chat-home-pin:focus-visible, .chat-home-control:focus-visible { outline: 2px solid #91b9ed; outline-offset: 2px; } .chat-home-row { transition: background 120ms ease; }`}</style>
+    <div style={{ width: '100%', 'max-width': '960px', margin: '0 auto', padding: '24px 18px', 'box-sizing': 'border-box' }}>
+      <header style={{ display: 'flex', 'align-items': 'center', gap: '12px', 'margin-bottom': '24px' }}>
+        <h1 style={{ margin: '0', 'font-size': '22px', 'font-weight': '600', flex: '1' }}>{view() === 'wiki' ? 'Wiki' : view() === 'updates' ? 'Updates' : 'Chats'}</h1>
+        <button class="chat-home-control" onClick={() => { void refresh(); setRefreshKey(previous => previous + 1) }} style={{ background: 'transparent', border: '1px solid #333', 'border-radius': '6px', color: '#bbb', padding: '9px 12px', cursor: 'pointer' }}>Refresh</button>
+        <Show when={props.onNewChat}><button class="chat-home-control" onClick={() => props.onNewChat?.()} style={{ background: '#d9e5f7', border: '0', 'border-radius': '6px', color: '#172233', padding: '10px 14px', 'font-weight': '600', cursor: 'pointer' }}>New chat</button></Show>
+      </header>
+      <Show when={error()}><p role="alert" style={{ color: '#e5a89d', 'font-size': '13px' }}>{error()}</p></Show>
+      <Show when={view() === 'updates'}>
+        <SuperFeed onOpenSession={props.onOpen} refreshKey={refreshKey()} onOpenRoom={name => { setWikiContext(name); setOpenedWiki(true) }} />
+      </Show>
+      <Show when={view() === 'wiki'}>
+        <SharedWiki source={wikiContext()} refreshKey={refreshKey()} />
+      </Show>
+      <Show when={view() === 'chats'}>
+        <input class="chat-home-control" type="search" aria-label="Search chats" placeholder="Search chats and conversations" value={query()} onInput={event => setQuery(event.currentTarget.value)} style={{ width: '100%', 'box-sizing': 'border-box', background: '#1b1b1b', border: '1px solid #333', 'border-radius': '8px', padding: '12px 14px', color: '#eee', 'font-size': '14px', 'margin-bottom': '24px' }} />
+        <label style={{ display: 'flex', gap: '8px', color: '#aaa', 'font-size': '12px', 'margin-bottom': '20px' }}><input type="checkbox" checked={showArchived()} onChange={event => setShowArchived(event.currentTarget.checked)} />Show archived chats</label>
+        <Show when={!query().trim()} fallback={<section aria-label="Search results"><h2 style={{ 'font-size': '13px', color: '#aaa' }}>Search results</h2><Show when={!searching()} fallback={<p role="status" style={{ color: '#999' }}>Searching…</p>}><For each={searchResults()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>No chats found.</p>}>{session => <ChatRow session={session} />}</For></Show></section>}>
+          <Show when={!loading()} fallback={<p role="status" style={{ color: '#999' }}>Loading chats…</p>}>
+            <section aria-label="Pinned chats" style={{ 'margin-bottom': '30px' }}>
+              <h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Pinned</h2>
+              <For each={pinnedChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>Pin a chat to keep it close.</p>}>{session => <ChatRow session={session} />}</For>
+            </section>
+            <Show when={showArchived()}><section aria-label="Archived chats" style={{ 'margin-top': '30px', 'margin-bottom': '30px' }}><h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Archived</h2><For each={archivedChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>No archived chats.</p>}>{session => <ChatRow session={session} />}</For></section></Show>
+            <section aria-label="Recent chats">
+              <h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Recent</h2>
+              <For each={recentChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>Start a chat with whatever’s on your mind.</p>}>{session => <ChatRow session={session} />}</For>
+            </section>
           </Show>
         </Show>
-      </div>
+      </Show>
     </div>
-  )
+  </main>
 }

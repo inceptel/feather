@@ -397,6 +397,18 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
               </article>
             )
           }
+          if (item.sourceKind) {
+            return <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
+              <div style={{ color: muted, 'font-size': '12px' }}>{item.sourceKind === 'wiki' ? 'Shared wiki' : item.room} · {timeAgo(item.occurredAt)}</div>
+              <h3 style={{ color: ink, 'font-size': '16px', 'word-break': 'break-word' }}>{item.title}</h3>
+              <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px' }} />
+              <a href={appUrl(item.sourceHref)} onClick={event => {
+                if (item.sourceKind === 'chat' && item.sessionId && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                  event.preventDefault(); props.onOpenSession(item.sessionId)
+                }
+              }} style={{ color: green, 'font-size': '13px' }}>Open {item.sourceKind === 'wiki' ? 'Wiki' : 'chat'} →</a>
+            </article>
+          }
           if (item.publicationId) {
             // Publication: visual on top, headline, summary, details folded, comments.
             return (

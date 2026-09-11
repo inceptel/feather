@@ -99,6 +99,26 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
         if (child.exitCode !== null) throw new Error(stderr)
         try { health = await (await fetch(`${base}/api/health`)).json() } catch { await new Promise(resolve => setTimeout(resolve, 50)) }
       }
+      // Stop disables continuation, not the chat process. A human's next
+      // message re-arms it through both supported message-delivery paths.
+      const ralphId = 'de2eb8c2-1ec2-4fe0-81ee-6eaa0565e123'
+      assert.equal((await post(`${base}/api/sessions`, { id: ralphId, agent: 'claude', cwd: home, mode: 'ralph' })).status, 200)
+      const pane = `feather-${ralphId.slice(0, 8)}`
+      assert.equal((await post(`${base}/api/scheduler/chats/${ralphId}/stop`)).status, 200)
+      assert.equal(readMeta()[ralphId].ralph.enabled, false)
+      const autonomous = await json(await fetch(`${base}/api/sessions?mode=ralph`))
+      assert.ok(autonomous.body.sessions.some(session => session.id === ralphId), 'Autopilot includes chats without transcripts')
+      assert.ok(fs.readFileSync(tmuxReg, 'utf8').includes(pane), 'Stop keeps the chat process')
+      assert.equal((await post(`${base}/api/sessions/${ralphId}/send`, { text: 'Continue with the revised task.' })).status, 200)
+      assert.equal(readMeta()[ralphId].ralph.enabled, true)
+      await post(`${base}/api/scheduler/chats/${ralphId}/stop`)
+      assert.equal((await fetch(`${base}/api/sessions/${ralphId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Feather-Message-ID': 'resume-human-123' }, body: JSON.stringify({ text: 'A new instruction.' }) })).status, 200)
+      assert.equal(readMeta()[ralphId].ralph.enabled, true)
+      await post(`${base}/api/scheduler/chats/${ralphId}/stop`)
+      // Retrying an acknowledged message is not a new human instruction.
+      await fetch(`${base}/api/sessions/${ralphId}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Feather-Message-ID': 'resume-human-123' }, body: JSON.stringify({ text: 'A new instruction.' }) })
+      assert.equal(readMeta()[ralphId].ralph.enabled, false)
+
       const created = await json(await post(`${base}/api/rooms`, { name: 'ev-shop', mission: 'run an EV-only auto shop' }))
       assert.equal(created.status, 200, created.text)
       const leaderId = created.body.leaderSessionId
@@ -184,12 +204,14 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       const checkerId = agentEntry.runtime.running.agent.checkerSessionId
       const groupId = agentEntry.runtime.running.agent.groupId
       assert.match(groupId, /^agent-ev-shop-agent-/)
-      assert.ok(fs.readFileSync(path.join(home, '.feather/omp-sessions', builderId, 'scheduled-prompt.md'), 'utf8').startsWith('[Room wake · #ev-shop · agent agent · builder'))
+      const builderPrompt = path.join(home, '.feather/omp-sessions', builderId, 'scheduled-prompt.md')
+      await waitFor(() => fs.existsSync(builderPrompt), { message: 'creator prompt written after group registration' })
+      assert.ok(fs.readFileSync(builderPrompt, 'utf8').startsWith('[Room wake · #ev-shop · agent agent · builder'))
       const groups = JSON.parse(fs.readFileSync(path.join(home, '.feather/sidecars/groups.json'), 'utf8'))
       assert.deepEqual(groups[groupId].members.map(member => member.role).sort(), ['builder', 'checker'])
-      const meta = readMeta()
-      assert.equal(meta[builderId].title, 'builder agent: #ev-shop')
-      assert.equal(meta[checkerId].title, 'checker agent: #ev-shop')
+      const meta = await waitFor(() => readMeta()[builderId]?.title ? readMeta() : null, { message: 'creator metadata saved' })
+      assert.equal(meta[builderId].title, 'Creator agent: #ev-shop')
+      assert.equal(meta[checkerId].title, 'Reviewer agent: #ev-shop')
       assert.equal((await post(`${base}/api/scheduler/rules/ev-shop/agent/fire`)).status, 409, 'one wake per agent at a time')
       // The builder's last word ends the wake; both chats are retired.
       fs.appendFileSync(path.join(home, '.feather/sidecars', groupId, 'chat.jsonl'), JSON.stringify({ ts: Date.now(), seq: 1, from: 'builder', to: 'checker', text: '[DONE] approved; wiki/Pricing.md written' }) + '\n')

@@ -9,6 +9,19 @@ import {
 } from '../../lib/ralph.js'
 
 describe('Ralph contract', () => {
+  it('recognizes reviewer waits separately from completion and human blockers in every harness', () => {
+    const text = 'Review requested.\nRALPH_WAITING: Awaiting Reviewer verdict'
+    const entries = {
+      omp: { type: 'message', id: 'wait', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] } },
+      claude: { type: 'assistant', uuid: 'wait', message: { stop_reason: 'end_turn', content: [{ type: 'text', text }] } },
+      codex: { type: 'event_msg', id: 'wait', payload: { type: 'task_complete', last_agent_message: text } },
+    }
+    for (const [agent, entry] of Object.entries(entries)) {
+      assert.deepEqual(ralphBoundaryFromLine(JSON.stringify(entry), agent), {
+        type: 'completed', key: 'wait', blocked: null, waiting: 'Awaiting Reviewer verdict',
+      })
+    }
+  })
   it('keeps the system prompt platform-neutral and bounded by human authority', () => {
     const prompt = ralphSystemPrompt()
     assert.match(prompt, /durable owner/)

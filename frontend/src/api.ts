@@ -35,6 +35,8 @@ export interface SessionMeta {
   isActive: boolean
   agent?: string
   isWorker?: boolean
+  chatRole?: 'creator' | 'reviewer'
+  chatPair?: { groupId: string; creatorSessionId: string; reviewerSessionId: string }
   projectId?: string | null
   projectLabel?: string | null
   share?: string[]
@@ -308,6 +310,7 @@ export interface FrictionComplaint {
 export type SuperFeedView = 'latest' | 'review' | 'following' | 'friction'
 
 export interface SuperFeedItem {
+  sourceKind?: 'chat' | 'wiki'
   evidenceId: string
   kind: 'update' | 'alert' | 'friction'
   room: string
@@ -481,10 +484,11 @@ export const setSessionShare = (id: string, peers: string[]) =>
 // On a peer box the response also carries `control` (whether we may send).
 // `q` searches ALL sessions (titles + full content, server-side) instead of
 // just the most-recent-50 the plain listing returns.
-export async function fetchSessions(box?: string | null, q?: string, limit?: number): Promise<{ sessions: SessionMeta[], control?: boolean }> {
+export async function fetchSessions(box?: string | null, q?: string, limit?: number, mode?: 'ralph'): Promise<{ sessions: SessionMeta[], control?: boolean }> {
   const params = new URLSearchParams()
   if (q) params.set('q', q)
   if (limit) params.set('limit', String(limit))
+  if (mode) params.set('mode', mode)
   const queryString = params.toString()
   const url = `${BASE}/api/sessions${queryString ? `?${queryString}` : ''}`
   const r = await fetch(bq(url, box))
@@ -1122,8 +1126,14 @@ export async function fetchSchedulerRuns(opts: { room?: string | null, limit?: n
   const query = params.toString()
   return (await responseJson<{ runs: SchedulerRun[] }>(await fetch(`${BASE}/api/scheduler/runs${query ? `?${query}` : ''}`))).runs
 }
-export async function schedulerRuleAction(ruleId: string, action: 'fire' | 'pause' | 'resume'): Promise<SchedulerRule> {
+export async function schedulerRuleAction(ruleId: string, action: 'fire' | 'pause' | 'resume' | 'stop'): Promise<SchedulerRule> {
   return (await responseJson<{ ok: true, rule: SchedulerRule }>(await fetch(`${BASE}/api/scheduler/rules/${ruleId}/${action}`, { method: 'POST' }))).rule
+}
+export async function stopAllAutopilot(): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/scheduler/stop-all`, { method: 'POST' }))
+}
+export async function stopAutopilotChat(id: string): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/scheduler/chats/${encodeURIComponent(id)}/stop`, { method: 'POST' }))
 }
 export async function deleteSchedulerRule(ruleId: string): Promise<void> {
   await responseJson(await fetch(`${BASE}/api/scheduler/rules/${ruleId}`, { method: 'DELETE' }))

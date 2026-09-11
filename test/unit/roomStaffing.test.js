@@ -238,7 +238,10 @@ describe('Room staffing from the template', () => {
       assert.ok(woken.includes('Re-read CARETAKER.md'))
       await new Promise(resolve => setTimeout(resolve, 200))
       assert.equal((readSent().match(/\[Room wake/g) || []).length, 1, readSent())
-      const after = readResidents()['ev-shop'].caretaker
+      const after = await waitFor(() => {
+        const current = readResidents()['ev-shop'].caretaker
+        return Number.isFinite(Date.parse(current.lastWakeAt)) ? current : null
+      }, { message: 'caretaker delivery bookkeeping' })
       assert.ok(after.nextWakeAtMs > Date.now() + 800_000)
       assert.ok(Number.isFinite(Date.parse(after.lastWakeAt)))
       assert.equal(readMeta()[caretakerId].ralph.enabled, true)
@@ -270,6 +273,10 @@ describe('Room staffing from the template', () => {
       assert.equal((readSent().match(/\[Room wake · #ev-shop · updater/g) || []).length, 0, readSent())
       setUpdaterRalph({ enabled: false, status: 'complete' })
       await waitFor(() => readSent().includes('[Room wake · #ev-shop · updater') ? readSent() : null, { message: 'updater wake after RALPH_COMPLETE' })
+      // The fake pane logs at paste time, before delivery observation and the
+      // final resident-state write. Wait for that write before this test edits
+      // the same JSON document to simulate the next overdue slot.
+      await waitFor(() => Number.isFinite(Date.parse(readResidents()['ev-shop'].updater.lastWakeAt)), { message: 'updater delivery bookkeeping' })
       assert.equal(readMeta()[updaterSessionId].ralph.enabled, true)
       assert.ok(readResidents()['ev-shop'].updater.nextWakeAtMs > Date.now() + 1_700_000)
       // A turn that never ends does not silence the resident: a whole interval
