@@ -3,6 +3,7 @@ import { fetchRooms, fetchSessions, RoomInfo, SessionMeta } from './api'
 import { appUrl } from './lib/appPath.js'
 import { markdownCSS, renderWikiMarkdown } from './components/MessageView'
 import { SuperFeed } from './components/SuperFeed'
+import './workspace.css'
 
 type ChatPin = { id: string, title?: string, legacy?: boolean }
 type WikiPage = { source: string, name: string, size: number, updatedAt: string }
@@ -79,17 +80,20 @@ function SharedWiki(props: { source?: string, refreshKey: number }) {
     if (parts.length) void openPage({ source: current.source, name: parts.join('/') })
   }
 
-  return <section data-testid="shared-wiki">
+  return <section data-testid="shared-wiki" class="workspace-wiki">
     <style>{markdownCSS}</style>
-    <p style={{ color: '#999', 'font-size': '13px' }}>Knowledge saved across your chats.</p>
-    <input type="search" aria-label="Search wiki pages" placeholder="Find a page by name or collection" value={query()} onInput={event => setQuery(event.currentTarget.value)} style={{ width: '100%', 'box-sizing': 'border-box', padding: '12px', background: '#191919', border: '1px solid #333', 'border-radius': '6px', color: '#ddd' }} />
-    <nav aria-label="Wiki pages" style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '8px', padding: '16px 0', 'max-height': '180px', overflow: 'auto' }}>
-      <For each={filtered()}>{page => <button onClick={() => void openPage(page)} aria-pressed={selected()?.source === page.source && selected()?.name === page.name} style={{ background: selected()?.source === page.source && selected()?.name === page.name ? '#243047' : '#191919', color: '#ddd', border: '1px solid #333', 'border-radius': '6px', padding: '9px 12px', cursor: 'pointer', 'text-align': 'left' }}>{page.name}<span style={{ display: 'block', color: '#999', 'font-size': '11px', 'margin-top': '3px' }}>{label(page.source)}</span></button>}</For>
-    </nav>
-    <Show when={error()}><p role="alert">{error()}</p></Show>
-    <Show when={loading()}><p role="status">Loading wiki…</p></Show>
-    <Show when={!loading() && !error() && !filtered().length}><p style={{ color: '#999' }}>{pages().length ? 'No matching pages.' : 'No wiki pages yet.'}</p></Show>
-    <Show when={!loading() && !error() && selected()}><article class="markdown wiki-markdown" onClick={followLink} style={{ 'overflow-wrap': 'anywhere', 'line-height': '1.6' }} innerHTML={renderWikiMarkdown(content())} /></Show>
+    <div class="workspace-wiki-index">
+      <input class="workspace-search" type="search" aria-label="Search wiki pages" placeholder="Find a page or collection" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
+      <nav aria-label="Wiki pages" class="workspace-wiki-pages">
+        <For each={filtered()}>{page => <button class="workspace-wiki-page" onClick={() => void openPage(page)} aria-pressed={selected()?.source === page.source && selected()?.name === page.name}>{page.name}<span>{label(page.source)}</span></button>}</For>
+      </nav>
+      <Show when={!loading() && !error() && !filtered().length}><p class="workspace-empty">{pages().length ? 'No matching pages.' : 'No wiki pages yet.'}</p></Show>
+    </div>
+    <div class="workspace-wiki-reading">
+      <Show when={error()}><p role="alert" class="workspace-error">{error()}</p></Show>
+      <Show when={loading()}><p role="status" class="workspace-empty">Loading wiki…</p></Show>
+      <Show when={!loading() && !error() && selected()}><article class="markdown wiki-markdown" onClick={followLink} innerHTML={renderWikiMarkdown(content())} /></Show>
+    </div>
   </section>
 }
 
@@ -173,9 +177,10 @@ export default function RoomsHome(props: {
     const generation = ++searchGeneration
     if (!search) { setResults([]); setSearching(false); return }
     setSearching(true)
+    const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const response = await fetchSessions(null, search, 150)
+        const response = await fetchSessions(null, search, 150, undefined, { signal: controller.signal })
         if (!disposed && generation === searchGeneration) setResults(response.sessions)
       } catch (cause) {
         if (!disposed && generation === searchGeneration) {
@@ -186,7 +191,7 @@ export default function RoomsHome(props: {
         if (!disposed && generation === searchGeneration) setSearching(false)
       }
     }, 250)
-    onCleanup(() => clearTimeout(timer))
+    onCleanup(() => { clearTimeout(timer); controller.abort() })
   })
 
   const allSessions = createMemo(() => {
@@ -241,30 +246,31 @@ export default function RoomsHome(props: {
 
   function ChatRow(row: { session: SessionMeta }) {
     const pinned = () => pins().some(pin => pin.id === row.session.id)
-    return <div class="chat-home-row" style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #222', gap: '8px' }}>
-      <button class="chat-home-open" onClick={() => props.onOpen(row.session.id)} style={{ flex: '1', 'min-width': '0', display: 'block', padding: '16px 4px', background: 'transparent', border: '0', color: '#ddd', 'text-align': 'left', cursor: 'pointer' }}>
-        <span style={{ display: 'flex', gap: '10px', 'align-items': 'center' }}>
-          <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'font-size': '15px', 'font-weight': '500' }}>{row.session.title || 'Untitled chat'}</span>
-          <Show when={row.session.isActive}><span aria-label="Working" title="Working" style={{ width: '6px', height: '6px', background: '#72b68a', 'border-radius': '50%', 'flex-shrink': '0' }} /></Show>
-          <span style={{ 'margin-left': 'auto', 'flex-shrink': '0', color: '#888', 'font-size': '11px' }}>{timeAgo(row.session.updatedAt)}</span>
+    return <div class="chat-home-row">
+      <button class="chat-home-open" onClick={() => props.onOpen(row.session.id)}>
+        <span class="chat-home-title-line">
+          <span class="chat-home-title">{row.session.title || 'Untitled chat'}</span>
+          <Show when={row.session.isActive}><span class="chat-home-working" aria-label="Working" title="Working" /></Show>
+          <span class="chat-home-time">{timeAgo(row.session.updatedAt)}</span>
         </span>
-        <Show when={row.session.projectLabel}><span style={{ display: 'block', 'margin-top': '5px', color: '#999', 'font-size': '12px' }}>{row.session.projectLabel}</span></Show>
+        <Show when={row.session.projectLabel}><span class="chat-home-project">{row.session.projectLabel}</span></Show>
       </button>
-      <button class="chat-home-pin" aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${row.session.title || 'chat'}`} aria-pressed={pinned()} disabled={pendingPins().includes(row.session.id)} onClick={() => void togglePin(row.session)} style={{ padding: '10px', 'min-height': '44px', background: 'transparent', border: '0', color: pinned() ? '#a9c4ee' : '#999', cursor: 'pointer', 'font-size': '12px' }}>{pendingPins().includes(row.session.id) ? '…' : pinned() ? 'Unpin' : 'Pin'}</button>
-      <button class="chat-home-control" aria-label={`${archived().includes(row.session.id) ? 'Restore' : 'Archive'} ${row.session.title || 'chat'}`} disabled={pendingPins().includes(row.session.id)} onClick={() => void toggleArchive(row.session)} style={{ padding: '8px', 'min-height': '44px', background: 'transparent', border: '0', color: '#999', cursor: 'pointer', 'font-size': '12px' }}>{archived().includes(row.session.id) ? 'Restore' : 'Archive'}</button>
+      <button class="chat-home-pin chat-home-action" aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${row.session.title || 'chat'}`} aria-pressed={pinned()} disabled={pendingPins().includes(row.session.id)} onClick={() => void togglePin(row.session)}>{pendingPins().includes(row.session.id) ? '…' : pinned() ? 'Unpin' : 'Pin'}</button>
+      <button class="chat-home-control chat-home-action" aria-label={`${archived().includes(row.session.id) ? 'Restore' : 'Archive'} ${row.session.title || 'chat'}`} disabled={pendingPins().includes(row.session.id)} onClick={() => void toggleArchive(row.session)}>{archived().includes(row.session.id) ? 'Restore' : 'Archive'}</button>
     </div>
   }
 
   const view = () => openedWiki() ? 'wiki' : props.view || 'chats'
-  return <main data-testid="chats-home" style={{ height: '100%', overflow: 'auto', background: '#111', color: '#ddd', 'font-family': 'inherit' }}>
-    <style>{`.chat-home-row:hover { background: #171717; } .chat-home-open:focus-visible, .chat-home-pin:focus-visible, .chat-home-control:focus-visible { outline: 2px solid #91b9ed; outline-offset: 2px; } .chat-home-row { transition: background 120ms ease; }`}</style>
-    <div style={{ width: '100%', 'max-width': '960px', margin: '0 auto', padding: '24px 18px', 'box-sizing': 'border-box' }}>
-      <header style={{ display: 'flex', 'align-items': 'center', gap: '12px', 'margin-bottom': '24px' }}>
-        <h1 style={{ margin: '0', 'font-size': '22px', 'font-weight': '600', flex: '1' }}>{view() === 'wiki' ? 'Wiki' : view() === 'updates' ? 'Updates' : 'Chats'}</h1>
-        <button class="chat-home-control" onClick={() => { void refresh(); setRefreshKey(previous => previous + 1) }} style={{ background: 'transparent', border: '1px solid #333', 'border-radius': '6px', color: '#bbb', padding: '9px 12px', cursor: 'pointer' }}>Refresh</button>
-        <Show when={props.onNewChat}><button class="chat-home-control" onClick={() => props.onNewChat?.()} style={{ background: '#d9e5f7', border: '0', 'border-radius': '6px', color: '#172233', padding: '10px 14px', 'font-weight': '600', cursor: 'pointer' }}>New chat</button></Show>
+  return <main data-testid="chats-home" class="workspace-home">
+    <div class="workspace-content">
+      <header class="workspace-header">
+        <div class="workspace-heading"><h1>{view() === 'wiki' ? 'Wiki' : view() === 'updates' ? 'Updates' : 'Chats'}</h1><p>{view() === 'wiki' ? 'Knowledge saved across your chats.' : view() === 'updates' ? 'The latest from your work.' : 'Pick up where you left off.'}</p></div>
+        <div class="workspace-header-actions">
+          <button class="chat-home-control workspace-button" onClick={() => { void refresh(); setRefreshKey(previous => previous + 1) }}>Refresh</button>
+          <Show when={props.onNewChat}><button class="chat-home-control workspace-button workspace-button-primary" onClick={() => props.onNewChat?.()}>New chat</button></Show>
+        </div>
       </header>
-      <Show when={error()}><p role="alert" style={{ color: '#e5a89d', 'font-size': '13px' }}>{error()}</p></Show>
+      <Show when={error()}><p role="alert" class="workspace-error">{error()}</p></Show>
       <Show when={view() === 'updates'}>
         <SuperFeed onOpenSession={props.onOpen} refreshKey={refreshKey()} onOpenRoom={name => { setWikiContext(name); setOpenedWiki(true) }} />
       </Show>
@@ -272,18 +278,20 @@ export default function RoomsHome(props: {
         <SharedWiki source={wikiContext()} refreshKey={refreshKey()} />
       </Show>
       <Show when={view() === 'chats'}>
-        <input class="chat-home-control" type="search" aria-label="Search chats" placeholder="Search chats and conversations" value={query()} onInput={event => setQuery(event.currentTarget.value)} style={{ width: '100%', 'box-sizing': 'border-box', background: '#1b1b1b', border: '1px solid #333', 'border-radius': '8px', padding: '12px 14px', color: '#eee', 'font-size': '14px', 'margin-bottom': '24px' }} />
-        <label style={{ display: 'flex', gap: '8px', color: '#aaa', 'font-size': '12px', 'margin-bottom': '20px' }}><input type="checkbox" checked={showArchived()} onChange={event => setShowArchived(event.currentTarget.checked)} />Show archived chats</label>
-        <Show when={!query().trim()} fallback={<section aria-label="Search results"><h2 style={{ 'font-size': '13px', color: '#aaa' }}>Search results</h2><Show when={!searching()} fallback={<p role="status" style={{ color: '#999' }}>Searching…</p>}><For each={searchResults()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>No chats found.</p>}>{session => <ChatRow session={session} />}</For></Show></section>}>
-          <Show when={!loading()} fallback={<p role="status" style={{ color: '#999' }}>Loading chats…</p>}>
-            <section aria-label="Pinned chats" style={{ 'margin-bottom': '30px' }}>
-              <h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Pinned</h2>
-              <For each={pinnedChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>Pin a chat to keep it close.</p>}>{session => <ChatRow session={session} />}</For>
+        <div class="workspace-search-bar">
+          <input class="chat-home-control workspace-search" type="search" aria-label="Search chats" placeholder="Search chats and conversations" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
+          <label class="workspace-archive-toggle"><input type="checkbox" checked={showArchived()} onChange={event => setShowArchived(event.currentTarget.checked)} />Show archived chats</label>
+        </div>
+        <Show when={!query().trim()} fallback={<section aria-label="Search results" class="workspace-section"><h2>Search results</h2><Show when={!searching()} fallback={<p role="status" class="workspace-empty">Searching…</p>}><For each={searchResults()} fallback={<p class="workspace-empty">No chats found.</p>}>{session => <ChatRow session={session} />}</For></Show></section>}>
+          <Show when={!loading()} fallback={<p role="status" class="workspace-empty">Loading chats…</p>}>
+            <section aria-label="Pinned chats" class="workspace-section">
+              <h2>Pinned<span class="workspace-count" aria-hidden="true">{pinnedChats().length}</span></h2>
+              <For each={pinnedChats()} fallback={<p class="workspace-empty">Pin a chat to keep it close.</p>}>{session => <ChatRow session={session} />}</For>
             </section>
-            <Show when={showArchived()}><section aria-label="Archived chats" style={{ 'margin-top': '30px', 'margin-bottom': '30px' }}><h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Archived</h2><For each={archivedChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>No archived chats.</p>}>{session => <ChatRow session={session} />}</For></section></Show>
-            <section aria-label="Recent chats">
-              <h2 style={{ 'font-size': '13px', color: '#aaa', 'font-weight': '600' }}>Recent</h2>
-              <For each={recentChats()} fallback={<p style={{ color: '#999', 'font-size': '13px' }}>Start a chat with whatever’s on your mind.</p>}>{session => <ChatRow session={session} />}</For>
+            <Show when={showArchived()}><section aria-label="Archived chats" class="workspace-section"><h2>Archived<span class="workspace-count" aria-hidden="true">{archivedChats().length}</span></h2><For each={archivedChats()} fallback={<p class="workspace-empty">No archived chats.</p>}>{session => <ChatRow session={session} />}</For></section></Show>
+            <section aria-label="Recent chats" class="workspace-section">
+              <h2>Recent</h2>
+              <For each={recentChats()} fallback={<p class="workspace-empty">Start a chat with whatever’s on your mind.</p>}>{session => <ChatRow session={session} />}</For>
             </section>
           </Show>
         </Show>

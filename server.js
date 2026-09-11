@@ -5,7 +5,8 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFile, execFileSync, execSync, spawn } from 'child_process';
+import { promisify } from 'node:util';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
@@ -13,7 +14,7 @@ import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent 
 import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
-import { createChatPair } from './lib/chat-pair.js';
+import { createChatPair, CHAT_PAIR_EFFICIENCY_PROMPT } from './lib/chat-pair.js';
 import { createProjectRenamer, managedChatProject } from './lib/chat-projects.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { stopScheduledRules, scheduledRunMayContinue, mayReenableRalph } from './lib/autopilot.js';
@@ -735,15 +736,19 @@ function isAutoWorkerSession(buf, agent, projectId, cwd) {
 // Full-content search across session JSONL files. Shells out to grep (fixed
 // string, case-insensitive) because session files can be >100MB and node-side
 // scanning would be slow. Returns the Set of file paths that contain `q`.
-function grepSessionFiles(q, files) {
+const execFileAsync = promisify(execFile);
+const sessionSearchLock = createKeyedLock();
+async function grepSessionFiles(q, files, signal) {
   const matches = new Set();
   const CHUNK = 200; // stay well under ARG_MAX
   for (let i = 0; i < files.length; i += CHUNK) {
+    signal?.throwIfAborted();
     const batch = files.slice(i, i + CHUNK);
     let out = '';
     try {
-      out = execFileSync('grep', ['-lisF', '--', q, ...batch], { maxBuffer: 16 * 1024 * 1024, timeout: 30000 }).toString();
+      ({ stdout: out } = await execFileAsync('grep', ['-lisF', '--', q, ...batch], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30000, signal }));
     } catch (e) {
+      signal?.throwIfAborted();
       // grep exits 1 when some files have no match; partial matches are still on stdout
       out = e.stdout ? e.stdout.toString() : '';
     }
@@ -813,10 +818,8 @@ function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candida
 // contains it (case-insensitive). Search ignores the mtime-ranked candidate
 // cutoff that the plain listing has: every candidate is considered, so old
 // threads that fell off the sidebar are still findable.
-function discoverSessions(limit = 50, query = null, requiredIds = []) {
+function listSessionCandidates(meta = readMeta()) {
   const candidates = [];
-  const meta = readMeta();
-  const labels = readProjectLabels();
   const codexLocalIds = new Map();
   for (const [localId, entry] of Object.entries(meta)) {
     if (entry?.codexUuid) codexLocalIds.set(entry.codexUuid, localId);
@@ -867,10 +870,12 @@ function discoverSessions(limit = 50, query = null, requiredIds = []) {
   // Sort by mtime descending; loop until we have `limit` non-worker sessions.
   // Content-based worker detection requires reading the file, so we can't pre-filter.
   candidates.sort((a, b) => b.mtime - a.mtime);
+  return candidates;
+}
 
-  // Content matches are computed up front in one grep pass over all candidate
-  // files; title matches are checked per-candidate inside the loop below.
-  const contentMatches = query ? grepSessionFiles(query, candidates.map(c => c.fpath)) : null;
+function discoverSessions(limit = 50, query = null, requiredIds = [], { candidates = listSessionCandidates(), contentMatches = new Set() } = {}) {
+  const meta = readMeta();
+  const labels = readProjectLabels();
   const queryLc = query ? query.toLowerCase() : null;
 
   const active = getActiveTmuxSessions();
@@ -1209,7 +1214,10 @@ function sessionSystemPrompt(id) {
   if (roomName) parts.push(roomLeaderPrompt(roomName));
   if (isRalphSession(id)) parts.push(ralphSystemPrompt());
   const rolePrompt = readMeta()[id]?.chatPairPrompt;
-  if (rolePrompt) parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
+  if (rolePrompt) {
+    parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
+    if (!rolePrompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT)) parts.push(CHAT_PAIR_EFFICIENCY_PROMPT);
+  }
   return parts.join('\n\n');
 }
 
@@ -2906,11 +2914,20 @@ app.use('/api/sessions', (req, res, next) => {
   next();
 });
 
-app.get('/api/sessions', (req, res) => {
+app.get('/api/sessions', async (req, res) => {
+  const searchController = new AbortController();
+  const cancelSearch = () => searchController.abort();
+  res.once('close', cancelSearch);
   try {
     const autonomous = req.query.mode === 'ralph';
+    const id = typeof req.query.id === 'string' ? req.query.id : null;
+    if (id) return res.json({ sessions: discoverSessions(0, null, [id]) });
     const required = autonomous ? Object.entries(readMeta()).filter(([, entry]) => entry.mode === RALPH_MODE).map(([id]) => id) : [];
-    const sessions = discoverSessions(parseInt(req.query.limit) || 50, (req.query.q || '').trim() || null, required);
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() || null : null;
+    const candidates = listSessionCandidates();
+    const contentMatches = query ? await sessionSearchLock('archive', () => grepSessionFiles(query, candidates.map(c => c.fpath), searchController.signal)) : new Set();
+    if (searchController.signal.aborted) return;
+    const sessions = discoverSessions(parseInt(req.query.limit) || 50, query, required, { candidates, contentMatches });
     if (autonomous) {
       const meta = readMeta();
       for (const id of required) {
@@ -2924,7 +2941,8 @@ app.get('/api/sessions', (req, res) => {
     }
     res.json({ sessions: autonomous ? sessions.filter(session => session.mode === RALPH_MODE) : sessions });
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { if (!searchController.signal.aborted) res.status(500).json({ error: e.message }); }
+  finally { res.off('close', cancelSearch); }
 });
 
 
@@ -3669,7 +3687,8 @@ app.use('/api/share', requirePeer);
 app.get('/api/share/sessions', (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    const sessions = discoverSessions(limit)
+    const id = typeof req.query.id === 'string' ? req.query.id : null;
+    const sessions = discoverSessions(id ? 0 : limit, null, id ? [id] : [])
       .filter(s => peerCanAccessSession(req.peer, s.id, s.projectId))
       .map(({ share, ...s }) => s); // don't leak who else a session is shared with
     res.json({ sessions, control: !!req.peer.control, owner: readSharing().owner || null });

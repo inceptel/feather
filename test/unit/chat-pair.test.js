@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createChatPair, chatFolderName } from '../../lib/chat-pair.js';
+import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT } from '../../lib/chat-pair.js';
+
+test('tiny tasks retain independent review with one combined request and no ceremony', () => {
+  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator' });
+  for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
+  assert.match(prompts.creator, /ONE review request/);
+  assert.match(prompts.reviewer, /brief independent check/);
+  assert.match(prompts.creator, /Review is still required/);
+});
 
 function fixture(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-chat-pair-'));

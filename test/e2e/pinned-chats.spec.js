@@ -56,6 +56,12 @@ for (const width of [1280, 390]) {
     });
     await page.goto('/#');
     await expect(page.getByRole('region', { name: 'Pinned chats', exact: true })).toContainText('Boat');
+    const costsBounds = await page.getByTestId('home-nav').getByRole('button', { name: 'Costs', exact: true }).boundingBox();
+    expect(costsBounds.x + costsBounds.width).toBeLessThanOrEqual(width);
+    await expect(page.getByTestId('home-nav-chats')).toHaveAttribute('aria-current', 'page');
+    await page.getByRole('searchbox', { name: 'Search chats', exact: true }).focus();
+    expect(await page.getByRole('searchbox', { name: 'Search chats', exact: true }).evaluate(element => getComputedStyle(element).outlineStyle)).toBe('solid');
+    await page.getByRole('searchbox', { name: 'Search chats', exact: true }).blur();
     await page.getByRole('button', { name: 'Pin Jacksonville EV', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Pinned chats', exact: true })).toContainText('Jacksonville EV');
     await page.getByRole('button', { name: 'Archive Jacksonville EV', exact: true }).click();
@@ -68,6 +74,7 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: testInfo.outputPath('chats.png'), fullPage: true });
     await page.getByTestId('home-nav').getByRole('button', { name: 'Wiki', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Shared knowledge' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('wiki.png'), fullPage: true });
     await page.getByTestId('home-nav').getByRole('button', { name: 'Updates', exact: true }).click();
     await expect(page.getByText('Battery comparison ready')).toBeVisible();
     await page.getByTestId('home-nav-scheduler').click();
@@ -78,6 +85,7 @@ for (const width of [1280, 390]) {
     await page.getByTestId('home-nav').getByRole('button', { name: 'Updates', exact: true }).click();
     await page.getByRole('link', { name: 'Open chat →' }).click();
     await expect(page).toHaveURL(/#boat$/);
+    await page.screenshot({ path: testInfo.outputPath('chat.png'), fullPage: true });
     await page.getByRole('button', { name: '⋮', exact: true }).click();
     page.once('dialog', dialog => dialog.accept('Boating'));
     const renamed = page.waitForRequest(request => request.url().endsWith('/api/chats/boat/project/rename'));

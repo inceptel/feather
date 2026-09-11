@@ -1,0 +1,81 @@
+.feather-shell {
+  color: var(--text-primary);
+  background: var(--bg-base);
+}
+
+.feather-shell :is(button, input, select, textarea) { font-family: inherit; }
+.feather-shell :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 3px;
+}
+
+.shell-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  flex-shrink: 0;
+  padding: max(8px, env(safe-area-inset-top)) 16px 8px 108px;
+  border-bottom: 1px solid var(--border-base);
+  background: var(--bg-secondary);
+}
+.shell-header-home { padding-left: 68px; }
+.shell-home-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px;
+}
+.shell-home-nav button {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-primary) 68%, var(--bg-base));
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.shell-home-nav button:hover { color: var(--text-primary); background: var(--bg-hover); }
+.shell-home-nav button[aria-current="page"] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+.shell-icon-button {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  z-index: 50;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 19px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.shell-icon-button:hover { background: var(--bg-hover); }
+.shell-menu-button { left: max(12px, env(safe-area-inset-left)); }
+.shell-home-button { left: calc(max(12px, env(safe-area-inset-left)) + 44px); }
+.shell-sidebar { border-right: 1px solid var(--border-medium); }
+
+@media (max-width: 480px) {
+  .shell-header-home { padding-left: 58px; padding-right: 8px; }
+  .shell-home-nav { gap: 0; }
+  .shell-home-nav button { min-height: 40px; padding: 7px 9px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell-sidebar { transition: none !important; }
+  .shell-home-nav button, .shell-icon-button { transition: none; }
+}

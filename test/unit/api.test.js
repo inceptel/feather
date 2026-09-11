@@ -103,6 +103,7 @@ before(async () => {
     fixtureBin = path.join(fixtureRoot, 'bin')
     fs.mkdirSync(fixtureBin)
     fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    fs.writeFileSync(path.join(fixtureBin, 'grep'), '#!/bin/sh\ncase "$*" in *feather-slow-search*) touch "$HOME/search-started"; sleep 1;; esac\nexec /usr/bin/grep "$@"\n', { mode: 0o700 })
     fixturePath = `${fixtureBin}${path.delimiter}${process.env.PATH || ''}`
   }
 
@@ -286,6 +287,24 @@ describe('GET /api/sessions', () => {
   it('finds an exact session by id for deep-link activity checks', async () => {
     const { sessions } = await (await fetch(`${BASE}/api/sessions?q=${encodeURIComponent(TEST_SESSION_ID)}&limit=5`)).json()
     assert.ok(sessions.some(session => session.id === TEST_SESSION_ID))
+  })
+
+  it('looks up only the requested id without content search', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?id=${encodeURIComponent(TEST_SESSION_ID)}`)).json()
+    assert.deepEqual(sessions.map(s => s.id), [TEST_SESSION_ID])
+    const missing = await (await fetch(`${BASE}/api/sessions?id=missing-session-id`)).json()
+    assert.deepEqual(missing.sessions, [])
+  })
+
+  it('keeps health responsive while full-text search is running', { skip: EXTERNAL_SERVER }, async () => {
+    let finished = false
+    const search = fetch(`${BASE}/api/sessions?q=feather-slow-search`).then(r => r.json()).finally(() => { finished = true })
+    try {
+      for (let i = 0; i < 100 && !fs.existsSync(path.join(fixtureHome, 'search-started')); i++) await new Promise(r => setTimeout(r, 10))
+      assert.ok(fs.existsSync(path.join(fixtureHome, 'search-started')))
+      assert.equal((await fetch(`${BASE}/api/health`)).status, 200)
+      assert.equal(finished, false, 'search must not block unrelated requests')
+    } finally { await search }
   })
 })
 

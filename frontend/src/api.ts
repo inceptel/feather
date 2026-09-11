@@ -484,14 +484,15 @@ export const setSessionShare = (id: string, peers: string[]) =>
 // On a peer box the response also carries `control` (whether we may send).
 // `q` searches ALL sessions (titles + full content, server-side) instead of
 // just the most-recent-50 the plain listing returns.
-export async function fetchSessions(box?: string | null, q?: string, limit?: number, mode?: 'ralph'): Promise<{ sessions: SessionMeta[], control?: boolean }> {
+export async function fetchSessions(box?: string | null, q?: string, limit?: number, mode?: 'ralph', options: { id?: string, signal?: AbortSignal } = {}): Promise<{ sessions: SessionMeta[], control?: boolean }> {
   const params = new URLSearchParams()
   if (q) params.set('q', q)
   if (limit) params.set('limit', String(limit))
   if (mode) params.set('mode', mode)
+  if (options.id) params.set('id', options.id)
   const queryString = params.toString()
   const url = `${BASE}/api/sessions${queryString ? `?${queryString}` : ''}`
-  const r = await fetch(bq(url, box))
+  const r = await fetch(bq(url, box), { signal: options.signal })
   return responseJson<{ sessions: SessionMeta[], control?: boolean }>(r)
 }
 

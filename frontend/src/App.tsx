@@ -4,6 +4,7 @@ import { batch, createSignal, createEffect, createMemo, onMount, onCleanup, Show
 import { MessageView, renderWikiMarkdown } from './components/MessageView'
 import { SidecarThread } from './components/Sidecar'
 import RoomsHome from './RoomsHome'
+import './shell.css'
 import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
 import { SchedulerView } from './components/SchedulerView'
@@ -388,16 +389,20 @@ export default function App() {
   const [searching, setSearching] = createSignal(false)
   let searchDebounce: ReturnType<typeof setTimeout> | undefined
   let searchSeq = 0
+  let searchController: AbortController | undefined
+  onCleanup(() => { searchController?.abort(); if (searchDebounce) clearTimeout(searchDebounce) })
   function onSearchInput(q: string) {
+    searchController?.abort()
+    const seq = ++searchSeq
     setSearchQuery(q)
     if (searchDebounce) clearTimeout(searchDebounce)
     const trimmed = q.trim()
     if (!trimmed) { setSearchResults(null); setSearching(false); return }
     setSearching(true)
     searchDebounce = setTimeout(async () => {
-      const seq = ++searchSeq
+      searchController = new AbortController()
       try {
-        const r = await fetchSessions(currentBox(), trimmed)
+        const r = await fetchSessions(currentBox(), trimmed, undefined, undefined, { signal: searchController.signal })
         if (seq === searchSeq) setSearchResults(r.sessions)
       } catch {
         if (seq === searchSeq) setSearchResults([])
@@ -407,6 +412,7 @@ export default function App() {
     }, 350)
   }
   function clearSearch() {
+    searchController?.abort()
     if (searchDebounce) clearTimeout(searchDebounce)
     searchSeq++
     setSearchQuery('')
@@ -660,7 +666,7 @@ export default function App() {
     const listed = recent.find(session => session.id === id)
     if (listed) return listed
     try {
-      const result = await fetchSessions(box, id, 5)
+      const result = await fetchSessions(box, undefined, undefined, undefined, { id })
       return result.sessions.find(session => session.id === id)
     } catch {
       return undefined
@@ -1712,10 +1718,6 @@ export default function App() {
       .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))
   }
 
-  const homeNavStyle = (active: boolean) => ({
-    background: active ? '#1b2430' : 'transparent', color: active ? '#e6ebf2' : '#8b97a8', border: `1px solid ${active ? '#2b3644' : 'transparent'}`,
-    'border-radius': '999px', padding: '4px 12px', 'font-size': '13px', 'font-weight': '650', cursor: 'pointer',
-  })
   const tabStyle = (t: string) => ({
     padding: '9px 14px', border: 'none', 'border-bottom': tab() === t ? '2px solid var(--success)' : '2px solid transparent',
     background: 'none', color: tab() === t ? 'var(--text-primary)' : 'var(--text-secondary)', 'font-size': '13px', 'font-weight': '600', cursor: 'pointer',
@@ -1772,6 +1774,7 @@ export default function App() {
 
   return (
     <div
+      class="feather-shell"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
       onDragEnter={(e) => { e.preventDefault(); dragCounter++; setDragging(true) }}
@@ -1782,10 +1785,10 @@ export default function App() {
 
       {/* Hamburger */}
       <Show when={!sidebar()}>
-        <button onClick={openSidebar} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '18px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#9776;</button>
+        <button class="shell-icon-button shell-menu-button" aria-label="Open sidebar" onClick={openSidebar}>&#9776;</button>
         {/* Back to the rooms home — shown whenever a session view is open */}
         <Show when={currentId()}>
-          <button onClick={goHome} style={{ position: 'fixed', top: 'max(12px, env(safe-area-inset-top))', left: 'calc(max(12px, env(safe-area-inset-left)) + 44px)', 'z-index': '50', background: '#1a1a2e', border: '1px solid #333', color: '#e5e5e5', width: '36px', height: '36px', 'border-radius': '8px', 'font-size': '20px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center', '-webkit-tap-highlight-color': 'transparent' }}>&#8249;</button>
+          <button class="shell-icon-button shell-home-button" aria-label="Back to chats" onClick={goHome}>&#8249;</button>
         </Show>
       </Show>
 
@@ -1795,9 +1798,9 @@ export default function App() {
       </Show>
 
       {/* Sidebar */}
-      <div style={{
+      <div class="shell-sidebar" style={{
         position: 'fixed', top: '0', left: '0', bottom: '0', width: '300px', 'max-width': '85vw',
-        background: '#0d1117', 'z-index': '60',
+        background: 'var(--bg-secondary)', 'z-index': '60',
         transform: sidebar() ? 'translateX(0)' : 'translateX(-100%)',
         transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
         'will-change': 'transform',
@@ -2049,16 +2052,16 @@ export default function App() {
       {/* Main */}
       <div style={{ flex: '1', display: 'flex', 'flex-direction': 'column', 'min-width': '0', height: '100%' }}>
         {/* Header */}
-        <div style={{ position: 'relative', padding: '8px 16px 0 100px', 'padding-top': 'max(8px, env(safe-area-inset-top))', 'border-bottom': '1px solid #1e1e1e', display: 'flex', 'align-items': 'center', gap: '8px', 'min-height': '48px', 'flex-shrink': '0' }}>
+        <div class="shell-header" classList={{ 'shell-header-home': !cur() }}>
           <span data-testid="build-version" title={`Build ${__BUILD_VERSION__}`} style={{ position: 'absolute', top: '2px', right: '10px', color: 'var(--text-ghost)', 'font-size': '8px', 'font-family': "'SF Mono', Menlo, monospace", 'line-height': '1', 'letter-spacing': '0.02em', 'white-space': 'nowrap' }}>{__BUILD_TIME__}</span>
           <Show when={cur()} fallback={
-            <div data-testid="home-nav" style={{ display: 'flex', 'align-items': 'center', gap: '4px', 'overflow-x': 'auto' }}>
-              <button data-testid="home-nav-chats" onClick={() => showHome({ kind: 'rooms' })} style={homeNavStyle(homeRoute().kind === 'rooms')}>Chats</button>
-              <button onClick={() => showHome({ kind: 'wiki' })} style={homeNavStyle(homeRoute().kind === 'wiki')}>Wiki</button>
-              <button onClick={() => showHome({ kind: 'updates' })} style={homeNavStyle(homeRoute().kind === 'updates')}>Updates</button>
-              <button data-testid="home-nav-scheduler" onClick={() => showHome({ kind: 'scheduler' })} style={homeNavStyle(homeRoute().kind === 'scheduler')}>Autopilot</button>
-              <button data-testid="home-nav-costs" onClick={() => showHome({ kind: 'costs' })} style={homeNavStyle(homeRoute().kind === 'costs')}>Costs</button>
-            </div>
+            <nav data-testid="home-nav" class="shell-home-nav" aria-label="Main navigation">
+              <button data-testid="home-nav-chats" aria-current={homeRoute().kind === 'rooms' ? 'page' : undefined} onClick={() => showHome({ kind: 'rooms' })}>Chats</button>
+              <button aria-current={homeRoute().kind === 'wiki' ? 'page' : undefined} onClick={() => showHome({ kind: 'wiki' })}>Wiki</button>
+              <button aria-current={homeRoute().kind === 'updates' ? 'page' : undefined} onClick={() => showHome({ kind: 'updates' })}>Updates</button>
+              <button data-testid="home-nav-scheduler" aria-current={homeRoute().kind === 'scheduler' ? 'page' : undefined} onClick={() => showHome({ kind: 'scheduler' })}>Autopilot</button>
+              <button data-testid="home-nav-costs" aria-current={homeRoute().kind === 'costs' ? 'page' : undefined} onClick={() => showHome({ kind: 'costs' })}>Costs</button>
+            </nav>
           }>
             {(s) => <>
               <Show when={s().isActive}><span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#4aba6a', 'flex-shrink': '0' }} /></Show>
