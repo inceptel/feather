@@ -1,5 +1,29 @@
 import { test, expect } from '@playwright/test';
 
+test('pinned and recent chats sort newest activity first', async ({ page }) => {
+  const sessions = [
+    { id: 'old-pin', title: 'Older pin', updatedAt: '2026-09-01T00:00:00Z' },
+    { id: 'old', title: 'Older chat', updatedAt: '2026-09-02T00:00:00Z' },
+    { id: 'new-pin', title: 'Newer pin', updatedAt: '2026-09-10T00:00:00Z' },
+    { id: 'new', title: 'Newer chat', updatedAt: '2026-09-11T00:00:00Z' },
+  ];
+  await page.route('**/api/**', async route => {
+    const p = new URL(route.request().url()).pathname;
+    const body = p === '/api/sessions' ? { sessions }
+      : p === '/api/chat-pins' ? { pins: [{ id: 'old-pin' }, { id: 'new-pin' }], archived: [] }
+      : p === '/api/rooms' ? { rooms: [] }
+      : p === '/api/boxes' ? { boxes: [] }
+      : p === '/api/sidecar' ? { groups: [] }
+      : p === '/api/sharing/peers' ? { peers: [] }
+      : p === '/api/agents' ? { agents: [] }
+      : ['/api/quick-links', '/api/starred'].includes(p) ? [] : {};
+    await route.fulfill({ json: body });
+  });
+  await page.goto('/#');
+  await expect(page.getByRole('region', { name: 'Pinned chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer pin', 'Older pin']);
+  await expect(page.getByRole('region', { name: 'Recent chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer chat', 'Older chat']);
+});
+
 for (const theme of ['feather', 'opencode', 'catppuccin', 'tokyonight']) {
   test(`workspace respects ${theme} theme and narrow layouts`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 844 });

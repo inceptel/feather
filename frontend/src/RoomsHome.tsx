@@ -8,6 +8,10 @@ import './workspace.css'
 type ChatPin = { id: string, title?: string, legacy?: boolean }
 type WikiPage = { source: string, name: string, size: number, updatedAt: string }
 
+function lastUsedFirst(a: SessionMeta, b: SessionMeta) {
+  return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)
+}
+
 function SharedWiki(props: { source?: string, refreshKey: number }) {
   const [pages, setPages] = createSignal<WikiPage[]>([])
   const [query, setQuery] = createSignal('')
@@ -203,8 +207,8 @@ export default function RoomsHome(props: {
   const pinnedChats = createMemo(() => pins().filter(pin => !archived().includes(pin.id)).map(pin => {
     const session = allSessions().get(pin.id)
     return { ...session, id: pin.id, title: (pin.legacy ? pin.title : session?.title) || pin.title || 'Pinned chat', updatedAt: session?.updatedAt || '', isActive: session?.isActive || false } as SessionMeta
-  }))
-  const recentChats = createMemo(() => sessions().filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)))
+  }).sort(lastUsedFirst))
+  const recentChats = createMemo(() => sessions().filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)).sort(lastUsedFirst))
   const archivedChats = createMemo(() => archived().map(id => allSessions().get(id) || { id, title: pins().find(pin => pin.id === id)?.title || 'Archived chat', updatedAt: '', isActive: false }))
   const searchResults = createMemo(() => results().filter(session => showArchived() || !archived().includes(session.id)))
 
