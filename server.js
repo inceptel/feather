@@ -3958,6 +3958,8 @@ app.get('/api/file', (req, res) => {
     const stat = fs.statSync(fpath);
     if (!stat.isFile()) return res.status(400).json({ error: 'not a file' });
     if (stat.size > 100 * 1024 * 1024) return res.status(413).json({ error: 'file too large' });
+    if (/\.html?$/i.test(fpath)) res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:");
+    if (req.query.download === '1') return res.download(fpath, path.basename(fpath), { dotfiles: 'allow' });
     res.sendFile(fpath, { dotfiles: 'allow' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4734,13 +4736,15 @@ function roomNameForSession(id) {
 
 function roomSessionContext(id) {
   const meta = readMeta()[id] || {};
+  const room = roomNameForSession(id);
+  const cwd = meta.cwd || (room ? path.join(ROOMS_HOME_DIR, room) : findJsonlPath(id, getAgentForSession(id)) ? sessionCwdForFork(id, getAgentForSession(id)) : null);
   const lineage = {
+    ...(cwd ? { cwd } : {}),
     forkOf: meta.forkOf || null,
     forkSourceTitle: meta.forkSourceTitle || null,
     workspaceMode: meta.forkWorkspaceMode || null,
     forkBranch: meta.forkBranch || null,
   };
-  const room = roomNameForSession(id);
   if (!room) {
     const session = discoverSessions(0, null, [id]).find(candidate => candidate.id === id);
     return { room: null, kind: session || meta.title ? 'chat' : null, role: null, label: meta.title || session?.title || null, ...lineage };

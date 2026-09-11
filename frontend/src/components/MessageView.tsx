@@ -33,6 +33,8 @@ import {
   toolPresentation,
 } from '../lib/toolPresentation.js'
 import { localFilePath, localFileUrl } from '../lib/localMedia.js'
+import { linkTarget, addHeadingIds } from '../lib/linkTarget.js'
+import { appUrl } from '../lib/appPath.js'
 import { extractImages } from '../lib/attachments.js'
 import { ProtocolRunCard } from './ProtocolRunCard'
 import { runsForInvocation } from '../lib/protocolRuns.js'
@@ -109,6 +111,14 @@ const marked = new Marked(
 const mdCache = new Map<string, string>()
 const MD_CACHE_MAX = 2000
 
+// Preserve safe file destinations before the sanitizer removes file:/sandbox:.
+// Do not widen the sanitizer's protocol allowlist (javascript:/data: stay blocked).
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  if (node.nodeName !== 'A' || data.attrName !== 'href' || !/^(file:|sandbox:)/i.test(data.attrValue)) return
+  const target = linkTarget(data.attrValue)
+  if (target.kind === 'file') data.attrValue = appUrl(`/api/file?path=${encodeURIComponent(target.path + (target.line ? ':' + target.line : ''))}`)
+})
+
 export function renderMarkdown(text: string): string {
   const cached = mdCache.get(text)
   if (cached !== undefined) return cached
@@ -154,33 +164,48 @@ function handleCopyClick(e: MouseEvent) {
   })
 }
 
+const wiredLinks = new WeakSet<HTMLAnchorElement>()
 function wirePathLink(a: HTMLAnchorElement, targetPath: string) {
+  if (wiredLinks.has(a)) return
+  wiredLinks.add(a)
   a.classList.add('feather-path')
-  a.href = '#'
+  a.href = localFileUrl(targetPath) || targetPath
   a.removeAttribute('target')
   a.removeAttribute('rel')
   a.dataset.path = targetPath
   a.addEventListener('click', (ev) => {
     ev.preventDefault()
-    window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath } }))
+    window.dispatchEvent(new CustomEvent('feather:open-path', { detail: { path: targetPath, fromChat: true } }))
   })
-}
-
-function filesystemPathFromHref(a: HTMLAnchorElement): string | null {
-  return localFilePath(a.getAttribute('href'))
 }
 
 // Make web links open in a new tab and route Markdown filesystem links through
 // Feather's file viewer, just like bare paths linkified below.
 function fixLinks(el: HTMLElement) {
+  addHeadingIds(el)
   for (const a of el.querySelectorAll('a')) {
-    const targetPath = filesystemPathFromHref(a)
-    if (targetPath) {
-      wirePathLink(a, targetPath)
+    if (wiredLinks.has(a)) continue
+    const target = linkTarget(a.getAttribute('href'))
+    if (target.kind === 'file') {
+      wirePathLink(a, target.path + (target.line ? ':' + target.line : ''))
       continue
     }
-    a.setAttribute('target', '_blank')
-    a.setAttribute('rel', 'noopener')
+    if (target.kind === 'anchor') {
+      a.addEventListener('click', event => {
+        event.preventDefault()
+        let id = target.hash
+        try { id = decodeURIComponent(id) } catch {}
+        const found = Array.from(el.querySelectorAll('[id]')).find(node => node.id === id)
+        found?.scrollIntoView({ block: 'start' })
+      })
+    } else if (target.kind === 'web') {
+      a.href = target.href
+      a.setAttribute('target', '_blank')
+      a.setAttribute('rel', 'noopener noreferrer')
+    } else {
+      a.removeAttribute('href')
+      a.setAttribute('title', 'This link has no safe destination')
+    }
   }
 }
 
@@ -221,7 +246,7 @@ function fixImages(el: HTMLElement, setLightbox?: (v: string | null) => void) {
 // Skips paths inside <a> (already linked) and <pre> (code blocks). Inline
 // <code> is fine — paths in backticks should still be clickable.
 // Matches absolute (/a/b), home-relative (~/a/b), and file:// URLs.
-const PATH_RE = /(?<![\w/:~])(?:file:\/\/)?(?:~|\/[\w.\-]+)(?:\/[\w.\-]+)+(?::\d+)?/g
+const PATH_RE = /(?<![\w/:~])(?:file:\/\/|sandbox:)?(?:~|\/[\p{L}\p{N}_.@%+~-]+)(?:\/[\p{L}\p{N}_.@%+~-]+)+(?::\d+(?::\d+)?)?(?:#L\d+)?/gu
 const TRAILING_PUNCT_RE = /[.,;:!?)\]}]+$/
 
 // Defer to next microtask so innerHTML / text children are populated first
@@ -229,6 +254,17 @@ const TRAILING_PUNCT_RE = /[.,;:!?)\]}]+$/
 const linkifyRef = (el: HTMLElement) => queueMicrotask(() => linkifyPaths(el))
 
 function linkifyPaths(el: HTMLElement) {
+  for (const code of el.querySelectorAll('code')) {
+    if (code.closest('pre,a') || code.children.length) continue
+    const raw = code.textContent?.trim() || ''
+    if (!/^(\/|~\/|file:\/\/|sandbox:\/)/.test(raw)) continue
+    const target = linkTarget(raw)
+    if (target.kind !== 'file') continue
+    const a = document.createElement('a')
+    a.textContent = raw
+    wirePathLink(a, target.path + (target.line ? ':' + target.line : ''))
+    code.replaceChildren(a)
+  }
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       let p: HTMLElement | null = (node as Text).parentElement

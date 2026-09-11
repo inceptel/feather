@@ -254,6 +254,7 @@ export interface RoomLeaderWake {
 }
 
 export interface RoomSessionContext {
+  cwd?: string
   room: string | null
   kind: 'main' | 'resident' | 'status' | 'chat' | null
   role: string | null

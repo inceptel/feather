@@ -8,7 +8,8 @@ import './shell.css'
 import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
 import { SchedulerView } from './components/SchedulerView'
-import { RoomWikiView } from './components/RoomWikiView'
+import { FilePreview } from './components/FilePreview'
+import { linkTarget } from './lib/linkTarget.js'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { BtwItem, SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
 import { askBtw, fetchBtw, fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns, openIntakeChat } from './api'
@@ -184,13 +185,10 @@ export default function App() {
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'wiki' | 'files' | 'terminal'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'terminal'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
   // or a Room page. Kept in the hash so reloads and back buttons work.
   const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' | 'wiki' | 'updates' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
-  const [wikiRoomName, setWikiRoomName] = createSignal<string | undefined>()
-  const [wikiLookupState, setWikiLookupState] = createSignal<'idle' | 'loading' | 'ready' | 'error'>('idle')
-  const [wikiRetry, setWikiRetry] = createSignal(0)
   const [roomContext, setRoomContext] = createSignal<RoomSessionContext | null>(null)
   const [filesMode, setFilesMode] = createSignal<'changed' | 'all'>('changed')
   const [browse, setBrowse] = createSignal<FileListing | null>(null)
@@ -212,11 +210,15 @@ export default function App() {
       return a.name.localeCompare(c.name)
     })
   }
+  const [browseError, setBrowseError] = createSignal('')
+  let browseGeneration = 0
   async function loadBrowse(dir?: string) {
+    const generation = ++browseGeneration
     setBrowseLoading(true)
-    try { setBrowse(await fetchFiles(dir)) }
-    catch (e) { console.error(e) }
-    finally { setBrowseLoading(false) }
+    setBrowseError('')
+    try { const result = await fetchFiles(dir); if (generation === browseGeneration) setBrowse(result) }
+    catch (e) { if (generation === browseGeneration) setBrowseError(e instanceof Error ? e.message : String(e)) }
+    finally { if (generation === browseGeneration) setBrowseLoading(false) }
   }
   async function deleteBrowseEntry(full: string, name: string, isDir: boolean) {
     const what = isDir ? `directory "${name}" and ALL its contents` : `"${name}"`
@@ -251,47 +253,45 @@ export default function App() {
   }
   const uploadsInFlight = new Map<string, Promise<string>>()
   const voiceMemosInFlight = new Map<string, Promise<void>>()
-  type FileKind = 'image' | 'pdf' | 'md' | 'text'
-  function fileKind(p: string): FileKind {
-    const ext = p.toLowerCase().split('.').pop() || ''
-    if (['png','jpg','jpeg','gif','webp','svg','bmp','ico','avif'].includes(ext)) return 'image'
-    if (ext === 'pdf') return 'pdf'
-    if (ext === 'md' || ext === 'markdown') return 'md'
-    return 'text'
-  }
-  const [viewingFile, setViewingFile] = createSignal<{ path: string; kind: FileKind; content: string; error?: string } | null>(null)
-  async function openFile(path: string) {
-    const kind = fileKind(path)
-    // Binary types (image/pdf) are rendered directly from the URL by the browser
-    // — no need to fetch text content. The 'Open' button also points to the same URL.
-    if (kind === 'image' || kind === 'pdf') {
-      setViewingFile({ path, kind, content: '' })
-      return
+  const [filesOpen, setFilesOpen] = createSignal(false)
+  const [pathError, setPathError] = createSignal('')
+  const [viewingFile, setViewingFile] = createSignal<{ path: string; line?: number } | null>(null)
+  let pathGeneration = 0
+  function openFile(path: string) { void goToPath(path, false) }
+  async function goToPath(rawPath: string, checkDirectory = true) {
+    if (isRemoteBox()) { setPathError('Files from remote chats must be opened on their own Feather instance.'); return }
+    setPathError('')
+    const generation = ++pathGeneration
+    const sessionId = currentId()
+    let cwd = roomContext()?.cwd
+    if (!cwd && sessionId) {
+      try { cwd = (await fetchSessionRoomContext(sessionId)).cwd } catch {}
     }
-    setViewingFile({ path, kind, content: '' })
-    try {
-      const r = await fetch(localFileUrl(path)!)
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-      setViewingFile({ path, kind, content: await r.text() })
-    } catch (e: any) {
-      setViewingFile({ path, kind, content: '', error: e.message || 'failed to load' })
+    if (generation !== pathGeneration || sessionId !== currentId() || isRemoteBox()) return
+    const target = linkTarget(rawPath, cwd)
+    if (target.kind !== 'file' || target.relative) { setPathError('Could not resolve this file. Use an absolute path or open its project first.'); return }
+    if (checkDirectory) {
+      try {
+        const listing = await fetchFiles(target.path)
+        if (generation !== pathGeneration) return
+        setBrowse(listing); setFilesMode('all'); setViewingFile(null); setFilesOpen(true)
+        return
+      } catch {}
     }
+    if (generation === pathGeneration) setViewingFile({ path: target.path, line: target.line })
   }
-  async function goToPath(rawPath: string) {
-    const path = rawPath.replace(/:\d+$/, '')
-    setTab('files')
-    setBrowseLoading(true)
-    try {
-      const listing = await fetchFiles(path)
-      setBrowse(listing)
-      setFilesMode('all')
-      setViewingFile(null)
-    } catch {
-      openFile(path)
-    } finally {
-      setBrowseLoading(false)
-    }
+  function closeFile() { ++pathGeneration; setViewingFile(null) }
+  async function openWorkspaceFiles() {
+    setSidebar(false); setFilesMode('all'); setFilesOpen(true)
+    const id = currentId()
+    let cwd = roomContext()?.cwd
+    if (id && !cwd) { try { cwd = (await fetchSessionRoomContext(id)).cwd } catch {} }
+    if (filesOpen() && id === currentId() && !isRemoteBox()) void loadBrowse(cwd)
   }
+  createEffect(() => {
+    currentId(); currentBox()
+    ++pathGeneration; ++browseGeneration; setViewingFile(null); setFilesOpen(false); setBrowse(null); setBrowseLoading(false); setPathError('')
+  })
   const [uploadScopes, setUploadScopes] = createSignal<Set<string>>(new Set())
   const mediaScopeKey = (boxId: string, sessionId: string) => `${boxId}\u0000${sessionId}`
   const uploading = () => {
@@ -1678,9 +1678,6 @@ export default function App() {
     else setFavicon('#666')
   })
 
-  createEffect(() => {
-    if (tab() === 'files' && filesMode() === 'all' && !browse() && !browseLoading()) loadBrowse()
-  })
 
   function formatSize(n: number): string {
     if (n < 1024) return n + 'B'
@@ -1751,25 +1748,6 @@ export default function App() {
     }).catch(() => {})
   })
 
-  // The Wiki is Room-owned. Resolve the current session's Room only when the
-  // tab opens; RoomWikiView then reads curated pages, never raw updates/traces.
-  let wikiRoomGeneration = 0
-  createEffect(() => {
-    const id = currentId()
-    wikiRetry()
-    const generation = ++wikiRoomGeneration
-    setWikiRoomName(undefined)
-    setWikiLookupState('idle')
-    if (tab() !== 'wiki' || !id || isRemoteBox()) return
-    setWikiLookupState('loading')
-    fetchSessionRoom(id).then((room) => {
-      if (generation !== wikiRoomGeneration) return
-      setWikiRoomName(room || undefined)
-      setWikiLookupState('ready')
-    }).catch(() => {
-      if (generation === wikiRoomGeneration) setWikiLookupState('error')
-    })
-  })
 
 
   return (
@@ -1813,6 +1791,11 @@ export default function App() {
             <button onClick={() => setSidebar(false)} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '20px', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent', padding: '4px 8px' }}>&times;</button>
           </div>
           {/* Sidebar tabs */}
+          <nav class="sidebar-workspace" aria-label="Workspace">
+            <span>Workspace</span>
+            <button onClick={() => { setSidebar(false); showHome({ kind: 'wiki' }) }}>Wiki</button>
+            <Show when={!isRemoteBox()}><button onClick={openWorkspaceFiles}>Files</button></Show>
+          </nav>
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
             <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
             <button onClick={() => setSidebarTab('links')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'links' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'links' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Links</button>
@@ -2150,14 +2133,12 @@ export default function App() {
 
         {/* Tabs */}
         <Show when={currentId()}>
-          <div style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '8px', 'flex-shrink': '0', 'overflow-x': 'auto', '-webkit-overflow-scrolling': 'touch', 'scrollbar-width': 'none' }}>
+          <nav aria-label="Conversation views" style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '8px', 'flex-shrink': '0', 'overflow-x': 'auto', '-webkit-overflow-scrolling': 'touch', 'scrollbar-width': 'none' }}>
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
             <Show when={!isRemoteBox()}>
-              <button data-testid="wiki-tab" onClick={() => setTab('wiki')} style={tabStyle('wiki')}>Wiki</button>
-              <button onClick={() => setTab('files')} style={tabStyle('files')}>Files{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}</button>
               <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
             </Show>
-          </div>
+          </nav>
         </Show>
 
         {/* Reconnecting banner */}
@@ -2209,27 +2190,28 @@ export default function App() {
                 onOpenAgentHub={isRemoteBox() ? undefined : openAgentHub}
               />
             </div>
-            <div data-testid="wiki-panel" style={{ display: tab() === 'wiki' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-              <Show when={tab() === 'wiki'}>
-                <Show when={wikiLookupState() === 'loading'}>
-                  <div style={{ color: '#666', 'font-size': '13px', padding: '24px 16px' }}>Finding this chat's Room…</div>
-                </Show>
-                <Show when={wikiLookupState() === 'error'}>
-                  <div style={{ color: '#d45555', 'font-size': '13px', padding: '24px 16px' }}>
-                    Could not load the Room Wiki. <button onClick={() => setWikiRetry((value) => value + 1)} style={{ background: 'none', border: 'none', color: '#73b8ff', padding: '0', cursor: 'pointer' }}>Retry</button>
-                  </div>
-                </Show>
-                <Show when={wikiLookupState() === 'ready'}>
-                  <RoomWikiView room={wikiRoomName()} />
-                </Show>
+            <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
+              <Show when={tab() === 'terminal'}>
+                <Suspense fallback={<div style={{ padding: '12px', color: '#888' }}>Loading terminal…</div>}>
+                  <Terminal sessionId={currentId()} />
+                </Suspense>
               </Show>
             </div>
-            <div style={{ display: tab() === 'files' ? 'flex' : 'none', 'flex-direction': 'column', height: '100%', overflow: 'hidden' }}>
+          </Show>
+        </div>
+
+        <Show when={pathError()}><div role="alert" class="workspace-path-error">{pathError()}<button aria-label="Dismiss file error" onClick={() => setPathError('')}>×</button></div></Show>
+        <Show when={filesOpen() && !isRemoteBox()}>
+          <div class="workspace-files-backdrop" onClick={e => { if (e.target === e.currentTarget) setFilesOpen(false) }}>
+            <section class="workspace-files-panel" role="dialog" aria-modal="true" aria-label="Files" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setFilesOpen(false) } }}>
+              <header><div><h2>Files</h2><span>Workspace files and references</span></div><button aria-label="Close files" ref={el => queueMicrotask(() => el.focus())} onClick={() => setFilesOpen(false)}>×</button></header>
+              <Show when={browseError()}><p role="alert" class="workspace-file-error">{browseError()}</p></Show>
+            <div class="workspace-files-body">
               {/* Mode toggle */}
               <div style={{ display: 'flex', gap: '4px', padding: '8px 12px', 'border-bottom': '1px solid #1e1e1e', 'flex-shrink': '0' }}>
                 <button onClick={() => setFilesMode('changed')}
                   style={{ background: filesMode() === 'changed' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: filesMode() === 'changed' ? '#e5e5e5' : '#888', 'font-size': '12px', padding: '4px 10px', 'border-radius': '6px', cursor: 'pointer' }}>
-                  Changed{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}
+                  Referenced{touchedFiles().length > 0 ? ` (${touchedFiles().length})` : ''}
                 </button>
                 <button onClick={() => setFilesMode('all')}
                   style={{ background: filesMode() === 'all' ? '#1e1e1e' : 'transparent', border: '1px solid #333', color: filesMode() === 'all' ? '#e5e5e5' : '#888', 'font-size': '12px', padding: '4px 10px', 'border-radius': '6px', cursor: 'pointer' }}>
@@ -2240,7 +2222,7 @@ export default function App() {
               <Show when={filesMode() === 'changed'}>
                 <div style={{ flex: '1', 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', padding: '8px 0' }}>
                   <Show when={touchedFiles().length === 0}>
-                    <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>No files touched yet</div>
+                    <div style={{ color: '#555', 'text-align': 'center', padding: '40px', 'font-size': '13px' }}>No files referenced yet</div>
                   </Show>
                   <For each={touchedFiles()}>{(f) => {
                     const short = f.path.split('/').slice(-2).join('/')
@@ -2337,56 +2319,11 @@ export default function App() {
                 </div>
               </Show>
             </div>
-            <div style={{ display: tab() === 'terminal' ? 'block' : 'none', height: '100%' }}>
-              <Show when={tab() === 'terminal'}>
-                <Suspense fallback={<div style={{ padding: '12px', color: '#888' }}>Loading terminal…</div>}>
-                  <Terminal sessionId={currentId()} />
-                </Suspense>
-              </Show>
-            </div>
-          </Show>
-        </div>
 
-        {/* File viewer modal */}
-        <Show when={viewingFile()}>
-          {(() => {
-            const v = viewingFile()!
-            const fileUrl = localFileUrl(v.path)!
-            return (
-              <div onClick={() => setViewingFile(null)} style={{ position: 'fixed', inset: '0', background: 'rgba(0,0,0,0.6)', 'z-index': '200', display: 'flex', 'align-items': 'stretch', 'justify-content': 'center', padding: 'max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom))' }}>
-                <div onClick={(e) => e.stopPropagation()} style={{ background: '#0d1117', border: '1px solid #1e1e1e', 'border-radius': '12px', 'max-width': '900px', width: '100%', display: 'flex', 'flex-direction': 'column', 'overflow': 'hidden' }}>
-                  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', padding: '10px 14px', 'border-bottom': '1px solid #1e1e1e', background: '#0a0e14', 'flex-shrink': '0' }}>
-                    <span style={{ color: '#888', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }} title={v.path}>{v.path}</span>
-                    <a href={fileUrl} target="_blank" rel="noopener" style={{ background: 'transparent', border: '1px solid #333', color: '#888', 'font-size': '11px', padding: '3px 8px', 'border-radius': '6px', cursor: 'pointer', 'text-decoration': 'none' }}>Open</a>
-                    <button onClick={() => setViewingFile(null)} style={{ background: 'transparent', border: 'none', color: '#888', 'font-size': '20px', cursor: 'pointer', padding: '0 4px', 'line-height': '1' }}>&times;</button>
-                  </div>
-                  <div style={{ 'overflow-y': 'auto', '-webkit-overflow-scrolling': 'touch', flex: '1', display: 'flex', 'flex-direction': 'column' }}>
-                    <Show when={v.error}>
-                      <div style={{ padding: '20px', color: '#c44', 'font-size': '13px' }}>{v.error}</div>
-                    </Show>
-                    <Show when={v.kind === 'image'}>
-                      <div style={{ padding: '12px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', flex: '1', background: '#000' }}>
-                        <img src={fileUrl} style={{ 'max-width': '100%', 'max-height': '80vh', 'object-fit': 'contain' }} />
-                      </div>
-                    </Show>
-                    <Show when={v.kind === 'pdf'}>
-                      <iframe src={fileUrl} style={{ width: '100%', height: '80vh', border: 'none', background: '#fff' }} />
-                    </Show>
-                    <Show when={v.kind === 'md' && !v.error && v.content}>
-                      <div class="prose" style={{ padding: '4px 24px', color: '#d0d0d0', 'font-size': '14px', 'line-height': '1.55' }} innerHTML={renderWikiMarkdown(v.content)} />
-                    </Show>
-                    <Show when={v.kind === 'text' && !v.error && v.content}>
-                      <pre style={{ margin: '0', padding: '16px 20px', color: '#d0d0d0', 'font-size': '12px', 'font-family': "'SF Mono', Menlo, monospace", 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{v.content}</pre>
-                    </Show>
-                    <Show when={!v.error && !v.content && (v.kind === 'md' || v.kind === 'text')}>
-                      <div style={{ padding: '20px', color: '#666', 'font-size': '13px' }}>Loading…</div>
-                    </Show>
-                  </div>
-                </div>
-              </div>
-            )
-          })()}
+            </section>
+          </div>
         </Show>
+        <Show when={viewingFile()} keyed>{file => <FilePreview path={file.path} line={file.line} onClose={closeFile} onOpen={openFile} />}</Show>
 
         {/* Drag overlay */}
         <Show when={dragging()}>

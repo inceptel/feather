@@ -1529,6 +1529,16 @@ describe('static files', () => {
 describe('GET /api/file', () => {
   const fixture = path.join(__dirname, '..', 'fixtures', 'tool-preview.svg')
 
+  it('isolates HTML documents and supports explicit download', async () => {
+    const html = path.join(__dirname, '..', '..', 'frontend', 'index.html')
+    const response = await fetch(`${BASE}/api/file?path=${encodeURIComponent(html)}`)
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-security-policy'), /sandbox;/)
+    const download = await fetch(`${BASE}/api/file?path=${encodeURIComponent(fixture)}&download=1`)
+    assert.equal(download.status, 200)
+    assert.match(download.headers.get('content-disposition'), /^attachment;/)
+  })
+
   it('serves a file by absolute path', async () => {
     const r = await fetch(`${BASE}/api/file?path=${encodeURIComponent(fixture)}`)
     assert.equal(r.status, 200)

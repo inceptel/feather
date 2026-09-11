@@ -1,0 +1,17 @@
+.file-preview-backdrop { position: fixed; inset: 0; background: #0009; z-index: 200; display: flex; justify-content: center; padding: 24px; }
+.file-preview { background: var(--bg-base); border: 1px solid var(--border-medium); border-radius: 10px; width: 100%; max-width: 1280px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.file-preview header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border-base); }
+.file-preview-name { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.file-preview-name span { font-size: 12px; color: var(--text-secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.file-preview button, .file-preview header > a { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 6px; padding: 8px 12px; font-size: 12px; text-decoration: none; cursor: pointer; }
+.file-preview button[aria-pressed=true] { border-color: var(--accent); }
+.file-preview nav { display: flex; align-items: center; gap: 8px; padding: 8px 20px; flex-wrap: wrap; }
+.file-preview nav span { color: var(--text-secondary); font-size: 12px; }
+.file-preview-body { overflow: auto; flex: 1; min-height: 0; padding: 16px 20px; }
+.file-preview-body pre { margin: 0; font: 13px/1.7 ui-monospace, monospace; white-space: pre; tab-size: 2; }
+.file-preview-body pre.file-source-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview-body iframe { border: 0; width: 100%; height: 100%; min-height: 50vh; background: white; }
+.file-preview-body :is(img,video) { max-width: 100%; max-height: 75vh; object-fit: contain; }
+.file-markdown { max-width: 85ch; margin: 0 auto; line-height: 1.7; }
+.file-preview-body [role=alert] { color: var(--error); margin-bottom: 12px; }
+@media (max-width: 600px) { .file-preview-backdrop { padding: max(8px,env(safe-area-inset-top)) 0 max(0px,env(safe-area-inset-bottom)); } .file-preview { border-radius: 0; } .file-preview header { padding: 12px; gap: 8px; } .file-preview-body { padding: 12px; } }
