@@ -118,6 +118,7 @@ before(async () => {
         HOME: fixtureHome,
         FEATHER_STATE_DIR: fixtureStateDir,
         FEATHER_DEEPGRAM_API_KEY: '',
+        FEATHER_OMP_AUTH_GATEWAY_URL: '',
         PORT: String(port),
         PATH: fixturePath,
       },
@@ -422,6 +423,64 @@ describe('GET /api/sessions/:id/room', () => {
     assert.equal(context.kind, 'chat')
     assert.equal(context.role, null)
     assert.equal(typeof context.label, 'string')
+  })
+})
+
+describe('Research subscriptions', () => {
+  it('creates a recurring, followed research Room and rejects duplicate subjects', async () => {
+    if (EXTERNAL_SERVER) return
+    const tmux = path.join(fixtureBin, 'tmux')
+    const previousTmux = fs.readFileSync(tmux, 'utf8')
+    fs.writeFileSync(tmux, [
+      '#!/bin/sh',
+      'case "$1" in',
+      '  new-session|set-option|load-buffer|paste-buffer|send-keys|kill-session) exit 0;;',
+      '  has-session) exit 1;;',
+      'esac',
+      'exit 1',
+      '',
+    ].join('\n'), { mode: 0o700 })
+    try {
+      const subject = `Orbital battery markets ${Date.now().toString(36)}`
+      const created = await fetch(`${BASE}/api/research-subscriptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject, cadence: 'four-hourly' }),
+      })
+      const payload = await created.json()
+      assert.equal(created.status, 201, JSON.stringify(payload))
+      assert.equal(payload.subscription.subject, subject)
+      assert.equal(payload.subscription.cadence, 'four-hourly')
+      assert.equal(payload.subscription.status, 'researching')
+      assert.match(payload.subscription.room, /^research-/)
+      assert.ok(fs.readFileSync(path.join(payload.room.cwd, 'STEERING.md'), 'utf8').includes(subject))
+      assert.ok(fs.readFileSync(path.join(payload.room.cwd, 'wiki/TODO.md'), 'utf8').includes(`Scan ${subject} for material developments`))
+
+      const [subscription] = (await (await fetch(`${BASE}/api/research-subscriptions`)).json()).subscriptions
+        .filter((entry) => entry.subject === subject)
+      assert.equal(subscription.room, payload.subscription.room)
+      const feed = await (await fetch(`${BASE}/api/feed`)).json()
+      assert.ok(feed.following.includes(subscription.room))
+      const scheduler = await (await fetch(`${BASE}/api/scheduler?room=${encodeURIComponent(subscription.room)}`)).json()
+      assert.equal(scheduler.rules.length, 1)
+      assert.equal(scheduler.rules[0].id, `${subscription.room}/research`)
+      assert.equal(scheduler.rules[0].every, '4h')
+      assert.ok(scheduler.rules[0].prompt.includes('Treat social posts as discovery leads'))
+
+      const duplicate = await fetch(`${BASE}/api/research-subscriptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: subject.toUpperCase(), cadence: 'daily' }),
+      })
+      assert.equal(duplicate.status, 409)
+
+      const stopped = await fetch(`${BASE}/api/research-subscriptions/${encodeURIComponent(subscription.room)}`, { method: 'DELETE' })
+      const stoppedPayload = await stopped.json()
+      assert.equal(stopped.status, 200, JSON.stringify(stoppedPayload))
+      assert.equal(stoppedPayload.subscriptions.some((entry) => entry.room === subscription.room), false)
+    } finally {
+      fs.writeFileSync(tmux, previousTmux, { mode: 0o700 })
+    }
   })
 })
 

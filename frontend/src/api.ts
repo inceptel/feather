@@ -374,6 +374,34 @@ export async function setFeedFollowing(room: string, following: boolean): Promis
   return (await responseJson<{ ok: true, following: string[] }>(response)).following
 }
 
+export interface ResearchSubscription {
+  subject: string
+  room: string
+  cadence: 'hourly' | 'four-hourly' | 'daily'
+  status: 'researching' | 'scheduled' | 'stopped'
+  lastRunAt: string | null
+  nextRunAt: string | null
+}
+
+export async function fetchResearchSubscriptions(): Promise<ResearchSubscription[]> {
+  const response = await fetch(`${BASE}/api/research-subscriptions`)
+  return (await responseJson<{ subscriptions: ResearchSubscription[] }>(response)).subscriptions
+}
+
+export async function createResearchSubscription(subject: string, cadence: ResearchSubscription['cadence']): Promise<ResearchSubscription> {
+  const response = await fetch(`${BASE}/api/research-subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject, cadence }),
+  })
+  return (await responseJson<{ subscription: ResearchSubscription }>(response)).subscription
+}
+
+export async function deleteResearchSubscription(room: string): Promise<ResearchSubscription[]> {
+  const response = await fetch(`${BASE}/api/research-subscriptions/${encodeURIComponent(room)}`, { method: 'DELETE' })
+  return (await responseJson<{ subscriptions: ResearchSubscription[] }>(response)).subscriptions
+}
+
 export async function postFeedComment(evidenceId: string, text: string): Promise<FeedComment> {
   const response = await fetch(`${BASE}/api/feed/comments`, {
     method: 'POST',

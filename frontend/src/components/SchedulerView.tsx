@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
+import { ProjectInboxes } from './ProjectInboxes'
 import { fetchScheduler, fetchSchedulerRuns, schedulerRuleAction, deleteSchedulerRule, stopAllAutopilot, stopAutopilotChat, fetchSessions, SchedulerSnapshot, SchedulerRule, SchedulerRun, SessionMeta } from '../api'
 
 // Scheduler: every wake rule Feather owns, in one table. What fires, when,
@@ -131,6 +132,8 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
           <button disabled={!!busy()} onClick={() => stop()} style={{ ...buttonStyle, color: red }} title="Stop active autonomous work and turn off future runs">Stop all</button>
         </div>
         <Show when={error()}><div style={{ color: red, 'font-size': '13px' }}>{error()}</div></Show>
+
+        <ProjectInboxes onOpenSession={props.onOpenSession} />
 
         <div style={cardStyle}>
           <div style={{ ...labelStyle, 'margin-bottom': '8px' }}>Scheduled work</div>

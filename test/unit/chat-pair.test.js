@@ -5,11 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT } from '../../lib/chat-pair.js';
 
-test('tiny tasks retain independent review with one combined request and no ceremony', () => {
+test('pairs agree before implementation and evaluate evidence without ceremony', () => {
   const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator' });
   for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
-  assert.match(prompts.creator, /ONE review request/);
-  assert.match(prompts.reviewer, /brief independent check/);
+  assert.match(prompts.creator, /Both agree before building/);
+  assert.match(prompts.reviewer, /against every agreed criterion/);
+  assert.match(prompts.creator, /one short exchange before producing the answer/);
+  assert.match(prompts.creator, /cr-agreement.creator.md/);
+  assert.match(prompts.reviewer, /not independent evidence/);
+  assert.match(prompts.creator, /Do not lower criteria to pass/);
+  assert.match(prompts.creator, /Do not stop merely because three rounds/);
   assert.match(prompts.creator, /Review is still required/);
 });
 

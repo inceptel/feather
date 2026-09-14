@@ -17,6 +17,14 @@ function ctx(extra = {}) {
 }
 
 describe('scheduler rules', () => {
+  it('records a user stop without classifying it as failure or killing chat state', () => {
+    const runtime = { ...emptyRuntime(), paused: true, pausedReason: 'stopped by user' }
+    const stopped = markFinished(runtime, { outcome: 'stopped', at: T0 })
+    assert.equal(stopped.lastOutcome, 'stopped')
+    assert.equal(stopped.paused, true)
+    assert.equal(stopped.pausedReason, 'stopped by user')
+    assert.equal(stopped.consecutiveFailures, 0)
+  })
   it('parses durations both ways', () => {
     assert.equal(parseDuration('30m'), 30 * 60_000)
     assert.equal(parseDuration('2h'), 2 * H)
