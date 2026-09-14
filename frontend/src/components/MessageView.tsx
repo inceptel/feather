@@ -1634,6 +1634,17 @@ export function MessageView(props: MessageViewProps) {
           </div>
         )
 
+        const internalText = (msg.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim()
+        const internalLabel = /^\[feather-sidecar [^\]]+\]/.test(internalText) ? 'Sidecar message'
+          : /^(You are part of a Creator–Reviewer \(CR\) pair in Feather\.|# Feather Ralph:|You are a Feather \*\*sidecar\*\* agent\.)/.test(internalText) ? 'Agent setup' : null
+        if (msg.role === 'user' && internalLabel) {
+          return <details class="agent-context-disclosure" style={{ margin: '0 0 12px', color: 'var(--text-secondary)', 'font-size': '12px' }}>
+            <summary style={{ cursor: 'pointer', padding: '8px 0' }}>{internalLabel}</summary>
+            <div style={{ 'white-space': 'pre-wrap', 'overflow-wrap': 'anywhere', padding: '8px 12px', color: 'var(--text-primary)' }}>{internalText}</div>
+            {metadataRow}
+          </details>
+        }
+
         // User message: single blue-tinted bubble right-aligned; metadata INSIDE the bubble.
         if (msg.role === 'user') {
           return (
