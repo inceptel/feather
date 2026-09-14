@@ -388,24 +388,12 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
   return (
     <section data-testid="super-feed" style={{ 'margin-bottom': '28px', 'font-size': '14px' }}>
       <style>{markdownCSS}</style>
-      <div style={{ display: 'flex', 'align-items': 'flex-end', gap: '10px', padding: '8px 2px 12px' }}>
-        <div style={{ 'min-width': '0' }}>
-          <h1 style={{ margin: '0', 'font-size': '20px', 'font-weight': '700', color: ink, 'line-height': '1.2' }}>Super Feed</h1>
-          <div style={{ color: muted, 'font-size': '12px', 'margin-top': '3px' }}>New research, shipped work, decisions, and friction.</div>
-        </div>
-        <button data-testid="feed-refresh" onClick={refresh} disabled={requestInFlight}
-          style={{ 'margin-left': 'auto', background: 'none', border: `1px solid ${line}`, 'border-radius': '999px', color: muted, 'font-size': '12px', 'font-weight': '700', cursor: 'pointer', padding: '4px 10px', 'flex-shrink': '0' }}>Refresh</button>
-      </div>
-      <div style={{ background: '#0d1117', border: `1px solid ${researchOpen() ? '#31415a' : line}`, 'border-radius': '12px', padding: '11px 12px', 'margin-bottom': '10px' }}>
+      <div style={{ 'border-bottom': `1px solid ${line}`, padding: '0 0 16px', 'margin-bottom': '20px' }}>
         <button data-testid="research-toggle" type="button" onClick={() => setResearchOpen(!researchOpen())}
           aria-expanded={researchOpen()}
-          style={{ width: '100%', display: 'flex', 'align-items': 'center', gap: '10px', background: 'none', border: 'none', color: ink, padding: '0', cursor: 'pointer', 'text-align': 'left' }}>
-          <span style={{ width: '28px', height: '28px', 'border-radius': '9px', display: 'grid', 'place-items': 'center', background: '#172234', color: blue, 'font-size': '16px', 'font-weight': '800', 'flex-shrink': '0' }}>+</span>
+          style={{ width: '100%', display: 'flex', 'align-items': 'center', gap: '10px', background: 'none', border: 'none', color: ink, padding: '0', 'min-height': '44px', cursor: 'pointer', 'text-align': 'left' }}>
           <span style={{ 'min-width': '0' }}>
-            <span style={{ display: 'block', 'font-size': '14px', 'font-weight': '750' }}>Choose what Feather researches</span>
-            <span style={{ display: 'block', color: muted, 'font-size': '12px', 'margin-top': '2px' }}>
-              {researchSubscriptions().length ? `${researchSubscriptions().length} subject${researchSubscriptions().length === 1 ? '' : 's'} tracked` : 'Get useful, cited updates instead of reading raw feeds'}
-            </span>
+            <span style={{ display: 'block', 'font-size': '13px', 'font-weight': '600' }}>Research topics{researchSubscriptions().length ? ` · ${researchSubscriptions().length} tracked` : ''}</span>
           </span>
           <span style={{ 'margin-left': 'auto', color: muted, 'font-size': '13px' }}>{researchOpen() ? 'Hide' : 'Manage'}</span>
         </button>

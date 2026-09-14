@@ -65,6 +65,7 @@ for (const width of [1280, 390]) {
     await expect(inbox).toContainText('Playable board');
     await inbox.locator('summary').filter({ hasText: 'Playable board' }).click();
     await expect(inbox).toContainText('A second click overwrites X');
+    await inbox.locator('summary').filter({ hasText: /^Add task$/ }).click();
     await inbox.getByRole('textbox', { name: 'New task for Tic-tac-toe' }).fill('Track scores');
     await inbox.getByRole('button', { name: 'Add task', exact: true }).click();
     await expect(inbox).toContainText('Track scores');
@@ -76,7 +77,7 @@ for (const width of [1280, 390]) {
     await expect(inbox.getByLabel('Standing objective')).toHaveValue('Keep the game simple and keyboard accessible.');
     await inbox.getByRole('button', { name: 'Save direction' }).click();
     await expect.poll(() => state.savedConfig()).toEqual({ objective: 'Keep the game simple and keyboard accessible.', allowIdeas: true, maxGeneratedTasks: 1 });
-    await expect(inbox).toContainText('Keep the game simple and keyboard accessible.');
+    await expect(inbox.getByLabel('Standing objective')).toHaveValue('Keep the game simple and keyboard accessible.');
     expect(await inbox.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`project-inbox-${width}.png`), fullPage: true });
   });
@@ -86,6 +87,7 @@ test('failed task creation keeps the draft and permits retry', async ({ page }) 
   const state = await fixture(page);
   const inbox = page.getByRole('region', { name: 'Project inboxes' });
   state.fail();
+  await inbox.locator('summary').filter({ hasText: /^Add task$/ }).click();
   await inbox.getByRole('textbox', { name: 'New task for Tic-tac-toe' }).fill('Track scores');
   await inbox.getByRole('button', { name: 'Add task', exact: true }).click();
   await expect(inbox.getByRole('alert')).toHaveText('Task already exists');
@@ -124,8 +126,21 @@ test('blocked tasks show the latest reason and unblock back into agreement', asy
 test('a response slower than the polling interval still renders without overlapping polls', async ({ page }) => {
   const state = await fixture(page, {}, 6200);
   const inbox = page.getByRole('region', { name: 'Project inboxes' });
+  await expect(inbox.getByRole('status')).toHaveText('Loading projects…');
+  await expect(inbox.getByText('No active project inboxes.', { exact: false })).not.toBeVisible();
   await expect(inbox).toContainText('Playable board', { timeout: 10000 });
   expect(state.inboxRequests()).toBe(1);
+});
+
+test('empty inbox setup stays collapsed and can be revealed without losing access', async ({ page }) => {
+  await fixture(page, { objective: '', tasks: [] });
+  const inbox = page.getByRole('region', { name: 'Project inboxes' });
+  await expect(inbox.getByRole('button', { name: 'Tic-tac-toe' })).not.toBeVisible();
+  await inbox.getByRole('button', { name: 'Show 1 chats without an inbox' }).click();
+  await expect(inbox.getByRole('button', { name: 'Tic-tac-toe' })).toBeVisible();
+  await expect(inbox.getByLabel('New task for Tic-tac-toe')).not.toBeVisible();
+  await inbox.locator('summary').filter({ hasText: /^Add task$/ }).click();
+  await expect(inbox.getByLabel('New task for Tic-tac-toe')).toBeVisible();
 });
 
 test('task details load only when opened and refresh when its reviewed revision changes', async ({ page }) => {
@@ -139,6 +154,7 @@ test('task details load only when opened and refresh when its reviewed revision 
   expect(state.detailRequests()).toHaveLength(1);
   await page.waitForTimeout(5200);
   expect(state.detailRequests()).toHaveLength(1);
+  await inbox.locator('summary').filter({ hasText: /^Add task$/ }).click();
   await inbox.getByRole('textbox', { name: 'New task for Tic-tac-toe' }).fill('Keep this draft');
   state.updateTask('board', { status: 'approved', revision: 'commit-two', review: { verdict: 'PASS', evidence: 'Repeated clicks preserve X and the next turn.' } });
   await expect(inbox).toContainText('Repeated clicks preserve X and the next turn.', { timeout: 10000 });

@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js'
 import { BASE } from '../api'
+import './WorkOverview.css'
 
 interface Task {
   id: string; title: string; description?: string; owner?: string | null; status: string
@@ -33,6 +34,18 @@ async function request(path: string, body?: unknown, signal?: AbortSignal) {
 
 export function ProjectInboxes(props: { onOpenSession: (id: string) => void }) {
   const [projects, setProjects] = createSignal<ProjectInbox[]>([])
+  const [loaded, setLoaded] = createSignal(false)
+  const [query, setQuery] = createSignal('')
+  const [showUnconfigured, setShowUnconfigured] = createSignal(false)
+  const unconfigured = createMemo(() => projects().filter(project => !project.objective && !project.tasks.length).length)
+  const visibleProjects = createMemo(() => projects().filter(project => {
+    if (query().trim()) return `${project.title} ${project.tasks.map(task => task.title).join(' ')}`.toLowerCase().includes(query().trim().toLowerCase())
+    return showUnconfigured() || Boolean(project.objective) || project.tasks.length > 0
+  }).sort((a, b) => {
+    const active = (project: ProjectInbox) => Number(project.tasks.some(task => task.status !== 'done'))
+    const updated = (project: ProjectInbox) => Math.max(0, ...project.tasks.map(task => Date.parse(task.updatedAt || '') || 0))
+    return active(b) - active(a) || updated(b) - updated(a)
+  }))
   const projectsById = createMemo(() => new Map(projects().map(project => [project.projectId, project])))
   const [error, setError] = createSignal('')
   const [busy, setBusy] = createSignal(false)
@@ -50,6 +63,7 @@ export function ProjectInboxes(props: { onOpenSession: (id: string) => void }) {
     } catch (e) {
       if (!disposed && current === generation) setError((e as Error).message)
     } finally {
+      if (!disposed && current === generation) setLoaded(true)
       if (loadingGeneration === current) loadingGeneration = null
     }
   }
@@ -74,14 +88,18 @@ export function ProjectInboxes(props: { onOpenSession: (id: string) => void }) {
   })
   onCleanup(() => { disposed = true; ++generation; controller.abort() })
 
-  return <section aria-label="Project inboxes" data-testid="project-inboxes" style={{ background: '#0f141b', border: '1px solid #1e2632', 'border-radius': '12px', padding: '14px 16px', 'min-width': '0' }}>
-    <h3 style={{ margin: '0 0 10px', 'font-size': '14px' }}>Project inboxes</h3>
+  return <section aria-label="Project inboxes" data-testid="project-inboxes" class="project-inboxes">
+    <div class="work-section-heading"><h2>Project inboxes</h2><span>Tasks, reviews and results</span></div>
+    <Show when={loaded() && projects().length > 1}><input class="work-search" type="search" aria-label="Find a project or task" placeholder="Find a project or task…" value={query()} onInput={event => setQuery(event.currentTarget.value)} /></Show>
     <Show when={error()}><p role="alert" style={{ color: '#e3826d', 'font-size': '13px' }}>{error()}</p></Show>
-    <Show when={projects().length} fallback={<p style={{ color: muted, 'font-size': '13px', margin: '0' }}>No project inboxes yet. Give a CR pair a project objective and tasks to work through.</p>}>
-      <For each={projects().map(project => project.projectId)}>{id => <Inbox
+    <Show when={loaded()} fallback={<div class="work-loading" role="status">Loading projects…</div>}>
+    <Show when={visibleProjects().length} fallback={<p class="work-empty">{query() ? 'No matching projects.' : 'No active project inboxes. Open a chat below to give it a direction.'}</p>}>
+      <For each={visibleProjects().map(project => project.projectId)}>{id => <Inbox
         project={() => projectsById().get(id)!}
         busy={busy} mutate={mutate} onOpenSession={props.onOpenSession}
       />}</For>
+    </Show>
+    <Show when={unconfigured() > 0 && !query()}><button class="work-muted-button" aria-expanded={showUnconfigured()} onClick={() => setShowUnconfigured(!showUnconfigured())}>{showUnconfigured() ? 'Hide' : 'Show'} {unconfigured()} chats without an inbox</button></Show>
     </Show>
   </section>
 }
@@ -92,23 +110,22 @@ function Inbox(props: { project: () => ProjectInbox; busy: () => boolean; mutate
   const [allowIdeas, setAllowIdeas] = createSignal<boolean | undefined>()
   const path = () => `/api/chats/${encodeURIComponent(props.project().sessionId)}/inbox`
   const tasksById = createMemo(() => new Map(props.project().tasks.map(task => [task.id, task])))
-  return <article style={{ 'border-top': '1px solid #1e2632', padding: '12px 0', 'overflow-wrap': 'anywhere' }}>
-    <div style={{ display: 'flex', gap: '10px', 'align-items': 'baseline', 'flex-wrap': 'wrap' }}>
-      <button style={{ ...button, background: 'none', border: 'none', padding: '0', 'font-weight': '650', 'text-decoration': 'underline dotted' }} onClick={() => props.onOpenSession(props.project().sessionId)}>{props.project().title}</button>
-      <span style={{ color: muted, 'font-size': '12px' }}>{props.project().tasks.filter(task => task.status === 'done').length}/{props.project().tasks.length} done</span>
+  return <article class="project-inbox">
+    <div class="project-inbox-heading">
+      <button class="project-title" onClick={() => props.onOpenSession(props.project().sessionId)}>{props.project().title}<span aria-hidden="true">↗</span></button>
+      <span class="work-count">{props.project().tasks.filter(task => task.status === 'done').length} of {props.project().tasks.length} done</span>
     </div>
-    <Show when={props.project().objective}><p style={{ color: '#c9d1dc', 'font-size': '13px', margin: '8px 0' }}>{props.project().objective}</p></Show>
     <For each={props.project().tasks.map(task => task.id)}>{id => <TaskRow task={() => tasksById().get(id)!} path={() => `${path()}/tasks/${encodeURIComponent(id)}`} busy={props.busy} mutate={props.mutate} onOpenSession={props.onOpenSession} />}</For>
-    <form onSubmit={async event => {
+    <div class="project-inbox-tools"><details class="work-disclosure"><summary>Add task</summary><form onSubmit={async event => {
       event.preventDefault()
       const submitted = title().trim()
       if (submitted && await props.mutate(`${path()}/tasks`, { title: submitted }) && title().trim() === submitted) setTitle('')
     }} style={{ display: 'flex', gap: '8px', 'flex-wrap': 'wrap', 'margin-top': '10px' }}>
       <input aria-label={`New task for ${props.project().title}`} placeholder="Add a task…" value={title()} onInput={event => setTitle(event.currentTarget.value)} required maxLength={300} style={{ ...field, flex: '1 1 160px' }} />
       <button type="submit" disabled={props.busy() || !title().trim()} style={button}>Add task</button>
-    </form>
-    <details style={{ 'margin-top': '10px', 'font-size': '13px' }}>
-      <summary style={{ color: muted, cursor: 'pointer' }}>Project direction</summary>
+    </form></details>
+    <details class="work-disclosure">
+      <summary>Project direction</summary>
       <form onSubmit={async event => {
         event.preventDefault()
         const submittedObjective = objective() ?? props.project().objective ?? ''
@@ -123,6 +140,7 @@ function Inbox(props: { project: () => ProjectInbox; busy: () => boolean; mutate
         <button style={{ ...button, 'justify-self': 'start' }} disabled={props.busy()}>Save direction</button>
       </form>
     </details>
+    </div>
   </article>
 }
 
@@ -144,9 +162,9 @@ function TaskRow(props: { task: () => Task; path: () => string; busy: () => bool
     }).catch(error => { if (active) setError(error.message || 'Task details unavailable') })
     onCleanup(() => { active = false; controller.abort() })
   }))
-  return <div style={{ padding: '8px 0', 'border-bottom': '1px solid #1e2632', 'font-size': '13px' }}>
+  return <div class="project-task" data-status={props.task().status}>
     <details onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary style={{ cursor: 'pointer', 'line-height': '1.7' }}>{props.task().title} <span style={{ color: props.task().status === 'done' ? '#69c77f' : muted }}>· {props.task().status.replaceAll('_', ' ')}</span></summary>
+      <summary><span class="project-task-title">{props.task().title}</span><span class="work-status" data-status={props.task().status}>{props.task().status.replaceAll('_', ' ')}</span></summary>
       <Show when={open()}>
         <Show when={error()}><p role="alert" style={{ color: '#e3826d' }}>{error()} <button style={button} onClick={() => setRetry(value => value + 1)}>Retry details</button></p></Show>
         <Show when={!detail() && !error()}><p style={{ color: muted }}>Loading details…</p></Show>
@@ -160,7 +178,7 @@ function TaskRow(props: { task: () => Task; path: () => string; busy: () => bool
       </Show>
     </details>
     <Show when={props.task().status === 'blocked'}><p style={{ color: '#e0b45f', margin: '6px 0', 'line-height': '1.5' }}>{props.task().blockedReason || 'Waiting for a blocker to be resolved.'}</p></Show>
-    <Show when={props.task().owner}><button title={props.task().owner!} style={{ ...button, padding: '3px 6px', 'margin-top': '4px', color: muted }} onClick={() => props.onOpenSession(props.task().owner!)}>Open pair · {props.task().owner!.slice(0, 8)}</button></Show>
+    <Show when={open() && props.task().owner}><button class="work-muted-button task-chat-link" aria-label={`Open chat for ${props.task().title}`} onClick={() => props.onOpenSession(props.task().owner!)}>Open chat ↗</button></Show>
     <Show when={props.task().status === 'blocked'}><button style={{ ...button, 'margin-left': '8px' }} disabled={props.busy()} onClick={() => props.mutate(`${props.path()}/unblock`, {})}>Unblock</button></Show>
   </div>
 }
