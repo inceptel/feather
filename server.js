@@ -15,6 +15,10 @@ import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/s
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
 import { createChatPair, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from './lib/chat-pair.js';
+import { loadChatConfig, resolveChatOptions } from './lib/chat-config.js';
+import { createChatPool } from './lib/chat-pool.js';
+import { recoverChatBoundary } from './lib/chat-recovery.js';
+import { applyChatWorkflow, authorizeChatWorkflow, publicChatWorkflow } from './lib/chat-workflow.js';
 import { createProjectInbox } from './lib/project-inbox.js';
 import { createProjectComms } from './lib/project-comms.js';
 import { createProjectCommsRuntime, projectCommsFeed, projectCommsComment } from './lib/project-comms-runtime.js';
@@ -111,6 +115,7 @@ if (!process.env.OPENAI_API_KEY && process.env.FEATHER_OPENAI_API_KEY) {
 const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 const envEnabled = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
 const READ_ONLY_MODE = envEnabled(process.env.FEATHER_READ_ONLY);
+const CHAT_CONFIG = loadChatConfig();
 const ROOM_PULSES_ENABLED = !READ_ONLY_MODE && !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_ROOM_PULSES || '').trim());
 const configuredPulseInterval = Number(process.env.FEATHER_ROOM_PULSE_INTERVAL_MS);
 const ROOM_PULSE_INTERVAL_MS = Math.max(60_000, Number.isFinite(configuredPulseInterval) && configuredPulseInterval > 0
@@ -829,6 +834,7 @@ function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candida
 function listSessionCandidates(meta = readMeta()) {
   const candidates = [];
   const codexLocalIds = new Map();
+  const pending = Object.entries(meta).filter(([, entry]) => entry.agent === 'codex' && entry.chatPair && !entry.codexUuid);
   for (const [localId, entry] of Object.entries(meta)) {
     if (entry?.codexUuid) codexLocalIds.set(entry.codexUuid, localId);
   }
@@ -872,7 +878,21 @@ function listSessionCandidates(meta = readMeta()) {
   // codex sessions
   for (const { uuid, fpath, mtime, size } of listCodexJsonlFiles()) {
     if (size < 50) continue;
-    candidates.push({ id: codexLocalIds.get(uuid) || uuid, fpath, mtime, size, agent: 'codex' });
+    let id = codexLocalIds.get(uuid);
+    // Adoption is asynchronous. Match only trusted developer identity while a
+    // new chat is unadopted, so setup transcripts cannot flash into the sidebar.
+    if (!id) {
+      const possible = pending.filter(([, entry]) => !meta[entry.chatPair.creatorSessionId]?.chatCreatedAt || mtime.getTime() >= Date.parse(meta[entry.chatPair.creatorSessionId].chatCreatedAt) - 1000);
+      if (possible.length) {
+        try {
+          const fd = fs.openSync(fpath, 'r');
+          const head = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, size));
+          try { fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+          id = possible.find(([localId]) => codexHeadHasChatIdentity(head, localId))?.[0];
+        } catch {}
+      }
+    }
+    candidates.push({ id: id || uuid, fpath, mtime, size, agent: 'codex' });
   }
 
   // Sort by mtime descending; loop until we have `limit` non-worker sessions.
@@ -898,6 +918,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
   const required = new Set(requiredIds);
   for (const candidate of candidates) {
     const { id, fpath, agent } = candidate;
+    if (meta[id]?.chatStandby) continue;
     if (sessions.length >= limit) {
       if (required.size === 0) break;
       if (!required.has(id)) continue;
@@ -921,12 +942,25 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatPair ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair } : {}),
+        ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
+        ...(meta[id]?.chatRole === 'creator' ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
       });
       required.delete(id);
     } catch {}
   }
 
+  // Newly allocated chats are real conversations even before a harness writes
+  // its first transcript. Keep the editable startup shell discoverable.
+  for (const [id, entry] of Object.entries(meta)) {
+    if (entry.chatRole !== 'creator' || entry.chatStandby || !entry.chatStartup || sessions.some(s => s.id === id)) continue;
+    if (!required.has(id) && ((Number.isFinite(limit) && sessions.length >= limit) || findJsonlPath(id, entry.agent))) continue;
+    if (queryLc && !`${entry.title || ''} ${id}`.toLowerCase().includes(queryLc)) continue;
+    sessions.push({ id, title: entry.title || 'New chat', agent: entry.agent,
+      updatedAt: entry.chatCreatedAt || new Date(0).toISOString(), isActive: tmuxIsActive(id),
+      chatRole: entry.chatRole, chatPair: entry.chatPair, chatStartup: entry.chatStartup,
+      workflow: publicChatWorkflow(entry.workflow), ...(entry.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph: publicRalphState(entry) } : {}) });
+  }
   // Re-sort by real activity. Candidates were ordered by file mtime, which is
   // bumped by idle bookkeeping writes; ordering by last real message keeps the
   // list "sorted by last message time" as users expect.
@@ -1057,7 +1091,9 @@ function validateFreshSessionId(id) {
 
 function launchInTmux(name, cmd, cwd) {
   try { execFileSync('tmux', ['kill-session', '-t', name], { stdio: 'ignore' }); } catch {}
-  execFileSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd || HOME, cmd], { stdio: 'ignore' });
+  // A shared tmux server retains its original HOME. Use the same home that
+  // Feather prepared/trusted, without changing any other session's environment.
+  execFileSync('tmux', ['new-session', '-d', '-s', name, '-c', cwd || HOME, '-e', `HOME=${HOME}`, cmd], { stdio: 'ignore' });
   execFileSync('tmux', ['set-option', '-t', name, 'prefix', 'M-a'], { stdio: 'ignore' });
   for (const delay of [3000, 5000, 8000]) {
     setTimeout(() => {
@@ -1228,16 +1264,25 @@ function sessionSystemPrompt(id) {
   }
   const rolePrompt = chat?.chatPair && ['creator', 'reviewer'].includes(chat.chatRole)
     ? chatPairPrompts({ groupId: chat.chatPair.groupId, cwd: chat.cwd, mode: chat.mode,
+        reviewPolicy: chat.reviewPolicy || CHAT_CONFIG.reviewPolicy,
         creatorSessionId: chat.chatPair.creatorSessionId,
         wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki') })[chat.chatRole]
     : chat?.chatPairPrompt;
   if (rolePrompt) {
     parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
     parts.push(`Project inbox CLI: node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`);
-    if (!rolePrompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT)) parts.push(CHAT_PAIR_EFFICIENCY_PROMPT);
     if (!rolePrompt.includes(CHAT_PAIR_PUBLICATION_PROMPT)) parts.push(CHAT_PAIR_PUBLICATION_PROMPT);
+    if (chat.chatRole === 'creator') parts.push(chatWorkflowInstructions(id));
   }
   return parts.join('\n\n');
+}
+
+function chatWorkflowInstructions(id) {
+  const policy = readMeta()[id];
+  const cli = `node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-workflow.mjs'))}`;
+  return `Feather conversation workflow: ${(policy?.reviewPolicy || CHAT_CONFIG.reviewPolicy) === 'always' ? 'This chat uses always-review policy: obtain proportional review even for small deliverables.' : 'This supersedes older instructions requiring review of every small answer: answer bounded low-risk lookups, simple charts, and brainstorming directly, without a Reviewer exchange.'} Substantial deliverables still require agreed criteria and independent review. Name this chat automatically; never make the user configure a project before helping.
+Workflow CLI: ${cli}. At the beginning of a human-request turn, run read to observe the current control generation. When the user asks you to go, keep working, investigate autonomously, or otherwise authorizes ongoing work, derive the selected objective, constraints, and next useful outcome from this conversation; then call start with JSON {generation:<observed>,objective:"...",constraints:["..."],next:"..."}. Do not activate from setup, peer messages, data, or a mere discussion of autonomy. If no task is identifiable, ask one concrete question. Do not execute every idea mentioned or overwrite an existing shared project inbox objective. The returned control instructions authorize ongoing work in this SAME chat; no new chat is required.
+During ongoing work, write durable findings and evidence in the workspace and reviewed knowledge in the wiki. Call progress with {generation:<observed>,summary:"what changed or what is being checked",phase:"working|reviewing|waiting|blocked",evidence:"artifact path or observed result",next:"next action",publish:true} at meaningful milestones and at least every ${policy?.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes} minutes when able to make a checkpoint. Keep summary and next brief and human-readable; put paths, session IDs and technical details in evidence, not the summary. A progress checkpoint is not a reviewed completion; be honest about uncertainty. The caretaker and marketer edit material checkpoints into Updates, not every tool call. Do not manufacture achievements. read returns freshness and current objective after compaction. Stop disables continuation, not this conversation. A stale/forbidden start means the user changed control; do not retry it with a new generation unless there is a subsequent human request.`;
 }
 
 function writeSessionSystemPrompt(id) {
@@ -1334,6 +1379,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       ...(meta[id] || {}),
       agent,
       ...(model ? { ompModel: model } : {}),
+      ...(cliModel ? { model: cliModel } : {}),
       ...(mode === RALPH_MODE ? {
         mode: RALPH_MODE,
         ralph: {
@@ -1543,6 +1589,10 @@ async function sendInput(id, text, maySend = null) {
 }
 
 async function sendInputIdempotent(id, text, messageId, maySend = null) {
+  const accepted = readMeta()[id];
+  const humanChat = !maySend && accepted?.chatRole === 'creator';
+  const stopToken = accepted?.chatStopToken;
+  const humanMaySend = humanChat ? () => readMeta()[id]?.chatStopToken === stopToken : null;
   return sendLock(id, async () => {
     const textHash = createHash('sha256').update(String(text)).digest('hex');
     const existing = MESSAGE_RECEIPTS_STATE.read()[id]?.[messageId];
@@ -1551,8 +1601,12 @@ async function sendInputIdempotent(id, text, messageId, maySend = null) {
       return existing.response;
     }
     if (maySend && !maySend()) throw httpError(409, 'Delivery paused');
-    if (!maySend) prepareRalphForHumanInput(id);
-    const result = await sendInputUnlocked(id, text, maySend, maySend ? () => prepareRalphForHumanInput(id) : null);
+    if (humanMaySend && !humanMaySend()) throw httpError(409, 'Message was stopped before delivery; send again to resume');
+    if (!maySend) {
+      authorizeChatHumanInput(id);
+      prepareRalphForHumanInput(id);
+    }
+    const result = await sendInputUnlocked(id, text, maySend || humanMaySend, maySend ? () => prepareRalphForHumanInput(id) : null);
     if (result.cancelled && !result.submitted) throw httpError(409, 'Delivery paused');
     const { observed } = result;
     const response = { ok: true, sentAt: new Date().toISOString(), observed };
@@ -1628,6 +1682,10 @@ function patchRalphState(id, patch) {
       ...meta,
       [id]: {
         ...meta[id],
+        ...(meta[id].workflow ? { workflow: { ...meta[id].workflow,
+          ...(typeof patch.enabled === 'boolean' ? { enabled: patch.enabled } : {}),
+          ...(['waiting', 'working', 'blocked', 'complete', 'stopped'].includes(patch.status) ? { phase: patch.status } : {}),
+        } } : {}),
         ralph: {
           ...(meta[id].ralph || {}),
           ...patch,
@@ -1647,6 +1705,9 @@ function cancelRalphCallback(id) {
 
 function stopRalphSession(id, status = 'stopped') {
   cancelRalphCallback(id);
+  if (readMeta()[id]?.chatRole === 'creator') {
+    updateMeta(meta => ({ ...meta, [id]: { ...meta[id], chatStopToken: randomUUID(), workflow: applyChatWorkflow(meta[id].workflow, { action: 'stop' }, { role: 'human' }).workflow } }));
+  }
   patchRalphState(id, {
     enabled: false,
     stopToken: randomUUID(),
@@ -1658,6 +1719,11 @@ function stopRalphSession(id, status = 'stopped') {
     error: null,
     callbackAttempt: 0,
   });
+}
+
+function authorizeChatHumanInput(id) {
+  if (readMeta()[id]?.chatRole !== 'creator') return;
+  updateMeta(meta => ({ ...meta, [id]: { ...meta[id], workflow: authorizeChatWorkflow(meta[id].workflow) } }));
 }
 
 function prepareRalphForHumanInput(id, source = 'human') {
@@ -1824,7 +1890,28 @@ function resumeRalphSession(id) {
 
 function recoverRalphCallbacks() {
   for (const [id, entry] of Object.entries(readMeta())) {
-    if (entry?.mode !== RALPH_MODE || !entry.ralph?.enabled || entry.ralph.status !== 'scheduled') continue;
+    if (entry?.mode !== RALPH_MODE || !entry.ralph?.enabled) continue;
+    if (entry.ralph.status === 'working') {
+      let boundary = null;
+      try {
+        const file = findJsonlPath(id, entry.agent);
+        if (file) {
+          const fd = fs.openSync(file, 'r');
+          try {
+            const size = fs.fstatSync(fd).size, start = Math.max(0, size - 4 * 1024 * 1024);
+            const buffer = Buffer.alloc(size - start);
+            fs.readSync(fd, buffer, 0, buffer.length, start);
+            const lines = buffer.toString('utf8').split('\n');
+            if (start) lines.shift();
+            boundary = recoverChatBoundary(entry, lines, entry.agent);
+          } finally { fs.closeSync(fd); }
+        }
+      } catch (error) { console.warn('[workflow] restart reconciliation:', error.message); }
+      if (boundary) scheduleRalphCallback(id, boundary);
+      else if (!tmuxIsActive(id)) patchRalphState(id, { enabled: false, status: 'error', error: 'Agent stopped while Feather was offline. Send a message to resume.' });
+      continue;
+    }
+    if (entry.ralph.status !== 'scheduled') continue;
     const key = entry.ralph.lastBoundaryKey;
     if (typeof key === 'string' && key) {
       armRalphCallback(id, key, Number.isSafeInteger(entry.ralph.callbackAttempt) ? entry.ralph.callbackAttempt : 0);
@@ -3263,23 +3350,45 @@ app.post('/api/chats/:id/project/rename', (req, res) => {
 installProjectInboxRoutes(app, { store: PROJECT_INBOX, readMeta, tokenValid: bridgeTokenValid,
   changed: (projectId, event) => { wakeProjectInbox(projectId, event); void projectCommsRuntime.tick(); } });
 
-app.post('/api/chats', async (req, res) => {
-  try {
-    const result = await createChatPair(req.body || {}, {
+const chatStartups = new Map();
+const chatCreationLock = createKeyedLock();
+const CHAT_SETUP_VERSION = 1;
+
+function chatResult(id) {
+  const entry = readMeta()[id];
+  if (!entry?.chatPair || entry.chatRole !== 'creator') throw httpError(404, 'Chat not found');
+  return { id, cwd: entry.cwd, projectId: entry.chatProjectId, groupId: entry.chatPair.groupId,
+    reviewerSessionId: entry.chatPair.reviewerSessionId, agent: entry.agent, mode: entry.mode,
+    status: entry.chatStartup?.status || 'ready', error: entry.chatStartup?.error || null };
+}
+
+function beginChatCreation(options, { requestId, fingerprint } = {}) {
+  let allocatedResolve, allocatedReject;
+  const allocated = new Promise((resolve, reject) => { allocatedResolve = resolve; allocatedReject = reject; });
+  let allocatedId;
+  const startup = { cancelled: false };
+  const ensureCurrent = () => { if (startup.cancelled) throw httpError(409, 'Chat startup cancelled'); };
+  const done = createChatPair(options, {
       root: CHAT_PROJECTS_ROOT,
       resolveProject: (id) => managedChatProject(CHAT_PROJECTS_ROOT, readMeta(), id),
       wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki'),
-      spawn: (id, cwd, agent, options) => spawnSession(id, cwd, agent, options),
+      spawn: (id, cwd, agent, options) => { ensureCurrent(); return spawnSession(id, cwd, agent, options); },
       prime: async (id, prompt) => {
+        ensureCurrent();
         await waitForPaneSettled(tmuxName(id));
-        await sendInput(id, prompt);
+        ensureCurrent();
+        await sendInput(id, prompt, () => !startup.cancelled);
       },
+      onAllocated: result => { allocatedId = result.id; startup.pair = result; chatStartups.set(result.id, startup); allocatedResolve({ ...result, status: 'starting' }); },
       createGroup: (group) => sidecar.createGroup(group),
       teardownGroup: (id) => sidecar.teardownGroup(id),
-      save: ({ id, reviewerSessionId, groupId, cwd, projectId, name, agent, reviewerAgent, rolePrompts }) => updateMeta((meta) => ({
+      save: ({ id, reviewerSessionId, groupId, cwd, projectId, name, agent, reviewerAgent, rolePrompts, model, reviewerModel, reviewPolicy, progressIntervalMinutes }) => updateMeta((meta) => ({
         ...meta,
-        [id]: { ...meta[id], agent, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: { groupId, creatorSessionId: id, reviewerSessionId } },
-        [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId } },
+        [id]: { ...meta[id], agent, model, reviewPolicy, progressIntervalMinutes, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: { groupId, creatorSessionId: id, reviewerSessionId },
+          chatStandby: !!options.standby, chatSetupVersion: CHAT_SETUP_VERSION, chatCreatedAt: new Date().toISOString(), chatStartup: { status: 'starting' },
+          ...(!options.standby && typeof options.prompt === 'string' && options.prompt.trim() ? { workflow: authorizeChatWorkflow(meta[id]?.workflow) } : {}),
+          ...(requestId ? { chatCreation: { requestId, fingerprint } } : {}) },
+        [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, model: reviewerModel, reviewPolicy, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId }, chatStandby: !!options.standby },
       })),
       stop: (id) => {
         try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -3287,11 +3396,95 @@ app.post('/api/chats', async (req, res) => {
       },
       forget: (ids) => updateMeta((meta) => {
         const next = { ...meta };
-        for (const id of ids) delete next[id];
+        // Keep ownership/aliases: deleting metadata exposes retained setup
+        // transcripts as unrelated ordinary chats after a failed startup.
+        for (const id of ids) if (next[id]) next[id] = { ...next[id], chatStartup: { status: 'failed', error: 'Pair startup failed. Start a new chat or retry.' } };
         return next;
       }),
+    }).then(result => {
+      ensureCurrent();
+      updateMeta(meta => meta[result.id] ? ({ ...meta, [result.id]: { ...meta[result.id], chatStartup: { status: 'ready' } } }) : meta);
+      return chatResult(result.id);
+    }).catch(error => {
+      allocatedReject(error);
+      if (allocatedId && !startup.cancelled) updateMeta(meta => meta[allocatedId] ? ({ ...meta, [allocatedId]: { ...meta[allocatedId], chatStartup: { status: 'failed', error: 'Could not start agents. Check engine login and try again.' } } }) : meta);
+      throw error;
+    }).finally(() => { if (allocatedId) chatStartups.delete(allocatedId); });
+  // A 202 caller observes errors through status; always consume rejection.
+  done.catch(error => console.warn('[chat-pair] startup failed:', error.message));
+  allocated.catch(() => {});
+  return { allocated, done };
+}
+
+function retireStandby(pair) {
+  for (const id of [pair.id, pair.reviewerSessionId]) {
+    try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
+    revokeSessionBridgeCapability(id);
+  }
+  try { sidecar.teardownGroup(pair.groupId); } catch {}
+  updateMeta(meta => {
+    const next = { ...meta };
+    for (const id of [pair.id, pair.reviewerSessionId]) if (next[id]) next[id] = { ...next[id], chatStandby: 'retired', chatStartup: { status: 'failed' } };
+    return next;
+  });
+}
+
+const chatPool = createChatPool({
+  capacity: READ_ONLY_MODE ? 0 : CHAT_CONFIG.standbyPairs,
+  create: () => beginChatCreation({ ...resolveChatOptions({}, CHAT_CONFIG), standby: true }).done,
+  healthy: pair => {
+    const meta = readMeta(), creator = meta[pair.id], reviewer = meta[pair.reviewerSessionId];
+    return creator?.chatSetupVersion === CHAT_SETUP_VERSION && creator.agent === CHAT_CONFIG.creator.agent
+      && creator.model === CHAT_CONFIG.creator.model && reviewer?.agent === CHAT_CONFIG.reviewer.agent
+      && reviewer.model === CHAT_CONFIG.reviewer.model && creator.reviewPolicy === CHAT_CONFIG.reviewPolicy
+      && creator.progressIntervalMinutes === CHAT_CONFIG.progressIntervalMinutes
+      && tmuxIsActive(pair.id) && tmuxIsActive(pair.reviewerSessionId);
+  },
+  claim: pair => pair,
+  retire: retireStandby,
+  onError: error => console.warn('[chat-pool]', error.message),
+  initialEntries: () => READ_ONLY_MODE ? [] : Object.entries(readMeta()).filter(([, entry]) => entry.chatRole === 'creator' && entry.chatStandby === true && entry.chatStartup?.status === 'ready')
+    .map(([id]) => chatResult(id)),
+});
+
+app.get('/api/chats/:id/status', (req, res) => {
+  try {
+    if (readMeta()[req.params.id]?.chatStandby) throw httpError(404, 'Chat not found');
+    res.json(chatResult(req.params.id));
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+
+app.post('/api/chats', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (Object.hasOwn(body, 'standby')) throw httpError(400, 'Standby allocation is internal');
+    const requestId = body.requestId;
+    if (requestId !== undefined && (typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(requestId))) throw httpError(400, 'Invalid creation request ID');
+    const options = resolveChatOptions(body, CHAT_CONFIG);
+    // Replay identifies the caller's request, not today's machine defaults.
+    const fingerprint = createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'requestId').sort(([a], [b]) => a.localeCompare(b))))).digest('hex');
+    const result = await chatCreationLock('create', async () => {
+      if (requestId) {
+        const found = Object.entries(readMeta()).find(([, entry]) => entry.chatCreation?.requestId === requestId);
+        if (found) {
+          if (found[1].chatCreation.fingerprint !== fingerprint) throw httpError(409, 'Creation request ID already used with different options');
+          return chatResult(found[0]);
+        }
+      }
+      const usesDefault = ['agent', 'reviewerAgent', 'model', 'reviewerModel', 'mode', 'projectSessionId', 'name', 'prompt', 'reviewPolicy', 'progressIntervalMinutes'].every(key => !Object.hasOwn(body, key));
+      const warm = usesDefault ? chatPool.acquire() : null;
+      if (warm) {
+        updateMeta(meta => ({ ...meta,
+          [warm.id]: { ...meta[warm.id], chatStandby: false, chatCreatedAt: new Date().toISOString(), ...(requestId ? { chatCreation: { requestId, fingerprint } } : {}) },
+          [warm.reviewerSessionId]: { ...meta[warm.reviewerSessionId], chatStandby: false },
+        }));
+        return chatResult(warm.id);
+      }
+      const startup = beginChatCreation(options, { requestId, fingerprint });
+      // Existing API clients without request IDs retain the synchronous contract.
+      return requestId ? await startup.allocated : await startup.done;
     });
-    res.json(result);
+    res.status(result.status === 'starting' ? 202 : 200).json(result);
   } catch (e) {
     console.warn('[chat-pair] creation failed:', e.message);
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Could not start the Creator–Reviewer pair' });
@@ -3306,17 +3499,81 @@ app.post('/api/sessions', (req, res) => {
 
 app.post('/api/sessions/:id/send', async (req, res) => {
   try {
+    if (readMeta()[req.params.id]?.chatStartup?.status === 'starting') throw httpError(409, 'Chat is still starting; your draft has not been sent');
+    if (readMeta()[req.params.id]?.chatStartup?.status === 'failed') throw httpError(409, 'Chat startup failed; start a new chat');
     const messageId = req.get('X-Feather-Message-ID');
     if (messageId !== undefined && !/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) {
       return res.status(400).json({ error: 'invalid message id' });
     }
-    if (!messageId) prepareRalphForHumanInput(req.params.id);
-    if (!messageId) {
-      await sendInput(req.params.id, req.body.text);
-      return res.json({ ok: true, sentAt: new Date().toISOString() });
-    }
-    return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId));
+    return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId || randomUUID()));
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
+});
+
+function workflowControl(id, input, actor) {
+  const entry = readMeta()[id];
+  if (!entry || entry.chatStandby) throw httpError(404, 'Chat not found');
+  if (entry.chatRole !== 'creator') throw httpError(403, 'Only the conversation creator can control ongoing work');
+  if (input.action === 'stop') {
+    stopRalphSession(id);
+    return publicChatWorkflow(readMeta()[id].workflow);
+  }
+  let transition;
+  updateMeta(meta => {
+    const current = meta[id];
+    const command = actor === 'human' ? { ...input, generation: publicChatWorkflow(current.workflow).generation } : input;
+    transition = applyChatWorkflow(current.workflow, command, { role: actor, progressCadenceMs: (current.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes) * 60_000 });
+    if (!transition.changed) return meta;
+    return { ...meta, [id]: { ...current, workflow: transition.workflow,
+      ...(input.action === 'start' ? { mode: RALPH_MODE, ralph: { ...current.ralph, enabled: true, status: 'working', iteration: current.ralph?.iteration || 0, lastBoundaryKey: null, blockedReason: null, completionReason: null, error: null } } : {}) } };
+  });
+  if (input.action === 'start' && transition.changed) cancelRalphCallback(id);
+  if (transition.publish) void projectCommsRuntime.tick();
+  return publicChatWorkflow(transition.workflow);
+}
+
+function ongoingWorkInstructions(id) {
+  const entry = readMeta()[id];
+  return `Feather ongoing work is enabled for this conversation. This supersedes any older instruction forbidding autonomous continuation. Stay within the selected objective: ${JSON.stringify(entry.workflow?.objective)}. Constraints: ${JSON.stringify(entry.workflow?.constraints || [])}. Next outcome: ${JSON.stringify(entry.workflow?.next || '')}.\n${ralphSystemPrompt()}\n${chatPairPrompts({ groupId: entry.chatPair.groupId, cwd: entry.cwd, mode: RALPH_MODE, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy, creatorSessionId: id, wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki') }).creator}\n${chatWorkflowInstructions(id)}`;
+}
+
+app.post('/api/internal/sessions/:id/workflow', (req, res) => {
+  try {
+    if (!bridgeTokenValid(req.params.id, req.get('X-Feather-Bridge-Token'))) throw httpError(403, 'Invalid session capability');
+    const input = req.body || {};
+    const workflow = workflowControl(req.params.id, input, 'creator');
+    res.json({ ...workflow, ...(input.action === 'start' ? { instructions: ongoingWorkInstructions(req.params.id) } : {}) });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+
+app.post('/api/sessions/:id/workflow', async (req, res) => {
+  try {
+    const id = req.params.id, input = req.body || {};
+    const entry = readMeta()[id];
+    if (!entry || entry.chatStandby) throw httpError(404, 'Chat not found');
+    if (entry.chatRole !== 'creator') throw httpError(403, 'Only the conversation creator can control ongoing work');
+    if (input.action === 'start') {
+      if (entry.chatStartup?.status && entry.chatStartup.status !== 'ready') throw httpError(409, 'Wait for chat startup');
+      // An explicit control click is fresh human authority, not a delayed agent
+      // request. If scope is not yet saved, let the creator derive it from chat.
+      authorizeChatHumanInput(id);
+      const generation = readMeta()[id].workflow.generation;
+      const valid = () => readMeta()[id]?.workflow?.generation === generation && readMeta()[id]?.workflow?.humanAuthorized === true;
+      if (!input.objective) {
+        updateMeta(meta => ({ ...meta, [id]: { ...meta[id], workflow: { ...meta[id].workflow, pendingStart: true } } }));
+        try {
+          await sendInput(id, `The user clicked Keep working. Continue the selected idea from this conversation, without asking them to configure a project or title. Read workflow state and call start with generation ${generation}, a concrete objective, constraints and next outcome derived from the conversation. If no idea has been discussed yet, call stop and ask what to work on; do not invent one.\n${chatWorkflowInstructions(id)}`, valid);
+        } catch (error) {
+          if (valid()) updateMeta(meta => ({ ...meta, [id]: { ...meta[id], workflow: { ...meta[id].workflow, pendingStart: false } } }));
+          throw error;
+        }
+        return res.json(publicChatWorkflow(readMeta()[id].workflow));
+      }
+      workflowControl(id, input, 'human');
+      await sendInput(id, ongoingWorkInstructions(id), valid);
+      return res.json(publicChatWorkflow(readMeta()[id].workflow));
+    }
+    res.json(workflowControl(id, input, 'human'));
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab', 'AgentHub']);
 const TMUX_TERMINAL_KEYS = { AgentHub: 'M-a' };
@@ -3362,7 +3619,7 @@ app.post('/api/sessions/:id/ralph', (req, res) => {
 
 app.post('/api/sessions/:id/interrupt', (req, res) => {
   const isRalph = isRalphSession(req.params.id);
-  if (isRalph) stopRalphSession(req.params.id);
+  if (isRalph || readMeta()[req.params.id]?.chatRole === 'creator') stopRalphSession(req.params.id);
   try {
     execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' });
     res.json({ ok: true });
@@ -3375,6 +3632,11 @@ app.post('/api/sessions/:id/interrupt', (req, res) => {
 app.post('/api/sessions/:id/delete', async (req, res) => {
   try {
     const id = req.params.id;
+    const startup = chatStartups.get(id);
+    if (startup) {
+      startup.cancelled = true;
+      retireStandby(startup.pair);
+    }
     const agent = getAgentForSession(id);
     await protocolRuns.deleteSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -3585,7 +3847,8 @@ function sidecarDeliver(group, fromRole, to, text) {
 }
 
 app.get('/api/sidecar', (_req, res) => {
-  res.json({ groups: sidecar.listGroups() });
+  const meta = readMeta();
+  res.json({ groups: sidecar.listGroups().filter(group => !group.members?.some(member => meta[member.sessionId]?.chatStandby)) });
 });
 
 app.get('/api/sidecar/:id', (req, res) => {
@@ -7285,6 +7548,19 @@ server.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => { try { roomSnapshotCache.get(); } catch {} }, 0);
   if (!READ_ONLY_MODE) setTimeout(() => syncAllRoomSidecars({ primeNewResidents: true }), 1000);
   if (!READ_ONLY_MODE) setTimeout(recoverRalphCallbacks, RALPH_CALLBACK_DELAY_MS);
+  if (!READ_ONLY_MODE) {
+    // Never replay half-delivered startup prompts after a restart. Keep their
+    // files and identities, expose claimed failures, and retire unused pairs.
+    for (const [id, entry] of Object.entries(readMeta())) {
+      if (entry.chatRole === 'creator' && entry.workflow?.pendingStart) {
+        stopRalphSession(id);
+      }
+      if (entry.chatRole !== 'creator' || entry.chatStartup?.status !== 'starting') continue;
+      if (entry.chatStandby) retireStandby({ id, reviewerSessionId: entry.chatPair.reviewerSessionId, groupId: entry.chatPair.groupId });
+      else updateMeta(meta => ({ ...meta, [id]: { ...meta[id], chatStartup: { status: 'failed', error: 'Startup was interrupted by a restart. Try again.' } } }));
+    }
+    setTimeout(() => void chatPool.refill(), 1000).unref();
+  }
   // Durable Room Sidecars are synchronized before listen; no startup 404 window.
   if (ROOM_PULSES_ENABLED) {
     setTimeout(checkRoomPulses, Math.min(ROOM_PULSE_CHECK_MS, ROOM_PULSE_INTERVAL_MS));

@@ -6,12 +6,62 @@ import path from 'node:path'
 import { setImmediate as settle } from 'node:timers/promises'
 import { createProjectComms } from '../../lib/project-comms.js'
 import { createProjectInbox } from '../../lib/project-inbox.js'
+import { applyChatWorkflow, authorizeChatWorkflow } from '../../lib/chat-workflow.js'
 import { createProjectCommsRuntime, projectCommsSources, projectCommsFeed, projectCommsComment } from '../../lib/project-comms-runtime.js'
 
 const creator = { role: 'creator', sessionId: 'creator', creatorSessionId: 'creator' }
 const reviewer = { role: 'reviewer', sessionId: 'reviewer', creatorSessionId: 'creator' }
 const human = { role: 'human', sessionId: 'creator' }
 const candidate = { title: 'Smarter rivals', summary: 'Inventory now changes rival behavior.', evidence: 'Independent reviewer played a full round.', links: [{ label: 'Play', url: 'https://example.com/play' }] }
+
+test('unused and retired pair evidence is never collected for publication', t => {
+  const f = fixture(t)
+  f.meta.creator.workflow = { checkpoints: [{ id: 'setup', publish: true, summary: 'Setup output', evidence: 'Setup file' }] }
+  for (const chatStandby of [true, 'retired']) {
+    f.meta.creator.chatStandby = chatStandby
+    assert.deepEqual(projectCommsSources(f.meta, f.inbox, f.wikiPath), [])
+  }
+  f.meta.creator.chatStandby = false
+  assert.equal(projectCommsSources(f.meta, f.inbox, f.wikiPath).length, 1)
+})
+
+test('interim workflow evidence reaches editors before completion, survives restart and may be suppressed', async t => {
+  const f = fixture(t)
+  let workflow = authorizeChatWorkflow(undefined, 1000000)
+  workflow = applyChatWorkflow(workflow, { action: 'start', generation: 1, objective: 'Improve rivals' }, { role: 'creator', now: 1000000 }).workflow
+  workflow = applyChatWorkflow(workflow, { action: 'progress', generation: 1, summary: 'A prototype responds to inventory', evidence: 'Prototype played locally; independent review remains pending', publish: true }, { role: 'creator', now: 1000000 }).workflow
+  f.meta.creator.workflow = workflow
+  const sources = projectCommsSources(f.meta, f.inbox, f.wikiPath)
+  assert.equal(sources.length, 1)
+  assert.equal(sources[0].snapshot.reviewed, false)
+  assert.equal(sources[0].snapshot.provenance, 'creator-progress')
+  await f.tick()
+  assert.match(f.launches[0].prompt, /interim observations, not reviewed completion/)
+  await f.complete('caretaker', { decision: 'suppress', reason: 'Wait for stronger evidence', wikiPaths: [] })
+  f.restart(); await f.tick()
+  assert.equal(f.launches.length, 1)
+  assert.deepEqual(projectCommsFeed(f.store), [])
+  assert.equal(f.meta.creator.workflow.summary, 'A prototype responds to inventory')
+})
+
+test('material progress publishes through caretaker and marketer while its objective remains active', async t => {
+  const f = fixture(t)
+  let workflow = authorizeChatWorkflow(undefined, 1000000)
+  workflow = applyChatWorkflow(workflow, { action: 'start', generation: 1, objective: 'Improve rivals' }, { role: 'creator', now: 1000000 }).workflow
+  f.meta.creator.workflow = applyChatWorkflow(workflow, { action: 'progress', generation: 1,
+    summary: 'Inventory response prototype is playable', evidence: 'A local game demonstrated responses; balancing remains', publish: true,
+  }, { role: 'creator', now: 1000000 }).workflow
+  await f.tick()
+  await f.complete('caretaker', { decision: 'publish', reason: 'A useful interim result', wikiPaths: [],
+    candidate: { title: 'A playable first step', summary: 'The prototype responds to inventory. Balancing is still underway.', evidence: 'Local game observation', links: [] },
+  })
+  await f.complete('marketer', { title: 'A playable first step', summary: 'The prototype responds to inventory. Balancing is still underway.', links: [] })
+  assert.equal(f.store.read().publications.length, 1)
+  assert.equal(f.meta.creator.workflow.enabled, true)
+  assert.equal(f.inbox.read('example-game').tasks.length, 0)
+  f.restart(); await f.tick()
+  assert.equal(f.store.read().publications.length, 1)
+})
 
 function fixture(t, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-comms-runtime-'))

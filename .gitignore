@@ -22,3 +22,5 @@ issues/
 auto.pid
 *.bak
 test-results/
+chat-config.json
+chat-pool.json

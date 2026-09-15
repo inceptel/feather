@@ -30,6 +30,8 @@ describe('Room status scheduler', () => {
     const residentId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
     const rooms = ['active', 'resident', 'idle', 'broken']
     fs.mkdirSync(path.join(home, '.feather'), { recursive: true })
+    fs.mkdirSync(path.join(home, '.omp'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.omp/auth-gateway.token'), 'synthetic-pulse-token', { mode: 0o600 })
     fs.mkdirSync(stateDir, { recursive: true })
     fs.mkdirSync(binDir, { recursive: true })
     for (const name of rooms) {
@@ -72,6 +74,7 @@ describe('Room status scheduler', () => {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
+        FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE: path.join(home, '.omp/auth-gateway.token'),
         FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_PULSE_INTERVAL_MS: '60000', FEATHER_ROOM_PULSE_MAX_CONCURRENT: '4',
         PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog, TMUX_REG: tmuxReg,
       },
@@ -126,6 +129,8 @@ describe('Room status scheduler', () => {
     const tmuxReg = path.join(root, 'tmux.reg')
     const rooms = ['r1', 'r2', 'r3', 'r4', 'r5']
     fs.mkdirSync(path.join(home, '.feather'), { recursive: true })
+    fs.mkdirSync(path.join(home, '.omp'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.omp/auth-gateway.token'), 'synthetic-pulse-token', { mode: 0o600 })
     fs.mkdirSync(stateDir, { recursive: true })
     fs.mkdirSync(binDir, { recursive: true })
     for (const name of rooms) {
@@ -155,6 +160,7 @@ describe('Room status scheduler', () => {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
+        FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE: path.join(home, '.omp/auth-gateway.token'),
         FEATHER_ROOM_PULSE_CHECK_MS: '50', FEATHER_ROOM_PULSE_INTERVAL_MS: '60000',
         FEATHER_ROOM_PULSE_MAX_CONCURRENT: '2',
         PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog, TMUX_REG: tmuxReg,

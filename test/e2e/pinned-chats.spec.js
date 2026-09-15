@@ -23,9 +23,10 @@ for (const width of [1280, 390]) {
       else if (p === '/api/chats') {
         const input = route.request().postDataJSON();
         expect(input.projectSessionId).toBe('boat');
-        expect(input.name).toBe('Strategy B');
-        sessions.push({ ...sessions[0], id: 'boat-b', title: 'Strategy B' });
-        body = { id: 'boat-b' };
+        expect(input.name).toBeUndefined();
+        expect(input.requestId).toEqual(expect.any(String));
+        sessions.push({ ...sessions[0], id: 'boat-b', title: 'New chat', chatStartup: { status: 'ready' } });
+        body = { id: 'boat-b', status: 'ready' };
       }
       else if (p === '/api/chats/boat/project/rename') {
         expect(route.request().postDataJSON().name).toBe('Boating');
@@ -92,7 +93,7 @@ for (const width of [1280, 390]) {
     await page.getByTestId('rename-project').click();
     await renamed;
     await page.getByRole('button', { name: '⋮', exact: true }).click();
-    page.once('dialog', dialog => dialog.accept('Strategy B'));
+    page.once('dialog', dialog => { throw new Error(`Unexpected naming dialog: ${dialog.message()}`); });
     await page.getByTestId('new-project-chat').click();
     await expect(page).toHaveURL(/#boat-b$/);
     expect(errors).toEqual([]);

@@ -56,6 +56,19 @@ test('rename rejects occupied names and nonproject chats without changing files'
   assert.equal(fs.readFileSync(path.join(f.cwd, 'keep.txt'), 'utf8'), 'evidence');
 });
 
+test('unused and retired pairs cannot share or rename their clean workspace', t => {
+  const f = fixture(t);
+  const renamer = createProjectRenamer(f.deps);
+  for (const chatStandby of [true, 'retired']) {
+    f.deps.saveMeta(meta => ({ ...meta, a: { ...meta.a, chatStandby } }));
+    assert.throws(() => managedChatProject(f.root, f.deps.readMeta(), 'a'), { status: 404 });
+    assert.throws(() => renamer.rename('a', 'claimed-name'), { status: 404 });
+    assert.ok(fs.existsSync(f.cwd));
+  }
+  f.deps.saveMeta(meta => ({ ...meta, a: { ...meta.a, chatStandby: false } }));
+  assert.equal(managedChatProject(f.root, f.deps.readMeta(), 'a').cwd, f.cwd);
+});
+
 test('an active process and a restarted process can use the original folder after rename', async t => {
   const f = fixture(t);
   const script = path.join(f.root, 'reader.cjs');

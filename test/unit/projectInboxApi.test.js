@@ -35,6 +35,22 @@ test('two authenticated pairs share durable work, reject defects and publish onl
   }
   const agent = (id, action, body = {}, status) => post(`/api/internal/sessions/${id}/inbox`, { action, ...body }, `test-${id}`, status);
   await start();
+  meta['standby-creator'] = { chatStandby: true, chatRole: 'creator', chatProjectId: 'unused',
+    chatPair: { creatorSessionId: 'standby-creator', reviewerSessionId: 'standby-reviewer' } };
+  meta['standby-reviewer'] = { ...meta['standby-creator'], chatRole: 'reviewer' };
+  for (const chatStandby of [true, 'retired']) {
+    meta['standby-creator'].chatStandby = chatStandby;
+    meta['standby-reviewer'].chatStandby = chatStandby;
+    const hidden = await (await fetch(base + '/api/project-inboxes')).json();
+    assert.ok(!hidden.projects.some(project => project.projectId === 'unused'));
+    assert.equal((await fetch(base + '/api/chats/standby-creator/inbox')).status, 404);
+    await post('/api/chats/standby-creator/inbox/config', { objective: 'Must not contaminate standby' }, undefined, 404);
+    await agent('standby-reviewer', 'read', {}, 404);
+  }
+  meta['standby-creator'].chatStandby = false;
+  meta['standby-reviewer'].chatStandby = false;
+  await agent('standby-reviewer', 'read');
+  delete meta['standby-creator']; delete meta['standby-reviewer'];
   await post('/api/chats/a-creator/inbox/config', { objective: 'Build tic tac toe', allowIdeas: true, maxGeneratedTasks: 1 });
   for (let n = 1; n <= 6; n++) await post('/api/chats/a-creator/inbox/tasks', { id: `task-${n}`, title: `Requirement ${n}` });
   await post('/api/internal/sessions/a-creator/inbox', { action: 'claim' }, 'bad', 403);

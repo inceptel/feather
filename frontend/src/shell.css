@@ -3,6 +3,45 @@
   background: var(--bg-base);
 }
 
+.chat-workflow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-base);
+  color: var(--text-secondary, #aeb6c2);
+  font-size: 12px;
+  flex-shrink: 0;
+  animation: chat-status-in 140ms ease-out;
+}
+.chat-workflow-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.chat-workflow strong { color: var(--text-primary); font-weight: 600; }
+.chat-workflow p { margin: 4px 0 0; line-height: 1.5; }
+.chat-workflow button {
+  min-height: 36px;
+  padding: 6px 12px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.chat-workflow button:hover { background: var(--bg-hover); }
+.chat-workflow button:disabled { opacity: .5; cursor: wait; }
+.chat-workflow details { margin-top: 4px; }
+@media (max-width: 600px) {
+  .chat-workflow-summary, .chat-workflow-next {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+}
+@keyframes chat-status-in { from { opacity: .5; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .chat-workflow { animation: none; } }
+
 .feather-shell :is(button, input, select, textarea) { font-family: inherit; }
 .feather-shell :is(button, a, input, select, textarea):focus-visible {
   outline: 2px solid var(--accent) !important;

@@ -43,6 +43,22 @@ export interface SessionMeta {
   roomAssigned?: boolean
   mode?: 'ralph'
   ralph?: RalphState
+  chatStartup?: { status: 'starting' | 'ready' | 'failed'; error?: string }
+  workflow?: { objective?: string; phase: string; summary?: string; evidence?: string; next?: string; updatedAt?: string; enabled: boolean; pendingStart?: boolean; generation: number }
+}
+
+export interface ChatRequest { requestId: string; agent?: string; mode?: 'ralph'; projectSessionId?: string; name?: string }
+export interface ChatStartup { id: string; status?: 'ready' | 'starting' | 'failed'; error?: string; agent?: string }
+export async function createChat(input: ChatRequest): Promise<ChatStartup> {
+  return responseJson(await fetch(`${BASE}/api/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20_000) }))
+}
+export async function fetchChatStatus(id: string, signal?: AbortSignal): Promise<ChatStartup> {
+  return responseJson(await fetch(`${BASE}/api/chats/${encodeURIComponent(id)}/status`, { signal }))
+}
+export async function setChatWorking(id: string, enabled: boolean): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/sessions/${encodeURIComponent(id)}/${enabled ? 'workflow' : 'ralph'}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enabled ? { action: 'start' } : { enabled: false }),
+  }))
 }
 
 export interface BoxInfo {

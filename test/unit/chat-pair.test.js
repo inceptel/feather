@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from '../../lib/chat-pair.js';
 
 test('pairs agree before implementation and evaluate evidence without ceremony', () => {
-  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator' });
+  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator', reviewPolicy: 'always' });
   for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
   assert.match(prompts.creator, /Both agree before building/);
   assert.match(prompts.reviewer, /against every agreed criterion/);
@@ -16,6 +16,40 @@ test('pairs agree before implementation and evaluate evidence without ceremony',
   assert.match(prompts.creator, /Do not lower criteria to pass/);
   assert.match(prompts.creator, /Do not stop merely because three rounds/);
   assert.match(prompts.creator, /Review is still required/);
+});
+
+test('adaptive quick work keeps review idle while substantial work retains agreement', () => {
+  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project' });
+  assert.match(prompts.creator, /without a Reviewer exchange/);
+  assert.match(prompts.creator, /Keep the Reviewer idle/);
+  assert.match(prompts.creator, /Both agree before building/);
+  assert.match(prompts.creator, /Existing project inbox agreement and review gates always apply/);
+  assert.ok(!prompts.creator.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
+});
+
+test('pair saves resolved models and policy before exposing allocation', async t => {
+  const { events, deps } = fixture(t);
+  deps.onAllocated = entry => { events.push({ operation: 'allocated', args: [entry] }); };
+  await createChatPair({ agent: 'omp', model: 'provider/model', reviewerAgent: 'claude', reviewerModel: 'other-model', reviewPolicy: 'always' }, deps);
+  const saved = events.find(event => event.operation === 'save').args[0];
+  assert.equal(saved.model, 'provider/model');
+  assert.equal(saved.reviewerModel, 'other-model');
+  assert.equal(saved.reviewPolicy, 'always');
+  assert.ok(events.findIndex(event => event.operation === 'allocated') > events.findIndex(event => event.operation === 'save'));
+  assert.ok(events.findIndex(event => event.operation === 'allocated') < events.findIndex(event => event.operation === 'spawn'));
+  const launches = events.filter(event => event.operation === 'spawn');
+  assert.equal(launches[0].args[3].ompModel, 'provider/model');
+  assert.equal(launches[1].args[3].model, 'other-model');
+});
+
+test('standby rejects task content and failure can retain hidden identity', async t => {
+  const { deps, events } = fixture(t);
+  await assert.rejects(createChatPair({ standby: true, prompt: 'Do work' }, deps), { status: 400 });
+  deps.prime = async () => { throw new Error('startup failure'); };
+  deps.retire = entry => { events.push({ operation: 'retire', args: [entry] }); };
+  await assert.rejects(createChatPair({ standby: true }, deps), /startup failure/);
+  assert.equal(events.filter(event => event.operation === 'retire').length, 1);
+  assert.equal(events.filter(event => event.operation === 'forget').length, 0);
 });
 
 function fixture(t, overrides = {}) {
