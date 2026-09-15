@@ -311,7 +311,8 @@ export interface FrictionComplaint {
 export type SuperFeedView = 'latest' | 'review' | 'following' | 'friction'
 
 export interface SuperFeedItem {
-  sourceKind?: 'chat' | 'wiki'
+  sourceKind?: 'chat' | 'wiki' | 'project'
+  projectId?: string
   evidenceId: string
   kind: 'update' | 'alert' | 'friction'
   room: string
@@ -342,6 +343,26 @@ export interface FeedComment {
   text: string
   createdAt: string
   reply: { text: string, timestamp: string } | null
+  status?: string
+  error?: string | null
+  taskId?: string | null
+  taskStatus?: string | null
+}
+
+export interface ProjectCommsSnapshot {
+  enabled: boolean
+  error?: string | null
+  jobs: Array<{ id: string, role: 'caretaker' | 'marketer' | 'replyguy', projectId: string, projectTitle: string, status: string, sessionId?: string, error?: string | null, attempts?: number, updatedAt?: string }>
+}
+
+export async function fetchProjectComms(signal?: AbortSignal): Promise<ProjectCommsSnapshot> {
+  return responseJson<ProjectCommsSnapshot>(await fetch(`${BASE}/api/project-comms`, { signal }))
+}
+
+export async function projectCommsAction(action: 'pause' | 'resume' | 'retry', jobId?: string): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/project-comms`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...(jobId ? { jobId } : {}) }),
+  }))
 }
 
 export interface SuperFeedSnapshot {

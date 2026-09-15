@@ -21,6 +21,41 @@ let fixtureBin
 let serverProcess
 let serverOutput = ''
 
+it('publishes edited project evidence and returns an authenticated reply under its comment', { skip: EXTERNAL_SERVER }, async () => {
+  const { createProjectComms } = await import('../../lib/project-comms.js')
+  const store = createProjectComms({ root: fixtureStateDir, coalesceMs: 0 })
+  store.ingest({ id: 'http-test', projectId: 'http-project', projectTitle: 'HTTP project', ownerSessionId: 'http-creator', kind: 'task', snapshot: { summary: 'Reviewed result' } })
+  const tokenDir = path.join(fixtureHome, '.feather/omp-sessions/.feather-bridge-tokens')
+  fs.mkdirSync(tokenDir, { recursive: true })
+  async function complete(role, output) {
+    const job = store.leaseNext()
+    assert.equal(job.role, role)
+    const sessionId = randomUUID(), token = randomUUID()
+    store.assign(job.id, job.leaseToken, sessionId)
+    fs.writeFileSync(path.join(tokenDir, createHash('sha256').update(sessionId).digest('hex')), token, { mode: 0o600 })
+    const url = `${BASE}/api/internal/sessions/${sessionId}/project-comms/${job.id}`
+    const post = secret => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Feather-Bridge-Token': secret }, body: JSON.stringify({ leaseToken: job.leaseToken, output }) })
+    assert.equal((await post('wrong')).status, 403)
+    const response = await post(token)
+    assert.equal(response.status, 200, await response.text())
+    assert.equal((await post(token)).status, 200, 'Same callback is idempotent')
+  }
+  await complete('caretaker', { decision: 'publish', reason: 'Useful result', candidate: { title: 'Reviewed change', summary: 'It works.', evidence: 'Reviewer verified it.' } })
+  await complete('marketer', { title: 'Ready to try', summary: 'The reviewed change is ready.' })
+  const publication = store.read().publications.find(item => item.projectId === 'http-project')
+  const evidenceId = `project-update:${publication.id}`
+  const feed = await fetch(`${BASE}/api/feed`).then(response => response.json())
+  assert.equal(feed.items.filter(item => item.evidenceId === evidenceId).length, 1)
+  const response = await fetch(`${BASE}/api/feed/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ evidenceId, text: 'What changed?' }) })
+  assert.equal(response.status, 201, await response.text())
+  await complete('replyguy', { action: 'reply', body: 'The reviewer verified the change.' })
+  const updated = await fetch(`${BASE}/api/feed`).then(response => response.json())
+  const card = updated.items.find(item => item.evidenceId === evidenceId)
+  assert.equal(card.comments.length, 1)
+  assert.equal(card.comments[0].status, 'answered')
+  assert.equal(card.comments[0].reply.text, 'The reviewer verified the change.')
+})
+
 // ── Synthetic session for deterministic testing ─────────────────────────────
 
 const TEST_SESSION_ID = `test-feather-${Date.now()}`
@@ -119,6 +154,7 @@ before(async () => {
         FEATHER_STATE_DIR: fixtureStateDir,
         FEATHER_DEEPGRAM_API_KEY: '',
         FEATHER_OMP_AUTH_GATEWAY_URL: '',
+        FEATHER_PROJECT_COMMS_ENABLED: '0',
         PORT: String(port),
         PATH: fixturePath,
       },

@@ -35,7 +35,22 @@
 .work-history > div { margin-top: 12px; }
 .work-overview button:focus-visible, .project-inboxes :is(button, input, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .work-overview button:disabled { cursor: default; opacity: .45; }
+.comms-team .work-section-heading { align-items: center; margin-bottom: 8px; }
+.comms-team .work-section-heading .workspace-button { margin-left: auto; }
+.comms-team .work-help + .work-help { margin-top: 4px; }
+.comms-job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border-base); }
+.comms-job-title { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.comms-job-title span { color: var(--text-secondary); }
+.comms-job-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.comms-error { color: var(--error); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; margin: 8px 0; }
+.project-update :is(button, a, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.project-update button { min-height: 40px; transition: opacity 120ms ease; }
+.project-update button:disabled { opacity: .5; cursor: default !important; }
 @media (max-width: 600px) {
+  .project-update button { min-height: 44px; }
+  .comms-job { grid-template-columns: minmax(0, 1fr) auto; }
+  .comms-job-actions { grid-column: 1 / -1; }
+  .comms-job .work-muted-button { min-height: 44px; }
   .work-content { padding: 28px 20px 56px; gap: 24px; }
   .work-header h1 { font-size: 26px; }
   .work-header-actions { margin-left: 0; }

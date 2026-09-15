@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
 import { ProjectInboxes } from './ProjectInboxes'
-import { fetchScheduler, fetchSchedulerRuns, schedulerRuleAction, deleteSchedulerRule, stopAllAutopilot, stopAutopilotChat, fetchSessions, SchedulerSnapshot, SchedulerRule, SchedulerRun, SessionMeta } from '../api'
+import { fetchScheduler, fetchSchedulerRuns, schedulerRuleAction, deleteSchedulerRule, stopAllAutopilot, stopAutopilotChat, fetchSessions, fetchProjectComms, projectCommsAction, ProjectCommsSnapshot, SchedulerSnapshot, SchedulerRule, SchedulerRun, SessionMeta } from '../api'
 
 // Scheduler: every wake rule Feather owns, in one table. What fires, when,
 // why it did not, and the last runs. Rules are written with `room schedule`.
@@ -78,7 +78,39 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
   const [chats, setChats] = createSignal<SessionMeta[]>([])
   const [loaded, setLoaded] = createSignal(false)
   const [showStopped, setShowStopped] = createSignal(false)
+  const [comms, setComms] = createSignal<ProjectCommsSnapshot | null>(null)
+  const [commsError, setCommsError] = createSignal<string | null>(null)
+  const [commsBusy, setCommsBusy] = createSignal(false)
+  const [showCommsHistory, setShowCommsHistory] = createSignal(false)
+  let commsGeneration = 0
+  let commsRequest: AbortController | null = null
+  let disposed = false
   let timer: ReturnType<typeof setInterval> | undefined
+
+  async function loadComms() {
+    if (disposed || commsRequest) return
+    const generation = ++commsGeneration
+    const controller = new AbortController()
+    commsRequest = controller
+    try {
+      const snapshot = await fetchProjectComms(controller.signal)
+      if (!disposed && generation === commsGeneration) { setComms(snapshot); setCommsError(snapshot.error || null) }
+    } catch (e: any) {
+      if (!disposed && generation === commsGeneration) setCommsError(e?.message || 'Updates team unavailable')
+    } finally {
+      if (commsRequest === controller) commsRequest = null
+    }
+  }
+  async function actComms(action: 'pause' | 'resume' | 'retry', jobId?: string) {
+    if (commsBusy()) return
+    setCommsBusy(true)
+    ++commsGeneration
+    commsRequest?.abort()
+    commsRequest = null
+    try { await projectCommsAction(action, jobId); await loadComms() }
+    catch (e: any) { if (!disposed) setCommsError(e?.message || 'Updates team action failed') }
+    finally { if (!disposed) setCommsBusy(false) }
+  }
 
   async function load() {
     try {
@@ -115,8 +147,8 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
     } catch (e: any) { setError(e?.message || 'Stop failed') }
     finally { setBusy(null) }
   }
-  onMount(() => { load(); timer = setInterval(load, 15000) })
-  onCleanup(() => { if (timer) clearInterval(timer) })
+  onMount(() => { load(); loadComms(); timer = setInterval(() => { load(); if (!commsBusy()) loadComms() }, 15000) })
+  onCleanup(() => { disposed = true; ++commsGeneration; commsRequest?.abort(); if (timer) clearInterval(timer) })
 
   return (
     <div data-testid="scheduler-view" class="work-overview">
@@ -124,7 +156,7 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
         <header class="work-header">
           <div><h1>Autopilot</h1><p>Your teams, their next tasks, and what's running.</p></div>
           <div class="work-header-actions">
-            <button onClick={load} class="workspace-button">Refresh</button>
+            <button onClick={() => { load(); if (!commsBusy()) loadComms() }} class="workspace-button">Refresh</button>
             <button disabled={!!busy()} onClick={() => stop()} class="workspace-button" title="Stop automatic continuation. Chats remain available.">Stop all</button>
           </div>
         </header>
@@ -148,6 +180,39 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
               <button class="work-muted-button" aria-expanded={showStopped()} onClick={() => setShowStopped(!showStopped())}>{showStopped() ? 'Hide' : 'Show'} stopped chats ({chats().filter(chat => !chat.ralph?.enabled).length})</button>
               <Show when={showStopped()}><For each={chats().filter(chat => !chat.ralph?.enabled)}>{chat => (
                 <div class="work-chat"><div><button class="project-title" onClick={() => props.onOpenSession(chat.id)}>{chat.title || 'Untitled chat'} ↗</button><div class="work-chat-note">{chat.ralph?.completionReason || chat.ralph?.blockedReason}</div></div><span class="work-status">Stopped</span></div>
+              )}</For></Show>
+            </Show>
+          </Show>
+        </section>
+
+        <section aria-label="Updates team" class="comms-team">
+          <div class="work-section-heading"><h2>Updates team</h2>
+            <Show when={comms()}><span>{comms()!.enabled ? 'On' : 'Paused'}</span>
+              <button class="workspace-button" disabled={commsBusy()} onClick={() => actComms(comms()!.enabled ? 'pause' : 'resume')}>{commsBusy() ? 'Saving…' : comms()!.enabled ? 'Pause updates team' : 'Resume updates team'}</button>
+            </Show>
+          </div>
+          <p class="work-help">Caretaker keeps the wiki useful. Marketer writes Updates. Replyguy brings your comments to the team and returns with answers.</p>
+          <p class="work-help">Pausing stops new helper jobs, not your chats or helpers already running.</p>
+          <Show when={commsError()}><p role="alert" class="comms-error">{commsError()} <button class="work-muted-button" disabled={commsBusy()} onClick={loadComms}>Try again</button></p></Show>
+          <Show when={comms()} fallback={<Show when={!commsError()}><div class="work-loading" role="status">Loading updates team…</div></Show>}>
+            <Show when={comms()!.jobs?.some(job => !['done', 'completed', 'suppressed'].includes(job.status))} fallback={<div class="work-empty">{comms()!.enabled ? 'No updates waiting. The team picks up meaningful project changes automatically.' : 'New helper jobs are paused. Resume when you want updates and replies to continue.'}</div>}>
+              <For each={comms()!.jobs?.filter(job => !['done', 'completed', 'suppressed'].includes(job.status))}>{job => (
+                <div class="comms-job">
+                  <div><div class="comms-job-title">{job.role === 'replyguy' ? 'Replyguy' : job.role === 'caretaker' ? 'Caretaker' : 'Marketer'} <span>· {job.projectTitle || 'Project'}</span></div>
+                    <Show when={job.error}><p class="comms-error">{job.error}</p></Show>
+                  </div>
+                  <span class="work-status" data-status={job.status}>{job.status.replaceAll('_', ' ')}</span>
+                  <div class="comms-job-actions">
+                    <Show when={job.sessionId}><button class="work-muted-button" onClick={() => props.onOpenSession(job.sessionId!)}>Open chat ↗</button></Show>
+                    <Show when={job.status === 'stalled' || job.status === 'failed'}><button class="workspace-button" disabled={commsBusy()} onClick={() => actComms('retry', job.id)} aria-label={`Retry ${job.role} for ${job.projectTitle}`}>Retry</button></Show>
+                  </div>
+                </div>
+              )}</For>
+            </Show>
+            <Show when={comms()!.jobs?.some(job => ['done', 'completed', 'suppressed'].includes(job.status))}>
+              <button class="work-muted-button" aria-expanded={showCommsHistory()} onClick={() => setShowCommsHistory(!showCommsHistory())}>{showCommsHistory() ? 'Hide' : 'Show'} recent helper work</button>
+              <Show when={showCommsHistory()}><For each={comms()!.jobs?.filter(job => ['done', 'completed', 'suppressed'].includes(job.status)).slice(0, 12)}>{job => (
+                <div class="comms-job"><span class="comms-job-title">{job.role} · {job.projectTitle}</span><span class="work-status">{job.status}</span><Show when={job.sessionId}><button class="work-muted-button" onClick={() => props.onOpenSession(job.sessionId!)}>Open chat ↗</button></Show></div>
               )}</For></Show>
             </Show>
           </Show>

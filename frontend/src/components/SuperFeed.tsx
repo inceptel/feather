@@ -58,6 +58,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
   const [commentOpen, setCommentOpen] = createSignal<string | null>(null)
   const [commentDraft, setCommentDraft] = createSignal('')
   const [commentBusy, setCommentBusy] = createSignal(false)
+  const [commentError, setCommentError] = createSignal<string | null>(null)
   const [pendingComments, setPendingComments] = createSignal<Record<string, FeedComment[]>>({})
   const [expandedReplies, setExpandedReplies] = createSignal<Record<string, boolean>>({})
   // Steer box: one open at a time, keyed by card; `steered` remembers the receipt per card.
@@ -179,6 +180,8 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
 
   function toggleComment(item: SuperFeedItem, event: MouseEvent) {
     event.stopPropagation()
+    if (commentBusy()) return
+    setCommentError(null)
     setCommentOpen(commentOpen() === item.evidenceId ? null : item.evidenceId)
     setCommentDraft('')
   }
@@ -189,6 +192,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
     const text = commentDraft().trim()
     if (!text || commentBusy()) return
     setCommentBusy(true)
+    setCommentError(null)
     try {
       const comment = await postFeedComment(item.evidenceId, text)
       setPendingComments(current => ({ ...current, [item.evidenceId]: [...(current[item.evidenceId] || []), comment] }))
@@ -198,7 +202,7 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
       etag = null
       refresh()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
+      setCommentError(caught instanceof Error ? caught.message : String(caught))
     } finally {
       setCommentBusy(false)
     }
@@ -293,10 +297,12 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
                   <div style={{ color: body, 'font-size': '14px', 'line-height': '1.5', 'margin-top': '2px', 'white-space': 'pre-wrap', 'word-break': 'break-word' }}>{comment.text}</div>
                   <div style={{ 'border-top': `1px solid ${line}`, 'margin-top': '8px', 'padding-top': '8px' }}>
                     <Show when={comment.reply} fallback={
-                      <div style={{ color: muted, 'font-size': '13px' }}>Sent to #{comment.room} · no answer yet</div>
+                      <div style={{ color: muted, 'font-size': '13px' }}>{threadProps.item.sourceKind === 'project'
+                        ? comment.error ? `Reply needs attention: ${comment.error}` : comment.taskStatus === 'blocked' ? 'Your team needs input. Open the chat to help them continue.' : comment.taskId ? 'Your team is working on this. Replyguy will bring back the result.' : 'Replyguy will respond here.'
+                        : `Sent to #${comment.room} · no answer yet`}</div>
                     }>
                       <div style={{ display: 'flex', 'align-items': 'baseline', gap: '7px', 'font-size': '12px', color: muted }}>
-                        <span style={{ color: green, 'font-weight': '700' }}>#{comment.room}</span>
+                        <span style={{ color: green, 'font-weight': '700' }}>{threadProps.item.sourceKind === 'project' ? 'Replyguy' : `#${comment.room}`}</span>
                         <span>{timeAgo(comment.reply!.timestamp)}</span>
                       </div>
                       <div class="markdown" innerHTML={renderWikiMarkdown(comment.reply!.text)}
@@ -304,6 +310,9 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
                       <Show when={long()}>
                         <button onClick={() => setExpandedReplies(current => ({ ...current, [comment.id]: !open() }))}
                           style={{ background: 'none', border: 'none', color: muted, 'font-size': '12px', 'font-weight': '700', padding: '4px 0 0', cursor: 'pointer' }}>{open() ? 'Show less' : 'Show more'}</button>
+                      </Show>
+                      <Show when={threadProps.item.sourceKind === 'project' && (comment.status === 'awaiting-task' || comment.error)}>
+                        <p style={{ color: comment.error ? red : muted, 'font-size': '13px', 'margin-bottom': '0' }}>{comment.error ? `Reply needs attention: ${comment.error}` : comment.taskStatus === 'blocked' ? 'Your team needs input. Open the chat to help them continue.' : 'Your team is working on this. Replyguy will bring back the result.'}</p>
                       </Show>
                     </Show>
                   </div>
@@ -313,9 +322,10 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
           </div>
         </Show>
         <Show when={commentOpen() === threadProps.item.evidenceId}>
+          <Show when={commentError()}><p role="alert" style={{ color: red, 'font-size': '13px' }}>{commentError()}</p></Show>
           <form onSubmit={(event) => submitComment(threadProps.item, event)} style={{ display: 'flex', gap: '6px', 'align-items': 'flex-end' }}>
-            <textarea data-testid={`feed-comment-input-${threadProps.item.evidenceId}`} value={commentDraft()} onInput={(event) => setCommentDraft(event.currentTarget.value)}
-              placeholder={`Ask #${threadProps.item.room} about this…`} rows={2} autofocus
+            <textarea disabled={commentBusy()} data-testid={`feed-comment-input-${threadProps.item.evidenceId}`} value={commentDraft()} onInput={(event) => setCommentDraft(event.currentTarget.value)}
+              aria-label={`Comment on ${threadProps.item.title}`} placeholder={threadProps.item.sourceKind === 'project' ? 'Ask a question or tell your team what to do next…' : `Ask #${threadProps.item.room} about this…`} rows={2} autofocus
               onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submitComment(threadProps.item, event) }}
               style={{ flex: '1', 'min-width': '0', background: '#0b0e13', border: '1px solid #2a3442', 'border-radius': '8px', color: ink, 'font-size': '14px', padding: '8px 10px', resize: 'vertical', 'font-family': 'inherit' }} />
             <button type="submit" disabled={commentBusy() || !commentDraft().trim()}
@@ -490,15 +500,19 @@ export function SuperFeed(props: { onOpenSession: (sessionId: string) => void, o
             )
           }
           if (item.sourceKind) {
-            return <article data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
+            return <article class={item.sourceKind === 'project' ? 'project-update' : undefined} data-testid={`feed-item-${item.evidenceId}`} style={cardStyle(item, false)}>
               <div style={{ color: muted, 'font-size': '12px' }}>{item.sourceKind === 'wiki' ? 'Shared wiki' : item.room} · {timeAgo(item.occurredAt)}</div>
               <h3 style={{ color: ink, 'font-size': '16px', 'word-break': 'break-word' }}>{item.title}</h3>
               <div class="markdown" innerHTML={renderWikiMarkdown(item.summary)} style={{ color: body, 'font-size': '14px' }} />
               <a href={appUrl(item.sourceHref)} onClick={event => {
-                if (item.sourceKind === 'chat' && item.sessionId && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+                if ((item.sourceKind === 'chat' || item.sourceKind === 'project') && item.sessionId && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
                   event.preventDefault(); props.onOpenSession(item.sessionId)
                 }
               }} style={{ color: green, 'font-size': '13px' }}>Open {item.sourceKind === 'wiki' ? 'Wiki' : 'chat'} →</a>
+              <Show when={item.sourceKind === 'project'}>
+                <div style={{ 'margin-top': '12px' }}><CommentButton item={item} items={[item]} /></div>
+                <Thread item={item} items={[item]} />
+              </Show>
             </article>
           }
           if (item.publicationId) {
