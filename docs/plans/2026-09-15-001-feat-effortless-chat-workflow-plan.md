@@ -1,7 +1,7 @@
 ---
 title: "feat: Effortless chat to autonomous work"
 type: feat
-status: active
+status: completed
 date: 2026-09-15
 ---
 

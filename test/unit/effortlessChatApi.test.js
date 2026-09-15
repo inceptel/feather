@@ -89,6 +89,20 @@ fs.writeFileSync(file, JSON.stringify(panes));
 
   await start();
   const [standbyId, standby] = await until(readyStandby, 'first ready pair');
+  assert.ok(standby.chatAllocatedAt, 'standby persists its original allocation time for alias discovery');
+  const oldTranscriptDir = path.join(home, '.claude', 'projects', 'synthetic-ordering');
+  fs.mkdirSync(oldTranscriptDir, { recursive: true });
+  const seedTranscript = (id, timestamp) => {
+    const file = path.join(oldTranscriptDir, `${id}.jsonl`);
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', uuid: `${id}-message`, sessionId: id,
+      cwd: standby.cwd, timestamp: new Date(timestamp).toISOString(),
+      message: { role: 'user', content: `Synthetic conversation ${id}` },
+    }) + '\n');
+    fs.utimesSync(file, new Date(timestamp), new Date(timestamp));
+  };
+  const oldTimestamp = Date.now() - 60_000;
+  seedTranscript(standbyId, oldTimestamp);
+  for (let n = 0; n < 3; n++) seedTranscript(`synthetic-newer-conversation-${n}`, oldTimestamp + 30_000 + n);
   for (const query of ['', '?q=New', `?id=${standbyId}`, `?q=${standbyId}`]) {
     const listing = await ok(`/api/sessions${query}`);
     assert.ok(!listing.sessions.some(session => session.id === standbyId || session.id === standby.chatPair.reviewerSessionId));
@@ -99,11 +113,32 @@ fs.writeFileSync(file, JSON.stringify(panes));
   assert.equal(first.status, 'ready');
   assert.equal(meta()[first.id].model, 'synthetic-creator');
   assert.equal(meta()[first.reviewerSessionId].model, 'synthetic-reviewer');
+  assert.equal(meta()[first.id].chatAllocatedAt, standby.chatAllocatedAt);
+  assert.ok(Date.parse(meta()[first.id].chatAllocatedAt) < Date.parse(meta()[first.id].chatCreatedAt),
+    'claim refreshes display time without shifting the native-alias allocation cutoff');
+  const newestOnly = await ok('/api/sessions?limit=1');
+  assert.equal(newestOnly.sessions[0]?.id, first.id,
+    'claim time promotes a warmed transcript above newer ordinary candidates before limit cutoff');
+  assert.ok(Date.parse(newestOnly.sessions[0].updatedAt) > oldTimestamp + 30_002);
   const [secondReadyId] = await until(readyStandby, 'replacement ready pair');
+  let legacyFinished = false;
+  const legacyRequest = request('/api/chats', { name: 'Legacy cold creation alongside warm claim' }).then(result => {
+    legacyFinished = true;
+    return result;
+  });
+  await until(() => Object.values(meta()).some(entry => entry.title === 'Legacy cold creation alongside warm claim'
+    && entry.chatStartup?.status === 'starting'), 'legacy allocation before readiness');
+  const concurrentClaimStarted = performance.now();
   const second = await ok('/api/chats', { requestId: 'warm-creation-two' });
+  const concurrentClaimMs = performance.now() - concurrentClaimStarted;
+  assert.equal(legacyFinished, false, 'legacy completion must wait outside the global creation lock');
+  assert.ok(concurrentClaimMs < 1000, `Concurrent warm claim took ${concurrentClaimMs.toFixed(1)}ms`);
   assert.equal(second.id, secondReadyId);
   assert.notEqual(second.id, first.id);
   assert.notEqual(second.cwd, first.cwd);
+  const legacy = await legacyRequest;
+  assert.equal(legacy.status, 200);
+  assert.equal(legacy.body.status, 'ready', 'legacy caller retains synchronous readiness contract');
 
   const claimTimes = [], claimedIds = new Set([first.id, second.id]);
   for (let trial = 0; trial < 20; trial++) {

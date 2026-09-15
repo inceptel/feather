@@ -882,7 +882,11 @@ function listSessionCandidates(meta = readMeta()) {
     // Adoption is asynchronous. Match only trusted developer identity while a
     // new chat is unadopted, so setup transcripts cannot flash into the sidebar.
     if (!id) {
-      const possible = pending.filter(([, entry]) => !meta[entry.chatPair.creatorSessionId]?.chatCreatedAt || mtime.getTime() >= Date.parse(meta[entry.chatPair.creatorSessionId].chatCreatedAt) - 1000);
+      const possible = pending.filter(([, entry]) => {
+        const creator = meta[entry.chatPair.creatorSessionId];
+        const allocatedAt = creator?.chatAllocatedAt || creator?.chatCreatedAt;
+        return !allocatedAt || mtime.getTime() >= Date.parse(allocatedAt) - 1000;
+      });
       if (possible.length) {
         try {
           const fd = fs.openSync(fpath, 'r');
@@ -897,7 +901,8 @@ function listSessionCandidates(meta = readMeta()) {
 
   // Sort by mtime descending; loop until we have `limit` non-worker sessions.
   // Content-based worker detection requires reading the file, so we can't pre-filter.
-  candidates.sort((a, b) => b.mtime - a.mtime);
+  const rankingTime = candidate => Math.max(candidate.mtime.getTime(), meta[candidate.id]?.chatRole === 'creator' && !meta[candidate.id]?.chatStandby ? Date.parse(meta[candidate.id].chatCreatedAt) || 0 : 0);
+  candidates.sort((a, b) => rankingTime(b) - rankingTime(a));
   return candidates;
 }
 
@@ -935,7 +940,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
       const ralph = publicRalphState(meta[id]);
       sessions.push({
         id, title: effectiveTitle,
-        updatedAt: new Date(facts.activityMs).toISOString(),
+        updatedAt: new Date(Math.max(facts.activityMs, meta[id]?.chatRole === 'creator' ? Date.parse(meta[id]?.chatCreatedAt) || 0 : 0)).toISOString(),
         isActive: sessionIsActive(active, id, facts.activityMs, now),
         agent,
         projectId: facts.projectId || null,
@@ -3385,7 +3390,7 @@ function beginChatCreation(options, { requestId, fingerprint } = {}) {
       save: ({ id, reviewerSessionId, groupId, cwd, projectId, name, agent, reviewerAgent, rolePrompts, model, reviewerModel, reviewPolicy, progressIntervalMinutes }) => updateMeta((meta) => ({
         ...meta,
         [id]: { ...meta[id], agent, model, reviewPolicy, progressIntervalMinutes, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: { groupId, creatorSessionId: id, reviewerSessionId },
-          chatStandby: !!options.standby, chatSetupVersion: CHAT_SETUP_VERSION, chatCreatedAt: new Date().toISOString(), chatStartup: { status: 'starting' },
+          chatStandby: !!options.standby, chatSetupVersion: CHAT_SETUP_VERSION, chatAllocatedAt: new Date().toISOString(), chatCreatedAt: new Date().toISOString(), chatStartup: { status: 'starting' },
           ...(!options.standby && typeof options.prompt === 'string' && options.prompt.trim() ? { workflow: authorizeChatWorkflow(meta[id]?.workflow) } : {}),
           ...(requestId ? { chatCreation: { requestId, fingerprint } } : {}) },
         [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, model: reviewerModel, reviewPolicy, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId }, chatStandby: !!options.standby },
@@ -3463,7 +3468,7 @@ app.post('/api/chats', async (req, res) => {
     const options = resolveChatOptions(body, CHAT_CONFIG);
     // Replay identifies the caller's request, not today's machine defaults.
     const fingerprint = createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'requestId').sort(([a], [b]) => a.localeCompare(b))))).digest('hex');
-    const result = await chatCreationLock('create', async () => {
+    const creation = await chatCreationLock('create', async () => {
       if (requestId) {
         const found = Object.entries(readMeta()).find(([, entry]) => entry.chatCreation?.requestId === requestId);
         if (found) {
@@ -3482,8 +3487,12 @@ app.post('/api/chats', async (req, res) => {
       }
       const startup = beginChatCreation(options, { requestId, fingerprint });
       // Existing API clients without request IDs retain the synchronous contract.
-      return requestId ? await startup.allocated : await startup.done;
+      const allocation = await startup.allocated;
+      return requestId ? allocation : { completion: startup.done };
     });
+    // Legacy callers still await readiness, but cannot hold up another caller's
+    // atomic claim while their own cold harnesses are starting.
+    const result = creation.completion ? await creation.completion : creation;
     res.status(result.status === 'starting' ? 202 : 200).json(result);
   } catch (e) {
     console.warn('[chat-pair] creation failed:', e.message);
