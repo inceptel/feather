@@ -1,5 +1,5 @@
 ---
-status: active
+status: complete
 execution: code
 ---
 # Project communications
@@ -23,3 +23,13 @@ Tests: project comments and reply refresh, failure/draft preservation, automatio
 
 ## U4 — Verify, deploy, demonstrate
 Full relevant unit/browser tests, independent review, inspect screenshots; guarded release archive/canary/promotion. Run real agents on Spread Rush evidence to publish an edited Update. Submit a clearly identified acceptance-test comment with a bounded project documentation task; verify replyguy delegates, CR completes, and a result returns under the same comment. No manual stand-in for role output. Keep truthful receipts; only claim success after the live chain completes.
+
+## Completion receipt
+
+Deployed application commit 7b270df, production version 2026-09-15T14:18:33Z. Final backend run: 474 pass. Browser canary: 26 pass, including eight communication tests. Live frontend/backend version, routes, screenshots, and transcript preservation verified.
+
+Real acceptance completed 2026-09-15T14:29:38Z: edited Spread Rush publication `pub-market-f99e9933-bb1e-4ad3-b3c9-57f12a0c4aa6`; comment `4c068240-674b-4b1a-a546-47778d3a671c`; delegated task `reply-4c068240-674b-4b1a-a546-47778d3a671c` completed with reviewer PASS; replyguy returned its result under the original comment. The pair corrected content and link issues, preserved concurrent wiki changes, and left game files unchanged. The request survived a production restart.
+
+The live test exposed stale direct-feed instructions. These were corrected permanently in generated/resumed CR prompts and comment delivery; both running peers received an explicitly labeled migration notice. The first editor card was verbose, so the final release tightens future editor instructions. Reply verbosity and high-volume queue performance remain tuning opportunities, not claims proved by this one acceptance.
+
+Evidence: `/home/user/.feather/deploy-receipts/project-comms-sdit44Cg/live-acceptance.json` and `/home/user/.feather/deploy-receipts/project-comms-contract-7lkyFvGr/`. No parent-authored stand-in was used for any role result.
