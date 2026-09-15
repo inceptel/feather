@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
 import { createKeyedLock } from '../../lib/sendlock.js';
 import { scheduledRunMayContinue } from '../../lib/autopilot.js';
 
@@ -10,9 +11,10 @@ const section = (start, end) => server.slice(server.indexOf(start), server.index
 function fixture(overrides = {}) {
   const state = { rules: { rule: { enabled: true } }, runtime: {}, active: [{ runId: 'old' }] };
   const meta = { chat: { ralph: { enabled: true, status: 'working' } } };
-  const pastes = [], events = [], keys = [];
+  const pastes = [], events = [], keys = [], prepares = [];
+  const receipts = {};
   const context = vm.createContext({
-    createKeyedLock, scheduledRunMayContinue, console,
+    createKeyedLock, scheduledRunMayContinue, createHash, console,
     tmuxName: id => id, tmuxIsActive: () => true, tmuxCapture: () => 'pane',
     tmuxPaste: (...args) => pastes.push(args), tmuxRun: args => keys.push(args.at(-1)),
     waitForPaneChange: async () => true, pause: async () => {},
@@ -20,6 +22,10 @@ function fixture(overrides = {}) {
     path: { join: (...parts) => parts.join('/') }, ROOMS_HOME_DIR: '/rooms',
     RESIDENT_RELAUNCH_SETTLE_MS: 1, sleep: async () => {}, launchOmpSession: () => {},
     ROOM_PULSE_STARTED_AT: 0,
+    MESSAGE_RECEIPTS_STATE: { read: () => receipts, update: fn => Object.assign(receipts, fn(receipts)) },
+    isJsonRecord: value => Boolean(value) && typeof value === 'object' && !Array.isArray(value),
+    httpError: (status, message) => Object.assign(new Error(message), { status }),
+    prepareRalphForHumanInput: id => prepares.push(id),
     SCHEDULER_STATE: { read: () => state, update: fn => Object.assign(state, fn(state)) },
     schedulerWrapUpPrompt: () => 'Automatic wrap-up', getAgentForSession: () => 'claude',
     appendSchedulerRun: event => events.push(event), ...overrides,
@@ -28,8 +34,70 @@ function fixture(overrides = {}) {
   vm.runInContext(section('function residentWakeDue(', 'const residentWakesInFlight = new Set();'), context);
   vm.runInContext(section('async function ensureResidentRunning(', 'function checkResidentWakes()'), context);
   vm.runInContext(section('async function schedulerNudge(', 'function schedulerFinishRun('), context);
-  return { context, state, meta, pastes, events, keys };
+  return { context, state, meta, pastes, events, keys, prepares, receipts };
 }
+
+test('guarded idempotent delivery cancelled behind the send lock is never committed', async () => {
+  let release, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const f = fixture({ waitForPaneChange: async () => { entered(); await gate; return true; } });
+  const human = f.context.sendInput('chat', 'Human message');
+  await ready;
+  let enabled = true;
+  const guarded = f.context.sendInputIdempotent('chat', 'Delegated task', 'comms-comment', () => enabled);
+  enabled = false;
+  release();
+  await human;
+  await assert.rejects(guarded, /Delivery paused/);
+  assert.equal(f.pastes.length, 1, 'Only the send already holding the lock is pasted');
+  assert.deepEqual(f.keys, ['Enter']);
+  assert.deepEqual(f.prepares, []);
+  assert.deepEqual(f.receipts, {});
+});
+
+test('guarded idempotent delivery prepares and records only at submission commit', async () => {
+  const order = [];
+  const f = fixture({
+    prepareRalphForHumanInput: id => { f.prepares.push(id); order.push('prepare'); },
+    tmuxPaste: (...args) => { f.pastes.push(args); order.push('paste'); },
+    tmuxRun: args => { f.keys.push(args.at(-1)); order.push('enter'); },
+  });
+  const response = await f.context.sendInputIdempotent('chat', 'Delegated task', 'comms-comment', () => true);
+  assert.equal(response.ok, true);
+  assert.deepEqual(order, ['prepare', 'paste', 'enter']);
+  assert.equal(f.receipts.chat['comms-comment'].response.ok, true);
+});
+
+test('communications retries reuse successful receipts across protocol wording changes without resuming or sending', async () => {
+  const calls = [];
+  const f = fixture({
+    readMeta: () => { calls.push('metadata'); return {}; },
+    tmuxIsActive: () => { calls.push('active'); return false; },
+    resumeSession: () => calls.push('resume'),
+    waitForPaneSettled: async () => calls.push('settle'),
+    PROJECT_COMMS: { read: () => ({ paused: true }) },
+    CHAT_PAIR_PUBLICATION_PROMPT: 'New publication protocol',
+  });
+  const response = { ok: true, sentAt: '2026-09-15T00:00:00Z', observed: true };
+  f.receipts.chat = { 'comms-comment-one': { textHash: createHash('sha256').update('Old publication protocol').digest('hex'), response } };
+  f.context.sendInputIdempotent = async () => calls.push('send');
+  const source = section('  sendTask: async delegation => {', '\n});\n\napp.get(\'/api/project-comms\'');
+  assert.ok(source.startsWith('  sendTask: async delegation => {') && source.trimEnd().endsWith('},'));
+  vm.runInContext(`const communicationsTransport = ({${source}});`, f.context);
+  f.context.delegation = { ownerSessionId: 'chat', commentId: 'comment-one', taskId: 'reply-comment-one', task: { title: 'Approved task', description: 'Same durable task' } };
+  const replay = await vm.runInContext('communicationsTransport.sendTask(delegation)', f.context);
+  assert.equal(replay, response);
+  assert.deepEqual(calls, [], 'A successful receipt skips metadata, resume, readiness and delivery entirely');
+  assert.deepEqual(f.prepares, []);
+});
+
+test('ordinary idempotent delivery still rejects a changed payload for the same message ID', async () => {
+  const f = fixture();
+  await f.context.sendInputIdempotent('chat', 'Original user request', 'user-message');
+  await assert.rejects(f.context.sendInputIdempotent('chat', 'Different user request', 'user-message'), /message id already used with different text/);
+  assert.equal(f.pastes.length, 1);
+});
 
 test('scheduled nudge queued behind a human send stays cancelled after rule restart', async () => {
   let release, entered;

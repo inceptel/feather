@@ -203,7 +203,8 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await page.route('**/api/rooms', route => route.fulfill({ json: { rooms: [room] } }))
 
   await page.goto(`${BASE}/#updates`)
-  await expect(page.getByRole('heading', { name: 'Super Feed' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Updates', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(1)
   const feed = page.getByTestId('super-feed')
   await expect(feed.getByText('Risk review completed.', { exact: true })).not.toBeVisible()
   await expect(feed.getByText('A decision-ready market change.', { exact: true })).toBeVisible()
@@ -215,7 +216,7 @@ test('Super Feed filters attention, subscriptions, and friction without exposing
   await expect(feed.getByText('Useful evidence-backed context; no action is requested.', { exact: true })).toBeVisible()
 
   failFeed = true
-  await feed.getByTestId('feed-refresh').click()
+  await page.getByTestId('feed-refresh').click()
   await expect(feed.getByText('HTTP 503', { exact: true })).toBeVisible()
   await expect(feed.getByText('A decision-ready market change.', { exact: true })).toBeVisible()
   failFeed = false

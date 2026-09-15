@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT } from '../../lib/chat-pair.js';
+import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from '../../lib/chat-pair.js';
 
-test('tiny tasks retain independent review with one combined request and no ceremony', () => {
+test('pairs agree before implementation and evaluate evidence without ceremony', () => {
   const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator' });
   for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
-  assert.match(prompts.creator, /ONE review request/);
-  assert.match(prompts.reviewer, /brief independent check/);
+  assert.match(prompts.creator, /Both agree before building/);
+  assert.match(prompts.reviewer, /against every agreed criterion/);
+  assert.match(prompts.creator, /one short exchange before producing the answer/);
+  assert.match(prompts.creator, /cr-agreement.creator.md/);
+  assert.match(prompts.reviewer, /not independent evidence/);
+  assert.match(prompts.creator, /Do not lower criteria to pass/);
+  assert.match(prompts.creator, /Do not stop merely because three rounds/);
   assert.match(prompts.creator, /Review is still required/);
 });
 
@@ -23,6 +28,24 @@ function fixture(t, overrides = {}) {
   }
   return { root, events, deps: { ...deps, ...overrides } };
 }
+
+test('CR completion hands reviewed evidence to editors without waiting for optional publication', () => {
+  for (const mode of [null, 'ralph']) {
+    const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator', wikiPath: '/tmp/wiki', mode });
+    for (const prompt of Object.values(prompts)) {
+      assert.ok(prompt.includes(CHAT_PAIR_PUBLICATION_PROMPT));
+      assert.match(prompt, /supersedes earlier instructions/);
+      assert.match(prompt, /reviewed inbox completion result is the durable handoff/);
+      assert.match(prompt, /queued for caretaker selection and marketer editing/);
+      assert.match(prompt, /Publication in Updates is optional and asynchronous/);
+      assert.match(prompt, /Never gate task completion or review approval on feed appearance/);
+      assert.match(prompt, /editors may combine or suppress/);
+      assert.match(prompt, /updates.creator.json/);
+      assert.match(prompt, /source evidence.*not direct publications/);
+      assert.doesNotMatch(prompt, /Completion records appear in Updates automatically|Shared wiki edits also appear in Updates/);
+    }
+  }
+});
 
 test('new chats have isolated readable folders and correctly addressed CR prompts', async t => {
   const { root, events, deps } = fixture(t);

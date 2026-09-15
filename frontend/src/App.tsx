@@ -1936,6 +1936,8 @@ export default function App() {
                         />
                       </Show>
                       <Show when={sidecarsForSession(s.id).length > 0 || s.id === currentId()}>
+                        <details onClick={e => e.stopPropagation()}>
+                          <summary style={{ color: 'var(--text-secondary)', 'font-size': '11px', cursor: 'pointer', padding: '6px 0' }}>Sidecars ({sidecarsForSession(s.id).length})</summary>
                         <div style={{ 'margin-top': '6px', 'padding-left': '14px', display: 'flex', 'flex-direction': 'column', gap: '3px' }}>
                           <For each={sidecarsForSession(s.id)}>{(g) => (
                             <div onClick={(e) => { e.stopPropagation(); setOpenSidecarId(g.id) }}
@@ -1954,6 +1956,7 @@ export default function App() {
                               onMouseOut={(e) => (e.currentTarget.style.color = '#555')}>+ sidecar</div>
                           </Show>
                         </div>
+                        </details>
                       </Show>
                     </div>
                   )}</For>

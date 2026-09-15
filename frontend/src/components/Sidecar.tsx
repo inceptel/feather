@@ -76,10 +76,10 @@ export function SidecarThread(props: {
         </div>
         <div style={{ flex: '1', overflow: 'auto', padding: '8px', display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
           <For each={thread()}>{(m) => (
-            <div style={{ 'border-left': '2px solid #333', padding: '2px 8px' }}>
-              <div style={{ color: '#6aa6e5', 'font-size': '11px' }}>{m.from} → {m.to}</div>
+            <details style={{ 'border-left': '2px solid #333', padding: '2px 8px' }}>
+              <summary style={{ color: '#6aa6e5', 'font-size': '11px', cursor: 'pointer', padding: '6px 0' }}>{m.from} → {m.to}</summary>
               <div style={{ 'white-space': 'pre-wrap' }}>{m.text}</div>
-            </div>
+            </details>
           )}</For>
         </div>
         <div style={{ padding: '8px', 'border-top': '1px solid #222', display: 'flex', gap: '6px', 'align-items': 'center' }}>

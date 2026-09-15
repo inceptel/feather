@@ -1,5 +1,6 @@
 import { createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchScheduler, fetchSchedulerRuns, schedulerRuleAction, deleteSchedulerRule, stopAllAutopilot, stopAutopilotChat, fetchSessions, SchedulerSnapshot, SchedulerRule, SchedulerRun, SessionMeta } from '../api'
+import { ProjectInboxes } from './ProjectInboxes'
+import { fetchScheduler, fetchSchedulerRuns, schedulerRuleAction, deleteSchedulerRule, stopAllAutopilot, stopAutopilotChat, fetchSessions, fetchProjectComms, projectCommsAction, ProjectCommsSnapshot, SchedulerSnapshot, SchedulerRule, SchedulerRun, SessionMeta } from '../api'
 
 // Scheduler: every wake rule Feather owns, in one table. What fires, when,
 // why it did not, and the last runs. Rules are written with `room schedule`.
@@ -11,10 +12,6 @@ const line = '#1e2632'
 const green = '#69c77f'
 const amber = '#e0b45f'
 const red = '#e3826d'
-const panel = '#0f141b'
-
-const cardStyle = { background: panel, border: `1px solid ${line}`, 'border-radius': '12px', padding: '14px 16px', 'min-width': '0' }
-const labelStyle = { color: muted, 'font-size': '11px', 'font-weight': '650', 'letter-spacing': '0.06em', 'text-transform': 'uppercase' as const }
 const cell = { padding: '6px 8px', color: body, 'vertical-align': 'top' as const, 'line-height': '1.35' }
 const buttonStyle = { background: '#182030', border: `1px solid ${line}`, color: ink, 'border-radius': '6px', padding: '3px 8px', 'font-size': '12px', cursor: 'pointer' }
 
@@ -79,7 +76,41 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
   const [error, setError] = createSignal<string | null>(null)
   const [busy, setBusy] = createSignal<string | null>(null)
   const [chats, setChats] = createSignal<SessionMeta[]>([])
+  const [loaded, setLoaded] = createSignal(false)
+  const [showStopped, setShowStopped] = createSignal(false)
+  const [comms, setComms] = createSignal<ProjectCommsSnapshot | null>(null)
+  const [commsError, setCommsError] = createSignal<string | null>(null)
+  const [commsBusy, setCommsBusy] = createSignal(false)
+  const [showCommsHistory, setShowCommsHistory] = createSignal(false)
+  let commsGeneration = 0
+  let commsRequest: AbortController | null = null
+  let disposed = false
   let timer: ReturnType<typeof setInterval> | undefined
+
+  async function loadComms() {
+    if (disposed || commsRequest) return
+    const generation = ++commsGeneration
+    const controller = new AbortController()
+    commsRequest = controller
+    try {
+      const snapshot = await fetchProjectComms(controller.signal)
+      if (!disposed && generation === commsGeneration) { setComms(snapshot); setCommsError(snapshot.error || null) }
+    } catch (e: any) {
+      if (!disposed && generation === commsGeneration) setCommsError(e?.message || 'Updates team unavailable')
+    } finally {
+      if (commsRequest === controller) commsRequest = null
+    }
+  }
+  async function actComms(action: 'pause' | 'resume' | 'retry', jobId?: string) {
+    if (commsBusy()) return
+    setCommsBusy(true)
+    ++commsGeneration
+    commsRequest?.abort()
+    commsRequest = null
+    try { await projectCommsAction(action, jobId); await loadComms() }
+    catch (e: any) { if (!disposed) setCommsError(e?.message || 'Updates team action failed') }
+    finally { if (!disposed) setCommsBusy(false) }
+  }
 
   async function load() {
     try {
@@ -90,6 +121,8 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
       setError(null)
     } catch (e: any) {
       setError(e?.message || 'Autopilot unavailable')
+    } finally {
+      setLoaded(true)
     }
   }
   async function act(rule: SchedulerRule, action: 'fire' | 'pause' | 'resume' | 'stop' | 'delete') {
@@ -114,26 +147,81 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
     } catch (e: any) { setError(e?.message || 'Stop failed') }
     finally { setBusy(null) }
   }
-  onMount(() => { load(); timer = setInterval(load, 15000) })
-  onCleanup(() => { if (timer) clearInterval(timer) })
+  onMount(() => { load(); loadComms(); timer = setInterval(() => { load(); if (!commsBusy()) loadComms() }, 15000) })
+  onCleanup(() => { disposed = true; ++commsGeneration; commsRequest?.abort(); if (timer) clearInterval(timer) })
 
   return (
-    <div data-testid="scheduler-view" style={{ height: '100%', 'overflow-y': 'auto', padding: '16px', color: ink, 'font-family': 'system-ui, sans-serif' }}>
-      <div style={{ 'max-width': '1100px', margin: '0 auto', display: 'flex', 'flex-direction': 'column', gap: '14px' }}>
-        <div style={{ display: 'flex', 'align-items': 'baseline', gap: '12px', 'flex-wrap': 'wrap' }}>
-          <h2 style={{ margin: '0', 'font-size': '18px', 'font-weight': '650' }}>Autopilot</h2>
-          <Show when={data()}>{(d) => (
-            <span style={{ color: muted, 'font-size': '12px' }}>
-              {d().enabled ? 'Work that continues on its own' : 'Scheduled work is off'}
-            </span>
-          )}</Show>
-          <button onClick={load} style={{ ...buttonStyle, 'margin-left': 'auto' }}>Refresh</button>
-          <button disabled={!!busy()} onClick={() => stop()} style={{ ...buttonStyle, color: red }} title="Stop active autonomous work and turn off future runs">Stop all</button>
-        </div>
+    <div data-testid="scheduler-view" class="work-overview">
+      <div class="work-content">
+        <header class="work-header">
+          <div><h1>Autopilot</h1><p>Your teams, their next tasks, and what's running.</p></div>
+          <div class="work-header-actions">
+            <button onClick={() => { load(); if (!commsBusy()) loadComms() }} class="workspace-button">Refresh</button>
+            <button disabled={!!busy()} onClick={() => stop()} class="workspace-button" title="Stop automatic continuation. Chats remain available.">Stop all</button>
+          </div>
+        </header>
         <Show when={error()}><div style={{ color: red, 'font-size': '13px' }}>{error()}</div></Show>
 
-        <div style={cardStyle}>
-          <div style={{ ...labelStyle, 'margin-bottom': '8px' }}>Scheduled work</div>
+        <section aria-label="Active chats">
+          <div class="work-section-heading"><h2>Working now</h2><Show when={loaded()}><span>{chats().filter(chat => chat.ralph?.enabled).length} active</span></Show></div>
+          <p class="work-help">Stop pauses automatic continuation. Your next message starts it again.</p>
+          <Show when={loaded()} fallback={<div class="work-loading" role="status">Loading active chats…</div>}>
+            <Show when={chats().some(chat => chat.ralph?.enabled)} fallback={<div class="work-empty">No chats on autopilot right now.</div>}>
+              <For each={chats().filter(chat => chat.ralph?.enabled).sort((a, b) => (a.title || '').localeCompare(b.title || ''))}>{chat => (
+                <div class="work-chat">
+                  <div><button class="project-title" onClick={() => props.onOpenSession(chat.id)}>{chat.title || 'Untitled chat'} ↗</button>
+                    <Show when={chat.ralph?.blockedReason || chat.ralph?.error || (chat.ralph?.iteration || 0) > 0}><div class="work-chat-note">{chat.ralph?.blockedReason || chat.ralph?.error || `${chat.ralph?.iteration} iterations`}</div></Show></div>
+                  <span class="work-status" data-status={chat.ralph?.status}>{chat.ralph?.status || 'Ready'}</span>
+                  <button disabled={!!busy()} onClick={() => stop(chat.id)} class="workspace-button">Stop</button>
+                </div>
+              )}</For>
+            </Show>
+            <Show when={chats().some(chat => !chat.ralph?.enabled)}>
+              <button class="work-muted-button" aria-expanded={showStopped()} onClick={() => setShowStopped(!showStopped())}>{showStopped() ? 'Hide' : 'Show'} stopped chats ({chats().filter(chat => !chat.ralph?.enabled).length})</button>
+              <Show when={showStopped()}><For each={chats().filter(chat => !chat.ralph?.enabled)}>{chat => (
+                <div class="work-chat"><div><button class="project-title" onClick={() => props.onOpenSession(chat.id)}>{chat.title || 'Untitled chat'} ↗</button><div class="work-chat-note">{chat.ralph?.completionReason || chat.ralph?.blockedReason}</div></div><span class="work-status">Stopped</span></div>
+              )}</For></Show>
+            </Show>
+          </Show>
+        </section>
+
+        <section aria-label="Updates team" class="comms-team">
+          <div class="work-section-heading"><h2>Updates team</h2>
+            <Show when={comms()}><span>{comms()!.enabled ? 'On' : 'Paused'}</span>
+              <button class="workspace-button" disabled={commsBusy()} onClick={() => actComms(comms()!.enabled ? 'pause' : 'resume')}>{commsBusy() ? 'Saving…' : comms()!.enabled ? 'Pause updates team' : 'Resume updates team'}</button>
+            </Show>
+          </div>
+          <p class="work-help">Caretaker keeps the wiki useful. Marketer writes Updates. Replyguy brings your comments to the team and returns with answers.</p>
+          <p class="work-help">Pausing stops new helper jobs, not your chats or helpers already running.</p>
+          <Show when={commsError()}><p role="alert" class="comms-error">{commsError()} <button class="work-muted-button" disabled={commsBusy()} onClick={loadComms}>Try again</button></p></Show>
+          <Show when={comms()} fallback={<Show when={!commsError()}><div class="work-loading" role="status">Loading updates team…</div></Show>}>
+            <Show when={comms()!.jobs?.some(job => !['done', 'completed', 'suppressed'].includes(job.status))} fallback={<div class="work-empty">{comms()!.enabled ? 'No updates waiting. The team picks up meaningful project changes automatically.' : 'New helper jobs are paused. Resume when you want updates and replies to continue.'}</div>}>
+              <For each={comms()!.jobs?.filter(job => !['done', 'completed', 'suppressed'].includes(job.status))}>{job => (
+                <div class="comms-job">
+                  <div><div class="comms-job-title">{job.role === 'replyguy' ? 'Replyguy' : job.role === 'caretaker' ? 'Caretaker' : 'Marketer'} <span>· {job.projectTitle || 'Project'}</span></div>
+                    <Show when={job.error}><p class="comms-error">{job.error}</p></Show>
+                  </div>
+                  <span class="work-status" data-status={job.status}>{job.status.replaceAll('_', ' ')}</span>
+                  <div class="comms-job-actions">
+                    <Show when={job.sessionId}><button class="work-muted-button" onClick={() => props.onOpenSession(job.sessionId!)}>Open chat ↗</button></Show>
+                    <Show when={job.status === 'stalled' || job.status === 'failed'}><button class="workspace-button" disabled={commsBusy()} onClick={() => actComms('retry', job.id)} aria-label={`Retry ${job.role} for ${job.projectTitle}`}>Retry</button></Show>
+                  </div>
+                </div>
+              )}</For>
+            </Show>
+            <Show when={comms()!.jobs?.some(job => ['done', 'completed', 'suppressed'].includes(job.status))}>
+              <button class="work-muted-button" aria-expanded={showCommsHistory()} onClick={() => setShowCommsHistory(!showCommsHistory())}>{showCommsHistory() ? 'Hide' : 'Show'} recent helper work</button>
+              <Show when={showCommsHistory()}><For each={comms()!.jobs?.filter(job => ['done', 'completed', 'suppressed'].includes(job.status)).slice(0, 12)}>{job => (
+                <div class="comms-job"><span class="comms-job-title">{job.role} · {job.projectTitle}</span><span class="work-status">{job.status}</span><Show when={job.sessionId}><button class="work-muted-button" onClick={() => props.onOpenSession(job.sessionId!)}>Open chat ↗</button></Show></div>
+              )}</For></Show>
+            </Show>
+          </Show>
+        </section>
+
+        <ProjectInboxes onOpenSession={props.onOpenSession} />
+
+        <details class="work-history">
+          <summary>Scheduled work <Show when={data()}>· {data()?.rules.length}</Show></summary>
           <Show when={(data()?.rules.length || 0) > 0} fallback={
             <div style={{ color: muted, 'font-size': '13px', 'line-height': '1.5' }}>
               No scheduled work yet. Scheduled tasks will appear here with their next run and stop controls.
@@ -199,25 +287,10 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
               </table>
             </div>
           </Show>
-        </div>
+        </details>
 
-        <div style={cardStyle}>
-          <div style={{ ...labelStyle, 'margin-bottom': '8px' }}>Keep working</div>
-          <p style={{ color: muted, 'font-size': '13px', margin: '0 0 8px' }}>Stop ends automatic continuation, not the chat. Your next message turns it back on.</p>
-          <Show when={chats().length} fallback={<div style={{ color: muted, 'font-size': '13px' }}>No ongoing autonomous chats.</div>}>
-            <For each={chats()}>{chat => (
-              <div style={{ display: 'flex', gap: '12px', 'align-items': 'center', padding: '8px 0', 'border-top': `1px solid ${line}` }}>
-                <button onClick={() => props.onOpenSession(chat.id)} style={{ ...buttonStyle, 'text-align': 'left' }}>{chat.title || 'Untitled chat'}</button>
-                <span style={{ color: chat.ralph?.enabled ? green : muted, 'font-size': '12px' }}>{chat.ralph?.status || 'Stopped'}</span>
-                <span style={{ color: muted, 'font-size': '12px', flex: '1' }}>{chat.ralph?.blockedReason || chat.ralph?.completionReason || chat.ralph?.error || `${chat.ralph?.iteration || 0} iterations`}</span>
-                <button disabled={!!busy() || !chat.ralph?.enabled} onClick={() => stop(chat.id)} style={{ ...buttonStyle, color: red }}>Stop</button>
-              </div>
-            )}</For>
-          </Show>
-        </div>
-
-        <div style={cardStyle}>
-          <div style={{ ...labelStyle, 'margin-bottom': '8px' }}>Recent runs</div>
+        <details class="work-history">
+          <summary>Run history</summary>
           <Show when={runs().length > 0} fallback={<div style={{ color: muted, 'font-size': '13px' }}>No runs yet.</div>}>
             <div style={{ 'overflow-x': 'auto' }}>
               <table data-testid="scheduler-runs" style={{ 'border-collapse': 'collapse', width: '100%', 'font-size': '13px' }}>
@@ -227,7 +300,7 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
                       <td style={{ ...cell, 'white-space': 'nowrap', color: muted }}>{clock(run.finishedAt || run.startedAt)}</td>
                       <td style={cell}>{run.ruleId}</td>
                       <td style={{ ...cell, color: run.event === 'finished' ? outcomeColor(run.outcome) : green, 'white-space': 'nowrap' }}>
-                        {run.event === 'finished' ? `${run.outcome} · ${Math.round((run.durationMs || 0) / 60000)}m` : run.event === 'nudged' ? 'wrap-up nudge' : 'started'}
+                        {run.event === 'finished' ? `${run.outcome} · ${Math.round((run.durationMs || 0) / 60000)}m` : 'started'}
                       </td>
                       <td style={{ ...cell, color: muted }}>{run.reason}{run.detail ? ` · ${run.detail}` : ''}</td>
                       <td style={cell}>
@@ -241,7 +314,7 @@ export function SchedulerView(props: { onOpenSession: (id: string) => void, onOp
               </table>
             </div>
           </Show>
-        </div>
+        </details>
       </div>
     </div>
   )

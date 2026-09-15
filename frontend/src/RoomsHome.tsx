@@ -270,7 +270,7 @@ export default function RoomsHome(props: {
       <header class="workspace-header">
         <div class="workspace-heading"><h1>{view() === 'wiki' ? 'Wiki' : view() === 'updates' ? 'Updates' : 'Chats'}</h1><p>{view() === 'wiki' ? 'Knowledge saved across your chats.' : view() === 'updates' ? 'The latest from your work.' : 'Pick up where you left off.'}</p></div>
         <div class="workspace-header-actions">
-          <button class="chat-home-control workspace-button" onClick={() => { void refresh(); setRefreshKey(previous => previous + 1) }}>Refresh</button>
+          <button data-testid={view() === 'updates' ? 'feed-refresh' : undefined} class="chat-home-control workspace-button" onClick={() => { void refresh(); setRefreshKey(previous => previous + 1) }}>Refresh</button>
           <Show when={props.onNewChat}><button class="chat-home-control workspace-button workspace-button-primary" onClick={() => props.onNewChat?.()}>New chat</button></Show>
         </div>
       </header>

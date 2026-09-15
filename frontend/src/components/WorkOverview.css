@@ -1,0 +1,62 @@
+.work-overview { height: 100%; overflow-y: auto; color: var(--text-primary); }
+.work-content { max-width: 1000px; margin: 0 auto; padding: 48px 32px 80px; display: flex; flex-direction: column; gap: 28px; }
+.work-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.work-header h1 { margin: 0 0 8px; font-size: 30px; font-weight: 600; letter-spacing: -.8px; }
+.work-header p, .work-help { color: var(--text-secondary); font-size: 13px; line-height: 1.6; margin: 0; }
+.work-header-actions { margin-left: auto; display: flex; gap: 8px; }
+.work-section-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.work-section-heading h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.work-section-heading > span, .work-count { font-size: 12px; color: var(--text-secondary); }
+.work-loading, .work-empty { padding: 24px 0; font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+.work-search { width: 100%; box-sizing: border-box; background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--border-base); border-radius: 8px; padding: 12px; margin-bottom: 16px; font: inherit; font-size: 13px; }
+.project-inbox { background: var(--bg-secondary); border: 1px solid var(--border-base); border-radius: 10px; padding: 18px 20px; margin-bottom: 12px; min-width: 0; }
+.project-inbox-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.project-title { flex: 1; min-width: 0; background: none; border: 0; color: var(--text-primary); padding: 4px 0; text-align: left; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.project-title span { color: var(--text-secondary); margin-left: 6px; font-weight: 400; }
+.work-count { flex-shrink: 0; }
+.project-inbox-tools { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+.work-disclosure { font-size: 13px; color: var(--text-secondary); }
+.work-disclosure[open] { flex-basis: 100%; }
+.work-disclosure > summary { cursor: pointer; min-height: 36px; line-height: 36px; }
+.work-muted-button { background: none; border: 0; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; min-height: 40px; padding: 8px 0; text-align: left; }
+.work-muted-button:hover, .project-title:hover { color: var(--accent); }
+.project-task { border-top: 1px solid var(--border-base); font-size: 13px; }
+.project-task > details > summary { display: flex; align-items: center; gap: 12px; padding: 12px 0; cursor: pointer; list-style: none; }
+.project-task > details > summary::before { content: '›'; color: var(--text-secondary); }
+.project-task > details[open] > summary::before { transform: rotate(90deg); }
+.project-task-title { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.work-status { font-size: 12px; color: var(--text-primary); background: var(--bg-hover); border-radius: 5px; padding: 4px 7px; white-space: nowrap; }
+.work-status[data-status=building]::before, .work-status[data-status=working]::before, .work-status[data-status=reviewing]::before, .work-status[data-status=done]::before, .work-status[data-status=completed]::before { content: ''; display: inline-block; width: 5px; height: 5px; background: var(--success); border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.work-chat { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border-base); }
+.work-chat .project-title { display: block; width: 100%; }
+.work-chat-note { color: var(--text-secondary); font-size: 12px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.work-history { border-top: 1px solid var(--border-base); padding-top: 12px; }
+.work-history > summary { color: var(--text-secondary); cursor: pointer; padding: 12px 0; font-size: 14px; }
+.work-history > div { margin-top: 12px; }
+.work-overview button:focus-visible, .project-inboxes :is(button, input, textarea, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.work-overview button:disabled { cursor: default; opacity: .45; }
+.comms-team .work-section-heading { align-items: center; margin-bottom: 8px; }
+.comms-team .work-section-heading .workspace-button { margin-left: auto; }
+.comms-team .work-help + .work-help { margin-top: 4px; }
+.comms-job { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border-base); }
+.comms-job-title { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.comms-job-title span { color: var(--text-secondary); }
+.comms-job-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.comms-error { color: var(--error); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; margin: 8px 0; }
+.project-update :is(button, a, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.project-update button { min-height: 40px; transition: opacity 120ms ease; }
+.project-update button:disabled { opacity: .5; cursor: default !important; }
+@media (max-width: 600px) {
+  .project-update button { min-height: 44px; }
+  .comms-job { grid-template-columns: minmax(0, 1fr) auto; }
+  .comms-job-actions { grid-column: 1 / -1; }
+  .comms-job .work-muted-button { min-height: 44px; }
+  .work-content { padding: 28px 20px 56px; gap: 24px; }
+  .work-header h1 { font-size: 26px; }
+  .work-header-actions { margin-left: 0; }
+  .project-inbox { padding: 14px; }
+  .project-task > details > summary { gap: 8px; }
+  .work-chat { gap: 8px; }
+  .work-chat .workspace-button { padding: 8px; }
+  .project-inbox-heading { align-items: baseline; }
+}
