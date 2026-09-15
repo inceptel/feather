@@ -128,3 +128,10 @@ test('malformed durable state fails closed and prompt requires explicit authenti
   fs.writeFileSync(path.join(f.root, 'project-comms.json'), JSON.stringify({ version: 1, paused: false, sources: [], jobs: [{ id: 'bad' }], publications: [], comments: [] }))
   assert.throws(() => f.store.read())
 })
+
+test('editor prompt keeps user updates short and leaves QA matrices in evidence', () => {
+  const prompt = buildProjectCommsPrompt({ role: 'marketer', projectId: 'p', ownerSessionId: 'owner', payload: { projectTitle: 'Project' } })
+  assert.match(prompt, /never exceed 120 words/)
+  assert.match(prompt, /test matrices, sample counts, device dimensions/)
+  assert.match(prompt, /Preserve uncertainty and evidence integrity/)
+})

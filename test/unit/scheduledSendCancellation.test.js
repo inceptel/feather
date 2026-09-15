@@ -69,6 +69,36 @@ test('guarded idempotent delivery prepares and records only at submission commit
   assert.equal(f.receipts.chat['comms-comment'].response.ok, true);
 });
 
+test('communications retries reuse successful receipts across protocol wording changes without resuming or sending', async () => {
+  const calls = [];
+  const f = fixture({
+    readMeta: () => { calls.push('metadata'); return {}; },
+    tmuxIsActive: () => { calls.push('active'); return false; },
+    resumeSession: () => calls.push('resume'),
+    waitForPaneSettled: async () => calls.push('settle'),
+    PROJECT_COMMS: { read: () => ({ paused: true }) },
+    CHAT_PAIR_PUBLICATION_PROMPT: 'New publication protocol',
+  });
+  const response = { ok: true, sentAt: '2026-09-15T00:00:00Z', observed: true };
+  f.receipts.chat = { 'comms-comment-one': { textHash: createHash('sha256').update('Old publication protocol').digest('hex'), response } };
+  f.context.sendInputIdempotent = async () => calls.push('send');
+  const source = section('  sendTask: async delegation => {', '\n});\n\napp.get(\'/api/project-comms\'');
+  assert.ok(source.startsWith('  sendTask: async delegation => {') && source.trimEnd().endsWith('},'));
+  vm.runInContext(`const communicationsTransport = ({${source}});`, f.context);
+  f.context.delegation = { ownerSessionId: 'chat', commentId: 'comment-one', taskId: 'reply-comment-one', task: { title: 'Approved task', description: 'Same durable task' } };
+  const replay = await vm.runInContext('communicationsTransport.sendTask(delegation)', f.context);
+  assert.equal(replay, response);
+  assert.deepEqual(calls, [], 'A successful receipt skips metadata, resume, readiness and delivery entirely');
+  assert.deepEqual(f.prepares, []);
+});
+
+test('ordinary idempotent delivery still rejects a changed payload for the same message ID', async () => {
+  const f = fixture();
+  await f.context.sendInputIdempotent('chat', 'Original user request', 'user-message');
+  await assert.rejects(f.context.sendInputIdempotent('chat', 'Different user request', 'user-message'), /message id already used with different text/);
+  assert.equal(f.pastes.length, 1);
+});
+
 test('scheduled nudge queued behind a human send stays cancelled after rule restart', async () => {
   let release, entered;
   const ready = new Promise(resolve => { entered = resolve; });
