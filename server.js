@@ -1223,6 +1223,9 @@ function sessionSystemPrompt(id) {
   if (roomName) parts.push(roomLeaderPrompt(roomName));
   if (isRalphSession(id)) parts.push(ralphSystemPrompt());
   const chat = readMeta()[id];
+  if (!roomName && chat?.chatRole !== 'reviewer' && !chat?.communicationRole) {
+    parts.push(`Chat naming: after the first meaningful user message, immediately give this chat a short, descriptive title as soon as you understand its purpose, before substantive work. If the message is only a greeting or the purpose is unclear, wait until it becomes clear. Do not name it from setup prompts, sidecar traffic, or scheduled/helper instructions. Preserve a title explicitly chosen by the user; otherwise replace generic or stale titles and refine once if your understanding materially changes, not every turn. Use plain language, usually 3–7 words, at most 80 characters; never include secrets or sensitive personal details. Current display title: ${JSON.stringify(chat?.title || 'New chat')}. Rename only your own chat by HTTP POST to http://127.0.0.1:${PORT}/api/sessions/${id}/rename with Content-Type: application/json and JSON body {"title":"Your descriptive title"}; encode the JSON safely and check the response. This is lightweight housekeeping: do not ask permission or wait for reviewer approval. Do not rename a Room, project folder, shared project, or peer session. A rename failure must not block the user's task.`);
+  }
   const rolePrompt = chat?.chatPair && ['creator', 'reviewer'].includes(chat.chatRole)
     ? chatPairPrompts({ groupId: chat.chatPair.groupId, cwd: chat.cwd, mode: chat.mode,
         creatorSessionId: chat.chatPair.creatorSessionId,
