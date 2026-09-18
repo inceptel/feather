@@ -1720,6 +1720,9 @@ function patchRalphState(id, patch) {
       ...meta,
       [id]: {
         ...meta[id],
+        // Every start clears the stop identity and every stop rotates it, so a
+        // stop note still queued from before is fenced out (see stopAuto).
+        ...(patch.enabled === true ? { autoStopId: undefined } : patch.enabled === false ? { autoStopId: randomUUID() } : {}),
         ...(meta[id].workflow ? { workflow: { ...meta[id].workflow,
           ...(typeof patch.enabled === 'boolean' ? { enabled: patch.enabled } : {}),
           ...(['waiting', 'working', 'blocked', 'complete', 'stopped'].includes(patch.status) ? { phase: patch.status } : {}),
@@ -1794,13 +1797,16 @@ function bumpAutoLifecycle(entry) {
 // (no autoModeBefore) keep their mode, as before.
 async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
   cancelRalphCallback(id);
-  let restored = false, stopLifecycle = null, stopped = false, pendingAttach = null;
+  let restored = false, stopId = null, stopped = false, pendingAttach = null;
   updateMeta(meta => {
     const current = meta[id];
     if (!current) return meta;
     stopped = true;
     pendingAttach = current.chatReviewerAttach || null;
-    const next = { ...current, chatStopToken: randomUUID() };
+    // The stop identity fences this stop's note: every later start clears it
+    // and every later stop rotates it, while a reviewer-only detach keeps it.
+    const next = { ...current, chatStopToken: randomUUID(), autoStopId: randomUUID() };
+    if (pendingAttach) tombstoneReviewer(next, pendingAttach, { pending: true });
     if (current.workflow) next.workflow = applyChatWorkflow(current.workflow, { action: 'stop' }, { role: 'human' }).workflow;
     if (current.mode === RALPH_MODE) {
       next.ralph = { ...(current.ralph || {}), enabled: false, stopToken: randomUUID(), pendingInboxHumanWake: null, lastBoundaryKey: null,
@@ -1815,33 +1821,33 @@ async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
     // no-op stop on an ordinary chat leave no trace.
     if (current.mode === RALPH_MODE || current.ralph?.enabled) next.autoStoppedAt = new Date().toISOString();
     next.autoLifecycle = bumpAutoLifecycle(current);
-    stopLifecycle = next.autoLifecycle;
+    stopId = next.autoStopId;
     return { ...meta, [id]: next };
   });
   if (!stopped) return { stopped: false };
   // A reviewer still being attached never becomes a pair after a stop: the
-  // lifecycle bump fences its commit, and its harness, capability, group and
-  // pending record go now. The record stays durable until this cleanup runs,
-  // so a crash before it is recovered by the boot sweep. Committed pairs stay.
+  // lifecycle bump fences its commit, the same write moved its record to a
+  // cleanup tombstone, and its harness, capability and group go now. The
+  // tombstone stays until they are verifiably gone. Committed pairs stay.
   if (pendingAttach) {
     const inflight = chatAttachAttempts.get(id);
     if (inflight?.token === pendingAttach.token) inflight.cancelled = true;
-    cleanupReviewerAttempt(id, pendingAttach);
+    releaseReviewerResources(id, { ...pendingAttach, pending: true });
   }
   const owned = Object.values(validateRules(SCHEDULER_STATE.read().rules || {}))
     .filter(rule => rule.room === CHAT_RULES_ROOM && rule.ownerSessionId === id && rule.enabled).map(rule => rule.id);
   if (owned.length) schedulerStopRules(owned);
   let noteStatus = null;
   if (note && restored && tmuxIsActive(id)) {
-    // A later detach (for example of a reviewer whose announcement this stop
-    // fenced out) bumps the lifecycle again; the note is still true then. Only
-    // a restart of ongoing work makes it stale, and the mode checks catch that.
-    const maySend = () => { const entry = readMeta()[id]; return Number.isSafeInteger(entry?.autoLifecycle) && entry.autoLifecycle >= stopLifecycle && !entry.ralph?.enabled && entry.mode !== RALPH_MODE; };
+    // Fenced by this stop's identity: a later detach (for example of a
+    // reviewer whose announcement this stop fenced out) keeps it, while any
+    // later start or stop replaces it and this note is dropped unpasted.
+    const maySend = () => { const entry = readMeta()[id]; return entry?.autoStopId === stopId && !entry.ralph?.enabled && entry.mode !== RALPH_MODE; };
     let result;
     try { result = await sendInput(id, AUTO_STOP_NOTE, maySend, { resume: false }); }
     catch (error) { result = { failed: true, error: error.message }; }
     noteStatus = result.failed ? 'failed' : result.dormant ? 'dormant' : result.cancelled && !result.submitted ? 'cancelled' : result.observed ? 'delivered' : 'unobserved';
-    updateMeta(meta => meta[id]?.autoLifecycle >= stopLifecycle && meta[id].mode !== RALPH_MODE
+    updateMeta(meta => meta[id]?.autoStopId === stopId
       ? { ...meta, [id]: { ...meta[id], autoStopNote: { status: noteStatus, at: new Date().toISOString() } } } : meta);
   }
   return { stopped: true, restored, stoppedRules: owned, note: noteStatus };
@@ -3586,23 +3592,63 @@ function killSessionQuietly(sessionId) {
   revokeSessionBridgeCapability(sessionId);
 }
 
-// Tear an attach attempt down. Safe to call twice; only this attempt's own
-// pending record is removed.
-// Returns true when every resource is gone. Otherwise the pending record is
-// kept, so the boot sweep or the next stop/detach retries; ownership of the
-// leftovers is never dropped while they exist.
-function cleanupReviewerAttempt(id, attempt) {
-  killSessionQuietly(attempt.reviewerSessionId);
-  let clean = !tmuxIsActive(attempt.reviewerSessionId) && !fs.existsSync(sessionBridgeTokenPath(attempt.reviewerSessionId));
-  if (attempt.groupId) { try { sidecar.teardownGroup(attempt.groupId); } catch (error) { if (!/not found|unknown/i.test(error?.message || '')) clean = false; } }
+// Physical cleanup of a reviewer (harness, capability, sidecar group) is
+// owned by a durable tombstone until it verifiably completes, whatever removed
+// the logical pair or attempt: a stop, a detach, DELETE, an announcement that
+// failed, or the boot sweep. The creator carries the list in
+// `chatReviewerCleanup`; the reviewer's own entry mirrors it in
+// `chatCleanupPending`, so the leftovers keep an owner even after the creator
+// is deleted. Both go in the same write once every resource is gone.
+function tombstoneReviewer(next, target, { pending = false } = {}) {
+  const rest = (next.chatReviewerCleanup || []).filter(item => item.reviewerSessionId !== target.reviewerSessionId);
+  next.chatReviewerCleanup = [...rest, { reviewerSessionId: target.reviewerSessionId, groupId: target.groupId || null, pending, since: new Date().toISOString() }];
+  if (pending) delete next.chatReviewerAttach;
+}
+function releaseReviewerResources(id, target) {
+  killSessionQuietly(target.reviewerSessionId);
+  let clean = !tmuxIsActive(target.reviewerSessionId) && !fs.existsSync(sessionBridgeTokenPath(target.reviewerSessionId));
+  if (target.groupId) { try { sidecar.teardownGroup(target.groupId); } catch (error) { if (!/not found|unknown/i.test(error?.message || '')) clean = false; } }
   updateMeta(meta => {
     const next = { ...meta };
-    if (next[attempt.reviewerSessionId]) next[attempt.reviewerSessionId] = { ...next[attempt.reviewerSessionId], chatDetachedAt: new Date().toISOString(), chatStartup: { status: 'failed', error: 'Reviewer attach did not complete.' } };
-    if (clean && next[id]?.chatReviewerAttach?.token === attempt.token) { next[id] = { ...next[id] }; delete next[id].chatReviewerAttach; }
+    const reviewer = next[target.reviewerSessionId];
+    if (reviewer) {
+      const marked = { ...reviewer, chatDetachedAt: reviewer.chatDetachedAt || new Date().toISOString(),
+        ...(target.pending ? { chatStartup: { status: 'failed', error: 'Reviewer attach did not complete.' } } : {}) };
+      if (clean) delete marked.chatCleanupPending;
+      else marked.chatCleanupPending = { creatorSessionId: id, groupId: target.groupId || null, pending: Boolean(target.pending), since: target.since || new Date().toISOString() };
+      next[target.reviewerSessionId] = marked;
+    }
+    if (clean && id && next[id]?.chatReviewerCleanup) {
+      const rest = next[id].chatReviewerCleanup.filter(item => item.reviewerSessionId !== target.reviewerSessionId);
+      next[id] = { ...next[id], chatReviewerCleanup: rest };
+      if (!rest.length) delete next[id].chatReviewerCleanup;
+    }
     return next;
   });
-  if (!clean) console.warn(`[chat] ${id}: reviewer attempt ${attempt.reviewerSessionId.slice(0, 8)} not fully cleaned; record kept for retry`);
+  if (!clean) console.warn(`[chat] ${(id || 'orphan').slice(0, 8)}: reviewer ${target.reviewerSessionId.slice(0, 8)} not fully cleaned; record kept for retry`);
   return clean;
+}
+// Retry every tombstone a creator still owns. True when none remain.
+function retryReviewerCleanup(id) {
+  for (const target of readMeta()[id]?.chatReviewerCleanup || []) releaseReviewerResources(id, target);
+  return !(readMeta()[id]?.chatReviewerCleanup?.length);
+}
+
+// Tear an attach attempt down. Safe to call twice; only this attempt's own
+// pending record is moved to a tombstone, which stays until the resources
+// are really gone (the boot sweep or the next attach retries).
+function cleanupReviewerAttempt(id, attempt) {
+  let owned = false;
+  updateMeta(meta => {
+    const current = meta[id];
+    if (!current) return meta;
+    owned = current.chatReviewerAttach?.token === attempt.token || (current.chatReviewerCleanup || []).some(item => item.reviewerSessionId === attempt.reviewerSessionId);
+    if (current.chatReviewerAttach?.token !== attempt.token) return meta;
+    const next = { ...current };
+    tombstoneReviewer(next, attempt, { pending: true });
+    return { ...meta, [id]: next };
+  });
+  return releaseReviewerResources(owned ? id : null, { ...attempt, pending: true });
 }
 
 // Remove the committed pair and/or a pending attempt from a creator. The
@@ -3614,27 +3660,21 @@ async function detachReviewer(id, { onlyIf = null, note = true } = {}) {
     const current = meta[id];
     if (!current) return meta;
     const next = { ...current };
-    if (current.chatReviewerAttach && (!onlyIf || current.chatReviewerAttach.reviewerSessionId === onlyIf)) { pending = current.chatReviewerAttach; delete next.chatReviewerAttach; }
+    if (current.chatReviewerAttach && (!onlyIf || current.chatReviewerAttach.reviewerSessionId === onlyIf)) { pending = current.chatReviewerAttach; tombstoneReviewer(next, pending, { pending: true }); }
     if (current.chatPair && (!onlyIf || current.chatPair.reviewerSessionId === onlyIf)) {
       removed = current.chatPair;
       next.chatPair = null;
       next.reviewPolicy = 'none';
       next.chatReviewerDetachedAt = new Date().toISOString();
+      tombstoneReviewer(next, removed);
     }
     if (!removed && !pending) return meta;
     next.autoLifecycle = bumpAutoLifecycle(current);
     lifecycle = next.autoLifecycle;
-    const out = { ...meta, [id]: next };
-    for (const gone of [removed, pending]) {
-      if (gone && out[gone.reviewerSessionId]) out[gone.reviewerSessionId] = { ...out[gone.reviewerSessionId], chatDetachedAt: new Date().toISOString() };
-    }
-    return out;
+    return { ...meta, [id]: next };
   });
-  for (const gone of [removed, pending]) {
-    if (!gone) continue;
-    killSessionQuietly(gone.reviewerSessionId);
-    try { sidecar.teardownGroup(gone.groupId); } catch {}
-  }
+  if (removed) releaseReviewerResources(id, removed);
+  if (pending) releaseReviewerResources(id, { ...pending, pending: true });
   let noteStatus = null;
   if (removed && note && tmuxIsActive(id)) {
     const maySend = () => readMeta()[id]?.autoLifecycle === lifecycle;
@@ -3652,6 +3692,7 @@ async function attachChatReviewer(id, body = {}) {
   if (entry.chatStartup?.status && entry.chatStartup.status !== 'ready') throw httpError(409, 'Wait for chat startup');
   if (entry.chatPair) return { attached: false, chatPair: entry.chatPair, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy };
   if (entry.chatReviewerAttach || chatAttachAttempts.has(id)) throw httpError(409, 'A reviewer is already being attached');
+  if (!retryReviewerCleanup(id)) throw httpError(409, 'A previous reviewer is still being cleaned up');
   if (body.reviewPolicy !== undefined && !['adaptive', 'always'].includes(body.reviewPolicy)) throw httpError(400, 'reviewPolicy must be adaptive or always');
   const options = resolveChatOptions({ reviewerAgent: body.reviewerAgent, reviewerModel: body.reviewerModel, reviewPolicy: body.reviewPolicy ?? 'adaptive' }, CHAT_CONFIG);
   const cwd = entry.cwd || sessionCwdForFork(id, entry.agent);
@@ -3669,7 +3710,7 @@ async function attachChatReviewer(id, body = {}) {
         updateMeta(meta => {
           const current = meta[id];
           if (!current || current.chatRole !== 'creator') { conflict = httpError(404, 'Chat not found'); return meta; }
-          if (current.chatPair || current.chatReviewerAttach || (Number.isSafeInteger(current.autoLifecycle) ? current.autoLifecycle : 0) !== attempt.lifecycle) { conflict = httpError(409, 'Chat changed while the reviewer was starting'); return meta; }
+          if (current.chatPair || current.chatReviewerAttach || current.chatReviewerCleanup?.length || (Number.isSafeInteger(current.autoLifecycle) ? current.autoLifecycle : 0) !== attempt.lifecycle) { conflict = httpError(409, 'Chat changed while the reviewer was starting'); return meta; }
           const now = new Date().toISOString();
           return { ...meta,
             [id]: { ...current, chatReviewerAttach: { token: attempt.token, reviewerSessionId: attempt.reviewerSessionId, groupId: attempt.groupId, startedAt: attempt.startedAt, lifecycle: attempt.lifecycle } },
@@ -3822,7 +3863,7 @@ async function workflowControl(id, input, actor) {
     transition = applyChatWorkflow(current.workflow, command, { role: actor, progressCadenceMs: (current.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes) * 60_000 });
     if (!transition.changed) return meta;
     return { ...meta, [id]: { ...current, workflow: transition.workflow,
-      ...(input.action === 'start' ? { mode: RALPH_MODE, autoStoppedAt: undefined, autoStopNote: undefined,
+      ...(input.action === 'start' ? { mode: RALPH_MODE, autoStoppedAt: undefined, autoStopNote: undefined, autoStopId: undefined,
         // Remember what this chat was before /auto so stop can put it back.
         ...(current.autoModeBefore === undefined && current.mode !== RALPH_MODE ? { autoModeBefore: current.mode ?? null } : {}),
         ralph: { ...current.ralph, enabled: true, status: 'working', iteration: current.ralph?.iteration || 0, lastBoundaryKey: null, blockedReason: null, completionReason: null, error: null } } : {}) } };
@@ -3945,6 +3986,7 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
     if (attaching) attaching.cancelled = true;
     const owner = readMeta()[id];
     if (owner?.chatRole === 'creator' && (owner.chatPair || owner.chatReviewerAttach)) await detachReviewer(id, { note: false });
+    if (owner?.chatRole === 'creator') retryReviewerCleanup(id);
     const agent = getAgentForSession(id);
     await protocolRuns.deleteSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -7866,8 +7908,14 @@ server.listen(PORT, '0.0.0.0', () => {
       if (entry.chatRole === 'creator' && entry.workflow?.pendingStart) {
         stopRalphSession(id);
       }
-      // A reviewer attach that a restart interrupted never becomes a pair.
+      // A reviewer attach that a restart interrupted never becomes a pair, and
+      // cleanup a crash or a failed kill left behind is retried from its owner.
       if (entry.chatRole === 'creator' && entry.chatReviewerAttach) cleanupReviewerAttempt(id, entry.chatReviewerAttach);
+      if (entry.chatRole === 'creator' && entry.chatReviewerCleanup?.length) retryReviewerCleanup(id);
+      if (entry.chatRole === 'reviewer' && entry.chatCleanupPending) {
+        const owner = entry.chatCleanupPending.creatorSessionId;
+        releaseReviewerResources(owner && readMeta()[owner] ? owner : null, { reviewerSessionId: id, ...entry.chatCleanupPending });
+      }
       if (entry.chatRole !== 'creator' || entry.chatStartup?.status !== 'starting') continue;
       if (entry.chatStandby) retireStandby({ id, reviewerSessionId: entry.chatPair?.reviewerSessionId ?? null, groupId: entry.chatPair?.groupId ?? null });
       else updateMeta(meta => ({ ...meta, [id]: { ...meta[id], chatStartup: { status: 'failed', error: 'Startup was interrupted by a restart. Try again.' } } }));

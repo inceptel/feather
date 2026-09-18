@@ -347,31 +347,57 @@ exit 0
     await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
-  // 8b. Stop during a paused attach whose cleanup fails: the pending record and
-  //     the reviewer's identity stay owned until the resources are really gone.
+  // 8b. Stop during a paused attach whose cleanup fails: the attempt is no
+  //     longer pending (the stop's own write moved it to a cleanup tombstone),
+  //     but the reviewer's resources stay owned, on both sides, until they are
+  //     really gone; the next attach retries that cleanup itself.
+  const tombstones = id => meta()[id]?.chatReviewerCleanup || [];
   {
     const { chat, attach, attempt } = await autoChatWithFrozenAttach('Stop With Failing Cleanup');
     noKill(attempt.reviewerSessionId);
     assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
     assert.equal(meta()[chat.id].mode, undefined);
-    assert.equal(meta()[chat.id].chatReviewerAttach?.token, attempt.token, 'record kept while the harness is still alive');
+    assert.equal(meta()[chat.id].chatReviewerAttach, undefined, 'the stop write ended the attempt');
+    assert.deepEqual(tombstones(chat.id).map(item => item.reviewerSessionId), [attempt.reviewerSessionId], 'cleanup ownership kept while the harness is still alive');
     assert.ok(panes().includes(attempt.reviewerSessionId.slice(0, 8)), 'the harness the kill could not remove');
     assert.ok(meta()[attempt.reviewerSessionId].chatDetachedAt);
+    assert.equal(meta()[attempt.reviewerSessionId].chatCleanupPending?.creatorSessionId, chat.id, 'the reviewer entry mirrors the pending cleanup');
     assert.match(logs, /not fully cleaned; record kept/);
     release(attempt.reviewerSessionId);
     assert.equal((await attach).status, 409);
-    assert.equal(meta()[chat.id].chatReviewerAttach?.token, attempt.token, 'the attempt\'s own cleanup also failed to remove the harness: record still kept');
+    assert.equal(tombstones(chat.id).length, 1, 'the attempt\'s own cleanup also failed to remove the harness: still owned');
     const blocked = await call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
     assert.equal(blocked.status, 409, 'no new reviewer while the old one is not cleaned up');
+    assert.match(blocked.data.error, /still being cleaned up/);
+    allowKill(attempt.reviewerSessionId);
+    const fresh = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(fresh.attached, true, 'the attach retried the cleanup and went ahead once it succeeded');
+    assert.equal(tombstones(chat.id).length, 0);
+    assert.equal(meta()[attempt.reviewerSessionId].chatCleanupPending, undefined);
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    assert.equal((await ok('GET', `/api/sidecar/${attempt.groupId}`)).group.status, 'done');
+    await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
+  }
+
+  // 8c. A failed stop cleanup, then the creator is deleted, then a restart: the
+  //     reviewer's own entry keeps the cleanup owned, and the boot sweep finishes it.
+  {
+    const { chat, attach, attempt } = await autoChatWithFrozenAttach('Delete After Failed Cleanup');
+    noKill(attempt.reviewerSessionId);
+    assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
+    release(attempt.reviewerSessionId);
+    assert.equal((await attach).status, 409);
+    assert.equal(tombstones(chat.id).length, 1);
+    await ok('POST', `/api/sessions/${chat.id}/delete`);
+    assert.equal(meta()[chat.id], undefined);
+    assert.ok(panes().includes(attempt.reviewerSessionId.slice(0, 8)), 'still not killable');
+    assert.equal(meta()[attempt.reviewerSessionId].chatCleanupPending?.creatorSessionId, chat.id, 'ownership survives the creator');
     allowKill(attempt.reviewerSessionId);
     await stop();
     await start();
-    assert.equal(meta()[chat.id].chatReviewerAttach, undefined, 'boot sweep finished the cleanup once the harness could be killed');
-    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)), 'boot sweep finished the orphaned cleanup');
+    assert.equal(meta()[attempt.reviewerSessionId].chatCleanupPending, undefined);
     assert.equal((await ok('GET', `/api/sidecar/${attempt.groupId}`)).group.status, 'done');
-    const fresh = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
-    assert.equal(fresh.attached, true);
-    await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
   // 9. Restart before the attach continues: the durable record survives the crash
@@ -451,6 +477,29 @@ exit 0
     assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'autonomous-era instructions never land after Stop');
     lastPastes(chat.id, 'Ongoing work stopped.');
     assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved', 'the stop note was submitted despite the later detach bump');
+  }
+
+  // 10b'. The unannounced pair's detach fails to kill the reviewer: the logical
+  //       pair is gone but cleanup stays owned; a later attach retries it.
+  {
+    const { chat, attach, attempt, gate } = await autoChatAtBarrier('Failed Unannounced Detach', 'attach-before-announce');
+    noKill(attempt.reviewerSessionId);
+    assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
+    gate.open();
+    const late = await attach;
+    assert.equal(late.status, 503, JSON.stringify(late.data));
+    assert.equal(meta()[chat.id].chatPair, null, 'logically detached');
+    assert.deepEqual(tombstones(chat.id).map(item => item.reviewerSessionId), [attempt.reviewerSessionId], 'physical cleanup still owned');
+    assert.ok(panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    const blocked = await call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.data));
+    assert.match(blocked.data.error, /still being cleaned up/);
+    allowKill(attempt.reviewerSessionId);
+    const fresh = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(fresh.attached, true);
+    assert.equal(tombstones(chat.id).length, 0);
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
   // 10c. Stop while the announcement sits at the paste boundary (after its
@@ -553,6 +602,89 @@ exit 0
     assert.doesNotMatch(announced[0], new RegExp(pair1.groupId));
     lastPastes(chat.id, 'Reviewer detached.', 'A Reviewer has been attached');
     await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
+  }
+
+  // A solo /auto chat whose stop note is parked at the paste boundary, so a
+  // later control action can race it.
+  async function autoChatWithParkedStopNote(name) {
+    const chat = await ok('POST', '/api/chats', { name });
+    await ok('POST', `/api/sessions/${chat.id}/send`, { text: 'Keep going.' });
+    const g = (await bridge(chat.id, { action: 'read' })).data.generation;
+    assert.equal((await bridge(chat.id, { action: 'start', generation: g, objective: `${name} objective`, constraints: [], next: 'go' })).status, 200);
+    const gate = barrier('send-before-paste', chat.id);
+    gate.arm();
+    const stopping = bridge(chat.id, { action: 'stop' });
+    await until(gate.arrived, 'the stop note to reach the paste boundary');
+    const stopId = meta()[chat.id].autoStopId;
+    assert.ok(stopId, 'a stop identity was written');
+    assert.equal(meta()[chat.id].mode, undefined);
+    return { chat, gate, stopping, stopId };
+  }
+  const stopNotes = id => pastes(id).filter(text => text.startsWith('Ongoing work stopped.')).length;
+  const humanStart = (id, name) => call('POST', `/api/sessions/${id}/workflow`, { action: 'start', objective: `${name} again`, constraints: [], next: 'go' });
+
+  // 13a. Stop, start again, stop again while the first note is still queued: the
+  //      first note is fenced by its stop identity and only the second lands.
+  {
+    const { chat, gate, stopping, stopId } = await autoChatWithParkedStopNote('Stop Start Stop');
+    const starting = humanStart(chat.id, 'Stop Start Stop'); // its instructions queue behind the parked note
+    await until(() => meta()[chat.id]?.mode === 'ralph', 'the human start');
+    assert.equal(meta()[chat.id].autoStopId, undefined, 'a start clears the stop identity');
+    const stopping2 = bridge(chat.id, { action: 'stop' });
+    await until(() => meta()[chat.id]?.mode === undefined && meta()[chat.id]?.autoStopId, 'the second stop');
+    assert.notEqual(meta()[chat.id].autoStopId, stopId, 'the second stop has its own identity');
+    gate.open();
+    const first = await stopping;
+    assert.equal(first.status, 200, JSON.stringify(first.data));
+    assert.equal(stopNotes(chat.id), 0, 'the first note never pasted');
+    assert.equal((await starting).status, 200);
+    const second = await stopping2;
+    assert.equal(second.status, 200, JSON.stringify(second.data));
+    assert.equal(stopNotes(chat.id), 1, 'exactly one stop note');
+    lastPastes(chat.id, 'Ongoing work stopped.');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved', 'the receipt belongs to the second stop');
+  }
+
+  // 13b. Stop, start again, interrupt while the first note is still queued: the
+  //      interrupt stops without a note and the queued note is dropped too.
+  {
+    const { chat, gate, stopping } = await autoChatWithParkedStopNote('Stop Start Interrupt');
+    const starting = humanStart(chat.id, 'Stop Start Interrupt');
+    await until(() => meta()[chat.id]?.mode === 'ralph', 'the human start');
+    await ok('POST', `/api/sessions/${chat.id}/interrupt`);
+    assert.equal(meta()[chat.id].mode, undefined, 'interrupt stopped the restarted work');
+    gate.open();
+    assert.equal((await stopping).status, 200);
+    await starting;
+    assert.equal(stopNotes(chat.id), 0, 'no stale stop note after an interrupt');
+    assert.equal(meta()[chat.id].autoStopNote, undefined, 'no receipt for a cancelled note');
+    assert.ok(meta()[chat.id].autoStoppedAt, 'the history marker stays');
+  }
+
+  // 13c. A reviewer-only detach while the note is queued keeps the stop identity:
+  //      the note still lands, and the detach note follows it.
+  {
+    const name = 'Stop Then Detach';
+    const chat = await ok('POST', '/api/chats', { name });
+    await ok('POST', `/api/sessions/${chat.id}/send`, { text: 'Keep going.' });
+    const g = (await bridge(chat.id, { action: 'read' })).data.generation;
+    assert.equal((await bridge(chat.id, { action: 'start', generation: g, objective: `${name} objective`, constraints: [], next: 'go' })).status, 200);
+    const attached = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(attached.attached, true);
+    const gate = barrier('send-before-paste', chat.id);
+    gate.arm();
+    const stopping = bridge(chat.id, { action: 'stop' });
+    await until(gate.arrived, 'the stop note to reach the paste boundary');
+    const stopId = meta()[chat.id].autoStopId;
+    const detaching = call('DELETE', `/api/chats/${chat.id}/reviewer`);
+    await until(() => meta()[chat.id]?.chatPair === null, 'the detach write');
+    assert.equal(meta()[chat.id].autoStopId, stopId, 'a detach keeps the stop identity');
+    gate.open();
+    assert.equal((await stopping).status, 200);
+    assert.equal((await detaching).status, 200);
+    lastPastes(chat.id, 'Ongoing work stopped.', 'Reviewer detached.');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved');
+    assert.equal(tombstones(chat.id).length, 0);
   }
 
   // 12. Boot sweep of a record left by a crash with no live process at all.
