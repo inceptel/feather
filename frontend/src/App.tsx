@@ -1923,6 +1923,12 @@ export default function App() {
                         <Show when={s.projectLabel}>
                           <div style={{ 'font-size': '10px', color: '#555', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'margin-top': '2px' }}>{s.projectLabel}</div>
                         </Show>
+                        <Show when={s.match}>{match => (
+                          <div title={match().count > 1 ? `${match().count} matching messages` : undefined} style={{ 'font-size': '11px', color: '#888', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', 'margin-top': '3px' }}>
+                            <For each={match().snippet}>{part => part.match ? <mark style={{ background: 'rgba(74,186,106,0.25)', color: '#d6f5df', 'border-radius': '2px', padding: '0 1px' }}>{part.text}</mark> : part.text}</For>
+                            <Show when={match().count > 1}><span style={{ color: '#555' }}> +{match().count - 1}</span></Show>
+                          </div>
+                        )}</Show>
                         </>
                       }>
                         <input

@@ -39,6 +39,9 @@
 .chat-home-working { width: 6px; height: 6px; background: var(--success); border-radius: 50%; flex-shrink: 0; }
 .chat-home-time { margin-left: auto; flex-shrink: 0; color: var(--workspace-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chat-home-project { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.5; }
+.chat-home-snippet { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.5; }
+.chat-home-snippet mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text-primary); border-radius: 2px; padding: 0 1px; }
+.chat-home-snippet-count { color: var(--text-dim); }
 .chat-home-action { min-height: 44px; padding: 8px 10px; background: transparent; border: 0; border-radius: 6px; color: var(--workspace-secondary); font: inherit; font-size: 12px; cursor: pointer; }
 .chat-home-action:hover { background: var(--bg-hover); color: var(--text-primary); }
 .chat-home-pin[aria-pressed="true"] { color: var(--accent); }

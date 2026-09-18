@@ -43,6 +43,16 @@ export interface SessionMeta {
   roomAssigned?: boolean
   mode?: 'ralph'
   ralph?: RalphState
+  /** Present only on search results whose message text matched the query. */
+  match?: SessionSearchMatch
+}
+
+export interface SessionSearchMatch {
+  snippet: { text: string, match: boolean }[]
+  messageId: string | null
+  role: 'user' | 'assistant'
+  timestamp: string | null
+  count: number
 }
 
 export interface BoxInfo {

@@ -87,6 +87,9 @@ function inventory(root) {
       const file = path.join(dir, name)
       const stat = fs.lstatSync(file)
       const relative = path.relative(root, file)
+      // The state cache (search index) is derived from transcripts and is
+      // refreshed by read-only requests by design; it is not durable state.
+      if (relative === 'cache' && stat.isDirectory()) continue
       if (stat.isDirectory()) { out.push([relative, 'dir', stat.mode & 0o777]); walk(file) }
       else if (stat.isSymbolicLink()) out.push([relative, 'link', fs.readlinkSync(file)])
       else out.push([relative, 'file', stat.mode & 0o777, createHash('sha256').update(fs.readFileSync(file)).digest('hex')])

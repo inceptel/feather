@@ -22,3 +22,4 @@ issues/
 auto.pid
 *.bak
 test-results/
+/cache/

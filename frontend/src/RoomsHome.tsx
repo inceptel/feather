@@ -258,6 +258,10 @@ export default function RoomsHome(props: {
           <span class="chat-home-time">{timeAgo(row.session.updatedAt)}</span>
         </span>
         <Show when={row.session.projectLabel}><span class="chat-home-project">{row.session.projectLabel}</span></Show>
+        <Show when={row.session.match}>{match => <span class="chat-home-snippet" title={match().count > 1 ? `${match().count} matching messages` : undefined}>
+          <For each={match().snippet}>{part => part.match ? <mark>{part.text}</mark> : part.text}</For>
+          <Show when={match().count > 1}><span class="chat-home-snippet-count"> +{match().count - 1}</span></Show>
+        </span>}</Show>
       </button>
       <button class="chat-home-pin chat-home-action" aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${row.session.title || 'chat'}`} aria-pressed={pinned()} disabled={pendingPins().includes(row.session.id)} onClick={() => void togglePin(row.session)}>{pendingPins().includes(row.session.id) ? '…' : pinned() ? 'Unpin' : 'Pin'}</button>
       <button class="chat-home-control chat-home-action" aria-label={`${archived().includes(row.session.id) ? 'Restore' : 'Archive'} ${row.session.title || 'chat'}`} disabled={pendingPins().includes(row.session.id)} onClick={() => void toggleArchive(row.session)}>{archived().includes(row.session.id) ? 'Restore' : 'Archive'}</button>

@@ -5,8 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile, execFileSync, execSync, spawn } from 'child_process';
-import { promisify } from 'node:util';
+import { execFileSync, execSync, spawn } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
@@ -22,6 +21,7 @@ import { installProjectInboxRoutes, projectInboxUpdates } from './lib/project-in
 import { projectInboxWakeIds } from './lib/project-inbox-wakes.js';
 import { createProjectRenamer, managedChatProject } from './lib/chat-projects.js';
 import { createKeyedLock } from './lib/sendlock.js';
+import { createSessionSearch } from './lib/session-search.js';
 import { stopScheduledRules, scheduledRunMayContinue, mayReenableRalph } from './lib/autopilot.js';
 import { resolveCodexWatchId, codexAdoptionPending, codexHeadHasChatIdentity } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
@@ -741,28 +741,15 @@ function isAutoWorkerSession(buf, agent, projectId, cwd) {
   return /^\/home\/user\/(?:auto|autoweb)-/.test(cwd);
 }
 
-// Full-content search across session JSONL files. Shells out to grep (fixed
-// string, case-insensitive) because session files can be >100MB and node-side
-// scanning would be slow. Returns the Set of file paths that contain `q`.
-const execFileAsync = promisify(execFile);
+// Full-content search across session transcripts. Message text is kept in a
+// SQLite FTS5 index (lib/session-search.js) that is refreshed incrementally
+// from appended bytes, so a search is one indexed query instead of a grep
+// over hundreds of MB of JSONL. The lock serialises index refreshes.
 const sessionSearchLock = createKeyedLock();
-async function grepSessionFiles(q, files, signal) {
-  const matches = new Set();
-  const CHUNK = 200; // stay well under ARG_MAX
-  for (let i = 0; i < files.length; i += CHUNK) {
-    signal?.throwIfAborted();
-    const batch = files.slice(i, i + CHUNK);
-    let out = '';
-    try {
-      ({ stdout: out } = await execFileAsync('grep', ['-lisF', '--', q, ...batch], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30000, signal }));
-    } catch (e) {
-      signal?.throwIfAborted();
-      // grep exits 1 when some files have no match; partial matches are still on stdout
-      out = e.stdout ? e.stdout.toString() : '';
-    }
-    for (const line of out.split('\n')) if (line) matches.add(line);
-  }
-  return matches;
+const sessionSearch = createSessionSearch({ dbPath: STATE_PATHS.cache.searchIndexFile });
+sessionSearch.ready.catch(e => console.error('[search] index unavailable:', e.message));
+async function refreshSessionSearch(candidates, signal) {
+  return sessionSearchLock('index', () => sessionSearch.sync(candidates, { signal }));
 }
 
 const sessionCandidateCache = new Map();
@@ -881,6 +868,18 @@ function listSessionCandidates(meta = readMeta()) {
   return candidates;
 }
 
+// Narrow a search to candidates that can match without opening every
+// transcript: index hits, id matches, and titles already known from meta or
+// the inspection cache. A derived title is the first user message, which the
+// index already covers, so this drops only exotic mid-word title matches.
+function searchCandidates(candidates, query, contentMatches, required = new Set(), meta = readMeta()) {
+  const queryLc = query.toLowerCase();
+  return candidates.filter(({ id, fpath }) => contentMatches.has(fpath) || required.has(id)
+    || id.toLowerCase().includes(queryLc)
+    || (meta[id]?.title || '').toLowerCase().includes(queryLc)
+    || (sessionCandidateCache.get(fpath)?.title || '').toLowerCase().includes(queryLc));
+}
+
 function discoverSessions(limit = 50, query = null, requiredIds = [], { candidates = listSessionCandidates(), contentMatches = new Set() } = {}) {
   const meta = readMeta();
   const labels = readProjectLabels();
@@ -906,6 +905,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
       const facts = inspectSessionCandidate(candidate);
       if (facts.worker || (meta[id]?.chatRole === 'reviewer' && !required.has(id) && query !== id)) continue;
       const effectiveTitle = meta[id]?.title || facts.title || id.slice(0, 8);
+      const match = contentMatches instanceof Map ? contentMatches.get(fpath) : null;
       if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
 
       // Project label is shown only for allowlisted projects (key present in labels);
@@ -922,6 +922,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatPair ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair } : {}),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
+        ...(match ? { match: { snippet: match.snippet, messageId: match.messageId, role: match.role, timestamp: match.timestamp, count: match.count } } : {}),
       });
       required.delete(id);
     } catch {}
@@ -2979,9 +2980,22 @@ app.get('/api/sessions', async (req, res) => {
     const required = autonomous ? Object.entries(readMeta()).filter(([, entry]) => entry.mode === RALPH_MODE).map(([id]) => id) : [];
     const query = typeof req.query.q === 'string' ? req.query.q.trim() || null : null;
     const candidates = listSessionCandidates();
-    const contentMatches = query ? await sessionSearchLock('archive', () => grepSessionFiles(query, candidates.map(c => c.fpath), searchController.signal)) : new Set();
-    if (searchController.signal.aborted) return;
-    const sessions = discoverSessions(parseInt(req.query.limit) || 50, query, required, { candidates, contentMatches });
+    let contentMatches = new Map();
+    let searchable = candidates;
+    if (query) {
+      try {
+        await refreshSessionSearch(candidates, searchController.signal);
+        if (searchController.signal.aborted) return;
+        contentMatches = sessionSearch.search(query);
+        searchable = searchCandidates(candidates, query, contentMatches, new Set(required));
+      } catch (e) {
+        // Index unavailable: fall back to title and id matching over every
+        // candidate rather than failing the request.
+        if (searchController.signal.aborted) return;
+        console.error('[search] index unavailable, matching titles only:', e.message);
+      }
+    }
+    const sessions = discoverSessions(parseInt(req.query.limit) || 50, query, required, { candidates: searchable, contentMatches });
     if (autonomous) {
       const meta = readMeta();
       for (const id of required) {
@@ -7275,6 +7289,15 @@ wss.on('connection', (ws, req) => {
     try { term.kill(); } catch {}
   });
 });
+
+// Build or catch up the search index in the background so the first search
+// after a restart is fast. Reads only bytes appended since the last run.
+setTimeout(() => {
+  const startedAt = Date.now();
+  refreshSessionSearch(listSessionCandidates())
+    .then(({ indexedFiles, indexedMessages }) => { if (indexedFiles) console.log(`[search] indexed ${indexedMessages} messages from ${indexedFiles} files in ${Date.now() - startedAt}ms`); })
+    .catch(e => console.error('[search] warm-up failed:', e.message));
+}, 2000).unref();
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Feather v2 on http://0.0.0.0:${PORT}`);

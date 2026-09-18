@@ -138,7 +138,6 @@ before(async () => {
     fixtureBin = path.join(fixtureRoot, 'bin')
     fs.mkdirSync(fixtureBin)
     fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
-    fs.writeFileSync(path.join(fixtureBin, 'grep'), '#!/bin/sh\ncase "$*" in *feather-slow-search*) touch "$HOME/search-started"; sleep 1;; esac\nexec /usr/bin/grep "$@"\n', { mode: 0o700 })
     fixturePath = `${fixtureBin}${path.delimiter}${process.env.PATH || ''}`
   }
 
@@ -333,15 +332,37 @@ describe('GET /api/sessions', () => {
     assert.deepEqual(missing.sessions, [])
   })
 
-  it('keeps health responsive while full-text search is running', { skip: EXTERNAL_SERVER }, async () => {
-    let finished = false
-    const search = fetch(`${BASE}/api/sessions?q=feather-slow-search`).then(r => r.json()).finally(() => { finished = true })
-    try {
-      for (let i = 0; i < 100 && !fs.existsSync(path.join(fixtureHome, 'search-started')); i++) await new Promise(r => setTimeout(r, 10))
-      assert.ok(fs.existsSync(path.join(fixtureHome, 'search-started')))
-      assert.equal((await fetch(`${BASE}/api/health`)).status, 200)
-      assert.equal(finished, false, 'search must not block unrelated requests')
-    } finally { await search }
+  it('finds sessions by message content with a snippet and ignores tool output', async () => {
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?q=${encodeURIComponent('douglas adams')}`)).json()
+    const found = sessions.find(s => s.id === TEST_SESSION_ID)
+    assert.ok(found, 'content search should find the seeded session')
+    assert.equal(found.match.messageId, 'api-test-0002')
+    assert.equal(found.match.role, 'assistant')
+    assert.equal(found.match.count, 1)
+    assert.ok(found.match.snippet.some(part => part.match && /^douglas$/i.test(part.text)), JSON.stringify(found.match.snippet))
+    const byTool = await (await fetch(`${BASE}/api/sessions?q=forty-two`)).json()
+    assert.ok(!byTool.sessions.some(s => s.id === TEST_SESSION_ID), 'tool results are not searchable')
+    const byTitle = await (await fetch(`${BASE}/api/sessions?q=${encodeURIComponent('meaning of life')}`)).json()
+    assert.ok(byTitle.sessions.some(s => s.id === TEST_SESSION_ID), 'title match still works')
+  })
+
+  it('picks up messages appended after the last search', async () => {
+    const sizeBefore = fs.statSync(testSessionPath).size
+    writeLine({
+      type: 'user', uuid: 'api-test-search-append', timestamp: '2025-06-15T12:00:20Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'user', content: 'A later note about axolotl husbandry' },
+    })
+    const { sessions } = await (await fetch(`${BASE}/api/sessions?q=axolotl`)).json()
+    const found = sessions.find(s => s.id === TEST_SESSION_ID)
+    assert.ok(found, 'appended content should be indexed on the next search')
+    assert.equal(found.match.messageId, 'api-test-search-append')
+    assert.ok(!(await (await fetch(`${BASE}/api/sessions?q=AND+OR+NOT+%5E`)).json()).error, 'operator-only queries do not error')
+    // Put the transcript back so later message tests see the seeded set only;
+    // the index must notice the file shrank and drop the appended note.
+    fs.truncateSync(testSessionPath, sizeBefore)
+    const after = await (await fetch(`${BASE}/api/sessions?q=axolotl`)).json()
+    assert.ok(!after.sessions.some(s => s.id === TEST_SESSION_ID), 'a truncated transcript is reindexed')
   })
 })
 
