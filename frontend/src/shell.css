@@ -30,15 +30,6 @@
 }
 .chat-workflow button:hover { background: var(--bg-hover); }
 .chat-workflow button:disabled { opacity: .5; cursor: wait; }
-.chat-workflow details { margin-top: 4px; }
-@media (max-width: 600px) {
-  .chat-workflow-summary, .chat-workflow-next {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-  }
-}
 @keyframes chat-status-in { from { opacity: .5; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .chat-workflow { animation: none; } }
 

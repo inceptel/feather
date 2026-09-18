@@ -243,3 +243,21 @@ describe('scheduler ticks', () => {
     assert.deepEqual(expiredRuns(runs, rules, T0).map((run) => run.runId), ['old'])
   })
 })
+
+describe('chat-owned rules', () => {
+  const chat = { id: 'chats/5760d093-standup', target: { kind: 'session', sessionId: '5760d093-a6fd-40c0-8895-054c6e9a6f0e' }, every: '24h', prompt: 'Post a standup.' }
+  it('defaults ownerSessionId to the target chat and keeps it out of other rooms', () => {
+    const rule = normalizeRule(chat)
+    assert.equal(rule.ownerSessionId, chat.target.sessionId)
+    assert.equal(rule.mode, 'inject')
+    assert.equal('ownerSessionId' in normalizeRule(leader), false)
+    assert.throws(() => normalizeRule({ ...leader, ownerSessionId: 'abc12345' }), /only valid for chats rules/)
+  })
+  it('refuses a chat rule that could reach another session or spawn anything', () => {
+    assert.throws(() => normalizeRule({ ...chat, ownerSessionId: 'someone-else-1' }), /must equal target.sessionId/)
+    assert.throws(() => normalizeRule({ ...chat, ownerSessionId: 'x' }), /must be a session id/)
+    assert.throws(() => normalizeRule({ ...chat, target: { kind: 'new', agent: 'claude' }, mode: 'fresh' }), /target.kind session and mode inject/)
+    assert.throws(() => normalizeRule({ ...chat, target: { kind: 'leader' } }), /target.kind session and mode inject/)
+    assert.throws(() => normalizeRule({ ...chat, mode: 'fresh' }), /target.kind session and mode inject|mode fresh needs/)
+  })
+})

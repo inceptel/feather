@@ -59,8 +59,8 @@ exit 0
     const data = await response.json(); assert.ok(response.ok, JSON.stringify(data)); return data;
   };
   await start();
-  const a = await post('/api/chats', { name: 'Strategy A', mode: 'ralph', reviewerAgent: 'claude' });
-  const b = await post('/api/chats', { name: 'Strategy B', projectSessionId: a.id, reviewerAgent: 'claude' });
+  const a = await post('/api/chats', { name: 'Strategy A', mode: 'ralph', reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
+  const b = await post('/api/chats', { name: 'Strategy B', projectSessionId: a.id, reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
   const startup = id => { const dir = path.join(home, '.feather/session-system-prompts'); return fs.readFileSync(path.join(dir, fs.readdirSync(dir).find(name => name.startsWith(`${id}-`))), 'utf8'); };
   assert.match(startup(a.id), /Chat naming: after the first meaningful user message/);
   assert.doesNotMatch(startup(a.reviewerSessionId), /Chat naming:/);

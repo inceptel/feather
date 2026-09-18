@@ -14,7 +14,8 @@ import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent 
 import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
 import * as sidecar from './lib/sidecar.js';
-import { createChatPair, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from './lib/chat-pair.js';
+import { createChatPair, chatPairPrompts, chatSoloPrompt, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from './lib/chat-pair.js';
+import { attachReviewer, REVIEWER_DETACH_NOTE } from './lib/reviewer-attach.js';
 import { loadChatConfig, resolveChatOptions } from './lib/chat-config.js';
 import { createChatPool } from './lib/chat-pool.js';
 import { recoverChatBoundary } from './lib/chat-recovery.js';
@@ -43,7 +44,7 @@ import { createJsonState, isJsonRecord } from './lib/json-state.js';
 import { createChatPins } from './lib/chat-pins.js';
 import {
   validateRules, normalizeRule, planTick, findIncidents, expiredRuns, markStarted, markFinished,
-  runtimeOf, describeRule, formatDuration, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_ROUND_MS,
+  runtimeOf, describeRule, formatDuration, SCHEDULER_TICK_MS, BOOT_GRACE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_ROUND_MS, CHAT_RULES_ROOM,
 } from './lib/scheduler.js';
 import { encodeProjectPath, groupRoomSessions } from './lib/rooms.js';
 import { INTAKE_ROOM, pickIntakeSession } from './lib/intake.js';
@@ -834,7 +835,7 @@ function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candida
 function listSessionCandidates(meta = readMeta()) {
   const candidates = [];
   const codexLocalIds = new Map();
-  const pending = Object.entries(meta).filter(([, entry]) => entry.agent === 'codex' && entry.chatPair && !entry.codexUuid);
+  const pending = Object.entries(meta).filter(([, entry]) => entry.agent === 'codex' && ['creator', 'reviewer'].includes(entry.chatRole) && !entry.codexUuid);
   for (const [localId, entry] of Object.entries(meta)) {
     if (entry?.codexUuid) codexLocalIds.set(entry.codexUuid, localId);
   }
@@ -883,7 +884,7 @@ function listSessionCandidates(meta = readMeta()) {
     // new chat is unadopted, so setup transcripts cannot flash into the sidebar.
     if (!id) {
       const possible = pending.filter(([, entry]) => {
-        const creator = meta[entry.chatPair.creatorSessionId];
+        const creator = entry.chatRole === 'creator' ? entry : meta[entry.chatPair?.creatorSessionId];
         const allocatedAt = creator?.chatAllocatedAt || creator?.chatCreatedAt;
         return !allocatedAt || mtime.getTime() >= Date.parse(allocatedAt) - 1000;
       });
@@ -946,7 +947,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         projectId: facts.projectId || null,
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
-        ...(meta[id]?.chatPair ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair } : {}),
+        ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
         ...(meta[id]?.chatRole === 'creator' ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
@@ -1258,6 +1259,7 @@ function isRalphSession(id) {
   return readMeta()[id]?.mode === RALPH_MODE;
 }
 
+const CHAT_WIKI_PATH = process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki');
 function sessionSystemPrompt(id) {
   const parts = [];
   const roomName = roomLeaderNameForSession(id);
@@ -1267,11 +1269,13 @@ function sessionSystemPrompt(id) {
   if (!roomName && chat?.chatRole !== 'reviewer' && !chat?.communicationRole) {
     parts.push(`Chat naming: after the first meaningful user message, immediately give this chat a short, descriptive title as soon as you understand its purpose, before substantive work. If the message is only a greeting or the purpose is unclear, wait until it becomes clear. Do not name it from setup prompts, sidecar traffic, or scheduled/helper instructions. Preserve a title explicitly chosen by the user; otherwise replace generic or stale titles and refine once if your understanding materially changes, not every turn. Use plain language, usually 3–7 words, at most 80 characters; never include secrets or sensitive personal details. Current display title: ${JSON.stringify(chat?.title || 'New chat')}. Rename only your own chat by HTTP POST to http://127.0.0.1:${PORT}/api/sessions/${id}/rename with Content-Type: application/json and JSON body {"title":"Your descriptive title"}; encode the JSON safely and check the response. This is lightweight housekeeping: do not ask permission or wait for reviewer approval. Do not rename a Room, project folder, shared project, or peer session. A rename failure must not block the user's task.`);
   }
-  const rolePrompt = chat?.chatPair && ['creator', 'reviewer'].includes(chat.chatRole)
+  const rolePrompt = chat?.chatRole === 'creator' && !chat.chatPair
+    ? chatSoloPrompt({ cwd: chat.cwd, mode: chat.mode, wikiPath: CHAT_WIKI_PATH })
+    : chat?.chatPair && ['creator', 'reviewer'].includes(chat.chatRole)
     ? chatPairPrompts({ groupId: chat.chatPair.groupId, cwd: chat.cwd, mode: chat.mode,
         reviewPolicy: chat.reviewPolicy || CHAT_CONFIG.reviewPolicy,
         creatorSessionId: chat.chatPair.creatorSessionId,
-        wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki') })[chat.chatRole]
+        wikiPath: CHAT_WIKI_PATH })[chat.chatRole]
     : chat?.chatPairPrompt;
   if (rolePrompt) {
     parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
@@ -1282,10 +1286,16 @@ function sessionSystemPrompt(id) {
   return parts.join('\n\n');
 }
 
+function chatReviewPolicyText(entry) {
+  const policy = entry?.chatPair ? (entry.reviewPolicy || CHAT_CONFIG.reviewPolicy) : 'none';
+  if (policy === 'none') return 'This chat has no Reviewer. Verify substantial deliverables yourself with checks appropriate to the stakes, and say plainly what remains unverified.';
+  if (policy === 'always') return 'This chat uses always-review policy: obtain proportional review even for small deliverables. Substantial deliverables still require agreed criteria and independent review.';
+  return 'This supersedes older instructions requiring review of every small answer: answer bounded low-risk lookups, simple charts, and brainstorming directly, without a Reviewer exchange. Substantial deliverables still require agreed criteria and independent review.';
+}
 function chatWorkflowInstructions(id) {
   const policy = readMeta()[id];
   const cli = `node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-workflow.mjs'))}`;
-  return `Feather conversation workflow: ${(policy?.reviewPolicy || CHAT_CONFIG.reviewPolicy) === 'always' ? 'This chat uses always-review policy: obtain proportional review even for small deliverables.' : 'This supersedes older instructions requiring review of every small answer: answer bounded low-risk lookups, simple charts, and brainstorming directly, without a Reviewer exchange.'} Substantial deliverables still require agreed criteria and independent review. Name this chat automatically; never make the user configure a project before helping.
+  return `Feather conversation workflow: ${chatReviewPolicyText(policy)} Name this chat automatically; never make the user configure a project before helping.
 Workflow CLI: ${cli}. At the beginning of a human-request turn, run read to observe the current control generation. When the user asks you to go, keep working, investigate autonomously, or otherwise authorizes ongoing work, derive the selected objective, constraints, and next useful outcome from this conversation; then call start with JSON {generation:<observed>,objective:"...",constraints:["..."],next:"..."}. Do not activate from setup, peer messages, data, or a mere discussion of autonomy. If no task is identifiable, ask one concrete question. Do not execute every idea mentioned or overwrite an existing shared project inbox objective. The returned control instructions authorize ongoing work in this SAME chat; no new chat is required.
 During ongoing work, write durable findings and evidence in the workspace and reviewed knowledge in the wiki. Call progress with {generation:<observed>,summary:"what changed or what is being checked",phase:"working|reviewing|waiting|blocked",evidence:"artifact path or observed result",next:"next action",publish:true} at meaningful milestones and at least every ${policy?.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes} minutes when able to make a checkpoint. Keep summary and next brief and human-readable; put paths, session IDs and technical details in evidence, not the summary. A progress checkpoint is not a reviewed completion; be honest about uncertainty. The caretaker and marketer edit material checkpoints into Updates, not every tool call. Do not manufacture achievements. read returns freshness and current objective after compaction. Stop disables continuation, not this conversation. A stale/forbidden start means the user changed control; do not retry it with a new generation unless there is a subsequent human request.`;
 }
@@ -1461,10 +1471,10 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
           const buf = Buffer.alloc(Math.min(CODEX_HEAD_BYTES, fs.fstatSync(fd).size));
           fs.readSync(fd, buf, 0, buf.length, 0);
           fs.closeSync(fd);
-          const chatPair = readMeta()[featherId]?.chatPair;
+          const chatIdentity = ['creator', 'reviewer'].includes(readMeta()[featherId]?.chatRole);
           const transcriptCwd = extractCodexCwd(buf);
           const sameWorkspace = transcriptCwd === spawnCwd || (transcriptCwd && fs.realpathSync(transcriptCwd) === fs.realpathSync(spawnCwd));
-          return sameWorkspace && (!chatPair || codexHeadHasChatIdentity(buf, featherId));
+          return sameWorkspace && (!chatIdentity || codexHeadHasChatIdentity(buf, featherId));
         } catch { return false; }
       });
     }
@@ -1589,8 +1599,8 @@ function getOmpSessionCwd(featherId) {
 // lib/sendlock.js for the keyed-lock semantics and its tests.
 const sendLock = createKeyedLock();
 
-async function sendInput(id, text, maySend = null) {
-  return sendLock(id, () => sendInputUnlocked(id, text, maySend));
+async function sendInput(id, text, maySend = null, { resume = true } = {}) {
+  return sendLock(id, () => sendInputUnlocked(id, text, maySend, null, { resume }));
 }
 
 async function sendInputIdempotent(id, text, messageId, maySend = null) {
@@ -1626,10 +1636,12 @@ async function sendInputIdempotent(id, text, messageId, maySend = null) {
   });
 }
 
-async function sendInputUnlocked(id, text, maySend = null, beforeSubmit = null) {
+async function sendInputUnlocked(id, text, maySend = null, beforeSubmit = null, { resume = true } = {}) {
   if (maySend && !maySend()) return { observed: false, cancelled: true };
   const target = tmuxName(id);
   if (!tmuxIsActive(id)) {
+    // A stop note or detach note must never wake a dormant chat just to say so.
+    if (!resume) return { observed: false, cancelled: true, dormant: true };
     resumeSession(id);
     const settled = await waitForPaneSettled(target);
     if (settled === false) console.warn(`[send] ${target}: pane still changing ${TMUX_READY_TIMEOUT_MS}ms after resume; sending anyway`);
@@ -1726,8 +1738,75 @@ function stopRalphSession(id, status = 'stopped') {
   });
 }
 
+// Who may drive ongoing work in a session: the chat's creator, or a plain
+// session nobody else owns. Reviewers, Room leaders, residents and helper
+// sessions are reserved for their own controllers.
+function autoControlRole(id, entry = readMeta()[id]) {
+  if (!entry || entry.chatStandby) return 'missing';
+  if (entry.chatRole === 'creator') return 'creator';
+  if (entry.chatRole === 'reviewer') return 'reviewer';
+  if (entry.communicationRole || roomLeaderNameForSession(id) || readRoomAssignments()[id]) return 'reserved';
+  return 'plain';
+}
+function assertAutoControl(id, entry = readMeta()[id]) {
+  const role = autoControlRole(id, entry);
+  if (role === 'missing') throw httpError(404, 'Chat not found');
+  if (role === 'reviewer') throw httpError(403, 'Only the conversation creator can control ongoing work');
+  if (role === 'reserved') throw httpError(403, 'Room and helper sessions cannot control ongoing work here');
+  return role;
+}
+
+const AUTO_STOP_NOTE = 'Ongoing work stopped. This is an ordinary chat again. Answer the user and wait; do not continue on your own.';
+function bumpAutoLifecycle(entry) {
+  return (Number.isSafeInteger(entry?.autoLifecycle) ? entry.autoLifecycle : 0) + 1;
+}
+// One durable stop for everything /auto can switch on: the Ralph callback,
+// the workflow, owned chat schedules, and the ralph mode itself when this
+// stop is the mirror of an /auto start. Chats that were born in ralph mode
+// (no autoModeBefore) keep their mode, as before.
+async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
+  cancelRalphCallback(id);
+  let restored = false, stopLifecycle = null, stopped = false;
+  updateMeta(meta => {
+    const current = meta[id];
+    if (!current) return meta;
+    stopped = true;
+    const next = { ...current, chatStopToken: randomUUID() };
+    if (current.workflow) next.workflow = applyChatWorkflow(current.workflow, { action: 'stop' }, { role: 'human' }).workflow;
+    if (current.mode === RALPH_MODE) {
+      next.ralph = { ...(current.ralph || {}), enabled: false, stopToken: randomUUID(), pendingInboxHumanWake: null, lastBoundaryKey: null,
+        status, blockedReason: null, completionReason: null, error: null, callbackAttempt: 0 };
+      if (current.autoModeBefore !== undefined && current.autoModeBefore !== RALPH_MODE) {
+        if (current.autoModeBefore === null) delete next.mode; else next.mode = current.autoModeBefore;
+        restored = true;
+      }
+    }
+    delete next.autoModeBefore;
+    delete next.chatReviewerAttach;
+    next.autoStoppedAt = new Date().toISOString();
+    next.autoLifecycle = bumpAutoLifecycle(current);
+    stopLifecycle = next.autoLifecycle;
+    return { ...meta, [id]: next };
+  });
+  if (!stopped) return { stopped: false };
+  const owned = Object.values(validateRules(SCHEDULER_STATE.read().rules || {}))
+    .filter(rule => rule.room === CHAT_RULES_ROOM && rule.ownerSessionId === id && rule.enabled).map(rule => rule.id);
+  if (owned.length) schedulerStopRules(owned);
+  let noteStatus = null;
+  if (note && restored && tmuxIsActive(id)) {
+    const maySend = () => { const entry = readMeta()[id]; return entry?.autoLifecycle === stopLifecycle && !entry.ralph?.enabled && entry.mode !== RALPH_MODE; };
+    let result;
+    try { result = await sendInput(id, AUTO_STOP_NOTE, maySend, { resume: false }); }
+    catch (error) { result = { failed: true, error: error.message }; }
+    noteStatus = result.failed ? 'failed' : result.dormant ? 'dormant' : result.cancelled && !result.submitted ? 'cancelled' : result.observed ? 'delivered' : 'unobserved';
+    updateMeta(meta => meta[id]?.autoLifecycle === stopLifecycle
+      ? { ...meta, [id]: { ...meta[id], autoStopNote: { status: noteStatus, at: new Date().toISOString() } } } : meta);
+  }
+  return { stopped: true, restored, stoppedRules: owned, note: noteStatus };
+}
+
 function authorizeChatHumanInput(id) {
-  if (readMeta()[id]?.chatRole !== 'creator') return;
+  if (!['creator', 'plain'].includes(autoControlRole(id))) return;
   updateMeta(meta => ({ ...meta, [id]: { ...meta[id], workflow: authorizeChatWorkflow(meta[id].workflow) } }));
 }
 
@@ -3361,9 +3440,9 @@ const CHAT_SETUP_VERSION = 1;
 
 function chatResult(id) {
   const entry = readMeta()[id];
-  if (!entry?.chatPair || entry.chatRole !== 'creator') throw httpError(404, 'Chat not found');
-  return { id, cwd: entry.cwd, projectId: entry.chatProjectId, groupId: entry.chatPair.groupId,
-    reviewerSessionId: entry.chatPair.reviewerSessionId, agent: entry.agent, mode: entry.mode,
+  if (!entry || entry.chatRole !== 'creator') throw httpError(404, 'Chat not found');
+  return { id, cwd: entry.cwd, projectId: entry.chatProjectId, groupId: entry.chatPair?.groupId ?? null,
+    reviewerSessionId: entry.chatPair?.reviewerSessionId ?? null, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy, agent: entry.agent, mode: entry.mode,
     status: entry.chatStartup?.status || 'ready', error: entry.chatStartup?.error || null };
 }
 
@@ -3389,11 +3468,11 @@ function beginChatCreation(options, { requestId, fingerprint } = {}) {
       teardownGroup: (id) => sidecar.teardownGroup(id),
       save: ({ id, reviewerSessionId, groupId, cwd, projectId, name, agent, reviewerAgent, rolePrompts, model, reviewerModel, reviewPolicy, progressIntervalMinutes }) => updateMeta((meta) => ({
         ...meta,
-        [id]: { ...meta[id], agent, model, reviewPolicy, progressIntervalMinutes, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: { groupId, creatorSessionId: id, reviewerSessionId },
+        [id]: { ...meta[id], agent, model, reviewPolicy, progressIntervalMinutes, title: name, cwd, chatProjectId: projectId, chatRole: 'creator', chatPairPrompt: rolePrompts.creator, chatPair: reviewerSessionId ? { groupId, creatorSessionId: id, reviewerSessionId } : null,
           chatStandby: !!options.standby, chatSetupVersion: CHAT_SETUP_VERSION, chatAllocatedAt: new Date().toISOString(), chatCreatedAt: new Date().toISOString(), chatStartup: { status: 'starting' },
           ...(!options.standby && typeof options.prompt === 'string' && options.prompt.trim() ? { workflow: authorizeChatWorkflow(meta[id]?.workflow) } : {}),
           ...(requestId ? { chatCreation: { requestId, fingerprint } } : {}) },
-        [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, model: reviewerModel, reviewPolicy, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId }, chatStandby: !!options.standby },
+        ...(reviewerSessionId ? { [reviewerSessionId]: { ...meta[reviewerSessionId], agent: reviewerAgent, model: reviewerModel, reviewPolicy, title: `Reviewer: ${name}`, cwd, chatProjectId: projectId, chatRole: 'reviewer', chatPairPrompt: rolePrompts.reviewer, chatPair: { groupId, creatorSessionId: id, reviewerSessionId }, chatStandby: !!options.standby } } : {}),
       })),
       stop: (id) => {
         try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -3422,14 +3501,15 @@ function beginChatCreation(options, { requestId, fingerprint } = {}) {
 }
 
 function retireStandby(pair) {
-  for (const id of [pair.id, pair.reviewerSessionId]) {
+  const ids = [pair.id, pair.reviewerSessionId].filter(Boolean);
+  for (const id of ids) {
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
     revokeSessionBridgeCapability(id);
   }
-  try { sidecar.teardownGroup(pair.groupId); } catch {}
+  if (pair.groupId) { try { sidecar.teardownGroup(pair.groupId); } catch {} }
   updateMeta(meta => {
     const next = { ...meta };
-    for (const id of [pair.id, pair.reviewerSessionId]) if (next[id]) next[id] = { ...next[id], chatStandby: 'retired', chatStartup: { status: 'failed' } };
+    for (const id of ids) if (next[id]) next[id] = { ...next[id], chatStandby: 'retired', chatStartup: { status: 'failed' } };
     return next;
   });
 }
@@ -3438,18 +3518,173 @@ const chatPool = createChatPool({
   capacity: READ_ONLY_MODE ? 0 : CHAT_CONFIG.standbyPairs,
   create: () => beginChatCreation({ ...resolveChatOptions({}, CHAT_CONFIG), standby: true }).done,
   healthy: pair => {
-    const meta = readMeta(), creator = meta[pair.id], reviewer = meta[pair.reviewerSessionId];
+    const meta = readMeta(), creator = meta[pair.id];
+    const reviewer = pair.reviewerSessionId ? meta[pair.reviewerSessionId] : null;
+    const reviewerHealthy = creator?.chatPair
+      ? reviewer?.agent === CHAT_CONFIG.reviewer.agent && reviewer.model === CHAT_CONFIG.reviewer.model && tmuxIsActive(pair.reviewerSessionId)
+      : CHAT_CONFIG.reviewPolicy === 'none';
     return creator?.chatSetupVersion === CHAT_SETUP_VERSION && creator.agent === CHAT_CONFIG.creator.agent
-      && creator.model === CHAT_CONFIG.creator.model && reviewer?.agent === CHAT_CONFIG.reviewer.agent
-      && reviewer.model === CHAT_CONFIG.reviewer.model && creator.reviewPolicy === CHAT_CONFIG.reviewPolicy
+      && creator.model === CHAT_CONFIG.creator.model && creator.reviewPolicy === CHAT_CONFIG.reviewPolicy
       && creator.progressIntervalMinutes === CHAT_CONFIG.progressIntervalMinutes
-      && tmuxIsActive(pair.id) && tmuxIsActive(pair.reviewerSessionId);
+      && tmuxIsActive(pair.id) && reviewerHealthy;
   },
   claim: pair => pair,
   retire: retireStandby,
   onError: error => console.warn('[chat-pool]', error.message),
   initialEntries: () => READ_ONLY_MODE ? [] : Object.entries(readMeta()).filter(([, entry]) => entry.chatRole === 'creator' && entry.chatStandby === true && entry.chatStartup?.status === 'ready')
     .map(([id]) => chatResult(id)),
+});
+
+
+// --- Attaching and detaching a Reviewer on a running chat ---------------------
+const chatAttachAttempts = new Map(); // creator id -> in-flight attempt
+
+function killSessionQuietly(sessionId) {
+  try { execFileSync('tmux', ['kill-session', '-t', tmuxName(sessionId)], { stdio: 'ignore' }); } catch {}
+  revokeSessionBridgeCapability(sessionId);
+}
+
+// Tear an attach attempt down. Safe to call twice; only this attempt's own
+// pending record is removed.
+function cleanupReviewerAttempt(id, attempt) {
+  killSessionQuietly(attempt.reviewerSessionId);
+  try { sidecar.teardownGroup(attempt.groupId); } catch {}
+  updateMeta(meta => {
+    const next = { ...meta };
+    if (next[attempt.reviewerSessionId]) next[attempt.reviewerSessionId] = { ...next[attempt.reviewerSessionId], chatDetachedAt: new Date().toISOString(), chatStartup: { status: 'failed', error: 'Reviewer attach did not complete.' } };
+    if (next[id]?.chatReviewerAttach?.token === attempt.token) { next[id] = { ...next[id] }; delete next[id].chatReviewerAttach; }
+    return next;
+  });
+}
+
+// Remove the committed pair and/or a pending attempt from a creator. The
+// reviewer's metadata stays (its transcript is still a real file); its harness,
+// capability and group go. `onlyIf` restricts the removal to one reviewer identity.
+async function detachReviewer(id, { onlyIf = null, note = true } = {}) {
+  let removed = null, pending = null, lifecycle = null;
+  updateMeta(meta => {
+    const current = meta[id];
+    if (!current) return meta;
+    const next = { ...current };
+    if (current.chatReviewerAttach && (!onlyIf || current.chatReviewerAttach.reviewerSessionId === onlyIf)) { pending = current.chatReviewerAttach; delete next.chatReviewerAttach; }
+    if (current.chatPair && (!onlyIf || current.chatPair.reviewerSessionId === onlyIf)) {
+      removed = current.chatPair;
+      next.chatPair = null;
+      next.reviewPolicy = 'none';
+      delete next.chatPairLifecycle;
+      next.chatReviewerDetachedAt = new Date().toISOString();
+    }
+    if (!removed && !pending) return meta;
+    next.autoLifecycle = bumpAutoLifecycle(current);
+    lifecycle = next.autoLifecycle;
+    const out = { ...meta, [id]: next };
+    for (const gone of [removed, pending]) {
+      if (gone && out[gone.reviewerSessionId]) out[gone.reviewerSessionId] = { ...out[gone.reviewerSessionId], chatDetachedAt: new Date().toISOString() };
+    }
+    return out;
+  });
+  for (const gone of [removed, pending]) {
+    if (!gone) continue;
+    killSessionQuietly(gone.reviewerSessionId);
+    try { sidecar.teardownGroup(gone.groupId); } catch {}
+  }
+  let noteStatus = null;
+  if (removed && note && tmuxIsActive(id)) {
+    const maySend = () => readMeta()[id]?.autoLifecycle === lifecycle;
+    let result;
+    try { result = await sendInput(id, REVIEWER_DETACH_NOTE, maySend, { resume: false }); }
+    catch (error) { result = { failed: true }; }
+    noteStatus = result.failed ? 'failed' : result.dormant ? 'dormant' : result.cancelled && !result.submitted ? 'cancelled' : result.observed ? 'delivered' : 'unobserved';
+  }
+  return { detached: Boolean(removed || pending), reviewerSessionId: removed?.reviewerSessionId || pending?.reviewerSessionId || null, note: noteStatus };
+}
+
+async function attachChatReviewer(id, body = {}) {
+  const entry = readMeta()[id];
+  if (!entry || entry.chatStandby || entry.chatRole !== 'creator') throw httpError(404, 'Chat not found');
+  if (entry.chatStartup?.status && entry.chatStartup.status !== 'ready') throw httpError(409, 'Wait for chat startup');
+  if (entry.chatPair) return { attached: false, chatPair: entry.chatPair, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy };
+  if (entry.chatReviewerAttach || chatAttachAttempts.has(id)) throw httpError(409, 'A reviewer is already being attached');
+  if (body.reviewPolicy !== undefined && !['adaptive', 'always'].includes(body.reviewPolicy)) throw httpError(400, 'reviewPolicy must be adaptive or always');
+  const options = resolveChatOptions({ reviewerAgent: body.reviewerAgent, reviewerModel: body.reviewerModel, reviewPolicy: body.reviewPolicy ?? 'adaptive' }, CHAT_CONFIG);
+  const cwd = entry.cwd || sessionCwdForFork(id, entry.agent);
+  const name = entry.title || 'New chat';
+  const attempt = { token: randomUUID(), reviewerSessionId: randomUUID(), groupId: randomUUID(), startedAt: new Date().toISOString(),
+    lifecycle: Number.isSafeInteger(entry.autoLifecycle) ? entry.autoLifecycle : 0, cancelled: false };
+  const { reviewerAgent, reviewerModel, reviewPolicy } = options;
+  const prompts = chatPairPrompts({ groupId: attempt.groupId, cwd, objective: entry.workflow?.objective || '', mode: entry.mode, wikiPath: CHAT_WIKI_PATH, creatorSessionId: id, reviewPolicy });
+  const alive = () => !attempt.cancelled && readMeta()[id]?.chatReviewerAttach?.token === attempt.token
+    && (Number.isSafeInteger(readMeta()[id].autoLifecycle) ? readMeta()[id].autoLifecycle : 0) === attempt.lifecycle;
+  try {
+    return await attachReviewer(attempt, {
+      allocate: () => {
+        let conflict = null;
+        updateMeta(meta => {
+          const current = meta[id];
+          if (!current || current.chatRole !== 'creator') { conflict = httpError(404, 'Chat not found'); return meta; }
+          if (current.chatPair || current.chatReviewerAttach || (Number.isSafeInteger(current.autoLifecycle) ? current.autoLifecycle : 0) !== attempt.lifecycle) { conflict = httpError(409, 'Chat changed while the reviewer was starting'); return meta; }
+          const now = new Date().toISOString();
+          return { ...meta,
+            [id]: { ...current, chatReviewerAttach: { token: attempt.token, reviewerSessionId: attempt.reviewerSessionId, groupId: attempt.groupId, startedAt: attempt.startedAt, lifecycle: attempt.lifecycle } },
+            [attempt.reviewerSessionId]: { agent: reviewerAgent, model: reviewerModel, reviewPolicy, title: `Reviewer: ${name}`, cwd, chatProjectId: current.chatProjectId,
+              chatRole: 'reviewer', chatPairPrompt: prompts.reviewer, chatPair: { groupId: attempt.groupId, creatorSessionId: id, reviewerSessionId: attempt.reviewerSessionId },
+              chatStandby: false, chatAllocatedAt: now, chatCreatedAt: now },
+          };
+        });
+        if (conflict) throw conflict;
+        chatAttachAttempts.set(id, attempt);
+      },
+      alive,
+      createGroup: () => sidecar.createGroup({ id: attempt.groupId, agent: entry.agent, task: name, durable: true,
+        members: [{ sessionId: id, role: 'creator', spawned: false }, { sessionId: attempt.reviewerSessionId, role: 'reviewer', spawned: true }] }),
+      spawn: () => spawnSession(attempt.reviewerSessionId, cwd, reviewerAgent, reviewerModel ? (reviewerAgent === 'omp' ? { ompModel: reviewerModel } : { model: reviewerModel }) : {}),
+      prime: async (_attempt, maySend) => {
+        await waitForPaneSettled(tmuxName(attempt.reviewerSessionId));
+        if (!alive()) return { observed: false, cancelled: true };
+        return sendInput(attempt.reviewerSessionId, prompts.reviewer, maySend);
+      },
+      commit: (_attempt, delivery) => {
+        let committed = false;
+        updateMeta(meta => {
+          const current = meta[id];
+          if (!alive() || !current) return meta;
+          committed = true;
+          const next = { ...current, chatPair: { groupId: attempt.groupId, creatorSessionId: id, reviewerSessionId: attempt.reviewerSessionId },
+            reviewPolicy, chatPairLifecycle: attempt.lifecycle, chatReviewerAttachedAt: new Date().toISOString(),
+            chatReviewerDelivery: { submitted: delivery.submitted, observed: delivery.observed } };
+          delete next.chatReviewerAttach;
+          delete next.chatReviewerDetachedAt;
+          return { ...meta, [id]: next };
+        });
+        return committed;
+      },
+      announce: () => {
+        const maySend = () => { const current = readMeta()[id]; return current?.chatPair?.reviewerSessionId === attempt.reviewerSessionId && (Number.isSafeInteger(current.autoLifecycle) ? current.autoLifecycle : 0) === current.chatPairLifecycle; };
+        return sendInput(id, `A Reviewer has been attached to this chat. From now on:\n${prompts.creator}`, maySend, { resume: false });
+      },
+      cleanup: () => { cleanupReviewerAttempt(id, attempt); chatAttachAttempts.delete(id); },
+      detach: reviewerSessionId => detachReviewer(id, { onlyIf: reviewerSessionId, note: false }),
+    });
+  } finally { chatAttachAttempts.delete(id); }
+}
+
+app.post('/api/chats/:id/reviewer', async (req, res) => {
+  try {
+    const result = await attachChatReviewer(req.params.id, req.body || {});
+    const entry = readMeta()[req.params.id];
+    res.json({ ...result, chatPair: entry?.chatPair ?? null, reviewPolicy: entry?.reviewPolicy || CHAT_CONFIG.reviewPolicy });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+app.delete('/api/chats/:id/reviewer', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const entry = readMeta()[id];
+    if (!entry || entry.chatStandby || entry.chatRole !== 'creator') throw httpError(404, 'Chat not found');
+    const attempt = chatAttachAttempts.get(id);
+    if (attempt) attempt.cancelled = true;
+    const result = await detachReviewer(id, { note: true });
+    res.json({ ...result, chatPair: null, reviewPolicy: readMeta()[id]?.reviewPolicy || 'none' });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
 app.get('/api/chats/:id/status', (req, res) => {
@@ -3481,7 +3716,7 @@ app.post('/api/chats', async (req, res) => {
       if (warm) {
         updateMeta(meta => ({ ...meta,
           [warm.id]: { ...meta[warm.id], chatStandby: false, chatCreatedAt: new Date().toISOString(), ...(requestId ? { chatCreation: { requestId, fingerprint } } : {}) },
-          [warm.reviewerSessionId]: { ...meta[warm.reviewerSessionId], chatStandby: false },
+          ...(warm.reviewerSessionId ? { [warm.reviewerSessionId]: { ...meta[warm.reviewerSessionId], chatStandby: false } } : {}),
         }));
         return chatResult(warm.id);
       }
@@ -3518,12 +3753,11 @@ app.post('/api/sessions/:id/send', async (req, res) => {
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 
-function workflowControl(id, input, actor) {
+async function workflowControl(id, input, actor) {
   const entry = readMeta()[id];
-  if (!entry || entry.chatStandby) throw httpError(404, 'Chat not found');
-  if (entry.chatRole !== 'creator') throw httpError(403, 'Only the conversation creator can control ongoing work');
+  assertAutoControl(id, entry);
   if (input.action === 'stop') {
-    stopRalphSession(id);
+    await stopAuto(id);
     return publicChatWorkflow(readMeta()[id].workflow);
   }
   let transition;
@@ -3533,7 +3767,10 @@ function workflowControl(id, input, actor) {
     transition = applyChatWorkflow(current.workflow, command, { role: actor, progressCadenceMs: (current.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes) * 60_000 });
     if (!transition.changed) return meta;
     return { ...meta, [id]: { ...current, workflow: transition.workflow,
-      ...(input.action === 'start' ? { mode: RALPH_MODE, ralph: { ...current.ralph, enabled: true, status: 'working', iteration: current.ralph?.iteration || 0, lastBoundaryKey: null, blockedReason: null, completionReason: null, error: null } } : {}) } };
+      ...(input.action === 'start' ? { mode: RALPH_MODE,
+        // Remember what this chat was before /auto so stop can put it back.
+        ...(current.autoModeBefore === undefined && current.mode !== RALPH_MODE ? { autoModeBefore: current.mode ?? null } : {}),
+        ralph: { ...current.ralph, enabled: true, status: 'working', iteration: current.ralph?.iteration || 0, lastBoundaryKey: null, blockedReason: null, completionReason: null, error: null } } : {}) } };
   });
   if (input.action === 'start' && transition.changed) cancelRalphCallback(id);
   if (transition.publish) void projectCommsRuntime.tick();
@@ -3542,14 +3779,18 @@ function workflowControl(id, input, actor) {
 
 function ongoingWorkInstructions(id) {
   const entry = readMeta()[id];
-  return `Feather ongoing work is enabled for this conversation. This supersedes any older instruction forbidding autonomous continuation. Stay within the selected objective: ${JSON.stringify(entry.workflow?.objective)}. Constraints: ${JSON.stringify(entry.workflow?.constraints || [])}. Next outcome: ${JSON.stringify(entry.workflow?.next || '')}.\n${ralphSystemPrompt()}\n${chatPairPrompts({ groupId: entry.chatPair.groupId, cwd: entry.cwd, mode: RALPH_MODE, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy, creatorSessionId: id, wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki') }).creator}\n${chatWorkflowInstructions(id)}`;
+  const cwd = entry.cwd || sessionCwdForFork(id, entry.agent);
+  const rolePrompt = entry.chatPair
+    ? chatPairPrompts({ groupId: entry.chatPair.groupId, cwd, mode: RALPH_MODE, reviewPolicy: entry.reviewPolicy || CHAT_CONFIG.reviewPolicy, creatorSessionId: id, wikiPath: CHAT_WIKI_PATH }).creator
+    : chatSoloPrompt({ cwd, mode: RALPH_MODE, wikiPath: CHAT_WIKI_PATH });
+  return `Feather ongoing work is enabled for this conversation. This supersedes any older instruction forbidding autonomous continuation. Stay within the selected objective: ${JSON.stringify(entry.workflow?.objective)}. Constraints: ${JSON.stringify(entry.workflow?.constraints || [])}. Next outcome: ${JSON.stringify(entry.workflow?.next || '')}.\n${ralphSystemPrompt()}\n${rolePrompt}\n${chatWorkflowInstructions(id)}`;
 }
 
-app.post('/api/internal/sessions/:id/workflow', (req, res) => {
+app.post('/api/internal/sessions/:id/workflow', async (req, res) => {
   try {
     if (!bridgeTokenValid(req.params.id, req.get('X-Feather-Bridge-Token'))) throw httpError(403, 'Invalid session capability');
     const input = req.body || {};
-    const workflow = workflowControl(req.params.id, input, 'creator');
+    const workflow = await workflowControl(req.params.id, input, 'creator');
     res.json({ ...workflow, ...(input.action === 'start' ? { instructions: ongoingWorkInstructions(req.params.id) } : {}) });
   } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
@@ -3558,8 +3799,7 @@ app.post('/api/sessions/:id/workflow', async (req, res) => {
   try {
     const id = req.params.id, input = req.body || {};
     const entry = readMeta()[id];
-    if (!entry || entry.chatStandby) throw httpError(404, 'Chat not found');
-    if (entry.chatRole !== 'creator') throw httpError(403, 'Only the conversation creator can control ongoing work');
+    assertAutoControl(id, entry);
     if (input.action === 'start') {
       if (entry.chatStartup?.status && entry.chatStartup.status !== 'ready') throw httpError(409, 'Wait for chat startup');
       // An explicit control click is fresh human authority, not a delayed agent
@@ -3577,11 +3817,11 @@ app.post('/api/sessions/:id/workflow', async (req, res) => {
         }
         return res.json(publicChatWorkflow(readMeta()[id].workflow));
       }
-      workflowControl(id, input, 'human');
+      await workflowControl(id, input, 'human');
       await sendInput(id, ongoingWorkInstructions(id), valid);
       return res.json(publicChatWorkflow(readMeta()[id].workflow));
     }
-    res.json(workflowControl(id, input, 'human'));
+    res.json(await workflowControl(id, input, 'human'));
   } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 const TERMINAL_KEYS = new Set(['Enter', 'Escape', 'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'Space', 'Tab', 'AgentHub']);
@@ -3617,18 +3857,18 @@ app.post('/api/sessions/:id/resume', (req, res) => {
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/ralph', (req, res) => {
+app.post('/api/sessions/:id/ralph', async (req, res) => {
   try {
     if (typeof req.body?.enabled !== 'boolean') throw httpError(400, 'enabled must be a boolean');
     if (req.body.enabled) resumeRalphSession(req.params.id);
-    else stopRalphSession(req.params.id);
+    else await stopAuto(req.params.id);
     res.json({ ok: true });
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/interrupt', (req, res) => {
+app.post('/api/sessions/:id/interrupt', async (req, res) => {
   const isRalph = isRalphSession(req.params.id);
-  if (isRalph || readMeta()[req.params.id]?.chatRole === 'creator') stopRalphSession(req.params.id);
+  if (isRalph || readMeta()[req.params.id]?.chatRole === 'creator') await stopAuto(req.params.id, { note: false });
   try {
     execFileSync('tmux', ['send-keys', '-t', tmuxName(req.params.id), 'C-c'], { stdio: 'ignore' });
     res.json({ ok: true });
@@ -3646,6 +3886,10 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
       startup.cancelled = true;
       retireStandby(startup.pair);
     }
+    const attaching = chatAttachAttempts.get(id);
+    if (attaching) attaching.cancelled = true;
+    const owner = readMeta()[id];
+    if (owner?.chatRole === 'creator' && (owner.chatPair || owner.chatReviewerAttach)) await detachReviewer(id, { note: false });
     const agent = getAgentForSession(id);
     await protocolRuns.deleteSession(id);
     try { execFileSync('tmux', ['kill-session', '-t', tmuxName(id)], { stdio: 'ignore' }); } catch {}
@@ -6760,9 +7004,10 @@ function schedulerPrompt(rule, { at, runtime }) {
   const parent = rule.after ? runtimeOf(SCHEDULER_STATE.read(), rule.after) : null;
   // markStarted already stamped lastRunAt for this run; the wake message
   // must look back to the run before it, or every wake says "none".
-  const changedRooms = roomsWithWikiWritesSince(Date.parse(runtime?.previousRunAt || '') || 0);
+  const chatRule = roomName === CHAT_RULES_ROOM;
+  const changedRooms = chatRule ? [] : roomsWithWikiWritesSince(Date.parse(runtime?.previousRunAt || '') || 0);
   const values = { room: roomName, role, at: at.toISOString(), ruleId: rule.id, after: rule.after || '', afterAt: parent?.lastRunAt || '', changed: changedRooms.join(', ') };
-  const header = `[Room wake · #${roomName} · ${role} · ${at.toISOString()}]`;
+  const header = chatRule ? `[Scheduled · ${rule.id} · ${at.toISOString()}]` : `[Room wake · #${roomName} · ${role} · ${at.toISOString()}]`;
   if (rule.prompt) {
     const body = fillSchedulerPrompt(rule.prompt, values);
     return body.startsWith('[') ? body : `${header}\n${body}`;
@@ -7207,6 +7452,7 @@ function schedulerRaiseIncident(incident, now) {
     runtime: { ...(current.runtime || {}), [rule.id]: { ...runtimeOf(current, rule.id), incidentAt: new Date(now).toISOString() } },
   }));
   console.warn(`[scheduler] incident ${kind} ${rule.id}: ${detail}`);
+  if (rule.room === CHAT_RULES_ROOM) return; // chat rules have no Room feed
   try {
     appendRoomPublication({
       roomRoot: path.join(ROOMS_HOME_DIR, rule.room),
@@ -7252,7 +7498,7 @@ function schedulerTick(now = Date.now()) {
     }
     // 2. Plan and launch.
     const fresh = SCHEDULER_STATE.read();
-    const liveRules = Object.fromEntries(Object.entries(rules).filter(([, rule]) => roomNames.has(rule.room)));
+    const liveRules = Object.fromEntries(Object.entries(rules).filter(([, rule]) => roomNames.has(rule.room) || rule.room === CHAT_RULES_ROOM));
     const plan = planTick({
       rules: liveRules, runtime: fresh.runtime || {}, activeRuns: fresh.active || [], now,
       bootAt: SCHEDULER_BOOT_AT, bootGraceMs: SCHEDULER_BOOT_GRACE_MS, contextFor: schedulerContextFor,
@@ -7311,23 +7557,23 @@ function schedulerStopRules(ids, { pause = false } = {}) {
     schedulerFinishRun(run, 'stopped', { rule: state.rules[run.ruleId], detail: pause ? 'paused by user' : 'stopped by user', preserveChat: true });
   }
 }
-app.post('/api/scheduler/stop-all', (req, res) => {
+app.post('/api/scheduler/stop-all', async (req, res) => {
   try {
     PROJECT_COMMS.setPaused(true);
     const ids = Object.keys(SCHEDULER_STATE.read().rules || {});
     schedulerStopRules(ids);
     const ralphIds = Object.entries(readMeta()).filter(([, meta]) => meta.mode === 'ralph').map(([id]) => id);
     for (const id of ralphIds) {
-      stopRalphSession(id);
+      await stopAuto(id, { note: false });
     }
     res.json({ ok: true, stoppedRules: ids.length, stoppedChats: ralphIds.length });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
-app.post('/api/scheduler/chats/:id/stop', (req, res) => {
+app.post('/api/scheduler/chats/:id/stop', async (req, res) => {
   try {
     const id = req.params.id;
     if (!isRalphSession(id)) throw httpError(404, 'no such autonomous chat');
-    stopRalphSession(id);
+    await stopAuto(id);
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -7341,8 +7587,9 @@ app.put('/api/scheduler/rules/:room/:name', (req, res) => {
   try {
     const id = schedulerRuleId(req);
     if (req.params.room === HOUSE_ROOM_NAME) ensureHouseRoom();
-    if (!listRoomDirs().includes(req.params.room)) throw httpError(404, 'no such room');
+    if (req.params.room !== CHAT_RULES_ROOM && !listRoomDirs().includes(req.params.room)) throw httpError(404, 'no such room');
     const rule = normalizeRule({ ...(req.body || {}), id });
+    if (rule.room === CHAT_RULES_ROOM && !['creator', 'plain'].includes(autoControlRole(rule.ownerSessionId))) throw httpError(404, 'no such chat');
     SCHEDULER_STATE.update((current) => {
       const rules = { ...(current.rules || {}), [id]: rule };
       validateRules(rules);
@@ -7564,8 +7811,10 @@ server.listen(PORT, '0.0.0.0', () => {
       if (entry.chatRole === 'creator' && entry.workflow?.pendingStart) {
         stopRalphSession(id);
       }
+      // A reviewer attach that a restart interrupted never becomes a pair.
+      if (entry.chatRole === 'creator' && entry.chatReviewerAttach) cleanupReviewerAttempt(id, entry.chatReviewerAttach);
       if (entry.chatRole !== 'creator' || entry.chatStartup?.status !== 'starting') continue;
-      if (entry.chatStandby) retireStandby({ id, reviewerSessionId: entry.chatPair.reviewerSessionId, groupId: entry.chatPair.groupId });
+      if (entry.chatStandby) retireStandby({ id, reviewerSessionId: entry.chatPair?.reviewerSessionId ?? null, groupId: entry.chatPair?.groupId ?? null });
       else updateMeta(meta => ({ ...meta, [id]: { ...meta[id], chatStartup: { status: 'failed', error: 'Startup was interrupted by a restart. Try again.' } } }));
     }
     setTimeout(() => void chatPool.refill(), 1000).unref();

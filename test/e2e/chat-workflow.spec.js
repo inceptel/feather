@@ -55,6 +55,17 @@ for (const width of [1280, 390]) {
         expect(route.request().postDataJSON()).toEqual({ enabled: false });
         sessions[0].workflow = { ...sessions[0].workflow, enabled: false, pendingStart: false, phase: 'stopped' };
         body = { ok: true };
+      } else if (p === '/api/chats/test-chat/reviewer') {
+        if (route.request().method() === 'POST') {
+          expect(route.request().postDataJSON()).toEqual({ reviewPolicy: 'adaptive' });
+          sessions[0].chatPair = { groupId: 'g1', creatorSessionId: 'test-chat', reviewerSessionId: 'test-reviewer' };
+          sessions[0].reviewPolicy = 'adaptive';
+          body = { attached: true, chatPair: sessions[0].chatPair, reviewPolicy: 'adaptive' };
+        } else {
+          expect(route.request().method()).toBe('DELETE');
+          sessions[0].chatPair = null; sessions[0].reviewPolicy = 'none';
+          body = { detached: true, chatPair: null, reviewPolicy: 'none' };
+        }
       } else if (p.endsWith('/input')) { sends.push(route.request().postDataJSON()); body = { ok: true }; }
       else if (p === '/api/sessions') body = { sessions };
       else if (p.endsWith('/messages')) body = { messages: [], hasMore: false, cursor: 0, nextBefore: 0 };
@@ -97,34 +108,48 @@ for (const width of [1280, 390]) {
     await expect(editor).toHaveValue('Compare the sample options');
     startupStatus = 'ready';
     await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
-    await page.getByRole('button', { name: 'Keep working', exact: true }).click();
-    const progress = page.getByRole('region', { name: 'Chat progress' });
-    await expect(progress).toContainText('Preparing ongoing work');
-    await page.reload();
-    await expect(progress).toContainText('Preparing ongoing work');
-    await progress.getByRole('button', { name: 'Stop', exact: true }).click();
-    await expect(progress).toContainText('Stopped');
-    await progress.getByRole('button', { name: 'Keep working', exact: true }).click();
-    await expect(progress).toContainText('Reviewing');
-    await expect(progress).toContainText('Resolve reviewer comments');
+    // The old progress banner is gone: no region between the header and the tabs.
+    await expect(page.getByRole('region', { name: 'Chat startup' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Chat progress' })).toHaveCount(0);
+    await expect(page.getByText('Details & evidence', { exact: true })).toHaveCount(0);
+    const tabs = page.getByRole('navigation', { name: 'Conversation views' });
+    await expect(tabs).toBeVisible();
+    const menu = page.getByTestId('chat-menu');
+    const toggleWorking = page.getByTestId('toggle-working');
+    const toggleReviewer = page.getByTestId('toggle-reviewer');
+    await menu.click();
+    await expect(toggleWorking).toHaveText('Keep working');
+    await expect(toggleReviewer).toHaveText('Attach reviewer');
+    await toggleWorking.click();
+    await expect(toggleWorking).toBeHidden();
+    await expect.poll(() => workflowStarts).toBe(1);
+    await menu.click();
+    await expect(toggleWorking).toHaveText('Stop working');
+    await toggleWorking.click();
+    await menu.click();
+    await expect(toggleWorking).toHaveText('Keep working');
+    await toggleWorking.click();
+    await expect.poll(() => workflowStarts).toBe(2);
     await expect(page.getByRole('button', { name: 'Interrupt', exact: true })).toBeVisible();
     await expect(page.getByText('Loading...', { exact: true })).toBeHidden();
     await expect(page.getByText('Reconnecting...', { exact: true })).toBeHidden();
-    if (width === 390) {
-      expect((await page.locator('.chat-workflow-summary').boundingBox()).height).toBeLessThanOrEqual(36);
-      await progress.getByText('Details & evidence', { exact: true }).click();
-      await expect(progress.getByText('Objective: Compare the sample options', { exact: true })).toBeVisible();
-      await expect(progress.getByText('comparison.md', { exact: true })).toBeVisible();
-      await progress.getByText('Details & evidence', { exact: true }).click();
-    }
+    await menu.click();
+    await expect(toggleWorking).toHaveText('Stop working');
+    await toggleReviewer.click();
+    await menu.click();
+    await expect(toggleReviewer).toHaveText('Detach reviewer');
+    await toggleReviewer.click();
+    await menu.click();
+    await expect(toggleReviewer).toHaveText('Attach reviewer');
+    await page.keyboard.press('Escape');
     const bounds = await editor.boundingBox();
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(844);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    // The tabs sit directly under the chat header: nothing but the header above them.
+    const tabsBox = await tabs.boundingBox();
+    const headerBottom = await page.getByTestId('chat-menu').evaluate(el => el.closest('header, [data-testid="chat-header"]')?.getBoundingClientRect().bottom ?? 0);
+    if (headerBottom) expect(tabsBox.y).toBeLessThanOrEqual(headerBottom + 2);
     await page.screenshot({ path: testInfo.outputPath(`working-${width}.png`), fullPage: true });
-    await progress.getByRole('button', { name: 'Stop', exact: true }).click();
-    await expect(progress).toContainText('Stopped');
-    await progress.getByRole('button', { name: 'Keep working', exact: true }).click();
-    await expect(progress).toContainText('Reviewing');
     expect(creations).toHaveLength(3);
     expect(maxStatusRequests).toBe(1);
     expect(errors).toEqual([]);

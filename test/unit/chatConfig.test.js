@@ -12,7 +12,7 @@ test('missing machine settings resolve safe defaults without writing a file', t 
   const config = loadChatConfig({ file, env: {} });
   assert.equal(config.creator.agent, 'claude');
   assert.equal(config.reviewer.agent, 'codex');
-  assert.equal(config.reviewPolicy, 'adaptive');
+  assert.equal(config.reviewPolicy, 'none');
   assert.equal(config.standbyPairs, 1);
   assert.equal(fs.existsSync(file), false);
   assert.equal(loadChatConfig({ file, env: { FEATHER_CHAT_POOL_SIZE: '0' } }).standbyPairs, 0);

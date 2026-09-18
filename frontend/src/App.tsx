@@ -22,7 +22,7 @@ import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } 
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
-import { createChat, fetchChatStatus, setChatWorking, type ChatRequest } from './api'
+import { createChat, fetchChatStatus, setChatWorking, attachReviewer, detachReviewer, type ChatRequest } from './api'
 
 interface QuickLink { label: string; url: string }
 
@@ -198,6 +198,7 @@ export default function App() {
   const [creating, setCreating] = createSignal(false)
   const [pendingChat, setPendingChat] = createSignal<{ id: string; request: ChatRequest } | null>(restoredChat)
   const [workflowBusy, setWorkflowBusy] = createSignal<'start' | 'stop' | null>(null)
+  const [reviewerBusy, setReviewerBusy] = createSignal<'attach' | 'detach' | null>(null)
   const [startingWorkId, setStartingWorkId] = createSignal<string | null>(null)
   let workflowActionGeneration = 0
   const [workflowError, setWorkflowError] = createSignal('')
@@ -1029,9 +1030,9 @@ export default function App() {
     setLoading(false)
   }
 
-  async function handleNew(agent?: string, mode?: 'ralph', projectSessionId?: string, name?: string) {
+  async function handleNew(agent?: string, mode?: 'ralph', projectSessionId?: string, name?: string, options: { reviewPolicy?: ChatRequest['reviewPolicy'] } = {}) {
     if (creating()) return
-    const request = { requestId: crypto.randomUUID(), agent, mode, projectSessionId, name }
+    const request: ChatRequest = { requestId: crypto.randomUUID(), agent, mode, projectSessionId, name, ...(options.reviewPolicy ? { reviewPolicy: options.reviewPolicy } : {}) }
     const id = `new-chat-${request.requestId}`
     setPendingChat({ id, request })
     setSessions(previous => [{ id, title: name || 'New chat', updatedAt: new Date().toISOString(), isActive: false, chatRole: 'creator', chatStartup: { status: 'starting' } }, ...previous])
@@ -1070,6 +1071,15 @@ export default function App() {
     finally {
       if (generation === workflowActionGeneration) { setWorkflowBusy(null); setStartingWorkId(null) }
     }
+  }
+
+  async function handleReviewer(attach: boolean) {
+    const id = currentId()
+    if (!id || reviewerBusy()) return
+    setReviewerBusy(attach ? 'attach' : 'detach'); setWorkflowError('')
+    try { if (attach) await attachReviewer(id); else await detachReviewer(id); await refreshSessions() }
+    catch (error) { if (currentId() === id) setWorkflowError(error instanceof Error ? error.message : (attach ? 'Could not attach reviewer' : 'Could not detach reviewer')) }
+    finally { setReviewerBusy(null) }
   }
 
   function retryStartup() {
@@ -1743,14 +1753,6 @@ export default function App() {
   const startupBlocked = () => !!cur()?.chatStartup && cur()?.chatStartup?.status !== 'ready'
   const preparingWork = () => startingWorkId() === currentId() || !!cur()?.workflow?.pendingStart
   const ongoingEnabled = () => !!(preparingWork() || cur()?.workflow?.enabled || cur()?.ralph?.enabled)
-  const workflowSummary = () => cur()?.ralph?.error || cur()?.ralph?.blockedReason || cur()?.workflow?.summary || cur()?.workflow?.objective
-  const workflowLabel = () => {
-    const s = cur()
-    if (preparingWork()) return 'Preparing ongoing work'
-    const phase = s?.workflow?.phase || s?.ralph?.status
-    if (!ongoingEnabled() && (phase === 'stopped' || s?.ralph?.status === 'stopped')) return 'Stopped'
-    return phase === 'reviewing' ? 'Reviewing' : phase === 'working' ? 'Working' : 'Waiting'
-  }
   const startingChatId = createMemo(() => {
     const id = currentId()
     return id && !id.startsWith('new-chat-') && !isRemoteBox() && cur()?.chatStartup?.status === 'starting' ? id : null
@@ -1956,6 +1958,13 @@ export default function App() {
                       <span style={{ flex: '1' }}>{agent.label}</span>
                     </button>
                   }</For>
+                  <button data-testid="new-chat-with-reviewer" onClick={() => handleNew(undefined, undefined, undefined, undefined, { reviewPolicy: 'adaptive' })} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                  >
+                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#8bc99c', 'flex-shrink': '0' }} />
+                    <span style={{ flex: '1' }}>With reviewer</span>
+                  </button>
                 </div>
               </Show>
             </div>
@@ -2193,7 +2202,7 @@ export default function App() {
                 <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
               <div style={{ position: 'relative' }}>
-                <button onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>
+                <button data-testid="chat-menu" aria-label="Chat menu" onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>
                 <Show when={menuOpen()}>
                   <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '99' }} />
                   <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
@@ -2202,6 +2211,14 @@ export default function App() {
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
                       <button data-testid="fork-chat" onClick={() => openForkDialog(s().title)}
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork chat</button>
+                      <Show when={s().chatRole === 'creator' || s().mode === 'ralph'}>
+                        <button data-testid="toggle-working" disabled={workflowBusy() === 'stop' || (!ongoingEnabled() && !!workflowBusy())} onClick={() => { setMenuOpen(false); void handleWorkflow(!ongoingEnabled()) }}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>{ongoingEnabled() ? 'Stop working' : 'Keep working'}</button>
+                      </Show>
+                      <Show when={s().chatRole === 'creator' && s().chatStartup?.status !== 'starting'}>
+                        <button data-testid="toggle-reviewer" disabled={!!reviewerBusy()} onClick={() => { setMenuOpen(false); void handleReviewer(!s().chatPair) }}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>{reviewerBusy() === 'attach' ? 'Attaching reviewer…' : reviewerBusy() === 'detach' ? 'Detaching reviewer…' : s().chatPair ? 'Detach reviewer' : 'Attach reviewer'}</button>
+                      </Show>
                       <Show when={s().chatRole === 'creator'}>
                         <button data-testid="new-project-chat" onClick={() => { setMenuOpen(false); void handleNew(s().agent, undefined, s().id) }}
                           style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>New chat in this project</button>
@@ -2231,29 +2248,9 @@ export default function App() {
           </Show>
         </div>
 
-        <Show when={cur() && !isRemoteBox() && (cur()?.chatRole === 'creator' || cur()?.mode === 'ralph')}>
-          <section class="chat-workflow" aria-label="Chat progress">
-            <Show when={startupBlocked()} fallback={<>
-              <div class="chat-workflow-copy" role="status">
-                <Show when={preparingWork() || cur()?.workflow || cur()?.ralph} fallback={<span>Continue this conversation as ongoing work.</span>}>
-                  <strong>{workflowLabel()}</strong>
-                  <Show when={cur()?.workflow?.updatedAt}><span title={cur()?.workflow?.updatedAt}> · Updated {timeAgo(cur()!.workflow!.updatedAt!) === 'now' ? 'just now' : `${timeAgo(cur()!.workflow!.updatedAt!)} ago`}</span></Show>
-                  <Show when={workflowSummary()}><p class="chat-workflow-summary" title={workflowSummary()}>{workflowSummary()}</p></Show>
-                  <Show when={cur()?.workflow?.next}><p class="chat-workflow-next" title={cur()?.workflow?.next}>Next: {cur()?.workflow?.next}</p></Show>
-                  <Show when={workflowSummary() || cur()?.workflow?.next || cur()?.workflow?.evidence}>
-                    <details><summary>Details{cur()?.workflow?.evidence ? ' & evidence' : ''}</summary>
-                      <Show when={cur()?.workflow?.objective}><p>Objective: {cur()?.workflow?.objective}</p></Show>
-                      <Show when={workflowSummary()}><p>{workflowSummary()}</p></Show>
-                      <Show when={cur()?.workflow?.next}><p>Next: {cur()?.workflow?.next}</p></Show>
-                      <Show when={cur()?.workflow?.evidence}><p>{cur()?.workflow?.evidence}</p></Show>
-                    </details>
-                  </Show>
-                </Show>
-              </div>
-              <button disabled={workflowBusy() === 'stop'} onClick={() => void handleWorkflow(!ongoingEnabled())}>
-                {ongoingEnabled() ? 'Stop' : 'Keep working'}
-              </button>
-            </>}>
+        <Show when={cur() && !isRemoteBox() && (cur()?.chatRole === 'creator' || cur()?.mode === 'ralph') && (startupBlocked() || workflowError())}>
+          <section class="chat-workflow" aria-label="Chat startup">
+            <Show when={startupBlocked()}>
               <div class="chat-workflow-copy" role={cur()?.chatStartup?.status === 'failed' ? 'alert' : 'status'}>
                 <strong>{cur()?.chatStartup?.status === 'failed' ? 'Chat could not start' : 'Starting chat…'}</strong>
                 <p>{cur()?.chatStartup?.error || 'You can draft your message while the chat starts.'}</p>
@@ -2262,7 +2259,7 @@ export default function App() {
                 <button disabled={creating()} onClick={retryStartup}>{failedStartupId() === currentId() ? 'Try again' : 'Retry startup'}</button>
               </Show>
             </Show>
-            <Show when={workflowError()}><p role="alert">{workflowError()}</p></Show>
+            <Show when={workflowError()}><p class="chat-workflow-copy" role="alert">{workflowError()}</p></Show>
           </section>
         </Show>
 
