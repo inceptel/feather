@@ -98,7 +98,7 @@
   <div class="wrap"><table id="usage"><thead><tr><th>Chat</th><th>Line</th><th>Model</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th>Last request</th></tr></thead><tbody></tbody></table></div>
 
   <footer>
-    <p>Rows are the union of the <code>autonomous</code> source (<code>api/sessions?mode=ralph&amp;limit=300</code>) and any row of the <code>sessions</code> source (<code>api/sessions?limit=300</code>) with <code>mode = ralph</code> or <code>workflow.enabled</code>, de-duplicated by id. The <code>sessions</code> source lists only the most recent 300 discovered sessions, so an older workflow-only chat would be missing. State is derived from the source fields only: no <code>ralph</code> object → <b>unknown</b>; <code>ralph.status = blocked</code> → <b>blocked</b> even when <code>ralph.enabled</code> is false (the callback is off because a human must answer); <code>ralph.error</code> or <code>status = error</code> → <b>error</b>; <code>enabled</code> with status working/scheduled → <b>working</b>; <code>enabled</code> with no status → <b>unknown</b>; <code>workflow.phase = reviewing</code> → <b>reviewing</b>; status waiting or phase waiting → <b>waiting</b>; status stopped/complete → history. Joins use session IDs only: usage rows by <code>sessionId</code>, reviewer lines by <code>chatPair.reviewerSessionId</code>, running rules by <code>runtime.running.sessionId</code>. Sessions without a <code>chatRole</code> are Room residents or plain sessions; their Room is not in the source rows, so it is not shown.</p>
+    <p>Rows are the union of the <code>autonomous</code> source (<code>api/sessions?mode=ralph&amp;limit=300</code>) and any row of the <code>sessions</code> source (<code>api/sessions?limit=300</code>) with <code>mode = ralph</code>, <code>workflow.enabled</code>, or <code>auto.stoppedAt</code> (a chat whose ongoing work was stopped and which is ordinary again), de-duplicated by id. The <code>sessions</code> source lists only the most recent 300 discovered sessions, so an older workflow-only chat would be missing. State is derived from the source fields only: no <code>ralph</code> object but <code>auto.stoppedAt</code> and the workflow not enabled → <b>stopped</b> (history); otherwise no <code>ralph</code> object → <b>unknown</b>; <code>ralph.status = blocked</code> → <b>blocked</b> even when <code>ralph.enabled</code> is false (the callback is off because a human must answer); <code>ralph.error</code> or <code>status = error</code> → <b>error</b>; <code>enabled</code> with status working/scheduled → <b>working</b>; <code>enabled</code> with no status → <b>unknown</b>; <code>workflow.phase = reviewing</code> → <b>reviewing</b>; status waiting or phase waiting → <b>waiting</b>; status stopped/complete → history. Joins use session IDs only: usage rows by <code>sessionId</code>, reviewer lines by <code>chatPair.reviewerSessionId</code>, running rules by <code>runtime.running.sessionId</code>. Sessions without a <code>chatRole</code> are Room residents or plain sessions; their Room is not in the source rows, so it is not shown.</p>
     <p>Refreshes every 30 s while this tab is visible; nothing is fetched while it is hidden. Usage rows are the top 12 sessions by tokens in each window (<code>api/usage</code> caps <code>bySession</code> at 12), so a quiet chat may have no row even when it used tokens.</p>
   </footer>
 
@@ -138,6 +138,7 @@
   const ORDER = { blocked: 0, working: 1, reviewing: 1, waiting: 2, error: 3, unknown: 4, stopped: 5, complete: 5 };
   function classify(s) {
     const r = s.ralph;
+    if ((!r || typeof r !== 'object') && s.auto?.stoppedAt && s.workflow?.enabled !== true) return { state: 'stopped', history: true, why: `ongoing work stopped ${fmtTime(s.auto.stoppedAt)}; the chat is ordinary again` };
     if (!r || typeof r !== 'object') return { state: 'unknown', history: false, why: s.workflow?.enabled ? 'workflow enabled but no ralph state in the source row' : 'no ralph state in the source row' };
     const status = String(r.status || '');
     const phase = String(s.workflow?.phase || '');
@@ -341,7 +342,7 @@
       for (const s of all) {
         if (sessionsById.has(s.id)) continue;
         sessionsById.set(s.id, s);
-        if (s.mode === 'ralph' || s.workflow?.enabled === true) { auto.push(s); unionAdded++; }
+        if (s.mode === 'ralph' || s.workflow?.enabled === true || s.auto?.stoppedAt) { auto.push(s); unionAdded++; }
       }
       rowsNow = auto.map(s => ({ s, c: classify(s) }));
       if (!autoOk && !allOk) {

@@ -157,8 +157,14 @@ Read-only. Two GETs, nothing else:
 
 ```bash
 curl -sS "$FEATHER_URL/api/sessions?mode=ralph&limit=300"
+curl -sS "$FEATHER_URL/api/sessions?limit=300"
 curl -sS "$FEATHER_URL/api/scheduler"
 ```
+
+The first GET lists chats in ralph mode. The second adds chats whose
+`workflow.enabled` is true and chats with `auto.stoppedAt`: a stopped `/auto`
+returns the chat to its ordinary mode, so it only appears there, as history.
+De-duplicate by id.
 
 Print one line per chat: state → title → objective (or "no objective
 recorded") → `/#<id>`. Order: blocked (with the reason) → working → reviewing

@@ -949,7 +949,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
-        ...(meta[id]?.chatRole === 'creator' ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
+        ...(meta[id]?.chatRole === 'creator' ? { workflow: publicChatWorkflow(meta[id].workflow), ...publicAutoHistory(meta[id]) } : {}),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
       });
       required.delete(id);
@@ -965,7 +965,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
     sessions.push({ id, title: entry.title || 'New chat', agent: entry.agent,
       updatedAt: entry.chatCreatedAt || new Date(0).toISOString(), isActive: tmuxIsActive(id),
       chatRole: entry.chatRole, chatPair: entry.chatPair, chatStartup: entry.chatStartup,
-      workflow: publicChatWorkflow(entry.workflow), ...(entry.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph: publicRalphState(entry) } : {}) });
+      workflow: publicChatWorkflow(entry.workflow), ...publicAutoHistory(entry), ...(entry.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph: publicRalphState(entry) } : {}) });
   }
   // Re-sort by real activity. Candidates were ordered by file mtime, which is
   // bumped by idle bookkeeping writes; ordering by last real message keeps the
@@ -1279,13 +1279,16 @@ function sessionSystemPrompt(id) {
     : chat?.chatPairPrompt;
   if (rolePrompt) {
     parts.push(`[Feather chat identity: ${id}]\n${rolePrompt}`);
-    parts.push(`Project inbox CLI: node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`);
+    if (chat.chatPair) parts.push(chatInboxCliPrompt());
     if (!rolePrompt.includes(CHAT_PAIR_PUBLICATION_PROMPT)) parts.push(CHAT_PAIR_PUBLICATION_PROMPT);
     if (chat.chatRole === 'creator') parts.push(chatWorkflowInstructions(id));
   }
   return parts.join('\n\n');
 }
 
+function chatInboxCliPrompt() {
+  return `Project inbox CLI: node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`;
+}
 function chatReviewPolicyText(entry) {
   const policy = entry?.chatPair ? (entry.reviewPolicy || CHAT_CONFIG.reviewPolicy) : 'none';
   if (policy === 'none') return 'This chat has no Reviewer. Verify substantial deliverables yourself with checks appropriate to the stakes, and say plainly what remains unverified.';
@@ -1652,6 +1655,9 @@ async function sendInputUnlocked(id, text, maySend = null, beforeSubmit = null, 
     // Commit guarded automation synchronously: Stop cannot interleave between
     // paste and Enter. Once submitted, leave the current turn alone.
     const before = tmuxCapture(target);
+    // The capture may have waited on a busy pane; re-check right before the
+    // synchronous paste + Enter so a stop or detach in that window still wins.
+    if (!maySend()) return { observed: false, cancelled: true };
     if (beforeSubmit) beforeSubmit();
     tmuxPaste(target, text, buffer);
     tmuxRun(['send-keys', '-t', target, 'Enter']);
@@ -1757,6 +1763,13 @@ function assertAutoControl(id, entry = readMeta()[id]) {
 }
 
 const AUTO_STOP_NOTE = 'Ongoing work stopped. This is an ordinary chat again. Answer the user and wait; do not continue on your own.';
+// Bounded history for a chat whose ongoing work was stopped: a stopped /auto
+// restores the ordinary mode, so without this the row would vanish from every
+// autos view instead of entering history.
+function publicAutoHistory(entry) {
+  if (!entry?.autoStoppedAt) return {};
+  return { auto: { stoppedAt: entry.autoStoppedAt, lifecycle: Number.isSafeInteger(entry.autoLifecycle) ? entry.autoLifecycle : 0, note: entry.autoStopNote?.status || null } };
+}
 function bumpAutoLifecycle(entry) {
   return (Number.isSafeInteger(entry?.autoLifecycle) ? entry.autoLifecycle : 0) + 1;
 }
@@ -1766,11 +1779,12 @@ function bumpAutoLifecycle(entry) {
 // (no autoModeBefore) keep their mode, as before.
 async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
   cancelRalphCallback(id);
-  let restored = false, stopLifecycle = null, stopped = false;
+  let restored = false, stopLifecycle = null, stopped = false, pendingAttach = null;
   updateMeta(meta => {
     const current = meta[id];
     if (!current) return meta;
     stopped = true;
+    pendingAttach = current.chatReviewerAttach || null;
     const next = { ...current, chatStopToken: randomUUID() };
     if (current.workflow) next.workflow = applyChatWorkflow(current.workflow, { action: 'stop' }, { role: 'human' }).workflow;
     if (current.mode === RALPH_MODE) {
@@ -1782,13 +1796,21 @@ async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
       }
     }
     delete next.autoModeBefore;
-    delete next.chatReviewerAttach;
     next.autoStoppedAt = new Date().toISOString();
     next.autoLifecycle = bumpAutoLifecycle(current);
     stopLifecycle = next.autoLifecycle;
     return { ...meta, [id]: next };
   });
   if (!stopped) return { stopped: false };
+  // A reviewer still being attached never becomes a pair after a stop: the
+  // lifecycle bump fences its commit, and its harness, capability, group and
+  // pending record go now. The record stays durable until this cleanup runs,
+  // so a crash before it is recovered by the boot sweep. Committed pairs stay.
+  if (pendingAttach) {
+    const inflight = chatAttachAttempts.get(id);
+    if (inflight?.token === pendingAttach.token) inflight.cancelled = true;
+    cleanupReviewerAttempt(id, pendingAttach);
+  }
   const owned = Object.values(validateRules(SCHEDULER_STATE.read().rules || {}))
     .filter(rule => rule.room === CHAT_RULES_ROOM && rule.ownerSessionId === id && rule.enabled).map(rule => rule.id);
   if (owned.length) schedulerStopRules(owned);
@@ -3571,7 +3593,6 @@ async function detachReviewer(id, { onlyIf = null, note = true } = {}) {
       removed = current.chatPair;
       next.chatPair = null;
       next.reviewPolicy = 'none';
-      delete next.chatPairLifecycle;
       next.chatReviewerDetachedAt = new Date().toISOString();
     }
     if (!removed && !pending) return meta;
@@ -3650,7 +3671,7 @@ async function attachChatReviewer(id, body = {}) {
           if (!alive() || !current) return meta;
           committed = true;
           const next = { ...current, chatPair: { groupId: attempt.groupId, creatorSessionId: id, reviewerSessionId: attempt.reviewerSessionId },
-            reviewPolicy, chatPairLifecycle: attempt.lifecycle, chatReviewerAttachedAt: new Date().toISOString(),
+            reviewPolicy, chatReviewerAttachedAt: new Date().toISOString(),
             chatReviewerDelivery: { submitted: delivery.submitted, observed: delivery.observed } };
           delete next.chatReviewerAttach;
           delete next.chatReviewerDetachedAt;
@@ -3659,8 +3680,10 @@ async function attachChatReviewer(id, body = {}) {
         return committed;
       },
       announce: () => {
-        const maySend = () => { const current = readMeta()[id]; return current?.chatPair?.reviewerSessionId === attempt.reviewerSessionId && (Number.isSafeInteger(current.autoLifecycle) ? current.autoLifecycle : 0) === current.chatPairLifecycle; };
-        return sendInput(id, `A Reviewer has been attached to this chat. From now on:\n${prompts.creator}`, maySend, { resume: false });
+        // Fenced by reviewer identity: a detach or a later pair cancels this
+        // announcement; a stop of ongoing work does not, the pair survives it.
+        const maySend = () => readMeta()[id]?.chatPair?.reviewerSessionId === attempt.reviewerSessionId;
+        return sendInput(id, `A Reviewer has been attached to this chat. From now on:\n${prompts.creator}\n\n${chatInboxCliPrompt()}\n\n${chatWorkflowInstructions(id)}`, maySend, { resume: false });
       },
       cleanup: () => { cleanupReviewerAttempt(id, attempt); chatAttachAttempts.delete(id); },
       detach: reviewerSessionId => detachReviewer(id, { onlyIf: reviewerSessionId, note: false }),
