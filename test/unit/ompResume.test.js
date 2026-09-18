@@ -87,7 +87,7 @@ describe('safe OMP resume', () => {
         ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port),
         // This test exercises native shared discovery, not gateway isolation.
         FEATHER_OMP_AUTH_GATEWAY_URL: '', FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE: '',
-        FEATHER_ROOM_PULSES: '0', PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog,
+        FEATHER_ROOM_PULSES: '0', FEATHER_CHAT_POOL_SIZE: '0', PATH: `${binDir}:${process.env.PATH}`, TMUX_TEST_LOG: tmuxLog,
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     })

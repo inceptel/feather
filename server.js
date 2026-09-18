@@ -949,7 +949,8 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
-        ...(meta[id]?.chatRole === 'creator' ? { workflow: publicChatWorkflow(meta[id].workflow), ...publicAutoHistory(meta[id]) } : {}),
+        ...(meta[id]?.chatRole === 'creator' || meta[id]?.workflow ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
+        ...publicAutoHistory(meta[id]),
         ...(meta[id]?.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph } : {}),
       });
       required.delete(id);
@@ -1051,6 +1052,19 @@ async function waitForPaneChange(target, before, timeoutMs, pollMs = 100) {
 // for two polls in a row: the harness is at its composer, not still booting.
 // Replaces a blind 6s sleep. Falls back to that sleep when unobservable.
 const TMUX_READY_TIMEOUT_MS = Number(process.env.FEATHER_TMUX_READY_TIMEOUT_MS || 15_000);
+
+// Deterministic pause points for the lifecycle tests only. With
+// FEATHER_TEST_BARRIER_DIR set, a boundary named <name>.<id> parks (async, the
+// event loop keeps serving requests) while that file exists, and marks its
+// arrival with <name>.<id>.waiting. Unset in production: a no-op.
+const TEST_BARRIER_DIR = process.env.FEATHER_TEST_BARRIER_DIR || null;
+async function testBarrier(name, id) {
+  if (!TEST_BARRIER_DIR) return;
+  const file = path.join(TEST_BARRIER_DIR, `${name}.${id}`);
+  if (!fs.existsSync(file)) return;
+  try { fs.writeFileSync(`${file}.waiting`, ''); } catch {}
+  while (fs.existsSync(file)) await pause(20);
+}
 async function waitForPaneSettled(target, { timeoutMs = TMUX_READY_TIMEOUT_MS, minMs = 1500, pollMs = 300 } = {}) {
   const start = Date.now();
   let previous;
@@ -1655,6 +1669,7 @@ async function sendInputUnlocked(id, text, maySend = null, beforeSubmit = null, 
     // Commit guarded automation synchronously: Stop cannot interleave between
     // paste and Enter. Once submitted, leave the current turn alone.
     const before = tmuxCapture(target);
+    if (typeof testBarrier === 'function') await testBarrier('send-before-paste', id); // absent in the unit-test slices of this region
     // The capture may have waited on a busy pane; re-check right before the
     // synchronous paste + Enter so a stop or detach in that window still wins.
     if (!maySend()) return { observed: false, cancelled: true };
@@ -1796,7 +1811,9 @@ async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
       }
     }
     delete next.autoModeBefore;
-    next.autoStoppedAt = new Date().toISOString();
+    // History marks only a chat that really was autonomous. /interrupt and a
+    // no-op stop on an ordinary chat leave no trace.
+    if (current.mode === RALPH_MODE || current.ralph?.enabled) next.autoStoppedAt = new Date().toISOString();
     next.autoLifecycle = bumpAutoLifecycle(current);
     stopLifecycle = next.autoLifecycle;
     return { ...meta, [id]: next };
@@ -1816,12 +1833,15 @@ async function stopAuto(id, { note = true, status = 'stopped' } = {}) {
   if (owned.length) schedulerStopRules(owned);
   let noteStatus = null;
   if (note && restored && tmuxIsActive(id)) {
-    const maySend = () => { const entry = readMeta()[id]; return entry?.autoLifecycle === stopLifecycle && !entry.ralph?.enabled && entry.mode !== RALPH_MODE; };
+    // A later detach (for example of a reviewer whose announcement this stop
+    // fenced out) bumps the lifecycle again; the note is still true then. Only
+    // a restart of ongoing work makes it stale, and the mode checks catch that.
+    const maySend = () => { const entry = readMeta()[id]; return Number.isSafeInteger(entry?.autoLifecycle) && entry.autoLifecycle >= stopLifecycle && !entry.ralph?.enabled && entry.mode !== RALPH_MODE; };
     let result;
     try { result = await sendInput(id, AUTO_STOP_NOTE, maySend, { resume: false }); }
     catch (error) { result = { failed: true, error: error.message }; }
     noteStatus = result.failed ? 'failed' : result.dormant ? 'dormant' : result.cancelled && !result.submitted ? 'cancelled' : result.observed ? 'delivered' : 'unobserved';
-    updateMeta(meta => meta[id]?.autoLifecycle === stopLifecycle
+    updateMeta(meta => meta[id]?.autoLifecycle >= stopLifecycle && meta[id].mode !== RALPH_MODE
       ? { ...meta, [id]: { ...meta[id], autoStopNote: { status: noteStatus, at: new Date().toISOString() } } } : meta);
   }
   return { stopped: true, restored, stoppedRules: owned, note: noteStatus };
@@ -3568,15 +3588,21 @@ function killSessionQuietly(sessionId) {
 
 // Tear an attach attempt down. Safe to call twice; only this attempt's own
 // pending record is removed.
+// Returns true when every resource is gone. Otherwise the pending record is
+// kept, so the boot sweep or the next stop/detach retries; ownership of the
+// leftovers is never dropped while they exist.
 function cleanupReviewerAttempt(id, attempt) {
   killSessionQuietly(attempt.reviewerSessionId);
-  try { sidecar.teardownGroup(attempt.groupId); } catch {}
+  let clean = !tmuxIsActive(attempt.reviewerSessionId) && !fs.existsSync(sessionBridgeTokenPath(attempt.reviewerSessionId));
+  if (attempt.groupId) { try { sidecar.teardownGroup(attempt.groupId); } catch (error) { if (!/not found|unknown/i.test(error?.message || '')) clean = false; } }
   updateMeta(meta => {
     const next = { ...meta };
     if (next[attempt.reviewerSessionId]) next[attempt.reviewerSessionId] = { ...next[attempt.reviewerSessionId], chatDetachedAt: new Date().toISOString(), chatStartup: { status: 'failed', error: 'Reviewer attach did not complete.' } };
-    if (next[id]?.chatReviewerAttach?.token === attempt.token) { next[id] = { ...next[id] }; delete next[id].chatReviewerAttach; }
+    if (clean && next[id]?.chatReviewerAttach?.token === attempt.token) { next[id] = { ...next[id] }; delete next[id].chatReviewerAttach; }
     return next;
   });
+  if (!clean) console.warn(`[chat] ${id}: reviewer attempt ${attempt.reviewerSessionId.slice(0, 8)} not fully cleaned; record kept for retry`);
+  return clean;
 }
 
 // Remove the committed pair and/or a pending attempt from a creator. The
@@ -3662,7 +3688,9 @@ async function attachChatReviewer(id, body = {}) {
       prime: async (_attempt, maySend) => {
         await waitForPaneSettled(tmuxName(attempt.reviewerSessionId));
         if (!alive()) return { observed: false, cancelled: true };
-        return sendInput(attempt.reviewerSessionId, prompts.reviewer, maySend);
+        const delivery = await sendInput(attempt.reviewerSessionId, prompts.reviewer, maySend);
+        await testBarrier('attach-before-commit', id);
+        return delivery;
       },
       commit: (_attempt, delivery) => {
         let committed = false;
@@ -3679,10 +3707,14 @@ async function attachChatReviewer(id, body = {}) {
         });
         return committed;
       },
-      announce: () => {
-        // Fenced by reviewer identity: a detach or a later pair cancels this
-        // announcement; a stop of ongoing work does not, the pair survives it.
-        const maySend = () => readMeta()[id]?.chatPair?.reviewerSessionId === attempt.reviewerSessionId;
+      announce: async () => {
+        // Fenced by reviewer identity and lifecycle: a detach, a later pair or
+        // a stop of ongoing work cancels this announcement, so instructions
+        // captured while the chat was autonomous never land after Stop. An
+        // unannounced pair is then detached again (lib/reviewer-attach.js).
+        const lifecycleOf = entry => Number.isSafeInteger(entry?.autoLifecycle) ? entry.autoLifecycle : 0;
+        const maySend = () => { const entry = readMeta()[id]; return entry?.chatPair?.reviewerSessionId === attempt.reviewerSessionId && lifecycleOf(entry) === attempt.lifecycle; };
+        await testBarrier('attach-before-announce', id);
         return sendInput(id, `A Reviewer has been attached to this chat. From now on:\n${prompts.creator}\n\n${chatInboxCliPrompt()}\n\n${chatWorkflowInstructions(id)}`, maySend, { resume: false });
       },
       cleanup: () => { cleanupReviewerAttempt(id, attempt); chatAttachAttempts.delete(id); },
@@ -3790,7 +3822,7 @@ async function workflowControl(id, input, actor) {
     transition = applyChatWorkflow(current.workflow, command, { role: actor, progressCadenceMs: (current.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes) * 60_000 });
     if (!transition.changed) return meta;
     return { ...meta, [id]: { ...current, workflow: transition.workflow,
-      ...(input.action === 'start' ? { mode: RALPH_MODE,
+      ...(input.action === 'start' ? { mode: RALPH_MODE, autoStoppedAt: undefined, autoStopNote: undefined,
         // Remember what this chat was before /auto so stop can put it back.
         ...(current.autoModeBefore === undefined && current.mode !== RALPH_MODE ? { autoModeBefore: current.mode ?? null } : {}),
         ralph: { ...current.ralph, enabled: true, status: 'working', iteration: current.ralph?.iteration || 0, lastBoundaryKey: null, blockedReason: null, completionReason: null, error: null } } : {}) } };

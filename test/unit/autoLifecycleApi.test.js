@@ -29,7 +29,7 @@ has-session) grep -qxF "$target" "$TMUX_REG"; exit $? ;;
 list-sessions) while IFS= read -r n; do printf '%s|0\\n' "$n"; done < "$TMUX_REG" ;;
 new-session) name=''; prev=''; for a in "$@"; do if [ "$prev" = '-s' ]; then name="$a"; fi; prev="$a"; done
   printf '%s\\n' "$name" >> "$TMUX_REG"; { env; printf 'ARGS=%s\\n' "$*"; } > "$TMUX_REG.env.$name" ;;
-kill-session) grep -vxF "$target" "$TMUX_REG" > "$TMUX_REG.n"; mv "$TMUX_REG.n" "$TMUX_REG" ;;
+kill-session) if [ -e "$TMUX_REG.nokill.$target" ]; then exit 1; fi; grep -vxF "$target" "$TMUX_REG" > "$TMUX_REG.n"; mv "$TMUX_REG.n" "$TMUX_REG" ;;
 capture-pane) if [ -e "$TMUX_REG.hold.$target" ]; then date +%s%N; else echo ready; fi ;;
 load-buffer) cat "$4" > "$TMUX_REG.buf.$3" 2>/dev/null || true ;;
 paste-buffer) name=''; prev=''; for a in "$@"; do if [ "$prev" = '-b' ]; then name="$a"; fi; prev="$a"; done
@@ -37,6 +37,8 @@ paste-buffer) name=''; prev=''; for a in "$@"; do if [ "$prev" = '-b' ]; then na
 esac
 exit 0
 `, { mode: 0o755 });
+  const barriers = path.join(root, 'barriers');
+  fs.mkdirSync(barriers);
   const port = await freePort(), base = `http://127.0.0.1:${port}`;
   // Sentinels that must never reach the server or the harnesses it launches.
   const sentinels = { TMUX: '/tmp/sentinel-tmux,1,0', TMUX_PANE: '%99', FEATHER_URL: 'http://sentinel.invalid', FEATHER_WIKI_DIR: '/sentinel-wiki', FEATHER_UPLOAD_DIR: '/sentinel-uploads' };
@@ -48,7 +50,7 @@ exit 0
       // Allowlisted child environment: nothing from the caller's shell or an
       // enclosing Feather/tmux leaks into the server under test.
       env: { HOME: home, FEATHER_STATE_DIR: state, PORT: String(port),
-        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '6000',
+        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '6000', FEATHER_TEST_BARRIER_DIR: barriers,
         PATH: `${bin}:${process.env.PATH}`, TMUX_REG: registry, LANG: 'C.UTF-8' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -73,6 +75,15 @@ exit 0
   const pastes = id => fs.existsSync(`${registry}.pastes`) ? fs.readFileSync(`${registry}.pastes`, 'utf8').split('\n').filter(line => line.startsWith(`${pane(id)}\t`)).map(line => Buffer.from(line.slice(pane(id).length + 1), 'base64').toString('utf8')) : [];
   const hold = id => fs.writeFileSync(`${registry}.hold.${pane(id)}`, '');
   const release = id => fs.rmSync(`${registry}.hold.${pane(id)}`, { force: true });
+  const noKill = id => fs.writeFileSync(`${registry}.nokill.${pane(id)}`, '');
+  const allowKill = id => fs.rmSync(`${registry}.nokill.${pane(id)}`, { force: true });
+  // Server-side pause points (FEATHER_TEST_BARRIER_DIR): arm before the code
+  // path runs, wait for arrival, act, then open the barrier.
+  const barrier = (name, id) => ({
+    arm: () => fs.writeFileSync(path.join(barriers, `${name}.${id}`), ''),
+    arrived: () => fs.existsSync(path.join(barriers, `${name}.${id}.waiting`)),
+    open: () => { fs.rmSync(path.join(barriers, `${name}.${id}`), { force: true }); fs.rmSync(path.join(barriers, `${name}.${id}.waiting`), { force: true }); },
+  });
   const until = async (probe, what) => { for (let n = 0; n < 2000; n++) { const value = probe(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error(`timed out waiting for ${what}`); };
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const bridge = async (id, body) => {
@@ -121,6 +132,12 @@ exit 0
   for (const [key, value] of Object.entries(sentinels)) assert.ok(!harnessEnv.includes(value), `${key} sentinel leaked into the harness environment`);
   assert.ok(new RegExp(`FEATHER_URL=\\S*127\\.0\\.0\\.1:${port}`).test(harnessEnv.replace(/'"'"'/g, '')), 'the harness gets this server as FEATHER_URL');
   assert.doesNotMatch(startup(solo.id), /sentinel-wiki/);
+  // An ordinary chat that never entered /auto leaves no autonomous history,
+  // whether it is interrupted or told to stop.
+  await ok('POST', `/api/sessions/${solo.id}/interrupt`, {});
+  assert.equal((await bridge(solo.id, { action: 'stop' })).status, 200);
+  assert.equal((await ok('GET', '/api/sessions')).sessions.find(s => s.id === solo.id).auto, undefined, 'no history marker for a chat that was never autonomous');
+  assert.equal(meta()[solo.id].autoStoppedAt, undefined);
 
   // 2. /auto via the bridge (what the skill does): start, same objective, changed
   //    objective, stale generation, stop, start refused until a human speaks, start again.
@@ -152,12 +169,14 @@ exit 0
   assert.equal(stopped1.data.enabled, false);
   assert.equal(stopped1.data.generation, gen + 1);
   assert.equal(meta()[solo.id].mode, undefined, 'stop restores the ordinary mode');
-  assert.equal(meta()[solo.id].autoLifecycle, 1);
+  assert.equal(meta()[solo.id].autoLifecycle, 3);
   assert.ok(pastes(solo.id).some(text => text.startsWith('Ongoing work stopped.')), 'the stop note reached the creator pane');
   const stoppedRow = (await ok('GET', '/api/sessions')).sessions.find(s => s.id === solo.id);
   assert.equal(stoppedRow.mode, undefined);
-  assert.equal(stoppedRow.auto?.lifecycle, 1, 'a stopped auto keeps a public history marker');
+  assert.equal(stoppedRow.auto?.lifecycle, 3, 'a stopped auto keeps a public history marker');
   assert.ok(stoppedRow.auto.stoppedAt);
+  assert.equal((await bridge(solo.id, { action: 'stop' })).status, 200, 'a second stop is a no-op');
+  assert.equal((await ok('GET', '/api/sessions')).sessions.find(s => s.id === solo.id).auto.stoppedAt, stoppedRow.auto.stoppedAt, 'a no-op stop does not rewrite history');
   const refused = await bridge(solo.id, { action: 'start', generation: gen + 1, objective: 'Draft the plan' });
   assert.equal(refused.status, 409, 'no restart without a new human instruction');
   assert.match(refused.data.error, /human instruction/);
@@ -167,6 +186,7 @@ exit 0
   assert.equal(restarted.status, 200, JSON.stringify(restarted.data));
   assert.equal(meta()[solo.id].mode, 'ralph');
   assert.equal(meta()[solo.id].autoModeBefore, null);
+  assert.equal((await ok('GET', '/api/sessions')).sessions.find(s => s.id === solo.id).auto, undefined, 'a restart returns the chat to active: history cleared');
 
   // 3. Chat-owned schedules under the reserved `chats` room: a rule-only stop leaves
   //    the chat working; an owner stop disables every owned rule; ownership persists.
@@ -191,7 +211,7 @@ exit 0
   assert.equal(entry.mode, undefined, 'stop restores the pre-/auto mode');
   assert.equal(entry.autoModeBefore, undefined);
   assert.equal(entry.ralph.enabled, false);
-  assert.equal(entry.autoLifecycle, 2);
+  assert.equal(entry.autoLifecycle, 5);
   assert.ok(entry.autoStopNote && ['delivered', 'unobserved'].includes(entry.autoStopNote.status), JSON.stringify(entry.autoStopNote));
   assert.equal((await findRule()).enabled, false, 'stop disables owned schedules');
   assert.equal((await findRule()).ownerSessionId, solo.id, 'ownership survives the stop');
@@ -208,8 +228,8 @@ exit 0
   await ok('POST', `/api/sessions/${solo.id}/ralph`, { enabled: false });
   entry = meta()[solo.id];
   assert.equal(entry.mode, undefined);
-  assert.equal(entry.autoLifecycle, 3);
-  assert.equal(entry.autoStopNote.status, 'unobserved', 'note recorded from the previous stop only');
+  assert.equal(entry.autoLifecycle, 6);
+  assert.equal(entry.autoStopNote, undefined, 'no note for a dormant chat, and the restart cleared the previous one');
   assert.ok(!panes().includes(solo.id.slice(0, 8)), 'the stop note must not resume a dormant pane');
   assert.equal(pastes(solo.id).length, notesBefore, 'nothing pasted into a dormant pane');
   assert.equal((await findRule()).enabled, false, 'owner stop disables the owned rule again');
@@ -327,6 +347,33 @@ exit 0
     await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
+  // 8b. Stop during a paused attach whose cleanup fails: the pending record and
+  //     the reviewer's identity stay owned until the resources are really gone.
+  {
+    const { chat, attach, attempt } = await autoChatWithFrozenAttach('Stop With Failing Cleanup');
+    noKill(attempt.reviewerSessionId);
+    assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
+    assert.equal(meta()[chat.id].mode, undefined);
+    assert.equal(meta()[chat.id].chatReviewerAttach?.token, attempt.token, 'record kept while the harness is still alive');
+    assert.ok(panes().includes(attempt.reviewerSessionId.slice(0, 8)), 'the harness the kill could not remove');
+    assert.ok(meta()[attempt.reviewerSessionId].chatDetachedAt);
+    assert.match(logs, /not fully cleaned; record kept/);
+    release(attempt.reviewerSessionId);
+    assert.equal((await attach).status, 409);
+    assert.equal(meta()[chat.id].chatReviewerAttach?.token, attempt.token, 'the attempt\'s own cleanup also failed to remove the harness: record still kept');
+    const blocked = await call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(blocked.status, 409, 'no new reviewer while the old one is not cleaned up');
+    allowKill(attempt.reviewerSessionId);
+    await stop();
+    await start();
+    assert.equal(meta()[chat.id].chatReviewerAttach, undefined, 'boot sweep finished the cleanup once the harness could be killed');
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    assert.equal((await ok('GET', `/api/sidecar/${attempt.groupId}`)).group.status, 'done');
+    const fresh = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(fresh.attached, true);
+    await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
+  }
+
   // 9. Restart before the attach continues: the durable record survives the crash
   //    and the boot sweep removes the reviewer harness, capability and record.
   {
@@ -351,35 +398,103 @@ exit 0
     assert.equal(meta()[solo.id].mode, undefined, 'restored mode survives restart');
   }
 
-  // 10. Stop after commit: the pair is preserved, the announcement still lands.
-  //     The announcement is pasted and then observed for up to 2s on a constant
-  //     screen; the stop and its note arrive inside that window.
+  // Start /auto on a fresh chat and run an attach up to a named server barrier.
+  async function autoChatAtBarrier(name, point) {
+    const chat = await ok('POST', '/api/chats', { name });
+    await ok('POST', `/api/sessions/${chat.id}/send`, { text: 'Keep going.' });
+    const g = (await bridge(chat.id, { action: 'read' })).data.generation;
+    assert.equal((await bridge(chat.id, { action: 'start', generation: g, objective: `${name} objective`, constraints: [], next: 'go' })).status, 200);
+    const gate = barrier(point, chat.id);
+    gate.arm();
+    const attach = call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    const attempt = await until(() => meta()[chat.id]?.chatReviewerAttach, 'the pending attempt');
+    await until(gate.arrived, `the attach to reach ${point}`);
+    return { chat, attach, attempt, gate };
+  }
+  const creatorPastes = id => pastes(id).map(text => text.split('\n')[0].slice(0, 40));
+  const lastPastes = (id, ...prefixes) => { const tail = creatorPastes(id).slice(-prefixes.length); assert.deepEqual(tail.map((line, n) => line.startsWith(prefixes[n]) ? prefixes[n] : line), prefixes, JSON.stringify(creatorPastes(id))); };
+
+  // 10a. Stop after priming, before commit: no pair is ever committed, the attempt
+  //      is cleaned up, the stop note is the last thing the creator sees.
   {
-    const chat = await ok('POST', '/api/chats', { name: 'Stop After Commit' });
+    const { chat, attach, attempt, gate } = await autoChatAtBarrier('Stop Before Commit', 'attach-before-commit');
+    assert.ok(pastes(attempt.reviewerSessionId).length, 'the reviewer was primed');
+    assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
+    assert.equal(meta()[chat.id].mode, undefined);
+    assert.equal(meta()[chat.id].chatReviewerAttach, undefined, 'stop cleaned the primed-but-uncommitted attempt');
+    gate.open();
+    const late = await attach;
+    assert.equal(late.status, 409, JSON.stringify(late.data));
+    assert.equal(meta()[chat.id].chatPair, null, 'never committed');
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')));
+    lastPastes(chat.id, 'Ongoing work stopped.');
+  }
+
+  // 10b. Stop after commit, before the announcement is submitted: the lifecycle
+  //      fence cancels the announcement (its instructions were captured while the
+  //      chat was autonomous), the unannounced reviewer is detached again, and only
+  //      the stop note lands.
+  {
+    const { chat, attach, attempt, gate } = await autoChatAtBarrier('Stop Before Announce', 'attach-before-announce');
+    assert.equal(meta()[chat.id].chatPair?.reviewerSessionId, attempt.reviewerSessionId, 'committed');
+    assert.equal((await bridge(chat.id, { action: 'stop' })).status, 200);
+    assert.equal(meta()[chat.id].mode, undefined);
+    assert.equal(meta()[chat.id].chatPair?.reviewerSessionId, attempt.reviewerSessionId, 'a stop by itself keeps the committed pair');
+    gate.open();
+    const late = await attach;
+    assert.equal(late.status, 503, JSON.stringify(late.data));
+    assert.match(late.data.error, /could not be announced; it was detached again/);
+    assert.equal(meta()[chat.id].chatPair, null, 'an unannounced pair is unwound');
+    assert.ok(!panes().includes(attempt.reviewerSessionId.slice(0, 8)));
+    assert.ok(meta()[attempt.reviewerSessionId].chatDetachedAt);
+    assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'autonomous-era instructions never land after Stop');
+    lastPastes(chat.id, 'Ongoing work stopped.');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved', 'the stop note was submitted despite the later detach bump');
+  }
+
+  // 10c. Stop while the announcement sits at the paste boundary (after its
+  //      capture, before paste + Enter): the re-check cancels it.
+  {
+    const { chat, attach, attempt, gate } = await autoChatAtBarrier('Stop At Paste', 'send-before-paste');
+    assert.equal(meta()[chat.id].chatPair?.reviewerSessionId, attempt.reviewerSessionId, 'committed and announcing');
+    const stopping = bridge(chat.id, { action: 'stop' }); // its note queues behind the parked announcement
+    await until(() => meta()[chat.id]?.mode === undefined, 'the stop write');
+    gate.open();
+    const late = await attach;
+    assert.equal(late.status, 503, JSON.stringify(late.data));
+    assert.equal((await stopping).status, 200);
+    assert.equal(meta()[chat.id].chatPair, null);
+    assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'nothing pasted after the fence failed');
+    lastPastes(chat.id, 'Ongoing work stopped.');
+  }
+
+  // 10d. Stop after the announcement was submitted (during its observation wait):
+  //      the pair is preserved and both messages are on the creator pane in order.
+  {
+    const chat = await ok('POST', '/api/chats', { name: 'Stop After Announce' });
     await ok('POST', `/api/sessions/${chat.id}/send`, { text: 'Keep going.' });
     const g = (await bridge(chat.id, { action: 'read' })).data.generation;
     assert.equal((await bridge(chat.id, { action: 'start', generation: g, objective: 'commit objective', constraints: [], next: 'go' })).status, 200);
     const attach = call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
     const pair = await until(() => meta()[chat.id]?.chatPair, 'the committed pair');
-    assert.equal(meta()[chat.id].chatReviewerAttach, undefined);
-    const stopping = bridge(chat.id, { action: 'stop' }); // its stop note queues behind the announcement's observation wait
+    await until(() => pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'the announcement paste');
+    const stopping = bridge(chat.id, { action: 'stop' }); // the announcement is still being observed (2s)
     await until(() => meta()[chat.id]?.mode === undefined, 'the stop write');
     assert.deepEqual(meta()[chat.id].chatPair, pair, 'a stop keeps the committed pair');
     const done = await attach;
     assert.equal(done.status, 200, JSON.stringify(done.data));
-    assert.equal(done.data.attached, true);
     assert.equal(done.data.delivery.creator.submitted, true);
     assert.equal((await stopping).status, 200);
     assert.deepEqual(meta()[chat.id].chatPair, pair);
     assert.ok(panes().includes(pair.reviewerSessionId.slice(0, 8)), 'reviewer harness alive after the stop');
-    assert.ok(pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')));
-    assert.ok(pastes(chat.id).some(text => text.startsWith('Ongoing work stopped.')));
+    lastPastes(chat.id, 'A Reviewer has been attached', 'Ongoing work stopped.');
     assert.equal((await call('GET', `/api/chats/${chat.id}/inbox`)).status, 200);
     await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
-  // 11. Detach while the first reviewer is still priming, then re-attach: the
-  //     first attempt is fenced out (never announced) and only the new pair is announced.
+  // 11a. Detach while the first reviewer is still priming, then re-attach: the
+  //      first attempt is never announced and only the new pair is.
   {
     const chat = await ok('POST', '/api/chats', { name: 'Fenced Announcement' });
     const first = call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
@@ -405,6 +520,38 @@ exit 0
     assert.equal(announced.length, 1, 'exactly one announcement, for the live pair');
     assert.match(announced[0], new RegExp(`--group ${second.chatPair.groupId}`));
     assert.doesNotMatch(announced[0], new RegExp(attempt1.groupId));
+    await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
+  }
+
+  // 11b. Detach a committed pair before its announcement is submitted, then attach
+  //      a new reviewer: the old announcement is fenced by identity, the detach note
+  //      precedes the one announcement, which names only the new group. (A new pair
+  //      cannot form while the old attempt is still in flight: the second attach is
+  //      refused with 409 until the first has unwound.)
+  {
+    const chat = await ok('POST', '/api/chats', { name: 'Detach Before Announce' });
+    const gate = barrier('attach-before-announce', chat.id);
+    gate.arm();
+    const first = call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    const pair1 = await until(() => meta()[chat.id]?.chatPair, 'the first committed pair');
+    await until(gate.arrived, 'the announcement barrier');
+    const detaching = await call('DELETE', `/api/chats/${chat.id}/reviewer`);
+    assert.equal(detaching.data.detached, true);
+    assert.equal(meta()[chat.id].chatPair, null);
+    assert.equal((await call('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' })).status, 409, 'no new pair while the old attempt is in flight');
+    gate.open();
+    const firstResult = await first;
+    assert.equal(firstResult.status, 503, JSON.stringify(firstResult.data));
+    assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'a detached pair is never announced');
+    assert.ok(!panes().includes(pair1.reviewerSessionId.slice(0, 8)));
+    const second = await ok('POST', `/api/chats/${chat.id}/reviewer`, { reviewerAgent: 'claude' });
+    assert.equal(second.attached, true);
+    assert.notEqual(second.chatPair.reviewerSessionId, pair1.reviewerSessionId);
+    const announced = pastes(chat.id).filter(text => text.startsWith('A Reviewer has been attached'));
+    assert.equal(announced.length, 1, 'exactly one announcement, for the live pair');
+    assert.match(announced[0], new RegExp(`--group ${second.chatPair.groupId}`));
+    assert.doesNotMatch(announced[0], new RegExp(pair1.groupId));
+    lastPastes(chat.id, 'Reviewer detached.', 'A Reviewer has been attached');
     await ok('DELETE', `/api/chats/${chat.id}/reviewer`);
   }
 
