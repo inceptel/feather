@@ -27,6 +27,7 @@ import { projectInboxWakeIds } from './lib/project-inbox-wakes.js';
 import { createProjectRenamer, managedChatProject } from './lib/chat-projects.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { createSessionSearch } from './lib/session-search.js';
+import { createWikiSearch } from './lib/wiki-search.js';
 import { stopScheduledRules, scheduledRunMayContinue, mayReenableRalph } from './lib/autopilot.js';
 import { resolveCodexWatchId, codexAdoptionPending, codexHeadHasChatIdentity } from './lib/codex-watch.js';
 import { createSnapshotCache } from './lib/snapshot-cache.js';
@@ -754,6 +755,10 @@ function isAutoWorkerSession(buf, agent, projectId, cwd) {
 const sessionSearchLock = createKeyedLock();
 const sessionSearch = createSessionSearch({ dbPath: STATE_PATHS.cache.searchIndexFile });
 sessionSearch.ready.catch(e => console.error('[search] index unavailable:', e.message));
+// Full-text search over wiki pages (lib/wiki-search.js): in memory, synced
+// from the page listing on each query so a fresh edit is searchable at once.
+const wikiSearch = createWikiSearch();
+wikiSearch.ready.catch(e => console.error('[wiki-search] index unavailable:', e.message));
 async function refreshSessionSearch(candidates, signal) {
   return sessionSearchLock('index', () => sessionSearch.sync(candidates, { signal }));
 }
@@ -2690,7 +2695,7 @@ const app = express();
 // classified, while leaving static assets and existing non-API read surfaces
 // available for production-shaped canary inspection.
 const READ_ONLY_API_ROUTES = [
-  /^\/api\/wiki(?:\/page)?$/,
+  /^\/api\/wiki(?:\/page|\/search)?$/,
   /^\/api\/chat-pins$/,
   /^\/api\/health$/,
   /^\/api\/boxes$/,
@@ -6534,6 +6539,20 @@ app.get('/api/wiki/page', (req, res) => {
   const page = readSharedWiki(sharedDir, ROOMS_HOME_DIR, String(req.query.source || 'shared'), String(req.query.name || ''));
   if (!page) return res.status(404).json({ error: 'no such wiki page' });
   res.json(page);
+});
+
+// Content search across every wiki collection. The listing is cheap and the
+// index re-reads only pages whose size or mtime changed, so syncing per query
+// keeps results current without a watcher.
+app.get('/api/wiki/search', async (req, res) => {
+  const sharedDir = process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki');
+  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!query) return res.json({ results: [] });
+  try {
+    const pages = listSharedWiki(sharedDir, ROOMS_HOME_DIR);
+    await sessionSearchLock('wiki', () => wikiSearch.sync(pages, page => readSharedWiki(sharedDir, ROOMS_HOME_DIR, page.source, page.name)?.content ?? null));
+    res.json({ results: wikiSearch.search(query, { limit: parseInt(req.query.limit) || 40 }) });
+  } catch (e) { res.status(503).json({ error: e.message }); }
 });
 
 app.get('/api/rooms/:name/wiki', (req, res) => {

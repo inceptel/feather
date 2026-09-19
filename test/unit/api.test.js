@@ -56,6 +56,25 @@ it('publishes edited project evidence and returns an authenticated reply under i
   assert.equal(card.comments[0].reply.text, 'The reviewer verified the change.')
 })
 
+it('searches wiki page text across collections and marks the matched words', { skip: EXTERNAL_SERVER }, async () => {
+  const wikiDir = path.join(fixtureHome, 'wiki')
+  fs.mkdirSync(path.join(wikiDir, 'health'), { recursive: true })
+  fs.writeFileSync(path.join(wikiDir, 'Home.md'), '# Shared wiki\nThe front door.\n')
+  fs.writeFileSync(path.join(wikiDir, 'health', 'toenail-evidence.md'), '# Toenail evidence\nLaser trials measure clear nail, not mycological cure.\n')
+  const empty = await fetch(`${BASE}/api/wiki/search?q=`).then(r => r.json())
+  assert.deepEqual(empty, { results: [] })
+  const found = await fetch(`${BASE}/api/wiki/search?q=mycological%20cure`).then(r => r.json())
+  assert.equal(found.results.length, 1)
+  assert.equal(found.results[0].source, 'shared')
+  assert.equal(found.results[0].name, 'health/toenail-evidence')
+  assert.ok(found.results[0].snippet.some(part => part.match && /mycological/i.test(part.text)))
+  fs.writeFileSync(path.join(wikiDir, 'health', 'toenail-evidence.md'), '# Toenail evidence\nRewritten without the old phrase.\n')
+  const stale = await fetch(`${BASE}/api/wiki/search?q=mycological`).then(r => r.json())
+  assert.deepEqual(stale.results, [], 'an edited page is re-indexed on the next query')
+  const home = await fetch(`${BASE}/api/wiki/search?q=front%20door`).then(r => r.json())
+  assert.equal(home.results[0]?.name, 'Home')
+})
+
 // ── Synthetic session for deterministic testing ─────────────────────────────
 
 const TEST_SESSION_ID = `test-feather-${Date.now()}`

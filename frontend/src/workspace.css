@@ -55,6 +55,10 @@
 .workspace-wiki-page span { display: block; margin-top: 4px; color: var(--workspace-secondary); font-size: 11px; }
 .workspace-wiki-page:hover { background: var(--bg-secondary); }
 .workspace-wiki-page[aria-pressed="true"] { background: var(--accent-subtle); border-color: var(--border-medium); }
+.workspace-wiki-snippet { display: block; margin-top: 5px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.45; }
+.workspace-wiki-snippet mark { background: var(--accent-subtle); color: var(--text-primary); border-radius: 2px; padding: 0 1px; }
+.workspace-wiki-meta { margin: 0 0 16px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.5; }
+.workspace-wiki-meta.is-stale { color: #b8862b; }
 .workspace-wiki-reading { min-width: 0; padding: 4px 0 32px 28px; border-left: 1px solid var(--border-base); }
 .workspace-wiki-reading .wiki-markdown { overflow-wrap: anywhere; font-size: 15px; line-height: 1.75; }
 .workspace-wiki-reading .wiki-markdown > :first-child { margin-top: 0; }

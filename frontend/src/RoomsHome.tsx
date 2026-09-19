@@ -7,6 +7,30 @@ import './workspace.css'
 
 type ChatPin = { id: string, title?: string, legacy?: boolean }
 type WikiPage = { source: string, name: string, size: number, updatedAt: string }
+type WikiSnippet = { text: string, match: boolean }[]
+type WikiHit = { source: string, name: string, updatedAt: string, rank: number, snippet: WikiSnippet }
+type WikiListing = { page: { source: string, name: string, updatedAt: string }, snippet: WikiSnippet | null }
+
+const WIKI_STALE_DAYS = 14
+
+function ageInWords(iso: string) {
+  const ms = Date.now() - Date.parse(iso)
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 2) return 'just now'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  if (days < 60) return `${days} days ago`
+  const months = Math.floor(days / 30)
+  return `${months} months ago`
+}
+
+function pageIsStale(iso: string) {
+  const ms = Date.now() - Date.parse(iso)
+  return Number.isFinite(ms) && ms > WIKI_STALE_DAYS * 86400000
+}
 
 function lastUsedFirst(a: SessionMeta, b: SessionMeta) {
   return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0)
@@ -17,13 +41,45 @@ function SharedWiki(props: { source?: string, refreshKey: number }) {
   const [query, setQuery] = createSignal('')
   const [selected, setSelected] = createSignal<{ source: string, name: string } | null>(null)
   const [content, setContent] = createSignal('')
+  const [updatedAt, setUpdatedAt] = createSignal('')
+  const [hits, setHits] = createSignal<WikiHit[] | null>(null)
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal('')
   let generation = 0
   let pageGeneration = 0
-  onCleanup(() => { ++generation; ++pageGeneration })
+  let searchGeneration = 0
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => { ++generation; ++pageGeneration; ++searchGeneration; clearTimeout(searchTimer) })
   const label = (source: string) => source === 'shared' ? 'Shared wiki' : source.replace(/^room:/, '')
   const filtered = createMemo(() => pages().filter(page => `${label(page.source)} ${page.name}`.toLowerCase().includes(query().toLowerCase())))
+  const pageKey = (page: { source: string, name: string }) => `${page.source}\n${page.name}`
+
+  // Content hits come first with their snippet; pages whose title matched but
+  // whose body did not follow, so a short query still lists what it always did.
+  const listing = createMemo<WikiListing[]>(() => {
+    const found = hits()
+    const titled = filtered().map(page => ({ page, snippet: null }))
+    if (!found) return titled
+    const seen = new Set(found.map(pageKey))
+    return [...found.map(hit => ({ page: hit, snippet: hit.snippet })), ...titled.filter(item => !seen.has(pageKey(item.page)))]
+  })
+
+  createEffect(() => {
+    const text = query().trim()
+    const own = ++searchGeneration
+    clearTimeout(searchTimer)
+    if (text.length < 2) { setHits(null); return }
+    searchTimer = setTimeout(async () => {
+      try {
+        const response = await fetch(appUrl(`/api/wiki/search?q=${encodeURIComponent(text)}`))
+        if (!response.ok) throw new Error('search unavailable')
+        const data = await response.json()
+        if (own === searchGeneration) setHits(Array.isArray(data.results) ? data.results : null)
+      } catch {
+        if (own === searchGeneration) setHits(null)
+      }
+    }, 180)
+  })
 
   async function openPage(page: { source: string, name: string }) {
     const own = ++pageGeneration
@@ -35,7 +91,7 @@ function SharedWiki(props: { source?: string, refreshKey: number }) {
       const response = await fetch(appUrl(`/api/wiki/page?${new URLSearchParams(page)}`))
       if (!response.ok) throw new Error('Could not load wiki page')
       const data = await response.json()
-      if (own === pageGeneration) setContent(data.content)
+      if (own === pageGeneration) { setContent(data.content); setUpdatedAt(typeof data.updatedAt === 'string' ? data.updatedAt : '') }
     } catch (cause) {
       if (own === pageGeneration) setError(cause instanceof Error ? cause.message : String(cause))
     } finally { if (own === pageGeneration) setLoading(false) }
@@ -87,16 +143,28 @@ function SharedWiki(props: { source?: string, refreshKey: number }) {
   return <section data-testid="shared-wiki" class="workspace-wiki">
     <style>{markdownCSS}</style>
     <div class="workspace-wiki-index">
-      <input class="workspace-search" type="search" aria-label="Search wiki pages" placeholder="Find a page or collection" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
+      <input class="workspace-search" type="search" aria-label="Search wiki pages" placeholder="Search page text or titles" value={query()} onInput={event => setQuery(event.currentTarget.value)} />
       <nav aria-label="Wiki pages" class="workspace-wiki-pages">
-        <For each={filtered()}>{page => <button class="workspace-wiki-page" onClick={() => void openPage(page)} aria-pressed={selected()?.source === page.source && selected()?.name === page.name}>{page.name}<span>{label(page.source)}</span></button>}</For>
+        <For each={listing()}>{item => <button class="workspace-wiki-page" onClick={() => void openPage(item.page)} aria-pressed={selected()?.source === item.page.source && selected()?.name === item.page.name}>
+          {item.page.name}
+          <span>{label(item.page.source)} · {timeAgo(item.page.updatedAt)}</span>
+          <Show when={item.snippet}><small class="workspace-wiki-snippet"><For each={item.snippet}>{part => part.match ? <mark>{part.text}</mark> : <>{part.text}</>}</For></small></Show>
+        </button>}</For>
       </nav>
-      <Show when={!loading() && !error() && !filtered().length}><p class="workspace-empty">{pages().length ? 'No matching pages.' : 'No wiki pages yet.'}</p></Show>
+      <Show when={!loading() && !error() && !listing().length}><p class="workspace-empty">{pages().length ? 'No matching pages.' : 'No wiki pages yet.'}</p></Show>
     </div>
     <div class="workspace-wiki-reading">
       <Show when={error()}><p role="alert" class="workspace-error">{error()}</p></Show>
       <Show when={loading()}><p role="status" class="workspace-empty">Loading wiki…</p></Show>
-      <Show when={!loading() && !error() && selected()}><article class="markdown wiki-markdown" onClick={followLink} innerHTML={renderWikiMarkdown(content())} /></Show>
+      <Show when={!loading() && !error() && selected()}>
+        <Show when={updatedAt()}>
+          <p class="workspace-wiki-meta" classList={{ 'is-stale': pageIsStale(updatedAt()) }} data-testid="wiki-page-meta">
+            {label(selected()!.source)} · last changed {ageInWords(updatedAt())} ({new Date(updatedAt()).toLocaleDateString()})
+            <Show when={pageIsStale(updatedAt())}>. Anything this page calls current is as of that date.</Show>
+          </p>
+        </Show>
+        <article class="markdown wiki-markdown" onClick={followLink} innerHTML={renderWikiMarkdown(content())} />
+      </Show>
     </div>
   </section>
 }

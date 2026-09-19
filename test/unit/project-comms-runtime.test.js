@@ -273,3 +273,30 @@ test('pause during a delegation prevents the next delegation and helper launch',
   assert.equal(sends, 1); assert.equal(launches, 0)
   assert.equal(f.store.pendingDelegations().length, 1)
 })
+
+test('each tick snapshots the wiki into git at most once per interval and never blocks on failure', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-comms-runtime-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const wikiPath = path.join(root, 'wiki'); fs.mkdirSync(wikiPath)
+  const inbox = createProjectInbox({ root: path.join(root, 'inboxes') })
+  let clock = 1_000_000
+  const calls = []
+  let fail = false
+  const store = createProjectComms({ root, now: () => clock, coalesceMs: 0 })
+  const runtime = createProjectCommsRuntime({ store, root, wikiPath, readMeta: () => ({}), inbox, baseUrl: 'http://localhost:3300',
+    launch: async () => {}, sendTask: async () => {}, now: () => clock, wikiCommitIntervalMs: 60_000,
+    commitWiki: async dir => { calls.push(dir); if (fail) throw new Error('index.lock exists'); return { committed: true, subject: 'wiki: update Home' } } })
+  await runtime.tick()
+  assert.deepEqual(calls, [wikiPath])
+  clock += 10_000
+  await runtime.tick()
+  assert.equal(calls.length, 1, 'a tick inside the interval does not shell out again')
+  clock += 60_000
+  fail = true
+  await runtime.tick()
+  assert.equal(calls.length, 2)
+  assert.equal(runtime.status().error, null, 'a failed commit is logged, not surfaced as a comms error')
+  clock += 60_000
+  await runtime.tick()
+  assert.equal(calls.length, 3)
+})
