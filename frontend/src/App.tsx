@@ -18,6 +18,7 @@ import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation,
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
 import { appUrl } from './lib/appPath.js'
 import { localFileUrl } from './lib/localMedia.js'
+import { createMessageDeliveryGate } from './lib/messageDelivery.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
@@ -319,6 +320,7 @@ export default function App() {
     ++pathGeneration; ++browseGeneration; setViewingFile(null); setFilesOpen(false); setBrowse(null); setBrowseLoading(false); setPathError('')
   })
   const [uploadScopes, setUploadScopes] = createSignal<Set<string>>(new Set())
+  const messageDelivery = createMessageDeliveryGate()
   const mediaScopeKey = (boxId: string, sessionId: string) => `${boxId}\u0000${sessionId}`
   const uploading = () => {
     const sessionId = currentId()
@@ -1726,22 +1728,26 @@ export default function App() {
     const val = rawText.trim()
     if ((!val && !pending.length) || !currentId()) return
     const target = { id: currentId()!, box: currentBox() }
-    setUploadingFor(target, true)
-    setMediaNotice('')
-    try {
-      const parts: string[] = val ? [val] : []
-      for (const file of pending) {
-        const uploadPath = await uploadPendingFile(file)
-        parts.push(file.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${file.name})`)
+    const scope = mediaScopeKey(target.box, target.id)
+    const payload = JSON.stringify({ text: rawText, files: pending.map(file => file.id) })
+    try { await messageDelivery.run(scope, payload, async messageId => {
+      setUploadingFor(target, true)
+      setMediaNotice('')
+      try {
+        const parts: string[] = val ? [val] : []
+        for (const file of pending) {
+          const uploadPath = await uploadPendingFile(file)
+          parts.push(file.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${file.name})`)
+        }
+        await sendSessionText(parts.join('\n'), target, messageId)
+        acknowledgeComposedMessage(target, rawText, pending)
+      } catch (e: any) {
+        if (target.id === currentId() && target.box === currentBox()) setMediaNotice(`Media retained — ${e?.message || e}. Retry when ready.`)
+        throw e
+      } finally {
+        setUploadingFor(target, false)
       }
-      // Reuse the first durable attachment id as the delivery key. If the
-      // server accepted the prompt but its acknowledgement was lost, Retry
-      // receives the same success response without injecting it twice.
-      await sendSessionText(parts.join('\n'), target, pending[0]?.id)
-      acknowledgeComposedMessage(target, rawText, pending)
-    } catch (e: any) {
-      if (target.id === currentId() && target.box === currentBox()) setMediaNotice(`Media retained — ${e?.message || e}. Retry when ready.`)
-    } finally { setUploadingFor(target, false) }
+    }, pending[0]?.id) } catch {}
   }
 
   async function handleSend() {

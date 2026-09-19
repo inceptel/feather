@@ -5,7 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync, execSync, spawn } from 'child_process';
+import { execFileSync as rawExecFileSync, execSync, spawn } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
@@ -85,6 +85,7 @@ import {
 } from './lib/room-template.js';
 import { appendSteering, normalizeSteerText } from './lib/room-frontier.js';
 import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, feedCommentQueueLine, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
+import { retrySpawnCapacitySync } from './lib/process-retry.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -97,6 +98,8 @@ import {
   ralphContinuationPrompt,
   ralphSystemPrompt,
 } from './lib/ralph.js';
+const execFileSync = (...args) => retrySpawnCapacitySync(() => rawExecFileSync(...args));
+
 
 // Load ~/.env if present
 try {
