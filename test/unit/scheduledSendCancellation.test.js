@@ -2,23 +2,25 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createKeyedLock } from '../../lib/sendlock.js';
 import { scheduledRunMayContinue } from '../../lib/autopilot.js';
+import { applyChatWorkflow, authorizeChatWorkflow } from '../../lib/chat-workflow.js';
 
 const server = fs.readFileSync(new URL('../../server.js', import.meta.url), 'utf8');
 const section = (start, end) => server.slice(server.indexOf(start), server.indexOf(end, server.indexOf(start)));
 function fixture(overrides = {}) {
   const state = { rules: { rule: { enabled: true } }, runtime: {}, active: [{ runId: 'old' }] };
-  const meta = { chat: { ralph: { enabled: true, status: 'working' } } };
+  const meta = { chat: { chatRole: 'creator', mode: 'ralph', workflow: authorizeChatWorkflow(undefined), ralph: { enabled: true, status: 'working' } } };
   const pastes = [], events = [], keys = [], prepares = [];
   const receipts = {};
   const context = vm.createContext({
-    createKeyedLock, scheduledRunMayContinue, createHash, console,
+    createKeyedLock, scheduledRunMayContinue, createHash, randomUUID, console,
+    applyChatWorkflow, authorizeChatWorkflow, RALPH_MODE: 'ralph', cancelRalphCallback: () => {},
     tmuxName: id => id, tmuxIsActive: () => true, tmuxCapture: () => 'pane',
     tmuxPaste: (...args) => pastes.push(args), tmuxRun: args => keys.push(args.at(-1)),
     waitForPaneChange: async () => true, pause: async () => {},
-    readMeta: () => meta, getOmpSessionId: () => null,
+    readMeta: () => meta, updateMeta: fn => Object.assign(meta, fn(meta)), getOmpSessionId: () => null,
     path: { join: (...parts) => parts.join('/') }, ROOMS_HOME_DIR: '/rooms',
     RESIDENT_RELAUNCH_SETTLE_MS: 1, sleep: async () => {}, launchOmpSession: () => {},
     ROOM_PULSE_STARTED_AT: 0,
@@ -30,6 +32,9 @@ function fixture(overrides = {}) {
     schedulerWrapUpPrompt: () => 'Automatic wrap-up', getAgentForSession: () => 'claude',
     appendSchedulerRun: event => events.push(event), ...overrides,
   });
+  vm.runInContext(section('function authorizeChatHumanInput(', 'function prepareRalphForHumanInput('), context);
+  vm.runInContext(section('function patchRalphState(', 'function cancelRalphCallback('), context);
+  vm.runInContext(section('function stopRalphSession(', 'function authorizeChatHumanInput('), context);
   vm.runInContext(section('const sendLock = createKeyedLock();', 'const ralphCallbackTimers = new Map();'), context);
   vm.runInContext(section('function residentWakeDue(', 'const residentWakesInFlight = new Set();'), context);
   vm.runInContext(section('async function ensureResidentRunning(', 'function checkResidentWakes()'), context);
@@ -97,6 +102,34 @@ test('ordinary idempotent delivery still rejects a changed payload for the same 
   await f.context.sendInputIdempotent('chat', 'Original user request', 'user-message');
   await assert.rejects(f.context.sendInputIdempotent('chat', 'Different user request', 'user-message'), /message id already used with different text/);
   assert.equal(f.pastes.length, 1);
+});
+
+test('human message queued before Stop cannot acquire fresh authority after the send lock releases', async () => {
+  let release, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const f = fixture({ waitForPaneChange: async () => { entered(); await gate; return true; } });
+  const holding = f.context.sendInput('chat', 'Already submitted work');
+  await ready;
+  const queued = f.context.sendInputIdempotent('chat', 'Keep working on the old request', 'queued-human');
+  f.context.stopRalphSession('chat');
+  const generation = f.meta.chat.workflow.generation;
+  const token = f.meta.chat.chatStopToken;
+  const rejected = assert.rejects(queued, /stopped before delivery/);
+  release();
+  await holding;
+  await rejected;
+  assert.ok(token, 'Stop records a token before the queued request acquires its lock');
+  assert.equal(f.meta.chat.workflow.generation, generation);
+  assert.equal(f.meta.chat.workflow.humanAuthorized, false);
+  assert.equal(f.meta.chat.ralph.enabled, false);
+  assert.equal(f.pastes.length, 1);
+  assert.deepEqual(f.prepares, []);
+  assert.deepEqual(f.receipts, {});
+  await f.context.sendInputIdempotent('chat', 'A genuinely later human request', 'later-human');
+  assert.equal(f.meta.chat.workflow.humanAuthorized, true);
+  assert.equal(f.meta.chat.workflow.generation, generation + 1);
+  assert.equal(f.pastes.length, 2);
 });
 
 test('scheduled nudge queued behind a human send stays cancelled after rule restart', async () => {

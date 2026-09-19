@@ -6,6 +6,7 @@ import path from 'node:path'
 import { setImmediate as settle } from 'node:timers/promises'
 import { createProjectComms } from '../../lib/project-comms.js'
 import { createProjectInbox } from '../../lib/project-inbox.js'
+import { applyChatWorkflow, authorizeChatWorkflow } from '../../lib/chat-workflow.js'
 import { createProjectCommsRuntime, projectCommsSources, projectCommsFeed, projectCommsComment } from '../../lib/project-comms-runtime.js'
 
 const creator = { role: 'creator', sessionId: 'creator', creatorSessionId: 'creator' }
@@ -13,17 +14,66 @@ const reviewer = { role: 'reviewer', sessionId: 'reviewer', creatorSessionId: 'c
 const human = { role: 'human', sessionId: 'creator' }
 const candidate = { title: 'Smarter rivals', summary: 'Inventory now changes rival behavior.', evidence: 'Independent reviewer played a full round.', links: [{ label: 'Play', url: 'https://example.com/play' }] }
 
+test('unused and retired pair evidence is never collected for publication', t => {
+  const f = fixture(t)
+  f.meta.creator.workflow = { checkpoints: [{ id: 'setup', publish: true, summary: 'Setup output', evidence: 'Setup file' }] }
+  for (const chatStandby of [true, 'retired']) {
+    f.meta.creator.chatStandby = chatStandby
+    assert.deepEqual(projectCommsSources(f.meta, f.inbox, f.wikiPath), [])
+  }
+  f.meta.creator.chatStandby = false
+  assert.equal(projectCommsSources(f.meta, f.inbox, f.wikiPath).length, 1)
+})
+
+test('interim workflow evidence reaches editors before completion, survives restart and may be suppressed', async t => {
+  const f = fixture(t)
+  let workflow = authorizeChatWorkflow(undefined, 1000000)
+  workflow = applyChatWorkflow(workflow, { action: 'start', generation: 1, objective: 'Improve rivals' }, { role: 'creator', now: 1000000 }).workflow
+  workflow = applyChatWorkflow(workflow, { action: 'progress', generation: 1, summary: 'A prototype responds to inventory', evidence: 'Prototype played locally; independent review remains pending', publish: true }, { role: 'creator', now: 1000000 }).workflow
+  f.meta.creator.workflow = workflow
+  const sources = projectCommsSources(f.meta, f.inbox, f.wikiPath)
+  assert.equal(sources.length, 1)
+  assert.equal(sources[0].snapshot.reviewed, false)
+  assert.equal(sources[0].snapshot.provenance, 'creator-progress')
+  await f.tick()
+  assert.match(f.launches[0].prompt, /interim observations, not reviewed completion/)
+  await f.complete('caretaker', { decision: 'suppress', reason: 'Wait for stronger evidence', wikiPaths: [] })
+  f.restart(); await f.tick()
+  assert.equal(f.launches.length, 1)
+  assert.deepEqual(projectCommsFeed(f.store), [])
+  assert.equal(f.meta.creator.workflow.summary, 'A prototype responds to inventory')
+})
+
+test('material progress publishes through caretaker and marketer while its objective remains active', async t => {
+  const f = fixture(t)
+  let workflow = authorizeChatWorkflow(undefined, 1000000)
+  workflow = applyChatWorkflow(workflow, { action: 'start', generation: 1, objective: 'Improve rivals' }, { role: 'creator', now: 1000000 }).workflow
+  f.meta.creator.workflow = applyChatWorkflow(workflow, { action: 'progress', generation: 1,
+    summary: 'Inventory response prototype is playable', evidence: 'A local game demonstrated responses; balancing remains', publish: true,
+  }, { role: 'creator', now: 1000000 }).workflow
+  await f.tick()
+  await f.complete('caretaker', { decision: 'publish', reason: 'A useful interim result', wikiPaths: [],
+    candidate: { title: 'A playable first step', summary: 'The prototype responds to inventory. Balancing is still underway.', evidence: 'Local game observation', links: [] },
+  })
+  await f.complete('marketer', { title: 'A playable first step', summary: 'The prototype responds to inventory. Balancing is still underway.', links: [] })
+  assert.equal(f.store.read().publications.length, 1)
+  assert.equal(f.meta.creator.workflow.enabled, true)
+  assert.equal(f.inbox.read('example-game').tasks.length, 0)
+  f.restart(); await f.tick()
+  assert.equal(f.store.read().publications.length, 1)
+})
+
 function fixture(t, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-comms-runtime-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
-  const projectPath = path.join(root, 'spread-rush'), wikiPath = path.join(root, 'wiki')
+  const projectPath = path.join(root, 'example-game'), wikiPath = path.join(root, 'wiki')
   fs.mkdirSync(projectPath); fs.mkdirSync(wikiPath)
-  const wiki = path.join(wikiPath, 'spread-rush.md')
-  const meta = { creator: { chatRole: 'creator', chatProjectId: 'spread-rush', title: 'Spread Rush', cwd: projectPath }, reviewer: { chatRole: 'reviewer', chatProjectId: 'spread-rush', cwd: projectPath } }
+  const wiki = path.join(wikiPath, 'example-game.md')
+  const meta = { creator: { chatRole: 'creator', chatProjectId: 'example-game', title: 'Example Game', cwd: projectPath }, reviewer: { chatRole: 'reviewer', chatProjectId: 'example-game', cwd: projectPath } }
   let now = 1_000_000, failLaunch = false, failSend = false
   const launches = [], sends = []
   const inbox = createProjectInbox({ root: path.join(root, 'inboxes') })
-  inbox.configure('spread-rush', { objective: 'Make the game fun.', allowIdeas: false }, human)
+  inbox.configure('example-game', { objective: 'Make the game fun.', allowIdeas: false }, human)
   const makeStore = () => createProjectComms({ root, now: () => now, coalesceMs: 0, ...options })
   let store = makeStore()
   const makeRuntime = (readOnly = false) => createProjectCommsRuntime({ store, root, wikiPath, readMeta: () => meta, inbox, baseUrl: 'http://localhost:3300', readOnly,
@@ -32,16 +82,16 @@ function fixture(t, options = {}) {
   })
   let runtime = makeRuntime()
   function finish(taskId, result = { summary: 'Rivals adapt to inventory.', evidence: 'Browser round and independent review pass.', wiki }) {
-    inbox.claim('spread-rush', creator, { taskId })
-    inbox.transition('spread-rush', taskId, 'propose', { criteria: ['A reviewer can play the changed behavior.'] }, creator)
-    inbox.transition('spread-rush', taskId, 'agree', {}, reviewer)
-    inbox.transition('spread-rush', taskId, 'submit', { revision: `rev-${taskId}` }, creator)
-    inbox.transition('spread-rush', taskId, 'review', { revision: `rev-${taskId}`, verdict: 'PASS', evidence: 'Played and verified.' }, reviewer)
-    inbox.transition('spread-rush', taskId, 'complete', { revision: `rev-${taskId}`, result }, creator)
+    inbox.claim('example-game', creator, { taskId })
+    inbox.transition('example-game', taskId, 'propose', { criteria: ['A reviewer can play the changed behavior.'] }, creator)
+    inbox.transition('example-game', taskId, 'agree', {}, reviewer)
+    inbox.transition('example-game', taskId, 'submit', { revision: `rev-${taskId}` }, creator)
+    inbox.transition('example-game', taskId, 'review', { revision: `rev-${taskId}`, verdict: 'PASS', evidence: 'Played and verified.' }, reviewer)
+    inbox.transition('example-game', taskId, 'complete', { revision: `rev-${taskId}`, result }, creator)
   }
   function seed() {
-    fs.writeFileSync(wiki, '# Spread Rush\nRivals use inventory pressure.\n')
-    inbox.add('spread-rush', { id: 'rivals', title: 'Improve rivals' }, human)
+    fs.writeFileSync(wiki, '# Example Game\nRivals use inventory pressure.\n')
+    inbox.add('example-game', { id: 'rivals', title: 'Improve rivals' }, human)
     finish('rivals')
   }
   async function tick() { await settle(); await runtime.tick(); await settle() }
@@ -72,7 +122,7 @@ test('real project results and wiki evidence become an edited card only after bo
   fs.writeFileSync(path.join(f.projectPath, 'updates.creator.json'), JSON.stringify([{ id: 'note-one', summary: 'Rival logic changed.' }]))
   const sources = projectCommsSources(f.meta, f.inbox, f.wikiPath)
   assert.deepEqual(sources.map(source => source.kind).sort(), ['chat', 'task', 'wiki'])
-  assert.ok(sources.every(source => source.projectId === 'spread-rush' && source.ownerSessionId === 'creator'))
+  assert.ok(sources.every(source => source.projectId === 'example-game' && source.ownerSessionId === 'creator'))
   await f.tick()
   assert.equal(f.launches.length, 1)
   assert.equal(f.launches[0].role, 'caretaker')
@@ -91,7 +141,7 @@ test('real project results and wiki evidence become an edited card only after bo
   const feed = projectCommsFeed(f.store)
   assert.equal(feed.length, 1)
   assert.equal(feed[0].sourceKind, 'project')
-  assert.equal(feed[0].room, 'Spread Rush')
+  assert.equal(feed[0].room, 'Example Game')
   assert.equal(feed[0].sessionId, 'creator')
   assert.match(feed[0].summary, /\[Play now\]\(https:\/\/example.com\/play\)/)
   assert.equal(f.store.read().jobs.length, 2, 'Caretaker wiki edits must not create a feedback loop')
@@ -105,11 +155,11 @@ test('comment delegates one durable task and reviewed completion returns under t
   await f.tick()
   await f.complete('replyguy', { action: 'delegate', body: 'I have asked your team to increase aggression.', task: { title: 'More aggressive opponents', description: 'Adjust rival aggression and independently verify a round.' } }, 'initial')
   const taskId = `reply-${comment.id}`
-  assert.equal(f.inbox.read('spread-rush').tasks.filter(task => task.id === taskId).length, 1)
+  assert.equal(f.inbox.read('example-game').tasks.filter(task => task.id === taskId).length, 1)
   assert.equal(f.sends.length, 1)
   f.restart(); await f.tick(); await f.tick()
   assert.equal(f.sends.length, 1, 'Acknowledged delegation is not sent again on restart')
-  assert.equal(f.inbox.read('spread-rush').tasks.filter(task => task.id === taskId).length, 1)
+  assert.equal(f.inbox.read('example-game').tasks.filter(task => task.id === taskId).length, 1)
   f.finish(taskId, { summary: 'More aggressive opponents are live.', evidence: 'Reviewer played three rounds.', wiki: f.wiki })
   await f.tick(); await f.tick()
   // Per-project serialization lets caretaker evaluate the new CR result first.
@@ -162,12 +212,12 @@ test('failed task transport retries the existing inbox task instead of duplicati
   const job = f.running('replyguy', 'initial')
   f.runtime.complete(job.id, job.assignedSessionId, { leaseToken: job.leaseToken, output: { action: 'delegate', body: 'I will bring this to your team.', task: { title: 'Improve instructions', description: 'Clarify how to quote and verify it.' } } })
   await settle()
-  assert.equal(f.inbox.read('spread-rush').tasks.filter(task => task.id === `reply-${comment.id}`).length, 1)
+  assert.equal(f.inbox.read('example-game').tasks.filter(task => task.id === `reply-${comment.id}`).length, 1)
   assert.equal(f.store.read().comments.find(item => item.id === comment.id).delegation.error, 'Creator unavailable')
   assert.equal(f.store.pendingDelegations().length, 0, 'Failed transport observes retry backoff')
   f.restart(); f.advance(5001); await f.tick()
   assert.equal(f.sends.length, 2, 'Unacknowledged external transport is retried (at-least-once)')
-  assert.equal(f.inbox.read('spread-rush').tasks.filter(task => task.id === `reply-${comment.id}`).length, 1)
+  assert.equal(f.inbox.read('example-game').tasks.filter(task => task.id === `reply-${comment.id}`).length, 1)
   assert.equal(f.store.pendingDelegations().length, 0)
 })
 

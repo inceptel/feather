@@ -59,8 +59,15 @@ exit 0
     const data = await response.json(); assert.ok(response.ok, JSON.stringify(data)); return data;
   };
   await start();
-  const a = await post('/api/chats', { name: 'Strategy A', mode: 'ralph', reviewerAgent: 'claude' });
-  const b = await post('/api/chats', { name: 'Strategy B', projectSessionId: a.id, reviewerAgent: 'claude' });
+  const a = await post('/api/chats', { name: 'Strategy A', mode: 'ralph', reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
+  const b = await post('/api/chats', { name: 'Strategy B', projectSessionId: a.id, reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
+  const startup = id => { const dir = path.join(home, '.feather/session-system-prompts'); return fs.readFileSync(path.join(dir, fs.readdirSync(dir).find(name => name.startsWith(`${id}-`))), 'utf8'); };
+  assert.match(startup(a.id), /Chat naming: after the first meaningful user message/);
+  assert.doesNotMatch(startup(a.reviewerSessionId), /Chat naming:/);
+  await post(`/api/sessions/${a.id}/rename`, { title: 'Tic Tac Toe Rules' });
+  assert.equal(meta()[a.id].title, 'Tic Tac Toe Rules');
+  assert.equal(meta()[a.id].cwd, a.cwd, 'Display naming must not move the project');
+  assert.equal(meta()[a.reviewerSessionId].title, 'Reviewer: Strategy A');
   assert.equal(a.cwd, b.cwd);
   await post(`/api/chats/${a.id}/inbox/config`, { objective: 'Build tic tac toe', allowIdeas: false });
   await post(`/api/chats/${a.id}/inbox/tasks`, { id: 'board', title: 'Playable board' });

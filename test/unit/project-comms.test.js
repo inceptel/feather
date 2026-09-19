@@ -14,7 +14,7 @@ function setup(t, options = {}) {
   let store = createProjectComms(config)
   return { get store() { return store }, advance(ms) { clock += ms }, restart() { store = createProjectComms(config) }, root }
 }
-const source = (n = 1, more = {}) => ({ id: `task-${n}`, projectId: 'game', projectTitle: 'Spread Rush', ownerSessionId: 'creator', kind: 'task-result', snapshot: { summary: `Improvement ${n}`, evidence: 'local browser verified' }, ...more })
+const source = (n = 1, more = {}) => ({ id: `task-${n}`, projectId: 'game', projectTitle: 'Example Game', ownerSessionId: 'creator', kind: 'task-result', snapshot: { summary: `Improvement ${n}`, evidence: 'local browser verified' }, ...more })
 function lease(store) { const j = store.leaseNext(); assert.ok(j); store.assign(j.id, j.leaseToken, 'helper'); return j }
 function finish(store, j, output) { return store.complete(j.id, { leaseToken: j.leaseToken, sessionId: 'helper', output }) }
 const candidate = { title: 'Better opponents', summary: 'Opponents react to your pricing.', evidence: 'Verified a round locally', links: [{ label: 'Play', url: 'https://example.com/game' }] }

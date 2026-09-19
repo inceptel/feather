@@ -22,8 +22,16 @@ import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } 
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
+import { createChat, fetchChatStatus, setChatWorking, attachReviewer, detachReviewer, type ChatRequest } from './api'
 
 interface QuickLink { label: string; url: string }
+
+function restorePendingChat(): { id: string; request: ChatRequest } | null {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('feather-pending-chat') || 'null')
+    return typeof saved?.id === 'string' && typeof saved?.request?.requestId === 'string' ? saved : null
+  } catch { return null }
+}
 
 type FileStatus = 'draft' | 'uploading' | 'uploaded' | 'failed'
 type VoiceStatus = 'transcribing' | 'failed' | 'delivered'
@@ -135,7 +143,11 @@ function setFavicon(color: string) {
 }
 
 export default function App() {
-  const [sessions, setSessions] = createSignal<SessionMeta[]>([])
+  const restoredChat = restorePendingChat()
+  const [sessions, setSessions] = createSignal<SessionMeta[]>(restoredChat ? [{
+    id: restoredChat.id, title: 'New chat', updatedAt: new Date().toISOString(), isActive: false, chatRole: 'creator',
+    chatStartup: { status: restoredChat.id.startsWith('new-chat-') ? 'failed' : 'starting', error: restoredChat.id.startsWith('new-chat-') ? 'Startup was interrupted. Retry to reconnect your chat.' : undefined },
+  }] : [])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
   const [boxes, setBoxes] = createSignal<BoxInfo[]>([{ id: 'local', label: 'Local', available: true }])
   const [currentBox, setCurrentBox] = createSignal('local')
@@ -184,6 +196,20 @@ export default function App() {
   const [sidebar, setSidebar] = createSignal(false)
   const [loading, setLoading] = createSignal(false)
   const [creating, setCreating] = createSignal(false)
+  const [pendingChat, setPendingChat] = createSignal<{ id: string; request: ChatRequest } | null>(restoredChat)
+  const [workflowBusy, setWorkflowBusy] = createSignal<'start' | 'stop' | null>(null)
+  const [reviewerBusy, setReviewerBusy] = createSignal<'attach' | 'detach' | null>(null)
+  const [startingWorkId, setStartingWorkId] = createSignal<string | null>(null)
+  let workflowActionGeneration = 0
+  const [workflowError, setWorkflowError] = createSignal('')
+  const [failedStartupId, setFailedStartupId] = createSignal<string | null>(null)
+  createEffect(() => {
+    const pending = pendingChat()
+    try {
+      if (pending && sessions().find(s => s.id === pending.id)?.chatStartup?.status !== 'ready') sessionStorage.setItem('feather-pending-chat', JSON.stringify(pending))
+      else sessionStorage.removeItem('feather-pending-chat')
+    } catch { /* Drafting remains available when browser storage is full. */ }
+  })
   const [text, setText] = createSignal('')
   const [tab, setTab] = createSignal<'chat' | 'terminal'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
@@ -458,6 +484,16 @@ export default function App() {
   let spinSendAfterStop = false
   let tossCalibrationHitActive = false
   let textareaRef: HTMLTextAreaElement | undefined
+  createEffect(() => {
+    text(); currentId(); tab()
+    if (expanded()) return
+    const frame = requestAnimationFrame(() => {
+      if (!textareaRef?.isConnected) return
+      textareaRef.style.height = 'auto'
+      textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px'
+    })
+    onCleanup(() => cancelAnimationFrame(frame))
+  })
   let fileInputRef: HTMLInputElement | undefined
   let dragCounter = 0
   let mediaRestoreGeneration = 0
@@ -486,6 +522,7 @@ export default function App() {
 
 
   async function addFiles(fileList: FileList | File[]) {
+    if (startupBlocked()) { setMediaNotice('You can attach files once the chat is ready. Your text draft is saved.'); return }
     if (uploading()) return
     const sessionId = currentId()
     const boxId = currentBox()
@@ -678,7 +715,7 @@ export default function App() {
       const box = currentBox()
       const r = await fetchSessions(box)
       if (box !== currentBox()) return
-      setSessions(r.sessions)
+      setSessions(previous => [...r.sessions, ...previous.filter(s => !r.sessions.some(next => next.id === s.id) && (s.id === pendingChat()?.id || s.chatStartup?.status === 'starting'))])
       const selectedId = currentId()
       if (selectedId && (working() || toolIntentStatus())) {
         const selected = await findSessionMeta(selectedId, box, r.sessions)
@@ -817,6 +854,7 @@ export default function App() {
   }
 
   async function select(id: string) {
+    setWorkflowError('')
     const generation = ++selectGeneration
     const box = currentBox()
     const prev = currentId()
@@ -840,6 +878,8 @@ export default function App() {
     setHistoryIdx(-1)
     setHistoryOpen(false)
     cleanupSSE?.close()
+
+    if (id.startsWith('new-chat-')) { setLoading(false); return }
 
     type BufferedStreamEvent =
       | { kind: 'message'; message: Message; offset: number }
@@ -990,19 +1030,65 @@ export default function App() {
     setLoading(false)
   }
 
-  async function handleNew(agent?: string, mode?: 'ralph', projectSessionId?: string, name?: string) {
+  async function handleNew(agent?: string, mode?: 'ralph', projectSessionId?: string, name?: string, options: { reviewPolicy?: ChatRequest['reviewPolicy'] } = {}) {
+    if (creating()) return
+    const request: ChatRequest = { requestId: crypto.randomUUID(), agent, mode, projectSessionId, name, ...(options.reviewPolicy ? { reviewPolicy: options.reviewPolicy } : {}) }
+    const id = `new-chat-${request.requestId}`
+    setPendingChat({ id, request })
+    setSessions(previous => [{ id, title: name || 'New chat', updatedAt: new Date().toISOString(), isActive: false, chatRole: 'creator', chatStartup: { status: 'starting' } }, ...previous])
+    void select(id)
+    await submitChat({ id, request })
+  }
+
+  async function submitChat(pending: { id: string; request: ChatRequest }) {
     if (creating()) return
     setCreating(true)
     setAgentDropdown(false)
+    setSessions(previous => previous.map(s => s.id === pending.id ? { ...s, chatStartup: { status: 'starting' } } : s))
     try {
-      const response = await fetch(appUrl('/api/chats'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent, mode, projectSessionId, name }) })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || 'Could not start chat')
-      const id = result.id
-      select(id)
-      refreshSessions()
-    } catch (e) { alert(e instanceof Error ? e.message : 'Could not start chat') }
+      const result = await createChat(pending.request)
+      if (result.status === 'failed') setFailedStartupId(result.id)
+      const selected = currentId() === pending.id
+      saveDraft(result.id, selected ? text() : loadDraft(pending.id))
+      setPendingChat({ id: result.id, request: pending.request })
+      setSessions(previous => previous.filter(s => s.id !== result.id || s.id === pending.id).map(s => s.id === pending.id ? { ...s, id: result.id, agent: result.agent, chatStartup: { status: result.status || 'ready', error: result.error } } : s))
+      if (selected) void select(result.id)
+      void refreshSessions()
+    } catch (e) {
+      setSessions(previous => previous.map(s => s.id === pending.id ? { ...s, chatStartup: { status: 'failed', error: e instanceof Error ? e.message : 'Could not start chat' } } : s))
+    }
     finally { setCreating(false) }
+  }
+
+  async function handleWorkflow(enabled: boolean) {
+    const id = currentId()
+    if (!id || workflowBusy() === 'stop' || (enabled && workflowBusy())) return
+    const generation = ++workflowActionGeneration
+    setWorkflowBusy(enabled ? 'start' : 'stop'); setWorkflowError('')
+    setStartingWorkId(enabled ? id : null)
+    try { await setChatWorking(id, enabled); await refreshSessions() }
+    catch (error) { if (generation === workflowActionGeneration && currentId() === id) setWorkflowError(error instanceof Error ? error.message : 'Could not update ongoing work') }
+    finally {
+      if (generation === workflowActionGeneration) { setWorkflowBusy(null); setStartingWorkId(null) }
+    }
+  }
+
+  async function handleReviewer(attach: boolean) {
+    const id = currentId()
+    if (!id || reviewerBusy()) return
+    setReviewerBusy(attach ? 'attach' : 'detach'); setWorkflowError('')
+    try { if (attach) await attachReviewer(id); else await detachReviewer(id); await refreshSessions() }
+    catch (error) { if (currentId() === id) setWorkflowError(error instanceof Error ? error.message : (attach ? 'Could not attach reviewer' : 'Could not detach reviewer')) }
+    finally { setReviewerBusy(null) }
+  }
+
+  function retryStartup() {
+    const pending = pendingChat()
+    if (!pending) return
+    // A lost response reuses the identity; a confirmed failed launch needs a new one.
+    const retry = failedStartupId() === pending.id ? { ...pending, request: { ...pending.request, requestId: crypto.randomUUID() } } : pending
+    setPendingChat(retry)
+    void submitChat(retry)
   }
 
   async function handleResume(id: string) {
@@ -1468,6 +1554,7 @@ export default function App() {
   }
 
   async function toggleVoice() {
+    if (startupBlocked()) { setMediaNotice('Voice recording is available once the chat is ready.'); return }
     if (listening()) {
       // Stop recording and transcribe
       spinSendAfterStop = false
@@ -1635,6 +1722,7 @@ export default function App() {
   }
 
   async function sendComposedMessage(rawText: string, pending: PendingFile[] = files()) {
+    if (startupBlocked()) return
     const val = rawText.trim()
     if ((!val && !pending.length) || !currentId()) return
     const target = { id: currentId()!, box: currentBox() }
@@ -1662,6 +1750,32 @@ export default function App() {
   }
 
   const cur = () => sessions().find(s => s.id === currentId())
+  const startupBlocked = () => !!cur()?.chatStartup && cur()?.chatStartup?.status !== 'ready'
+  const preparingWork = () => startingWorkId() === currentId() || !!cur()?.workflow?.pendingStart
+  const ongoingEnabled = () => !!(preparingWork() || cur()?.workflow?.enabled || cur()?.ralph?.enabled)
+  const startingChatId = createMemo(() => {
+    const id = currentId()
+    return id && !id.startsWith('new-chat-') && !isRemoteBox() && cur()?.chatStartup?.status === 'starting' ? id : null
+  })
+  createEffect(() => {
+    const id = startingChatId()
+    if (!id) return
+    let cancelled = false
+    let inFlight = false
+    const controller = new AbortController()
+    const poll = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const state = await fetchChatStatus(id, controller.signal)
+        if (!cancelled && state.status === 'failed') setFailedStartupId(id)
+        if (!cancelled) setSessions(previous => previous.map(s => s.id === id ? { ...s, chatStartup: { status: state.status || 'starting', error: state.error } } : s))
+      } catch { /* Keep the draft and retry status on the next poll. */ }
+      finally { inFlight = false }
+    }
+    const timer = setInterval(poll, 1500)
+    onCleanup(() => { cancelled = true; controller.abort(); clearInterval(timer) })
+  })
   createEffect(() => {
     const session = cur()
     if (!loading() && session && !session.isActive) {
@@ -1824,7 +1938,7 @@ export default function App() {
             <Show when={!isRemoteBox()}>
             <div style={{ padding: '12px 16px', position: 'relative' }}>
               <div style={{ display: 'flex', 'border-radius': '8px', overflow: 'hidden' }}>
-                <button onClick={() => handleNew('claude')} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
+                <button onClick={() => handleNew()} disabled={creating()} style={{ flex: '1', padding: '10px', background: creating() ? '#1a1a2e' : '#4aba6a', color: creating() ? '#666' : '#000', border: 'none', 'font-size': '14px', 'font-weight': '600', cursor: creating() ? 'wait' : 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>
                   {creating() ? 'Starting...' : '+ New chat'}
                 </button>
                 <Show when={agents().some(a => a.available)}>
@@ -1844,16 +1958,13 @@ export default function App() {
                       <span style={{ flex: '1' }}>{agent.label}</span>
                     </button>
                   }</For>
-                  <div style={{ padding: '8px 14px 5px', color: '#ffb347', 'font-size': '10px', 'font-weight': '700', 'letter-spacing': '0.08em', 'text-transform': 'uppercase', background: '#151522' }}>Long-running Ralph</div>
-                  <For each={agents().filter(a => a.available)}>{(agent) =>
-                    <button onClick={() => handleNew(agent.id, 'ralph')} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                    >
-                      <span style={{ width: '8px', height: '8px', 'border-radius': '2px', background: '#ffb347', 'flex-shrink': '0', transform: 'rotate(45deg)' }} />
-                      <span style={{ flex: '1' }}>Ralph · {agent.label}</span>
-                    </button>
-                  }</For>
+                  <button data-testid="new-chat-with-reviewer" onClick={() => handleNew(undefined, undefined, undefined, undefined, { reviewPolicy: 'adaptive' })} style={{ display: 'flex', 'align-items': 'center', gap: '8px', width: '100%', padding: '10px 14px', background: 'none', border: 'none', color: '#e5e5e5', 'font-size': '13px', cursor: 'pointer', 'text-align': 'left', '-webkit-tap-highlight-color': 'transparent' }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#252540'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                  >
+                    <span style={{ width: '8px', height: '8px', 'border-radius': '50%', background: '#8bc99c', 'flex-shrink': '0' }} />
+                    <span style={{ flex: '1' }}>With reviewer</span>
+                  </button>
                 </div>
               </Show>
             </div>
@@ -2084,25 +2195,20 @@ export default function App() {
                   style={{ background: '#1a1a2e', border: '1px solid #4aba6a', 'border-radius': '6px', padding: '2px 8px', color: '#e5e5e5', 'font-size': '14px', 'font-weight': '600', outline: 'none', flex: '1', 'min-width': '0' }}
                 />
               </Show>
-              <Show when={s().mode === 'ralph'}>
-                <span title={s().ralph?.blockedReason || s().ralph?.completionReason || s().ralph?.error || ''} style={{ 'font-size': '10px', color: s().ralph?.status === 'error' ? '#ff7777' : s().ralph?.status === 'complete' ? '#76d895' : s().ralph?.status === 'blocked' ? '#ffb347' : '#d7a85a', background: '#2b2215', border: '1px solid #4d3920', 'border-radius': '10px', padding: '2px 8px', 'flex-shrink': '0', 'text-transform': 'capitalize' }}>
-                  Ralph · {s().ralph?.status || 'waiting'} · {s().ralph?.iteration || 0}
-                </span>
-              </Show>
               <div style={{ flex: '1' }} />
               <Show when={isPeerBox()}>
                 <span style={{ 'font-size': '11px', color: '#888', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '10px', padding: '2px 8px', 'flex-shrink': '0' }}>
                   @{boxes().find(b => b.id === currentBox())?.label || currentBox()}{peerControl() ? '' : ' \u00B7 view only'}
                 </span>
               </Show>
-              <Show when={(s().mode === 'ralph' ? s().ralph?.enabled : s().isActive) && canSend()}>
-                <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{s().mode === 'ralph' ? 'Stop Ralph' : 'Stop'}</button>
+              <Show when={s().isActive && canSend() && !startupBlocked()}>
+                <button onClick={() => handleInterrupt(s().id)} style={{ background: '#d45555', color: '#fff', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Interrupt</button>
               </Show>
-              <Show when={(s().mode === 'ralph' ? !s().ralph?.enabled : !s().isActive) && !isRemoteBox()}>
-                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>{s().mode === 'ralph' ? 'Resume Ralph' : 'Resume'}</button>
+              <Show when={!s().isActive && !s().workflow && s().mode !== 'ralph' && !isRemoteBox() && !startupBlocked()}>
+                <button onClick={() => handleResume(s().id)} style={{ background: '#4aba6a', color: '#000', border: 'none', 'border-radius': '6px', padding: '4px 12px', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Resume</button>
               </Show>
               <div style={{ position: 'relative' }}>
-                <button onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>
+                <button data-testid="chat-menu" aria-label="Chat menu" onClick={() => setMenuOpen(!menuOpen())} style={{ background: 'none', border: 'none', color: '#888', 'font-size': '18px', cursor: 'pointer', padding: '4px 6px', '-webkit-tap-highlight-color': 'transparent' }}>{'\u22EE'}</button>
                 <Show when={menuOpen()}>
                   <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: '0', 'z-index': '99' }} />
                   <div style={{ position: 'absolute', right: '0', top: '100%', background: '#1a1a2e', border: '1px solid #333', 'border-radius': '8px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', 'z-index': '100', 'min-width': '140px', overflow: 'hidden' }}>
@@ -2111,8 +2217,16 @@ export default function App() {
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename</button>
                       <button data-testid="fork-chat" onClick={() => openForkDialog(s().title)}
                         style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Fork chat</button>
+                      <Show when={s().chatRole === 'creator' || s().mode === 'ralph'}>
+                        <button data-testid="toggle-working" disabled={workflowBusy() === 'stop' || (!ongoingEnabled() && !!workflowBusy())} onClick={() => { setMenuOpen(false); void handleWorkflow(!ongoingEnabled()) }}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>{ongoingEnabled() ? 'Stop working' : 'Keep working'}</button>
+                      </Show>
+                      <Show when={s().chatRole === 'creator' && s().chatStartup?.status !== 'starting'}>
+                        <button data-testid="toggle-reviewer" disabled={!!reviewerBusy()} onClick={() => { setMenuOpen(false); void handleReviewer(!s().chatPair) }}
+                          style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>{reviewerBusy() === 'attach' ? 'Attaching reviewer…' : reviewerBusy() === 'detach' ? 'Detaching reviewer…' : s().chatPair ? 'Detach reviewer' : 'Attach reviewer'}</button>
+                      </Show>
                       <Show when={s().chatRole === 'creator'}>
-                        <button data-testid="new-project-chat" onClick={() => { const name = prompt('Name this chat', 'Strategy B'); if (name?.trim()) { setMenuOpen(false); void handleNew(s().agent, s().mode, s().id, name) } }}
+                        <button data-testid="new-project-chat" onClick={() => { setMenuOpen(false); void handleNew(s().agent, undefined, s().id) }}
                           style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>New chat in this project</button>
                         <button data-testid="rename-project" onClick={() => void handleProjectRename(s().id)}
                           style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', 'border-bottom': '1px solid #222', color: '#e5e5e5', 'font-size': '13px', 'text-align': 'left', cursor: 'pointer' }}>Rename project folder</button>
@@ -2140,6 +2254,21 @@ export default function App() {
           </Show>
         </div>
 
+        <Show when={cur() && !isRemoteBox() && (cur()?.chatRole === 'creator' || cur()?.mode === 'ralph') && (startupBlocked() || workflowError())}>
+          <section class="chat-workflow" aria-label="Chat startup">
+            <Show when={startupBlocked()}>
+              <div class="chat-workflow-copy" role={cur()?.chatStartup?.status === 'failed' ? 'alert' : 'status'}>
+                <strong>{cur()?.chatStartup?.status === 'failed' ? 'Chat could not start' : 'Starting chat…'}</strong>
+                <p>{cur()?.chatStartup?.error || 'You can draft your message while the chat starts.'}</p>
+              </div>
+              <Show when={cur()?.chatStartup?.status === 'failed' && pendingChat()?.id === currentId()}>
+                <button disabled={creating()} onClick={retryStartup}>{failedStartupId() === currentId() ? 'Try again' : 'Retry startup'}</button>
+              </Show>
+            </Show>
+            <Show when={workflowError()}><p class="chat-workflow-copy" role="alert">{workflowError()}</p></Show>
+          </section>
+        </Show>
+
         {/* Tabs */}
         <Show when={currentId()}>
           <nav aria-label="Conversation views" style={{ display: 'flex', 'align-items': 'center', 'border-bottom': '1px solid #1e1e1e', 'padding-left': '8px', 'flex-shrink': '0', 'overflow-x': 'auto', '-webkit-overflow-scrolling': 'touch', 'scrollbar-width': 'none' }}>
@@ -2161,7 +2290,7 @@ export default function App() {
             <Show when={homeRoute().kind === 'costs'} fallback={
               <Show when={homeRoute().kind === 'scheduler'} fallback={
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
-                <RoomsHome view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew('claude')} onOpen={select} onSessionsChanged={refreshSessions} />
+                <RoomsHome view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew()} onOpen={select} onSessionsChanged={refreshSessions} />
               }>
                 {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
               </Show>
@@ -2484,7 +2613,7 @@ export default function App() {
                   <button onClick={() => { setExpanded(false); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px' } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 6px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-height': '42px' }} title="Collapse">{'\u2193'} Collapse</button>
                 </div>
               </Show>
-              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
+              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={startupBlocked() || uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
             </div>
           </div>
         </Show>

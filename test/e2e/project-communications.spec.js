@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 async function fixture(page, hash = 'updates', options = {}) {
-  const item = { sourceKind: 'project', projectId: 'spread-rush', evidenceId: 'project-update:morning', kind: 'update', room: 'Spread Rush', title: 'Your opponents play smarter', summary: 'Rivals now respond to inventory pressure. Try another round.', detail: null, occurredAt: new Date().toISOString(), sourceHref: '/#session/creator', sourceState: 'available', status: null, needsReview: false, sessionId: 'creator', comments: [] };
-  const comms = { enabled: true, jobs: [{ id: 'failed-job', role: 'marketer', projectId: 'spread-rush', projectTitle: 'Spread Rush', status: 'stalled', error: 'Session disconnected', sessionId: 'writer' }, { id: 'wiki-job', role: 'caretaker', projectId: 'spread-rush', projectTitle: 'Spread Rush', status: 'running', sessionId: 'keeper' }] };
+  const item = { sourceKind: 'project', projectId: 'example-game', evidenceId: 'project-update:morning', kind: 'update', room: 'Example Game', title: 'Your opponents play smarter', summary: 'Rivals now respond to inventory pressure. Try another round.', detail: null, occurredAt: new Date().toISOString(), sourceHref: '/#session/creator', sourceState: 'available', status: null, needsReview: false, sessionId: 'creator', comments: [] };
+  const comms = { enabled: true, jobs: [{ id: 'failed-job', role: 'marketer', projectId: 'example-game', projectTitle: 'Example Game', status: 'stalled', error: 'Session disconnected', sessionId: 'writer' }, { id: 'wiki-job', role: 'caretaker', projectId: 'example-game', projectTitle: 'Example Game', status: 'running', sessionId: 'keeper' }] };
   const actions = [], comments = [], steers = [];
   let failComment = false, failAction = false;
   let commsRequests = 0;
@@ -107,7 +107,7 @@ test('failed comment keeps its draft and can be retried', async ({ page }) => {
 
 test('blocked delegated work asks for input instead of claiming it is working', async ({ page }) => {
   const state = await fixture(page);
-  state.item.comments.push({ id: 'blocked-comment', evidenceId: state.item.evidenceId, room: 'Spread Rush', text: 'Make this more aggressive.', createdAt: new Date().toISOString(), status: 'awaiting-task', taskId: 'blocked-task', taskStatus: 'blocked', reply: { text: 'Your team needs a choice about difficulty.', timestamp: new Date().toISOString() } });
+  state.item.comments.push({ id: 'blocked-comment', evidenceId: state.item.evidenceId, room: 'Example Game', text: 'Make this more aggressive.', createdAt: new Date().toISOString(), status: 'awaiting-task', taskId: 'blocked-task', taskStatus: 'blocked', reply: { text: 'Your team needs a choice about difficulty.', timestamp: new Date().toISOString() } });
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   const comment = page.getByTestId('feed-comment-blocked-comment');
   await expect(comment).toContainText('Your team needs input.');
@@ -116,7 +116,7 @@ test('blocked delegated work asks for input instead of claiming it is working', 
 
 test('reply failure remains visible even after an initial acknowledgment', async ({ page }) => {
   const state = await fixture(page);
-  state.item.comments.push({ id: 'failed-reply', evidenceId: state.item.evidenceId, room: 'Spread Rush', text: 'Improve instructions.', createdAt: new Date().toISOString(), status: 'awaiting-task', taskId: 'pending-task', error: 'Creator is unavailable', reply: { text: 'I will ask the team.', timestamp: new Date().toISOString() } });
+  state.item.comments.push({ id: 'failed-reply', evidenceId: state.item.evidenceId, room: 'Example Game', text: 'Improve instructions.', createdAt: new Date().toISOString(), status: 'awaiting-task', taskId: 'pending-task', error: 'Creator is unavailable', reply: { text: 'I will ask the team.', timestamp: new Date().toISOString() } });
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   const comment = page.getByTestId('feed-comment-failed-reply');
   await expect(comment).toContainText('Reply needs attention: Creator is unavailable');
@@ -137,7 +137,7 @@ test('updates team has independent pause, resume and retry controls on mobile', 
   await expect(team.getByRole('button', { name: 'Resume updates team' })).toBeVisible();
   await expect(team).toContainText('not your chats');
   await team.getByRole('button', { name: 'Resume updates team' }).click();
-  await team.getByRole('button', { name: 'Retry marketer for Spread Rush' }).click();
+  await team.getByRole('button', { name: 'Retry marketer for Example Game' }).click();
   await expect(team).toContainText('queued');
   expect(state.actions).toEqual([{ action: 'pause' }, { action: 'resume' }, { action: 'retry', jobId: 'failed-job' }]);
   expect(await team.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);

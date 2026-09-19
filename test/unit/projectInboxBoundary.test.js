@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { projectInboxWakeIds } from '../../lib/project-inbox-wakes.js';
 import { mayReenableRalph } from '../../lib/autopilot.js';
+import { applyChatWorkflow, authorizeChatWorkflow } from '../../lib/chat-workflow.js';
 
 // Run the server's actual wake, boundary, and Stop paths without a server or
 // harness. Timers are recorded but never launch a turn.
@@ -17,7 +18,7 @@ function fixture() {
   const context = vm.createContext({
     RALPH_MODE: 'ralph', RALPH_CALLBACK_DELAY_MS: 100,
     readMeta: () => meta, updateMeta: mutator => { meta = mutator(meta); },
-    isRalphSession: id => meta[id]?.mode === 'ralph', mayReenableRalph,
+    isRalphSession: id => meta[id]?.mode === 'ralph', mayReenableRalph, applyChatWorkflow, authorizeChatWorkflow,
     projectInboxWakeIds, PROJECT_INBOX: { read: () => project },
     randomUUID: () => `token-${++sequence}`,
     setTimeout: () => { const timer = ++sequence; timers.add(timer); return timer; },

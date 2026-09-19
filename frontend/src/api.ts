@@ -36,7 +36,8 @@ export interface SessionMeta {
   agent?: string
   isWorker?: boolean
   chatRole?: 'creator' | 'reviewer'
-  chatPair?: { groupId: string; creatorSessionId: string; reviewerSessionId: string }
+  chatPair?: { groupId: string; creatorSessionId: string; reviewerSessionId: string } | null
+  reviewPolicy?: 'none' | 'adaptive' | 'always'
   projectId?: string | null
   projectLabel?: string | null
   share?: string[]
@@ -53,6 +54,30 @@ export interface SessionSearchMatch {
   role: 'user' | 'assistant'
   timestamp: string | null
   count: number
+  chatStartup?: { status: 'starting' | 'ready' | 'failed'; error?: string }
+  workflow?: { objective?: string; phase: string; summary?: string; evidence?: string; next?: string; updatedAt?: string; enabled: boolean; pendingStart?: boolean; generation: number }
+}
+
+export interface ChatRequest { requestId: string; agent?: string; mode?: 'ralph'; projectSessionId?: string; name?: string; reviewPolicy?: 'none' | 'adaptive' | 'always' }
+export interface ChatStartup { id: string; status?: 'ready' | 'starting' | 'failed'; error?: string; agent?: string }
+export async function createChat(input: ChatRequest): Promise<ChatStartup> {
+  return responseJson(await fetch(`${BASE}/api/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(20_000) }))
+}
+export async function fetchChatStatus(id: string, signal?: AbortSignal): Promise<ChatStartup> {
+  return responseJson(await fetch(`${BASE}/api/chats/${encodeURIComponent(id)}/status`, { signal }))
+}
+export async function setChatWorking(id: string, enabled: boolean): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/sessions/${encodeURIComponent(id)}/${enabled ? 'workflow' : 'ralph'}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(enabled ? { action: 'start' } : { enabled: false }),
+  }))
+}
+export async function attachReviewer(id: string): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/chats/${encodeURIComponent(id)}/reviewer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewPolicy: 'adaptive' }), signal: AbortSignal.timeout(90_000),
+  }))
+}
+export async function detachReviewer(id: string): Promise<void> {
+  await responseJson(await fetch(`${BASE}/api/chats/${encodeURIComponent(id)}/reviewer`, { method: 'DELETE' }))
 }
 
 export interface BoxInfo {

@@ -5,7 +5,7 @@ import fs from 'fs'
 import path from 'path'
 
 const BASE = process.env.FEATHER_URL || 'http://localhost:4870'
-const HOME = process.env.HOME || '/home/user'
+const HOME = process.env.FEATHER_E2E_HOME || process.env.HOME || '/home/user'
 const SESSION_ID = `e2e-council-${Date.now()}`
 const OWNER_ID = '40000000-0000-4000-8000-000000000001'
 const BRIDGE_TOKEN = 'e2e-council-token'

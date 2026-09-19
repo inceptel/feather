@@ -23,3 +23,5 @@ auto.pid
 *.bak
 test-results/
 /cache/
+chat-config.json
+chat-pool.json

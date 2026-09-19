@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feather autos</title>
+<meta name="description" content="Live table of Feather autonomous chats, scheduler rules and token usage, read from this Feather instance. Read-only.">
+<style>
+  :root {
+    --bg: #f7f6f2; --surface: #ffffff; --ink: #1c1b18; --ink-2: #5a574f; --ink-3: #8a877d;
+    --line: #e2e0d8; --accent: #2a5db0;
+    --blocked: #b3261e; --working: #1f6f43; --reviewing: #6b4fbb; --waiting: #9a6a00; --error: #b3261e; --stopped: #6f6c64; --unknown: #8a877d;
+    --pill-bg: #f1efe8;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg: #15161a; --surface: #1d1f24; --ink: #ecebe6; --ink-2: #b4b2aa; --ink-3: #85837b;
+    --line: #2f323a; --accent: #7aa7ff;
+    --blocked: #ff7b72; --working: #63c58c; --reviewing: #b9a4ff; --waiting: #e6b450; --error: #ff7b72; --stopped: #9a988f; --unknown: #85837b;
+    --pill-bg: #262931;
+  } }
+  :root[data-theme="dark"] {
+    --bg: #15161a; --surface: #1d1f24; --ink: #ecebe6; --ink-2: #b4b2aa; --ink-3: #85837b;
+    --line: #2f323a; --accent: #7aa7ff;
+    --blocked: #ff7b72; --working: #63c58c; --reviewing: #b9a4ff; --waiting: #e6b450; --error: #ff7b72; --stopped: #9a988f; --unknown: #85837b;
+    --pill-bg: #262931;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 20px 16px 48px; max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  h3 { font-size: 14px; margin: 16px 0 6px; color: var(--ink-2); font-weight: 600; }
+  p, li { color: var(--ink-2); }
+  .banner { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 14px; }
+  .banner b { color: var(--ink); }
+  .banner.warn { border-color: var(--waiting); }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+  .tools button { font: inherit; padding: 4px 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px; cursor: pointer; }
+  .tools button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-3); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; white-space: nowrap; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--pill-bg); border: 1px solid var(--line); white-space: nowrap; }
+  .pill::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--dot, var(--unknown)); vertical-align: 0; }
+  .s-blocked { --dot: var(--blocked); } .s-working { --dot: var(--working); } .s-reviewing { --dot: var(--reviewing); }
+  .s-waiting { --dot: var(--waiting); } .s-error { --dot: var(--error); } .s-stopped { --dot: var(--stopped); } .s-complete { --dot: var(--stopped); } .s-unknown { --dot: var(--unknown); }
+  .muted { color: var(--ink-3); }
+  .why { color: var(--ink-2); font-size: 13px; max-width: 46ch; }
+  .objective { max-width: 52ch; color: var(--ink-2); }
+  .empty { padding: 12px 14px; color: var(--ink-3); font-size: 14px; }
+  .ok { color: var(--working); } .bad { color: var(--error); }
+  details { margin: 6px 0; } summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  footer { margin-top: 32px; font-size: 12.5px; color: var(--ink-3); }
+  @media (max-width: 600px) { body { padding: 14px 16px 40px; } h1 { font-size: 20px; } table { font-size: 13px; } }
+</style>
+</head>
+<body>
+  <h1>Feather autos</h1>
+  <p id="lede">Every autonomous chat (mode <code>ralph</code>, or a chat whose workflow is enabled), scheduler rule and per-session token usage, read from this Feather instance. Read-only: nothing here starts, stops or spawns anything. Links open the chat in the Feather UI.</p>
+
+  <div class="banner" id="capture"><b>Loading…</b></div>
+  <div class="tools">
+    <button type="button" id="refresh">Refresh now</button>
+    <span id="freshness" class="muted" aria-live="polite">not loaded yet</span>
+    <span>· Theme:</span>
+    <button type="button" data-theme-pick="auto" aria-pressed="true">system</button>
+    <button type="button" data-theme-pick="light">light</button>
+    <button type="button" data-theme-pick="dark">dark</button>
+  </div>
+
+  <h2>Sources</h2>
+  <div class="wrap"><table id="sources"><thead><tr><th>Source</th><th>URL</th><th>Status</th><th>Fetched</th><th class="num">ms</th><th>Failure</th></tr></thead><tbody></tbody></table></div>
+
+  <h2>Chats — active</h2>
+  <p>Anything that still has a claim on attention: blocked on a human, working, reviewing, waiting for a peer, in error, or unknown. Ordered blocked → working/reviewing → waiting → error → unknown.</p>
+  <p id="union-note" class="muted"></p>
+  <div class="wrap"><table id="active"><thead><tr><th>State</th><th>Chat</th><th>Kind</th><th>Objective / reason</th><th>Iteration</th><th>Last callback</th><th>Alive</th></tr></thead><tbody></tbody></table></div>
+
+  <h2>Chats — stopped or complete (history)</h2>
+  <div class="wrap"><table id="history"><thead><tr><th>State</th><th>Chat</th><th>Kind</th><th>Objective / reason</th><th>Iteration</th><th>Last callback</th><th>Alive</th></tr></thead><tbody></tbody></table></div>
+
+  <h2>Scheduler rules</h2>
+  <p id="sched-lede"></p>
+  <h3>Enabled</h3>
+  <div class="wrap"><table id="rules-on"><thead><tr><th>Rule</th><th>Target</th><th>When</th><th>Running now</th><th>Last run</th><th>Next due</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+  <h3>Disabled or paused</h3>
+  <div class="wrap"><table id="rules-off"><thead><tr><th>Rule</th><th>Target</th><th>When</th><th>Running now</th><th>Last run</th><th>Next due</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+
+  <h2>Token usage per session</h2>
+  <div class="tools" id="windows"><span>Window:</span></div>
+  <p id="usage-lede"></p>
+  <div class="wrap"><table id="usage"><thead><tr><th>Chat</th><th>Line</th><th>Model</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th>Last request</th></tr></thead><tbody></tbody></table></div>
+
+  <footer>
+    <p>Rows are the union of the <code>autonomous</code> source (<code>api/sessions?mode=ralph&amp;limit=300</code>) and any row of the <code>sessions</code> source (<code>api/sessions?limit=300</code>) with <code>mode = ralph</code>, <code>workflow.enabled</code>, or <code>auto.stoppedAt</code> (a chat whose ongoing work was stopped and which is ordinary again), de-duplicated by id. The <code>sessions</code> source lists only the most recent 300 discovered sessions, so an older workflow-only chat would be missing. State is derived from the source fields only: no <code>ralph</code> object but <code>auto.stoppedAt</code> and the workflow not enabled → <b>stopped</b> (history); otherwise no <code>ralph</code> object → <b>unknown</b>; <code>ralph.status = blocked</code> → <b>blocked</b> even when <code>ralph.enabled</code> is false (the callback is off because a human must answer); <code>ralph.error</code> or <code>status = error</code> → <b>error</b>; <code>enabled</code> with status working/scheduled → <b>working</b>; <code>enabled</code> with no status → <b>unknown</b>; <code>workflow.phase = reviewing</code> → <b>reviewing</b>; status waiting or phase waiting → <b>waiting</b>; status stopped/complete → history. Joins use session IDs only: usage rows by <code>sessionId</code>, reviewer lines by <code>chatPair.reviewerSessionId</code>, running rules by <code>runtime.running.sessionId</code>. Sessions without a <code>chatRole</code> are Room residents or plain sessions; their Room is not in the source rows, so it is not shown.</p>
+    <p>Refreshes every 30 s while this tab is visible; nothing is fetched while it is hidden. Usage rows are the top 12 sessions by tokens in each window (<code>api/usage</code> caps <code>bySession</code> at 12), so a quiet chat may have no row even when it used tokens.</p>
+  </footer>
+
+<script>
+(() => {
+  const $ = (sel) => document.querySelector(sel);
+  const el = (tag, props = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else n.setAttribute(k, v);
+    }
+    for (const kid of kids) if (kid != null) n.append(kid);
+    return n;
+  };
+  const fmtTime = (v) => {
+    if (v == null || v === '') return '—';
+    const d = typeof v === 'number' ? new Date(v) : new Date(String(v));
+    return Number.isNaN(d.getTime()) ? String(v) : d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+  };
+  const fmtInt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US') : '—';
+
+  // Theme
+  const applyTheme = (pick) => {
+    if (pick === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', pick);
+    document.querySelectorAll('[data-theme-pick]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themePick === pick)));
+    try { localStorage.setItem('autos-theme', pick); } catch {}
+  };
+  document.querySelectorAll('[data-theme-pick]').forEach(b => b.addEventListener('click', () => applyTheme(b.dataset.themePick)));
+  const params = new URLSearchParams(location.search);
+  let initialTheme = 'auto';
+  try { initialTheme = params.get('theme') || localStorage.getItem('autos-theme') || 'auto'; } catch {}
+  if (!['auto', 'light', 'dark'].includes(initialTheme)) initialTheme = 'auto';
+  applyTheme(initialTheme);
+
+  // ---- State taxonomy (documented in the footer) ----
+  const ORDER = { blocked: 0, working: 1, reviewing: 1, waiting: 2, error: 3, unknown: 4, stopped: 5, complete: 5 };
+  function classify(s) {
+    const r = s.ralph;
+    if ((!r || typeof r !== 'object') && s.auto?.stoppedAt && s.workflow?.enabled !== true) return { state: 'stopped', history: true, why: `ongoing work stopped ${fmtTime(s.auto.stoppedAt)}; the chat is ordinary again` };
+    if (!r || typeof r !== 'object') return { state: 'unknown', history: false, why: s.workflow?.enabled ? 'workflow enabled but no ralph state in the source row' : 'no ralph state in the source row' };
+    const status = String(r.status || '');
+    const phase = String(s.workflow?.phase || '');
+    if (status === 'blocked') return { state: 'blocked', history: false, why: r.blockedReason || 'blocked, no reason recorded' };
+    if (r.error || status === 'error') return { state: 'error', history: false, why: r.error ? String(r.error) : 'status "error" with no message recorded' };
+    if (status === 'stopped') return { state: 'stopped', history: true, why: '' };
+    if (status === 'complete') return { state: 'complete', history: true, why: r.completionReason || '' };
+    if (phase === 'reviewing') return { state: 'reviewing', history: false, why: '' };
+    if (status === 'waiting' || phase === 'waiting') return { state: 'waiting', history: false, why: '' };
+    if (r.enabled === true && (status === 'working' || status === 'scheduled')) return { state: 'working', history: false, why: '' };
+    if (r.enabled === true && status === '') return { state: 'unknown', history: false, why: 'ralph.enabled=true with no status: not proof it is working' };
+    if (r.enabled === false && (status === 'working' || status === '')) return { state: 'unknown', history: false, why: `ralph.enabled=false with status "${status || 'none'}": not proof it stopped` };
+    return { state: 'unknown', history: false, why: `unrecognised ralph.status "${status}"` };
+  }
+  const kindOf = (s) => s.chatRole === 'creator' ? (s.chatPair?.reviewerSessionId ? 'chat (creator + reviewer)' : 'chat (creator)')
+    : s.chatRole === 'reviewer' ? 'chat (reviewer)' : `session (${s.agent || 'agent ?'})`;
+
+  // Links open the chat in the Feather UI served next to this page.
+  const idHref = (id) => `./#${encodeURIComponent(id)}`;
+  function chatLink(s) {
+    const title = s.title || s.id;
+    return el('a', { href: idHref(s.id), title: s.id }, el('span', { text: title }));
+  }
+  const idLink = (id) => el('a', { href: idHref(id), title: id, class: 'id' }, el('span', { text: id.slice(0, 8) }));
+  function statePill(state) { return el('span', { class: `pill s-${state}`, text: state }); }
+
+  function renderChats(rows) {
+    const active = rows.filter(r => !r.c.history).sort((a, b) => (ORDER[a.c.state] - ORDER[b.c.state]) || (a.s.title || '').localeCompare(b.s.title || ''));
+    const hist = rows.filter(r => r.c.history).sort((a, b) => String(b.s.ralph?.lastCallbackAt || b.s.updatedAt || '').localeCompare(String(a.s.ralph?.lastCallbackAt || a.s.updatedAt || '')));
+    for (const [tableId, list] of [['#active', active], ['#history', hist]]) {
+      const tb = $(tableId + ' tbody'); tb.replaceChildren();
+      if (!list.length) { tb.append(el('tr', {}, el('td', { colspan: '7', class: 'empty', text: 'none' }))); continue; }
+      for (const { s, c } of list) {
+        const obj = s.workflow?.objective ? el('div', { class: 'objective', text: s.workflow.objective }) : null;
+        const why = c.why ? el('div', { class: 'why', text: c.why }) : null;
+        const none = !obj && !why ? el('span', { class: 'muted', text: 'no objective recorded' }) : null;
+        tb.append(el('tr', { 'data-state': c.state, 'data-id': s.id },
+          el('td', {}, statePill(c.state)),
+          el('td', {}, chatLink(s), el('div', { class: 'muted id', text: s.id.slice(0, 8) })),
+          el('td', { text: kindOf(s) }),
+          el('td', {}, obj, why, none),
+          el('td', { class: 'num', text: Number.isFinite(s.ralph?.iteration) ? String(s.ralph.iteration) : '—' }),
+          el('td', { text: fmtTime(s.ralph?.lastCallbackAt) }),
+          el('td', { text: s.isActive === true ? 'yes' : s.isActive === false ? 'no' : '—' }),
+        ));
+      }
+    }
+  }
+
+  function renderRules(sched, sessionsById) {
+    const rules = Array.isArray(sched?.rules) ? sched.rules : [];
+    $('#sched-lede').textContent = sched
+      ? `Scheduler ${sched.enabled === false ? 'disabled' : 'enabled'}; booted ${fmtTime(sched.bootAt)}; last tick ${fmtTime(sched.lastTickAt)}. Rules are identified as <room>/<name>; cron expressions run in UTC. A rule never overlaps its own in-flight run.`
+      : 'Scheduler source unavailable.';
+    const on = rules.filter(r => r.enabled !== false && !r.runtime?.paused);
+    const off = rules.filter(r => r.enabled === false || r.runtime?.paused);
+    for (const [tableId, list] of [['#rules-on', on], ['#rules-off', off]]) {
+      const tb = $(tableId + ' tbody'); tb.replaceChildren();
+      if (!list.length) { tb.append(el('tr', {}, el('td', { colspan: '7', class: 'empty', text: 'none' }))); continue; }
+      for (const r of list) {
+        const when = r.every ? `every ${r.every}` : r.cron ? `cron ${r.cron} (UTC)` : r.after ? `after ${r.after}` : '—';
+        const t = r.target || {};
+        const target = `${t.kind || '?'}${t.role ? ' ' + t.role : ''}${t.sessionId ? ' ' + t.sessionId.slice(0, 8) : ''}${r.mode ? ' · ' + r.mode : ''}`;
+        let running;
+        if (r.runtime?.running) {
+          const run = r.runtime.running;
+          const s = run.sessionId ? sessionsById.get(run.sessionId) : null;
+          running = el('span', {}, s ? chatLink(s) : run.sessionId ? idLink(run.sessionId) : el('span', { class: 'muted', text: 'no session' }), el('div', { class: 'muted', text: `since ${fmtTime(run.startedAt)}` }));
+        } else running = el('span', { class: 'muted', text: 'no' });
+        const rt = r.runtime || {};
+        const last = `${fmtTime(rt.lastRunAt)}${rt.lastOutcome ? ' · ' + rt.lastOutcome : ''}`;
+        const flags = [r.enabled === false ? 'disabled' : null, rt.paused ? `paused${rt.pausedReason ? ': ' + rt.pausedReason : ''}` : null].filter(Boolean).join('; ');
+        tb.append(el('tr', { 'data-rule': r.id },
+          el('td', {}, el('span', { class: 'id', text: r.id }), flags ? el('div', { class: 'muted', text: flags }) : null),
+          el('td', { text: target }),
+          el('td', { text: when }),
+          el('td', {}, running),
+          el('td', { text: last }),
+          el('td', { text: r.enabled === false ? '—' : fmtTime(rt.nextDueAt) }),
+          el('td', { class: 'why', text: r.note || '' }),
+        ));
+      }
+    }
+  }
+
+  function renderUsage(usageSrc, chats, windowKey) {
+    const tb = $('#usage tbody'); tb.replaceChildren();
+    const lede = $('#usage-lede');
+    if (!usageSrc || usageSrc.status !== 200 || !usageSrc.body) {
+      lede.textContent = `Usage source unavailable (${usageSrc ? (usageSrc.error || 'HTTP ' + usageSrc.status) : 'not fetched'}). No usage numbers are shown; absence is not zero.`;
+      tb.append(el('tr', {}, el('td', { colspan: '9', class: 'empty', text: 'usage not available' })));
+      return;
+    }
+    const windows = Array.isArray(usageSrc.body.windows) ? usageSrc.body.windows : [];
+    const w = windows.find(x => x.key === windowKey) || windows[0];
+    if (!w) { lede.textContent = 'Usage source returned no windows.'; tb.append(el('tr', {}, el('td', { colspan: '9', class: 'empty', text: 'no windows' }))); return; }
+    lede.textContent = `${w.label || w.key} (since ${fmtTime(w.since)}), generated ${fmtTime(usageSrc.body.generatedAt)}. One line per session in the tables above, active and history alike. Only the top 12 sessions by tokens are in each window. A window total is per session: it spans every auto run and every manual turn in that window, so it is not the cost of one run. Four token categories are shown separately; nothing is summed. Cost is not shown because the ledger records it as uncosted. "No ledger entry" means the window has no row for that session, which is not the same as zero.`;
+    const byId = new Map((w.bySession || []).map(r => [r.sessionId, r]));
+    const line = (label, id, s) => {
+      const u = byId.get(id);
+      return el('tr', { 'data-usage-id': id },
+        el('td', {}, s ? chatLink(s) : idLink(id)),
+        el('td', { text: label }),
+        el('td', { text: u ? (u.model || '—') : '' }),
+        ...(u
+          ? [el('td', { class: 'num', text: fmtInt(u.requests) }), el('td', { class: 'num', text: fmtInt(u.input) }), el('td', { class: 'num', text: fmtInt(u.output) }), el('td', { class: 'num', text: fmtInt(u.cacheRead) }), el('td', { class: 'num', text: fmtInt(u.cacheWrite) }), el('td', { text: fmtTime(u.lastAt) })]
+          : [el('td', { colspan: '6', class: 'muted', text: 'no ledger entry in this window' })]),
+      );
+    };
+    if (!chats.length) { tb.append(el('tr', {}, el('td', { colspan: '9', class: 'empty', text: 'no autonomous chats' }))); return; }
+    for (const { s, c } of chats) {
+      const label = s.chatRole === 'creator' ? 'creator' : s.chatRole === 'reviewer' ? 'reviewer' : 'session';
+      tb.append(line(`${label}${c.history ? ' (history)' : ''}`, s.id, s));
+      if (s.chatRole === 'creator' && s.chatPair?.reviewerSessionId) tb.append(line(`reviewer${c.history ? ' (history)' : ''}`, s.chatPair.reviewerSessionId, null));
+    }
+  }
+
+  function renderSources(sources) {
+    const tb = $('#sources tbody'); tb.replaceChildren();
+    for (const [name, src] of Object.entries(sources || {})) {
+      const ok = src.status === 200 && !src.error;
+      tb.append(el('tr', { 'data-source': name },
+        el('td', { text: name }),
+        el('td', { class: 'id', text: src.url || '' }),
+        el('td', { class: ok ? 'ok' : 'bad', text: src.status == null ? 'no response' : String(src.status) }),
+        el('td', { text: fmtTime(src.fetchedAt) }),
+        el('td', { class: 'num', text: Number.isFinite(src.ms) ? String(src.ms) : '—' }),
+        el('td', { class: 'why', text: src.error || '' }),
+      ));
+    }
+  }
+
+  // ---- Live sources: same-origin relative fetches, one row per source, failures independent ----
+  const SOURCES = {
+    autonomous: 'api/sessions?mode=ralph&limit=300',
+    sessions: 'api/sessions?limit=300',
+    scheduler: 'api/scheduler',
+    usage: 'api/usage',
+  };
+  async function fetchSource(name, url) {
+    const started = Date.now();
+    const out = { url, status: null, fetchedAt: null, ms: null, error: '', body: null };
+    try {
+      const res = await fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      out.status = res.status;
+      const text = await res.text();
+      try { out.body = text ? JSON.parse(text) : null; } catch { out.error = 'response is not JSON'; }
+      if (!res.ok && !out.error) out.error = (out.body && out.body.error) ? String(out.body.error) : `HTTP ${res.status}`;
+    } catch (e) { out.error = e && e.name === 'TimeoutError' ? 'timed out after 15 s' : String(e && e.message || e); }
+    out.ms = Date.now() - started; out.fetchedAt = new Date().toISOString();
+    return [name, out];
+  }
+  const ok = (src) => !!src && src.status === 200 && !src.error;
+  let lastLoadedAt = null, loading = false, currentWindow = params.get('window') || '24h', windowsPainted = '';
+  let sourcesNow = {};
+  let rowsNow = [];
+  function paintFreshness() {
+    const node = $('#freshness');
+    if (loading) { node.textContent = 'refreshing…'; return; }
+    if (!lastLoadedAt) { node.textContent = 'not loaded yet'; return; }
+    node.textContent = `updated ${Math.max(0, Math.round((Date.now() - lastLoadedAt) / 1000))}s ago`;
+  }
+  function paintUsage() {
+    const windows = Array.isArray(sourcesNow.usage?.body?.windows) ? sourcesNow.usage.body.windows : [];
+    if (!windows.some(w => w.key === currentWindow)) currentWindow = windows[0]?.key || currentWindow;
+    const bar = $('#windows');
+    const sig = windows.map(w => w.key).join('|');
+    if (sig !== windowsPainted) {
+      bar.querySelectorAll('button').forEach(b => b.remove());
+      for (const w of windows) {
+        const btn = el('button', { type: 'button', 'data-window': w.key, text: w.label || w.key });
+        btn.addEventListener('click', () => { currentWindow = w.key; paintUsage(); });
+        bar.append(btn);
+      }
+      windowsPainted = sig;
+    }
+    bar.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.window === currentWindow)));
+    renderUsage(sourcesNow.usage, rowsNow, currentWindow);
+  }
+  async function load() {
+    if (loading) return;
+    loading = true; paintFreshness();
+    try {
+      const sources = Object.fromEntries(await Promise.all(Object.entries(SOURCES).map(([n, u]) => fetchSource(n, u))));
+      sourcesNow = sources;
+      const failed = Object.entries(sources).filter(([, s]) => !ok(s)).map(([k]) => k);
+      const b = $('#capture'); b.className = failed.length ? 'banner warn' : 'banner';
+      b.replaceChildren(el('div', {},
+        el('b', { text: failed.length ? `${failed.length} of ${Object.keys(sources).length} sources failed` : 'All sources loaded' }),
+        el('span', { text: ` at ${fmtTime(new Date().toISOString())}. Live, read-only.` }),
+        failed.length ? el('div', { class: 'bad', text: `Sources that failed: ${failed.join(', ')}. They contribute no data, so the sections that depend on them are partial or empty, which is not the same as "nothing running".` }) : null,
+      ));
+      renderSources(sources);
+
+      // Union: autonomous (mode=ralph) ∪ sessions rows that are ralph or workflow-enabled.
+      const autoOk = ok(sources.autonomous), allOk = ok(sources.sessions);
+      const auto = autoOk ? (sources.autonomous.body?.sessions || []) : [];
+      const all = allOk ? (sources.sessions.body?.sessions || []) : [];
+      const sessionsById = new Map(auto.map(s => [s.id, s]));
+      let unionAdded = 0;
+      for (const s of all) {
+        if (sessionsById.has(s.id)) continue;
+        sessionsById.set(s.id, s);
+        if (s.mode === 'ralph' || s.workflow?.enabled === true || s.auto?.stoppedAt) { auto.push(s); unionAdded++; }
+      }
+      rowsNow = auto.map(s => ({ s, c: classify(s) }));
+      if (!autoOk && !allOk) {
+        for (const id of ['#active', '#history']) { const tb = $(id + ' tbody'); tb.replaceChildren(el('tr', {}, el('td', { colspan: '7', class: 'empty bad', text: 'both session sources failed; nothing is known about chats' }))); }
+        $('#union-note').textContent = '';
+      } else {
+        renderChats(rowsNow);
+        if (!autoOk) $('#active tbody').prepend(el('tr', {}, el('td', { colspan: '7', class: 'empty bad', text: 'autonomous source failed; the rows here come from the sessions source only, so this list is partial' })));
+        $('#union-note').textContent = `${auto.length} rows: ${auto.length - unionAdded} from the autonomous source` + (!autoOk ? ' (which failed)' : '') + `, ${unionAdded} added from the sessions source (mode ralph or workflow enabled, not already listed)` + (!allOk ? ' (which failed)' : '') + `. The sessions source covers at most the 300 most recent discovered sessions.`;
+      }
+      renderRules(ok(sources.scheduler) ? sources.scheduler.body : null, sessionsById);
+      paintUsage();
+      lastLoadedAt = Date.now();
+      document.body.dataset.ready = '1';
+    } finally { loading = false; paintFreshness(); }
+  }
+  $('#refresh').addEventListener('click', () => { void load(); });
+  setInterval(paintFreshness, 1000);
+  // Refresh every 30 s only while the tab is visible; catch up when it becomes visible again.
+  let timer = null;
+  function schedule() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (document.visibilityState === 'visible') timer = setInterval(() => { void load(); }, 30000);
+  }
+  document.addEventListener('visibilitychange', () => {
+    schedule();
+    if (document.visibilityState === 'visible' && (!lastLoadedAt || Date.now() - lastLoadedAt > 30000)) void load();
+  });
+  schedule();
+  void load();
+})();
+</script>
+</body>
+</html>

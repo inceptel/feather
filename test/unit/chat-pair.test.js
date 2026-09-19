@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from '../../lib/chat-pair.js';
 
 test('pairs agree before implementation and evaluate evidence without ceremony', () => {
-  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator' });
+  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator', reviewPolicy: 'always' });
   for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
   assert.match(prompts.creator, /Both agree before building/);
   assert.match(prompts.reviewer, /against every agreed criterion/);
@@ -18,11 +18,46 @@ test('pairs agree before implementation and evaluate evidence without ceremony',
   assert.match(prompts.creator, /Review is still required/);
 });
 
+test('adaptive quick work keeps review idle while substantial work retains agreement', () => {
+  const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project' });
+  assert.match(prompts.creator, /without a Reviewer exchange/);
+  assert.match(prompts.creator, /Keep the Reviewer idle/);
+  assert.match(prompts.creator, /Both agree before building/);
+  assert.match(prompts.creator, /Existing project inbox agreement and review gates always apply/);
+  assert.ok(!prompts.creator.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
+});
+
+test('pair saves resolved models and policy before exposing allocation', async t => {
+  const { events, deps } = fixture(t);
+  deps.onAllocated = entry => { events.push({ operation: 'allocated', args: [entry] }); };
+  await createChatPair({ agent: 'omp', model: 'provider/model', reviewerAgent: 'claude', reviewerModel: 'other-model', reviewPolicy: 'always' }, deps);
+  const saved = events.find(event => event.operation === 'save').args[0];
+  assert.equal(saved.model, 'provider/model');
+  assert.equal(saved.reviewerModel, 'other-model');
+  assert.equal(saved.reviewPolicy, 'always');
+  assert.ok(events.findIndex(event => event.operation === 'allocated') > events.findIndex(event => event.operation === 'save'));
+  assert.ok(events.findIndex(event => event.operation === 'allocated') < events.findIndex(event => event.operation === 'spawn'));
+  const launches = events.filter(event => event.operation === 'spawn');
+  assert.equal(launches[0].args[3].ompModel, 'provider/model');
+  assert.equal(launches[1].args[3].model, 'other-model');
+});
+
+test('standby rejects task content and failure can retain hidden identity', async t => {
+  const { deps, events } = fixture(t);
+  await assert.rejects(createChatPair({ standby: true, prompt: 'Do work' }, deps), { status: 400 });
+  deps.prime = async () => { throw new Error('startup failure'); };
+  deps.retire = entry => { events.push({ operation: 'retire', args: [entry] }); };
+  await assert.rejects(createChatPair({ standby: true }, deps), /startup failure/);
+  assert.equal(events.filter(event => event.operation === 'retire').length, 1);
+  assert.equal(events.filter(event => event.operation === 'forget').length, 0);
+});
+
 function fixture(t, overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-chat-pair-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const events = [];
-  const deps = { root };
+  // Pair fixtures opt into a Reviewer; the machine default is now a solo chat.
+  const deps = { root, config: { reviewPolicy: 'adaptive' } };
   for (const operation of ['spawn', 'prime', 'createGroup', 'teardownGroup', 'stop', 'save', 'forget']) {
     deps[operation] = async (...args) => { events.push({ operation, args }); };
   }
@@ -136,4 +171,25 @@ test('invalid agent and oversized input fail before creating files or sessions',
   assert.deepEqual(events, []);
   assert.deepEqual(fs.readdirSync(root), []);
   assert.equal(chatFolderName('../../ Boat; $(touch bad)'), 'boat-touch-bad');
+});
+
+test('the default chat is solo: one agent, no group, no reviewer, and a prompt that says so', async t => {
+  const { events, deps } = fixture(t, { config: {} });
+  const chat = await createChatPair({ name: 'Solo Plan', prompt: 'Draft the plan' }, deps);
+  assert.equal(chat.reviewerSessionId, null);
+  assert.equal(chat.groupId, null);
+  assert.equal(events.filter(e => e.operation === 'createGroup').length, 0);
+  assert.equal(events.filter(e => e.operation === 'spawn').length, 1);
+  const primes = events.filter(e => e.operation === 'prime');
+  assert.equal(primes.length, 1);
+  assert.equal(primes[0].args[0], chat.id);
+  assert.match(primes[0].args[1], /Draft the plan/);
+  assert.match(primes[0].args[1], /sole agent/);
+  assert.match(primes[0].args[1], /no Reviewer and no sidecar group/);
+  assert.doesNotMatch(primes[0].args[1], /sidecar post|Creator–Reviewer \(CR\) pair/);
+  const saved = events.find(e => e.operation === 'save').args[0];
+  assert.equal(saved.reviewPolicy, 'none');
+  assert.equal(saved.reviewerSessionId ?? null, null);
+  const paired = await createChatPair({ name: 'Paired', reviewPolicy: 'adaptive' }, deps);
+  assert.ok(paired.reviewerSessionId && paired.groupId, 'an explicit policy still creates a pair');
 });

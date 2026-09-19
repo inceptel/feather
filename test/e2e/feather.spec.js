@@ -155,7 +155,7 @@ test.describe('Session selection', () => {
     await page.goto(BASE)
     await page.waitForLoadState('networkidle')
     await selectTestSession(page)
-    await expect(page.locator('button:has-text("Chat")')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Chat', exact: true })).toBeVisible()
     await expect(page.locator('button:has-text("Terminal")')).toBeVisible()
   })
 
@@ -397,8 +397,7 @@ test.describe('Chat input', () => {
     await page.locator('button:has-text("Send")').click()
     await page.waitForTimeout(300)
 
-    const value = await textarea.inputValue()
-    expect(value).toBe('')
+    await expect(textarea).toHaveValue('')
   })
 
   test('Enter key sends, Shift+Enter adds newline', async ({ page }) => {
@@ -416,8 +415,7 @@ test.describe('Chat input', () => {
     await textarea.fill('will be sent')
     await textarea.press('Enter')
     await page.waitForTimeout(300)
-    const afterSend = await textarea.inputValue()
-    expect(afterSend).toBe('')
+    await expect(textarea).toHaveValue('')
   })
 })
 
@@ -431,7 +429,7 @@ test.describe('Tab switching', () => {
   })
 
   test('chat tab is active by default', async ({ page }) => {
-    const chatTab = page.locator('button:has-text("Chat")')
+    const chatTab = page.getByRole('button', { name: 'Chat', exact: true })
     // Active tab should have a non-transparent bottom border
     const borderBottom = await chatTab.evaluate(el => {
       const cs = getComputedStyle(el)
@@ -457,7 +455,7 @@ test.describe('Tab switching', () => {
     await page.waitForTimeout(300)
 
     // Back to chat
-    await page.locator('button:has-text("Chat")').click()
+    await page.getByRole('button', { name: 'Chat', exact: true }).click()
     await page.waitForTimeout(300)
 
     // Messages should be visible
