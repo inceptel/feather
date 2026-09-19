@@ -12,7 +12,7 @@ import { FilePreview } from './components/FilePreview'
 import { linkTarget } from './lib/linkTarget.js'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { BtwItem, SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
-import { askBtw, fetchBtw, fetchSessions, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns, openIntakeChat } from './api'
+import { askBtw, fetchBtw, fetchSessions, SEARCH_RESULT_LIMIT, fetchMessages, subscribeMessages, sendInput, sendSessionKeys, createSession, resumeSession, interruptSession, uploadFileWithId, transcribeAudio, deleteSession, renameSession, forkSession, fetchStarred, saveStarred, exportUrl, fetchAgents, fetchFiles, deletePath, fetchBoxes, fetchSharingPeers, setSessionShare, fetchBuildVersion, fetchSidecars, createSidecar, fetchSessionRoom, fetchSessionRoomContext, fetchProtocolRuns, openIntakeChat } from './api'
 import { createSpinGestureDetector, motionEventToSpinSample } from './spinGesture'
 import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation, runMediaOperationOnce, isRetryableVoiceMemo } from './lib/mediaRetry.js'
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
@@ -428,7 +428,7 @@ export default function App() {
     searchDebounce = setTimeout(async () => {
       searchController = new AbortController()
       try {
-        const r = await fetchSessions(currentBox(), trimmed, undefined, undefined, { signal: searchController.signal })
+        const r = await fetchSessions(currentBox(), trimmed, SEARCH_RESULT_LIMIT, undefined, { signal: searchController.signal })
         if (seq === searchSeq) setSearchResults(r.sessions)
       } catch {
         if (seq === searchSeq) setSearchResults([])

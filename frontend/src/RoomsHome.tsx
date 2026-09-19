@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, RoomInfo, SessionMeta } from './api'
+import { fetchRooms, fetchSessions, RoomInfo, SessionMeta, SEARCH_RESULT_LIMIT } from './api'
 import { appUrl } from './lib/appPath.js'
 import { markdownCSS, renderWikiMarkdown } from './components/MessageView'
 import { SuperFeed } from './components/SuperFeed'
@@ -184,7 +184,7 @@ export default function RoomsHome(props: {
     const controller = new AbortController()
     const timer = setTimeout(async () => {
       try {
-        const response = await fetchSessions(null, search, 150, undefined, { signal: controller.signal })
+        const response = await fetchSessions(null, search, SEARCH_RESULT_LIMIT, undefined, { signal: controller.signal })
         if (!disposed && generation === searchGeneration) setResults(response.sessions)
       } catch (cause) {
         if (!disposed && generation === searchGeneration) {

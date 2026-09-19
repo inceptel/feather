@@ -569,6 +569,11 @@ export const setSessionShare = (id: string, peers: string[]) =>
 // On a peer box the response also carries `control` (whether we may send).
 // `q` searches ALL sessions (titles + full content, server-side) instead of
 // just the most-recent-50 the plain listing returns.
+// Search results are ordered by recency and capped server-side, so a low cap
+// hides older matches for common words. Keep it wide enough to reach back
+// through the year; the sidebar virtualises rows cheaply.
+export const SEARCH_RESULT_LIMIT = 300
+
 export async function fetchSessions(box?: string | null, q?: string, limit?: number, mode?: 'ralph', options: { id?: string, signal?: AbortSignal } = {}): Promise<{ sessions: SessionMeta[], control?: boolean }> {
   const params = new URLSearchParams()
   if (q) params.set('q', q)
