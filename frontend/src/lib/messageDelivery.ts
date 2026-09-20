@@ -34,3 +34,43 @@ export function createMessageDeliveryGate(createId: () => string = () => crypto.
 
   return { run }
 }
+
+interface ReconciliationMessage {
+  uuid: string
+  timestamp: string
+  content?: Array<{ type: string, text?: string }>
+  delivery?: string
+}
+
+function canonicalSubmittedText(message: ReconciliationMessage): string {
+  const text = message.content?.find(block => block.type === 'text')?.text || ''
+  return text.replace(/<\/?pasted_content\b[^>]*>/gi, '').trim()
+}
+
+export function reconcileOptimisticUserMessage<T extends ReconciliationMessage>(
+  messages: T[],
+  incoming: T,
+  maxAgeMs = 30000,
+): T[] | null {
+  const incomingText = canonicalSubmittedText(incoming)
+  const incomingTime = Date.parse(incoming.timestamp)
+  if (!incomingText || !Number.isFinite(incomingTime)) return null
+
+  let matchIndex = -1
+  let matchAge = Infinity
+  for (let index = 0; index < messages.length; index++) {
+    const candidate = messages[index]
+    if (!candidate.uuid.startsWith('optimistic-')) continue
+    if (canonicalSubmittedText(candidate) !== incomingText) continue
+    const age = Math.abs(Date.parse(candidate.timestamp) - incomingTime)
+    if (Number.isFinite(age) && age < maxAgeMs && age < matchAge) {
+      matchIndex = index
+      matchAge = age
+    }
+  }
+  if (matchIndex < 0) return null
+
+  const reconciled = [...messages]
+  reconciled[matchIndex] = { ...incoming, delivery: 'delivered' }
+  return reconciled
+}

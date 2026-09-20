@@ -18,7 +18,7 @@ import { MEDIA_ATTEMPTS, MAX_UPLOAD_BYTES, MAX_AUDIO_BYTES, retryMediaOperation,
 import { putMediaRecord, patchMediaRecord, deleteMediaRecord, listMediaRecords, isTerminalMediaRecord, withMediaRecordClaim } from './lib/mediaOutbox.js'
 import { appUrl } from './lib/appPath.js'
 import { localFileUrl } from './lib/localMedia.js'
-import { createMessageDeliveryGate } from './lib/messageDelivery.js'
+import { createMessageDeliveryGate, reconcileOptimisticUserMessage } from './lib/messageDelivery.js'
 import { deriveToolIntentState, isFinalAssistantMessage, toolIntentTransition } from './lib/toolIntentStatus.js'
 import { deriveTodoSnapshot, reduceTodoSnapshot, todoSnapshotFromDetails } from './lib/ompTodo.js'
 import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime, reduceOmpMirrorState } from './lib/ompMirror.js'
@@ -919,16 +919,8 @@ export default function App() {
         }
         if (isFinalAssistantMessage(msg)) clearAssistantStream()
         if (msg.role === 'user') {
-          const msgText = msg.content?.find(block => block.type === 'text')?.text || ''
-          const optimisticIndex = prevMessages.findIndex(message =>
-            message.uuid.startsWith('optimistic-')
-            && message.content?.[0]?.text === msgText
-            && Math.abs(new Date(message.timestamp).getTime() - new Date(msg.timestamp).getTime()) < 30000)
-          if (optimisticIndex >= 0) {
-            const updated = [...prevMessages]
-            updated[optimisticIndex] = { ...msg, delivery: 'delivered' }
-            return updated
-          }
+          const reconciled = reconcileOptimisticUserMessage(prevMessages, msg)
+          if (reconciled) return reconciled
         }
         return [...prevMessages, msg]
       })
