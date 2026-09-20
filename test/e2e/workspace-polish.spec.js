@@ -1,11 +1,15 @@
 import { test, expect } from '@playwright/test';
 
-test('pinned and recent chats sort newest activity first', async ({ page }) => {
+test('shows five recent chats before pinned and other chats, each newest first', async ({ page }) => {
   const sessions = [
     { id: 'old-pin', title: 'Older pin', updatedAt: '2026-09-01T00:00:00Z' },
-    { id: 'old', title: 'Older chat', updatedAt: '2026-09-02T00:00:00Z' },
-    { id: 'new-pin', title: 'Newer pin', updatedAt: '2026-09-10T00:00:00Z' },
-    { id: 'new', title: 'Newer chat', updatedAt: '2026-09-11T00:00:00Z' },
+    { id: 'other', title: 'Other chat', updatedAt: '2026-09-02T00:00:00Z' },
+    { id: 'recent-5', title: 'Recent five', updatedAt: '2026-09-07T00:00:00Z' },
+    { id: 'recent-3', title: 'Recent three', updatedAt: '2026-09-09T00:00:00Z' },
+    { id: 'new-pin', title: 'Newer pin', updatedAt: '2026-09-12T00:00:00Z' },
+    { id: 'recent-1', title: 'Recent one', updatedAt: '2026-09-11T00:00:00Z' },
+    { id: 'recent-4', title: 'Recent four', updatedAt: '2026-09-08T00:00:00Z' },
+    { id: 'recent-2', title: 'Recent two', updatedAt: '2026-09-10T00:00:00Z' },
   ];
   await page.route('**/api/**', async route => {
     const p = new URL(route.request().url()).pathname;
@@ -20,8 +24,13 @@ test('pinned and recent chats sort newest activity first', async ({ page }) => {
     await route.fulfill({ json: body });
   });
   await page.goto('/#');
+  const home = page.getByTestId('chats-home');
+  const sections = home.locator('section.workspace-section');
+  await expect(sections).toHaveCount(3);
+  expect(await sections.evaluateAll(items => items.map(item => item.getAttribute('aria-label')))).toEqual(['Recent chats', 'Pinned chats', 'Other chats']);
+  await expect(page.getByRole('region', { name: 'Recent chats', exact: true }).locator('.chat-home-title')).toHaveText(['Recent one', 'Recent two', 'Recent three', 'Recent four', 'Recent five']);
   await expect(page.getByRole('region', { name: 'Pinned chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer pin', 'Older pin']);
-  await expect(page.getByRole('region', { name: 'Recent chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer chat', 'Older chat']);
+  await expect(page.getByRole('region', { name: 'Other chats', exact: true }).locator('.chat-home-title')).toHaveText(['Other chat']);
 });
 
 for (const theme of ['feather', 'opencode', 'catppuccin', 'tokyonight']) {
