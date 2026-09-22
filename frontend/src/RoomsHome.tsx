@@ -182,13 +182,13 @@ function timeAgo(iso?: string | null) {
 // The legacy component name preserves callers and stored Room data. The home
 // itself is now chats; no Room creation or resident management is required.
 export default function RoomsHome(props: {
+  sessions: SessionMeta[]
   onOpen: (id: string) => void
   onNewChat?: () => void
-  onSessionsChanged?: () => void
+  onSessionsChanged?: () => void | Promise<void>
   view?: 'chats' | 'wiki' | 'updates'
 }) {
   const [rooms, setRooms] = createSignal<RoomInfo[]>([])
-  const [sessions, setSessions] = createSignal<SessionMeta[]>([])
   const [pins, setPins] = createSignal<ChatPin[]>([])
   const [archived, setArchived] = createSignal<string[]>([])
   const [showArchived, setShowArchived] = createSignal(false)
@@ -211,18 +211,18 @@ export default function RoomsHome(props: {
     refreshing = true
     const generation = pinsGeneration
     const responses = await Promise.allSettled([
-      fetchRooms(), fetchSessions(null, undefined, 150),
+      fetchRooms(),
+      Promise.resolve().then(() => props.onSessionsChanged?.()),
       fetch(appUrl('/api/chat-pins')).then(async response => {
         if (!response.ok) throw new Error('Could not load pinned chats')
         return await response.json() as { pins: ChatPin[], archived?: string[] }
       }),
     ])
     if (disposed) return
-    const [roomResponse, sessionResponse, pinResponse] = responses
+    const [roomResponse, , pinResponse] = responses
     if (roomResponse.status === 'fulfilled') {
       setRooms(roomResponse.value)
     }
-    if (sessionResponse.status === 'fulfilled') setSessions(sessionResponse.value.sessions)
     if (pinResponse.status === 'fulfilled' && generation === pinsGeneration) {
       setPins(pinResponse.value.pins)
       setArchived(pinResponse.value.archived || [])
@@ -269,14 +269,14 @@ export default function RoomsHome(props: {
   const allSessions = createMemo(() => {
     const byId = new Map<string, SessionMeta>()
     for (const room of rooms()) for (const session of room.sessions) byId.set(session.id, session)
-    for (const session of sessions()) byId.set(session.id, session)
+    for (const session of props.sessions) byId.set(session.id, session)
     return byId
   })
   const pinnedChats = createMemo(() => pins().filter(pin => !archived().includes(pin.id)).map(pin => {
     const session = allSessions().get(pin.id)
     return { ...session, id: pin.id, title: (pin.legacy ? pin.title : session?.title) || pin.title || 'Pinned chat', updatedAt: session?.updatedAt || '', isActive: session?.isActive || false } as SessionMeta
   }).sort(lastUsedFirst))
-  const unpinnedChats = createMemo(() => sessions().filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)).sort(lastUsedFirst))
+  const unpinnedChats = createMemo(() => props.sessions.filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)).sort(lastUsedFirst))
   const recentChats = createMemo(() => unpinnedChats().slice(0, 5))
   const otherChats = createMemo(() => unpinnedChats().slice(5))
   const archivedChats = createMemo(() => archived().map(id => allSessions().get(id) || { id, title: pins().find(pin => pin.id === id)?.title || 'Archived chat', updatedAt: '', isActive: false }))

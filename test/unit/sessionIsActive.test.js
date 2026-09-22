@@ -1,6 +1,9 @@
-import { describe, it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { sessionIsActive, ACTIVE_MS, messageTimestampMs, lastMessageMs, latestSessionActivityMs } from '../../lib/sessions.js'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { sessionIsActive, ACTIVE_MS, messageTimestampMs, lastMessageMs, lastMessageMsFromFile, latestSessionActivityMs } from '../../lib/sessions.js'
 
 // Regression: finished sessions kept showing the green "active" dot because
 // isActive was true whenever a feather-* tmux session existed, which lingers up
@@ -92,6 +95,51 @@ describe('lastMessageMs', () => {
   it('returns null when there is no real message', () => {
     const onlySystem = [JSON.stringify({ type: 'system', timestamp: late })].join('\n')
     assert.equal(lastMessageMs(onlySystem, 'claude'), null)
+  })
+})
+
+describe('lastMessageMsFromFile', () => {
+  const roots = []
+  afterEach(() => {
+    while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true })
+  })
+
+  function transcript(lines) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-activity-'))
+    roots.push(root)
+    const file = path.join(root, 'session.jsonl')
+    fs.writeFileSync(file, `${lines.join('\n')}\n`)
+    return file
+  }
+
+  it('finds a real message across small reverse-read boundaries', () => {
+    const timestamp = '2026-06-27T01:00:00.000Z'
+    const file = transcript([
+      JSON.stringify({ type: 'assistant', timestamp, message: {} }),
+      ...Array.from({ length: 40 }, (_, index) => JSON.stringify({ type: 'system', index })),
+    ])
+    assert.equal(lastMessageMsFromFile(file, 'claude', 0, { chunkBytes: 37, maxBytes: 4096 }), Date.parse(timestamp))
+  })
+
+  it('stops after the first small tail chunk when it contains activity', () => {
+    const timestamp = '2026-06-27T01:00:00.000Z'
+    const file = transcript([
+      JSON.stringify({ type: 'system', detail: 'x'.repeat(1024 * 1024) }),
+      JSON.stringify({ type: 'assistant', timestamp, message: {} }),
+      JSON.stringify({ type: 'system', status: 'idle' }),
+    ])
+    let bytesRead = 0
+    const result = lastMessageMsFromFile(file, 'claude', 0, { onRead: bytes => { bytesRead += bytes } })
+    assert.equal(result, Date.parse(timestamp))
+    assert.equal(bytesRead, 64 * 1024)
+  })
+
+  it('returns the fallback when the bounded tail has no real message', () => {
+    const file = transcript([
+      JSON.stringify({ type: 'assistant', timestamp: '2026-06-27T01:00:00.000Z', message: {} }),
+      ...Array.from({ length: 100 }, (_, index) => JSON.stringify({ type: 'system', index })),
+    ])
+    assert.equal(lastMessageMsFromFile(file, 'claude', 123, { chunkBytes: 64, maxBytes: 256 }), 123)
   })
 })
 

@@ -11,8 +11,10 @@ test('shows five recent chats before pinned and other chats, each newest first',
     { id: 'recent-4', title: 'Recent four', updatedAt: '2026-09-08T00:00:00Z' },
     { id: 'recent-2', title: 'Recent two', updatedAt: '2026-09-10T00:00:00Z' },
   ];
+  const sessionLimits = [];
   await page.route('**/api/**', async route => {
     const p = new URL(route.request().url()).pathname;
+    if (p === '/api/sessions') sessionLimits.push(new URL(route.request().url()).searchParams.get('limit'));
     const body = p === '/api/sessions' ? { sessions }
       : p === '/api/chat-pins' ? { pins: [{ id: 'old-pin' }, { id: 'new-pin' }], archived: [] }
       : p === '/api/rooms' ? { rooms: [] }
@@ -31,6 +33,7 @@ test('shows five recent chats before pinned and other chats, each newest first',
   await expect(page.getByRole('region', { name: 'Recent chats', exact: true }).locator('.chat-home-title')).toHaveText(['Recent one', 'Recent two', 'Recent three', 'Recent four', 'Recent five']);
   await expect(page.getByRole('region', { name: 'Pinned chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer pin', 'Older pin']);
   await expect(page.getByRole('region', { name: 'Other chats', exact: true }).locator('.chat-home-title')).toHaveText(['Other chat']);
+  expect(sessionLimits).toEqual(['150']);
 });
 
 for (const theme of ['feather', 'opencode', 'catppuccin', 'tokyonight']) {

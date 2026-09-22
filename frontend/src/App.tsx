@@ -25,6 +25,8 @@ import { createOmpMirrorState, reconcileOmpRuntimeJobs, reconcileSubagentRuntime
 import { createProtocolRunsState, orderedProtocolRuns, reduceProtocolRunSnapshot, replaceProtocolRuns } from './lib/protocolRuns.js'
 import { createChat, fetchChatStatus, setChatWorking, attachReviewer, detachReviewer, type ChatRequest } from './api'
 
+const HOME_SESSION_LIST_LIMIT = 150
+
 interface QuickLink { label: string; url: string }
 
 function restorePendingChat(): { id: string; request: ChatRequest } | null {
@@ -712,19 +714,29 @@ export default function App() {
     }
   }
 
-  async function refreshSessions() {
-    try {
-      const box = currentBox()
-      const r = await fetchSessions(box)
-      if (box !== currentBox()) return
-      setSessions(previous => [...r.sessions, ...previous.filter(s => !r.sessions.some(next => next.id === s.id) && (s.id === pendingChat()?.id || s.chatStartup?.status === 'starting'))])
-      const selectedId = currentId()
-      if (selectedId && (working() || toolIntentStatus())) {
-        const selected = await findSessionMeta(selectedId, box, r.sessions)
-        if (!selected?.isActive) { setWorking(false); setToolIntentStatus(''); clearAssistantStream() }
-      }
-      if (isPeerBox()) setPeerControl(!!r.control)
-    } catch {}
+  const sessionRefreshes = new Map<string, Promise<void>>()
+  function refreshSessions(): Promise<void> {
+    const box = currentBox()
+    const limit = currentId() ? undefined : HOME_SESSION_LIST_LIMIT
+    const refreshKey = `${box}:${limit || 'default'}`
+    const existing = sessionRefreshes.get(refreshKey)
+    if (existing) return existing
+    const refresh = (async () => {
+      try {
+        const r = await fetchSessions(box, undefined, limit)
+        if (box !== currentBox()) return
+        setSessions(previous => [...r.sessions, ...previous.filter(s => !r.sessions.some(next => next.id === s.id) && (s.id === pendingChat()?.id || s.chatStartup?.status === 'starting'))])
+        const selectedId = currentId()
+        if (selectedId && (working() || toolIntentStatus())) {
+          const selected = await findSessionMeta(selectedId, box, r.sessions)
+          if (!selected?.isActive) { setWorking(false); setToolIntentStatus(''); clearAssistantStream() }
+        }
+        if (isPeerBox()) setPeerControl(!!r.control)
+      } catch {}
+    })()
+    sessionRefreshes.set(refreshKey, refresh)
+    void refresh.finally(() => { if (sessionRefreshes.get(refreshKey) === refresh) sessionRefreshes.delete(refreshKey) })
+    return refresh
   }
 
   function selectBox(id: string) {
@@ -2288,7 +2300,7 @@ export default function App() {
             <Show when={homeRoute().kind === 'costs'} fallback={
               <Show when={homeRoute().kind === 'scheduler'} fallback={
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
-                <RoomsHome view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew()} onOpen={select} onSessionsChanged={refreshSessions} />
+                <RoomsHome sessions={sessions()} view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew()} onOpen={select} onSessionsChanged={refreshSessions} />
               }>
                 {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
               </Show>

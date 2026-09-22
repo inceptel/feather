@@ -10,8 +10,9 @@ import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
 import { parseMessage, parseOmpMessage, parseCodexMessage, parseMessageForAgent } from './lib/parse.js';
-import { sessionIsActive, lastMessageMs, latestSessionActivityMs } from './lib/sessions.js';
+import { sessionIsActive, lastMessageMs, lastMessageMsFromFile as lastActivityMs, latestSessionActivityMs } from './lib/sessions.js';
 import { extractCodexTitle } from './lib/session-titles.js';
+import { createSessionFactsCache } from './lib/session-facts-cache.js';
 import * as sidecar from './lib/sidecar.js';
 import { createChatPair, chatPairPrompts, chatSoloPrompt, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from './lib/chat-pair.js';
 import { attachReviewer, REVIEWER_DETACH_NOTE } from './lib/reviewer-attach.js';
@@ -766,7 +767,10 @@ async function refreshSessionSearch(candidates, signal) {
   return sessionSearchLock('index', () => sessionSearch.sync(candidates, { signal }));
 }
 
-const sessionCandidateCache = new Map();
+const sessionCandidateCache = createSessionFactsCache({
+  file: STATE_PATHS.cache.sessionFactsFile,
+  onError: error => console.warn(`[sessions] could not persist facts cache: ${error.message}`),
+});
 
 function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candidateProjectId }) {
   const mtimeMs = mtime.getTime();
@@ -899,6 +903,7 @@ function listSessionCandidates(meta = readMeta()) {
   // Content-based worker detection requires reading the file, so we can't pre-filter.
   const rankingTime = candidate => Math.max(candidate.mtime.getTime(), meta[candidate.id]?.chatRole === 'creator' && !meta[candidate.id]?.chatStandby ? Date.parse(meta[candidate.id].chatCreatedAt) || 0 : 0);
   candidates.sort((a, b) => rankingTime(b) - rankingTime(a));
+  sessionCandidateCache.retain(new Set(candidates.map(candidate => candidate.fpath)));
   return candidates;
 }
 
@@ -985,33 +990,6 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
   return sessions;
 }
 
-// Tail sizes tried in order, growing only when the smaller read found no real
-// message. Some agents append bookkeeping lines (heartbeats, status) while
-// idle, so on a session left open for days the last real message can sit
-// megabytes back from EOF: a fixed 512KB tail found nothing, fell back to the
-// (always fresh) mtime, and lit the green dot on long-idle sessions.
-const ACTIVITY_TAILS = [512 * 1024, 4 * 1024 * 1024, 32 * 1024 * 1024];
-
-// Epoch-ms of the last real user/assistant message in a session's JSONL — the
-// true "last activity". Reads only the file tail (messages are appended), and
-// falls back to `fallbackMs` (the file mtime) if no real message is found.
-function lastActivityMs(fpath, agent, fallbackMs) {
-  try {
-    const size = fs.statSync(fpath).size;
-    const fd = fs.openSync(fpath, 'r');
-    try {
-      for (const tail of ACTIVITY_TAILS) {
-        const readLen = Math.min(size, tail);
-        const buf = Buffer.alloc(readLen);
-        fs.readSync(fd, buf, 0, readLen, size - readLen);
-        const ts = lastMessageMs(buf.toString('utf8'), agent, size > readLen);
-        if (ts) return ts;
-        if (readLen >= size) break; // whole file already scanned
-      }
-    } finally { fs.closeSync(fd); }
-    return fallbackMs;
-  } catch { return fallbackMs; }
-}
 
 // ── Tmux management ─────────────────────────────────────────────────────────
 
