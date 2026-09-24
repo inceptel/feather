@@ -10,8 +10,8 @@ import {
 } from '../../lib/omp.js'
 
 describe('omp launch config', () => {
-  it('defaults the model to gpt-5.6-sol and honors a valid override', () => {
-    assert.equal(resolveOmpModel({}), 'openai-codex/gpt-5.6-sol')
+  it('defaults the model to Opus 5.5 and honors a valid override', () => {
+    assert.equal(resolveOmpModel({}), 'anthropic/claude-opus-5-5')
     assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: 'anthropic/claude-opus-4-8' }), 'anthropic/claude-opus-4-8')
     assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: 'gpt-5.6-sol' }), 'gpt-5.6-sol')
   })
@@ -20,16 +20,16 @@ describe('omp launch config', () => {
     assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: '' }), '')
     assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: '   ' }), '')
     // Anything with quotes/spaces/semicolons can't be a model id → fall back.
-    assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: "sol'; rm -rf /" }), 'openai-codex/gpt-5.6-sol')
-    assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: 'has space' }), 'openai-codex/gpt-5.6-sol')
+    assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: "sol'; rm -rf /" }), 'anthropic/claude-opus-5-5')
+    assert.equal(resolveOmpModel({ FEATHER_OMP_MODEL: 'has space' }), 'anthropic/claude-opus-5-5')
   })
 
-  it('defaults thinking to high and accepts only known levels', () => {
-    assert.equal(resolveOmpThinking({}), 'high')
-    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'medium' }), 'medium')
+  it('defaults thinking to medium and accepts only known levels', () => {
+    assert.equal(resolveOmpThinking({}), 'medium')
+    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'high' }), 'high')
     assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'xhigh' }), 'xhigh')
-    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'bogus' }), 'high')
-    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: '' }), 'high')
+    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: 'bogus' }), 'medium')
+    assert.equal(resolveOmpThinking({ FEATHER_OMP_THINKING: '' }), 'medium')
   })
 
   it('sanitizes per-session model overrides: valid id or empty, never a fallback', () => {
