@@ -8,7 +8,9 @@ import os from 'os'
 import path from 'path'
 
 const repo = path.resolve(import.meta.dirname, '../..')
-const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-prefix-e2e-'))
+// Only a path at import: Playwright imports specs just to list them, and a
+// folder created here would never reach afterAll. beforeAll creates it.
+const fixtureRoot = path.join(os.tmpdir(), `feather-prefix-e2e-${process.pid}-${Date.now()}`)
 const home = path.join(fixtureRoot, 'home')
 const stateNormal = path.join(fixtureRoot, 'state-normal')
 const stateCanary = path.join(fixtureRoot, 'state-canary')
@@ -52,6 +54,11 @@ async function waitForHealth(port) {
 }
 
 async function startFeather(port, stateDir, readOnly) {
+  // Routing is under test, not agents: a tmux with no sessions and no warm
+  // chat pool, so a Send or a standby pair never launches a real harness.
+  const bin = path.join(fixtureRoot, 'bin')
+  fs.mkdirSync(bin, { recursive: true })
+  fs.writeFileSync(path.join(bin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
   const child = spawn(process.execPath, ['server.js'], {
     cwd: repo,
     env: {
@@ -59,6 +66,11 @@ async function startFeather(port, stateDir, readOnly) {
       HOME: home,
       FEATHER_STATE_DIR: stateDir,
       FEATHER_READ_ONLY: readOnly ? '1' : '0',
+      FEATHER_CHAT_POOL_SIZE: '0',
+      FEATHER_PROJECT_COMMS_ENABLED: '0',
+      FEATHER_ROOM_PULSES: '0',
+      FEATHER_SCHEDULER: '0',
+      PATH: `${bin}${path.delimiter}${process.env.PATH || ''}`,
       PORT: String(port),
     },
     stdio: ['ignore', 'ignore', 'pipe'],

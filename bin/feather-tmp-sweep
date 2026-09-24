@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Remove stale top-level entries from /tmp.
+
+Test runs, builds and headless browsers leave folders in /tmp that nothing
+removes; left alone they fill the disk. An entry is removed only when it and
+everything inside it is older than the cutoff, it belongs to this user, it is
+not a socket, pipe or system entry, and no running process uses it (cwd,
+open file, or a path in its argv).
+"""
+import argparse
+import fnmatch
+import os
+import shutil
+import stat
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(os.environ.get("FEATHER_TMP_SWEEP_ROOT", "/tmp"))
+MIN_AGE_DAYS = float(os.environ.get("FEATHER_TMP_SWEEP_MIN_AGE_DAYS", 3))
+INTERVAL = int(os.environ.get("FEATHER_TMP_SWEEP_INTERVAL_SECONDS", 7 * 24 * 60 * 60))
+PROTECTED = (
+    ".X*-unix", ".ICE-unix", ".font-unix", ".XIM-unix", ".Test-unix", "tmux-*",
+    "systemd-private-*", "snap-private-tmp", "supervisor*", "*.sock", "*.pid", "*.lock",
+)
+
+
+def paths_in_use():
+    used = set()
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        base = f"/proc/{pid}"
+        try:
+            used.add(os.readlink(f"{base}/cwd"))
+        except OSError:
+            pass
+        try:
+            for fd in os.listdir(f"{base}/fd"):
+                try:
+                    used.add(os.readlink(f"{base}/fd/{fd}"))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        try:
+            with open(f"{base}/cmdline", "rb") as handle:
+                for arg in handle.read().split(b"\0"):
+                    text = arg.decode("utf-8", "replace")
+                    for token in text.replace("=", " ").split():
+                        if token.startswith("/"):
+                            used.add(token)
+        except OSError:
+            pass
+    return {path.removesuffix(" (deleted)") for path in used}
+
+
+def newest_mtime(path, cutoff):
+    """Newest mtime in the tree, stopping early once one is newer than cutoff."""
+    newest = os.lstat(path).st_mtime
+    if newest > cutoff or not stat.S_ISDIR(os.lstat(path).st_mode):
+        return newest
+    for root, dirs, files in os.walk(path, onerror=lambda error: None):
+        for name in dirs + files:
+            try:
+                mtime = os.lstat(os.path.join(root, name)).st_mtime
+            except OSError:
+                continue
+            if mtime > newest:
+                newest = mtime
+                if newest > cutoff:
+                    return newest
+    return newest
+
+
+def size_of(path):
+    total = 0
+    if not os.path.isdir(path) or os.path.islink(path):
+        return os.lstat(path).st_size
+    for root, _dirs, files in os.walk(path, onerror=lambda error: None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def remove(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        # Staged releases and caches can be read-only trees.
+        for root, _dirs, _files in os.walk(path, onerror=lambda error: None):
+            try:
+                os.chmod(root, stat.S_IRWXU)
+            except OSError:
+                pass
+        shutil.rmtree(path, ignore_errors=True)
+        return not os.path.lexists(path)
+    os.unlink(path)
+    return True
+
+
+def sweep(dry_run=False):
+    cutoff = time.time() - MIN_AGE_DAYS * 86400
+    used = paths_in_use()
+    uid = os.getuid()
+    removed = freed = recent = in_use = 0
+    for entry in sorted(os.listdir(ROOT)):
+        path = str(ROOT / entry)
+        try:
+            info = os.lstat(path)
+        except OSError:
+            continue
+        if info.st_uid != uid or any(fnmatch.fnmatch(entry, pattern) for pattern in PROTECTED):
+            continue
+        if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+            continue  # sockets, pipes, devices
+        if any(candidate == path or candidate.startswith(path + "/") for candidate in used):
+            in_use += 1
+            continue
+        try:
+            if newest_mtime(path, cutoff) > cutoff:
+                recent += 1
+                continue
+            bytes_ = size_of(path)
+            if dry_run or remove(path):
+                removed += 1
+                freed += bytes_
+                if dry_run:
+                    print(path)
+        except OSError as error:
+            print(f"tmp-sweep: could not remove {path}: {error}", file=sys.stderr)
+    verb = "would remove" if dry_run else "removed"
+    print(f"tmp-sweep: {verb} {removed} entries, {freed // (1024 * 1024)} MB; kept {recent} recent, {in_use} in use", file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--loop", action="store_true", help=f"sweep now, then every {INTERVAL}s")
+    parser.add_argument("--dry-run", action="store_true", help="list what would be removed")
+    args = parser.parse_args()
+    while True:
+        sweep(args.dry_run)
+        sys.stderr.flush()
+        if not args.loop:
+            return
+        time.sleep(INTERVAL)
+
+
+if __name__ == "__main__":
+    main()
