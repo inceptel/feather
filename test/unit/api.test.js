@@ -78,6 +78,9 @@ it('searches wiki page text across collections and marks the matched words', { s
 // ── Synthetic session for deterministic testing ─────────────────────────────
 
 const TEST_SESSION_ID = `test-feather-${Date.now()}`
+const HELPER_SESSION_ID = `test-helper-${Date.now()}`
+const SCHEDULED_SESSION_ID = `test-scheduled-${Date.now()}`
+const HEADLESS_SESSION_ID = `test-headless-${Date.now()}`
 let testSessionDir
 let testSessionPath
 
@@ -225,6 +228,31 @@ before(async () => {
     },
   })
 
+  if (!EXTERNAL_SERVER) {
+    const backgroundTranscript = (id, entrypoint) => fs.writeFileSync(path.join(testSessionDir, `${id}.jsonl`), [
+      JSON.stringify({
+        type: 'user', uuid: `${id}-1`, timestamp: '2025-06-15T12:01:00Z', entrypoint,
+        isSidechain: false, isMeta: false,
+        message: { role: 'user', content: 'Maintain the shared project wiki.' },
+      }),
+      JSON.stringify({
+        type: 'assistant', uuid: `${id}-2`, timestamp: '2025-06-15T12:01:05Z', entrypoint,
+        isSidechain: false, isMeta: false,
+        message: { role: 'assistant', content: 'Wiki checked.' },
+      }),
+      '',
+    ].join('\n'))
+    backgroundTranscript(HELPER_SESSION_ID, 'cli')
+    backgroundTranscript(SCHEDULED_SESSION_ID, 'cli')
+    backgroundTranscript(HEADLESS_SESSION_ID, 'sdk-cli')
+    const metaFile = path.join(fixtureStateDir, 'session-meta.json')
+    let meta = {}
+    try { meta = JSON.parse(fs.readFileSync(metaFile, 'utf8')) } catch {}
+    meta[HELPER_SESSION_ID] = { agent: 'claude', title: 'caretaker · Shared knowledge', cwd: fixtureHome, communicationRole: 'caretaker' }
+    meta[SCHEDULED_SESSION_ID] = { agent: 'claude', title: 'Scheduled: house/updater', automated: true }
+    fs.writeFileSync(metaFile, JSON.stringify(meta))
+  }
+
   // Give fs.watch a moment to pick up the new file
   await new Promise(r => setTimeout(r, 500))
 })
@@ -349,6 +377,19 @@ describe('GET /api/sessions', () => {
     assert.deepEqual(sessions.map(s => s.id), [TEST_SESSION_ID])
     const missing = await (await fetch(`${BASE}/api/sessions?id=missing-session-id`)).json()
     assert.deepEqual(missing.sessions, [])
+  })
+
+  it('keeps background helpers out of lists while preserving exact lookup', { skip: EXTERNAL_SERVER }, async () => {
+    const background = [HELPER_SESSION_ID, SCHEDULED_SESSION_ID, HEADLESS_SESSION_ID]
+    const listed = await (await fetch(`${BASE}/api/sessions?limit=50`)).json()
+    assert.deepEqual(listed.sessions.filter(session => background.includes(session.id)), [])
+    assert.ok(listed.sessions.some(session => session.id === TEST_SESSION_ID), 'interactive chats stay listed')
+    const searched = await (await fetch(`${BASE}/api/sessions?q=${encodeURIComponent('shared project wiki')}`)).json()
+    assert.deepEqual(searched.sessions.filter(session => background.includes(session.id)), [])
+    for (const id of [HELPER_SESSION_ID, SCHEDULED_SESSION_ID]) {
+      const exact = await (await fetch(`${BASE}/api/sessions?id=${encodeURIComponent(id)}`)).json()
+      assert.deepEqual(exact.sessions.map(session => ({ id: session.id, isWorker: session.isWorker })), [{ id, isWorker: true }])
+    }
   })
 
   it('finds sessions by message content with a snippet and ignores tool output', async () => {

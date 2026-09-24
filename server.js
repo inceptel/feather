@@ -744,6 +744,9 @@ function extractSessionCwd(buf, agent) {
 
 function isAutoWorkerSession(buf, agent, projectId, cwd) {
   if (buf.includes('AUTO_WORKER=TRUE')) return true;
+  // Claude Agent SDK and `claude -p` runs (cron jobs, scratch harnesses) are
+  // programmatic; a person chatting in Feather always uses the interactive CLI.
+  if (agent === 'claude' && buf.includes('"entrypoint":"sdk-')) return true;
   if (projectId && /-home-user-(?:auto|autoweb)-/.test(projectId)) return true;
   // Sealed room workers (bin/room lookup/council/second-opinion) run headless
   // in ~/.feather/room-runs/<room>/<run>/ — transcript noise, not sessions.
@@ -943,7 +946,10 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
     }
     try {
       const facts = inspectSessionCandidate(candidate);
-      if (facts.worker || (meta[id]?.chatRole === 'reviewer' && !required.has(id) && query !== id)) continue;
+      // Communications helpers and scheduler/status runs stay reachable by
+      // exact id (Rooms, Autopilot, links) but never crowd the chat lists.
+      const backgroundSession = Boolean(meta[id]?.communicationRole || meta[id]?.automated);
+      if (facts.worker || (backgroundSession && !required.has(id)) || (meta[id]?.chatRole === 'reviewer' && !required.has(id) && query !== id)) continue;
       const effectiveTitle = meta[id]?.title || facts.title || id.slice(0, 8);
       const match = contentMatches instanceof Map ? contentMatches.get(fpath) : null;
       if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
@@ -961,6 +967,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
+        ...(backgroundSession ? { isWorker: true } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
         ...(meta[id]?.chatRole === 'creator' || meta[id]?.workflow ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
         ...publicAutoHistory(meta[id]),
@@ -6109,7 +6116,7 @@ async function staffExistingRoom(name, specialistWakeIntervals = {}) {
   updateMeta((meta) => {
     const next = { ...meta };
     for (const [role, resident] of Object.entries(configured)) {
-      next[resident.sessionId] = { ...(next[resident.sessionId] || {}), title: `${role}: #${name}` };
+      next[resident.sessionId] = { ...(next[resident.sessionId] || {}), title: `${role}: #${name}`, automated: true };
     }
     return next;
   });
@@ -6578,7 +6585,7 @@ function launchRoomPulse(name) {
         lastRunAt: new Date(now).toISOString(), nextRunAtMs: now + ROOM_PULSE_INTERVAL_MS, error: null,
       }),
     }));
-    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title: `Status: #${name}` } }));
+    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title: `Status: #${name}`, automated: true } }));
     ROOM_ASSIGN_STATE.update((current) => ({ ...current, [id]: name }));
     const continuing = !!findOmpJsonlPath(id);
     launchOmpSession(id, cwd, { resume: continuing, promptFile, autoApprove: true });
@@ -7202,12 +7209,12 @@ async function schedulerStartFreshSession({ id, cwd, room, engine, model = null,
     fs.mkdirSync(sessionDir, { recursive: true });
     const promptFile = path.join(sessionDir, 'scheduled-prompt.md');
     fs.writeFileSync(promptFile, prompt, { mode: 0o600 });
-    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title, ...(model ? { ompModel: sanitizeOmpModel(model) } : {}) } }));
+    updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), agent: 'omp', title, automated: true, ...(model ? { ompModel: sanitizeOmpModel(model) } : {}) } }));
     launchOmpSession(id, cwd, { promptFile, autoApprove: true });
     return;
   }
   spawnSession(id, cwd, engine, { model: model || '' });
-  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title, ...(model ? { model: sanitizeOmpModel(model) } : {}) } }));
+  updateMeta((meta) => ({ ...meta, [id]: { ...(meta[id] || {}), title, automated: true, ...(model ? { model: sanitizeOmpModel(model) } : {}) } }));
   await sleep(ROOM_KICKOFF_DELAY_MS);
   if (run) schedulerAssertActive(run);
   const delivered = await sendInput(id, prompt, run ? () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run) : null);

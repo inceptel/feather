@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('shows five recent chats before pinned and other chats, each newest first', async ({ page }) => {
+test('shows five human chats with an expandable list before pinned chats', async ({ page }) => {
   const sessions = [
     { id: 'old-pin', title: 'Older pin', updatedAt: '2026-09-01T00:00:00Z' },
     { id: 'other', title: 'Other chat', updatedAt: '2026-09-02T00:00:00Z' },
@@ -10,6 +10,7 @@ test('shows five recent chats before pinned and other chats, each newest first',
     { id: 'recent-1', title: 'Recent one', updatedAt: '2026-09-11T00:00:00Z' },
     { id: 'recent-4', title: 'Recent four', updatedAt: '2026-09-08T00:00:00Z' },
     { id: 'recent-2', title: 'Recent two', updatedAt: '2026-09-10T00:00:00Z' },
+    { id: 'caretaker', title: 'caretaker · Shared knowledge', updatedAt: '2026-09-13T00:00:00Z', isWorker: true },
   ];
   const sessionLimits = [];
   await page.route('**/api/**', async route => {
@@ -28,11 +29,15 @@ test('shows five recent chats before pinned and other chats, each newest first',
   await page.goto('/#');
   const home = page.getByTestId('chats-home');
   const sections = home.locator('section.workspace-section');
-  await expect(sections).toHaveCount(3);
-  expect(await sections.evaluateAll(items => items.map(item => item.getAttribute('aria-label')))).toEqual(['Recent chats', 'Pinned chats', 'Other chats']);
-  await expect(page.getByRole('region', { name: 'Recent chats', exact: true }).locator('.chat-home-title')).toHaveText(['Recent one', 'Recent two', 'Recent three', 'Recent four', 'Recent five']);
+  await expect(sections).toHaveCount(2);
+  expect(await sections.evaluateAll(items => items.map(item => item.getAttribute('aria-label')))).toEqual(['Recent chats', 'Pinned chats']);
+  const recent = page.getByRole('region', { name: 'Recent chats', exact: true });
+  await expect(recent.locator('.chat-home-title')).toHaveText(['Recent one', 'Recent two', 'Recent three', 'Recent four', 'Recent five']);
+  await expect(home).not.toContainText('caretaker · Shared knowledge');
   await expect(page.getByRole('region', { name: 'Pinned chats', exact: true }).locator('.chat-home-title')).toHaveText(['Newer pin', 'Older pin']);
-  await expect(page.getByRole('region', { name: 'Other chats', exact: true }).locator('.chat-home-title')).toHaveText(['Other chat']);
+  await page.getByRole('button', { name: 'Show 1 more chat', exact: true }).click();
+  await expect(recent.locator('.chat-home-title')).toHaveText(['Recent one', 'Recent two', 'Recent three', 'Recent four', 'Recent five', 'Other chat']);
+  await expect(page.getByRole('button', { name: 'Show fewer chats', exact: true })).toHaveAttribute('aria-expanded', 'true');
   expect(sessionLimits).toEqual(['150']);
 });
 

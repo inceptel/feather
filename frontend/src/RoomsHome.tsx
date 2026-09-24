@@ -192,6 +192,7 @@ export default function RoomsHome(props: {
   const [pins, setPins] = createSignal<ChatPin[]>([])
   const [archived, setArchived] = createSignal<string[]>([])
   const [showArchived, setShowArchived] = createSignal(false)
+  const [showAllChats, setShowAllChats] = createSignal(false)
   const [query, setQuery] = createSignal('')
   const [results, setResults] = createSignal<SessionMeta[]>([])
   const [loading, setLoading] = createSignal(true)
@@ -276,9 +277,9 @@ export default function RoomsHome(props: {
     const session = allSessions().get(pin.id)
     return { ...session, id: pin.id, title: (pin.legacy ? pin.title : session?.title) || pin.title || 'Pinned chat', updatedAt: session?.updatedAt || '', isActive: session?.isActive || false } as SessionMeta
   }).sort(lastUsedFirst))
-  const unpinnedChats = createMemo(() => props.sessions.filter(session => !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)).sort(lastUsedFirst))
-  const recentChats = createMemo(() => unpinnedChats().slice(0, 5))
-  const otherChats = createMemo(() => unpinnedChats().slice(5))
+  const unpinnedChats = createMemo(() => props.sessions.filter(session => !session.isWorker && !pins().some(pin => pin.id === session.id) && !archived().includes(session.id)).sort(lastUsedFirst))
+  const recentChats = createMemo(() => showAllChats() ? unpinnedChats() : unpinnedChats().slice(0, 5))
+  const hiddenChatCount = createMemo(() => Math.max(0, unpinnedChats().length - 5))
   const archivedChats = createMemo(() => archived().map(id => allSessions().get(id) || { id, title: pins().find(pin => pin.id === id)?.title || 'Archived chat', updatedAt: '', isActive: false }))
   const searchResults = createMemo(() => results().filter(session => showArchived() || !archived().includes(session.id)))
 
@@ -365,14 +366,15 @@ export default function RoomsHome(props: {
             <section aria-label="Recent chats" class="workspace-section">
               <h2>Recent</h2>
               <For each={recentChats()} fallback={<p class="workspace-empty">Start a chat with whatever’s on your mind.</p>}>{session => <ChatRow session={session} />}</For>
+              <Show when={hiddenChatCount()}>
+                <button class="chat-home-more" aria-expanded={showAllChats()} onClick={() => setShowAllChats(value => !value)}>
+                  {showAllChats() ? 'Show fewer chats' : `Show ${hiddenChatCount()} more ${hiddenChatCount() === 1 ? 'chat' : 'chats'}`}
+                </button>
+              </Show>
             </section>
             <section aria-label="Pinned chats" class="workspace-section">
               <h2>Pinned<span class="workspace-count" aria-hidden="true">{pinnedChats().length}</span></h2>
               <For each={pinnedChats()} fallback={<p class="workspace-empty">Pin a chat to keep it close.</p>}>{session => <ChatRow session={session} />}</For>
-            </section>
-            <section aria-label="Other chats" class="workspace-section">
-              <h2>Other chats</h2>
-              <For each={otherChats()} fallback={<p class="workspace-empty">No other chats.</p>}>{session => <ChatRow session={session} />}</For>
             </section>
             <Show when={showArchived()}><section aria-label="Archived chats" class="workspace-section"><h2>Archived<span class="workspace-count" aria-hidden="true">{archivedChats().length}</span></h2><For each={archivedChats()} fallback={<p class="workspace-empty">No archived chats.</p>}>{session => <ChatRow session={session} />}</For></section></Show>
           </Show>
