@@ -526,13 +526,17 @@ export default function App() {
 
 
   async function addFiles(fileList: FileList | File[]) {
+    // Copy before the first await: callers clear the file input (and drop data
+    // expires) right after this returns its promise, which empties that same
+    // live FileList, so iterating it after an await kept only the first file.
+    const selected = Array.from(fileList)
     if (startupBlocked()) { setMediaNotice('You can attach files once the chat is ready. Your text draft is saved.'); return }
     if (uploading()) return
     const sessionId = currentId()
     const boxId = currentBox()
     if (!sessionId) return
     const added: PendingFile[] = []
-    for (const f of fileList) {
+    for (const f of selected) {
       if (f.size > MAX_UPLOAD_BYTES) {
         setMediaNotice(`${f.name} is larger than the 50 MB upload limit.`)
         continue
