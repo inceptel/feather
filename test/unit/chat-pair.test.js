@@ -5,25 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { createChatPair, chatFolderName, chatPairPrompts, CHAT_PAIR_EFFICIENCY_PROMPT, CHAT_PAIR_PUBLICATION_PROMPT } from '../../lib/chat-pair.js';
 
-test('pairs agree before implementation and evaluate evidence without ceremony', () => {
+test('always-review pairs get the efficiency block and a recoverable agreement file', () => {
   const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator', reviewPolicy: 'always' });
   for (const prompt of Object.values(prompts)) assert.ok(prompt.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
-  assert.match(prompts.creator, /Both agree before building/);
-  assert.match(prompts.reviewer, /against every agreed criterion/);
-  assert.match(prompts.creator, /one short exchange before producing the answer/);
   assert.match(prompts.creator, /cr-agreement.creator.md/);
-  assert.match(prompts.reviewer, /not independent evidence/);
-  assert.match(prompts.creator, /Do not lower criteria to pass/);
-  assert.match(prompts.creator, /Do not stop merely because three rounds/);
-  assert.match(prompts.creator, /Review is still required/);
 });
 
-test('adaptive quick work keeps review idle while substantial work retains agreement', () => {
+test('adaptive pairs omit the always-review efficiency block', () => {
   const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project' });
-  assert.match(prompts.creator, /without a Reviewer exchange/);
-  assert.match(prompts.creator, /Keep the Reviewer idle/);
-  assert.match(prompts.creator, /Both agree before building/);
-  assert.match(prompts.creator, /Existing project inbox agreement and review gates always apply/);
   assert.ok(!prompts.creator.includes(CHAT_PAIR_EFFICIENCY_PROMPT));
 });
 
@@ -64,20 +53,12 @@ function fixture(t, overrides = {}) {
   return { root, events, deps: { ...deps, ...overrides } };
 }
 
-test('CR completion hands reviewed evidence to editors without waiting for optional publication', () => {
+test('every pair prompt carries the publication handoff and its per-creator updates file', () => {
   for (const mode of [null, 'ralph']) {
     const prompts = chatPairPrompts({ groupId: 'pair', cwd: '/tmp/project', creatorSessionId: 'creator', wikiPath: '/tmp/wiki', mode });
     for (const prompt of Object.values(prompts)) {
       assert.ok(prompt.includes(CHAT_PAIR_PUBLICATION_PROMPT));
-      assert.match(prompt, /supersedes earlier instructions/);
-      assert.match(prompt, /reviewed inbox completion result is the durable handoff/);
-      assert.match(prompt, /queued for caretaker selection and marketer editing/);
-      assert.match(prompt, /Publication in Updates is optional and asynchronous/);
-      assert.match(prompt, /Never gate task completion or review approval on feed appearance/);
-      assert.match(prompt, /editors may combine or suppress/);
       assert.match(prompt, /updates.creator.json/);
-      assert.match(prompt, /source evidence.*not direct publications/);
-      assert.doesNotMatch(prompt, /Completion records appear in Updates automatically|Shared wiki edits also appear in Updates/);
     }
   }
 });

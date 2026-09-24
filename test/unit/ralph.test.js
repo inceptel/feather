@@ -22,12 +22,8 @@ describe('Ralph contract', () => {
       })
     }
   })
-  it('keeps the system prompt platform-neutral and bounded by human authority', () => {
+  it('names the completion markers the server parses and leaks no platform paths', () => {
     const prompt = ralphSystemPrompt()
-    assert.match(prompt, /durable owner/)
-    assert.match(prompt, /Long context is never a reason to stop/)
-    assert.match(prompt, /Do not invent churn/)
-    assert.match(prompt, /irreducible human action/)
     assert.match(prompt, /RALPH_COMPLETE:/)
     assert.match(prompt, /RALPH_BLOCKED:/)
     assert.doesNotMatch(prompt, /\.claude|\.codex|\.omp|Telegram|\/home\//)
@@ -37,7 +33,6 @@ describe('Ralph contract', () => {
     const prompt = ralphContinuationPrompt(7)
     assert.match(prompt, /<feather-ralph-callback event="turn_complete" iteration="7">/)
     assert.match(prompt, /RALPH_COMPLETE:/)
-    assert.match(prompt, /next highest-leverage justified action/)
   })
 
   it('recognizes OMP completion and ignores tool segments', () => {

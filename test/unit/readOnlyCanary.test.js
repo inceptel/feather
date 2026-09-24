@@ -8,19 +8,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
+import { stopChild } from './stopChild.js'
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const children = new Set()
 const tempRoots = new Set()
 
 afterEach(async () => {
-  await Promise.all([...children].map(child => new Promise(resolve => {
-    if (child.exitCode !== null) return resolve()
-    const forceTimer = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL') }, 1000)
-    forceTimer.unref()
-    child.once('exit', () => { clearTimeout(forceTimer); resolve() })
-    child.kill('SIGTERM')
-  })))
+  await Promise.all([...children].map(child => stopChild(child, { graceMs: 1000 })))
   children.clear()
   for (const root of tempRoots) fs.rmSync(root, { recursive: true, force: true })
   tempRoots.clear()
@@ -75,7 +70,8 @@ function fixture() {
   const bin = path.join(root, 'bin')
   fs.mkdirSync(bin)
   const tmuxLog = path.join(root, 'tmux.log')
-  fs.writeFileSync(path.join(bin, 'tmux'), `#!/bin/sh\nif [ "$1" = load-buffer ]; then printf 'paste %s\\n' "$(cat "$4")" >> "${tmuxLog}"; exit 0; fi\nprintf '%s\\n' "$*" >> "${tmuxLog}"\nexit 0\n`, { mode: 0o755 })
+  // Logs every call; like a real terminal, the screen (capture-pane) changes after each paste or keypress.
+  fs.writeFileSync(path.join(bin, 'tmux'), `#!/bin/sh\nif [ "$1" = load-buffer ]; then printf 'paste %s\\n' "$(cat "$4")" >> "${tmuxLog}"; exit 0; fi\nprintf '%s\\n' "$*" >> "${tmuxLog}"\nif [ "$1" = capture-pane ]; then echo ready; grep -c -e '^paste ' -e '^send-keys' "${tmuxLog}"; fi\nexit 0\n`, { mode: 0o755 })
   return { home, state, sessionId, sessionFile, readableFile, tmuxLog, bin }
 }
 
@@ -303,8 +299,7 @@ describe('server-enforced read-only canary', () => {
     assert.equal(retry.status, 200)
     assert.deepEqual(await retry.json(), firstReceipt)
 
-    running.child.kill('SIGTERM')
-    await new Promise(resolve => running.child.once('exit', resolve))
+    await stopChild(running.child)
     children.delete(running.child)
     running = await startServer(fx, false)
     endpoint = `${running.base}/api/sessions/${fx.sessionId}/send`

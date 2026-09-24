@@ -7,16 +7,14 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { ompSessionCwdFromHead, ompSessionIdFromHead, ompTurnBoundaryFromLine } from '../../lib/omp-session.js'
+import { stopChild } from './stopChild.js'
 
 const roots = []
 const children = []
 afterEach(async () => {
   while (children.length) {
     const child = children.pop()
-    if (child.exitCode === null) {
-      child.kill('SIGTERM')
-      await new Promise(resolve => child.once('exit', resolve))
-    }
+    await stopChild(child)
   }
   while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true })
 })

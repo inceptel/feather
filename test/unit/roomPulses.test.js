@@ -7,6 +7,7 @@ import path from 'path'
 import { spawn } from 'child_process'
 
 import { encodeProjectPath } from '../../lib/rooms.js'
+import { stopChild } from './stopChild.js'
 
 const roots = []
 afterEach(() => { while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true }) })
@@ -114,8 +115,7 @@ describe('Room status scheduler', () => {
       assert.equal(meta[state.active.sessionId].title, 'Status: #active')
 
     } finally {
-      child.kill('SIGTERM')
-      await new Promise((resolve) => child.once('exit', resolve))
+      await stopChild(child)
     }
   })
 
@@ -189,8 +189,7 @@ describe('Room status scheduler', () => {
       assert.equal(state.r2.status, 'working')
       for (const name of ['r3', 'r4', 'r5']) assert.equal(state[name].status, 'waiting', `${name} should be deferred`)
     } finally {
-      child.kill('SIGTERM')
-      await new Promise((resolve) => child.once('exit', resolve))
+      await stopChild(child)
     }
   })
 })

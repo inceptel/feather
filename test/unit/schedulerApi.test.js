@@ -6,6 +6,7 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { createHash } from 'crypto'
+import { stopChild } from './stopChild.js'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 
@@ -336,8 +337,7 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       // The read-only snapshot lists every rule, and the state file validates.
       assert.equal(Object.keys(readScheduler().rules).length, 3)
     } finally {
-      child.kill('SIGTERM')
-      await new Promise(resolve => child.once('exit', resolve))
+      await stopChild(child)
       fs.rmSync(root, { recursive: true, force: true })
     }
   })

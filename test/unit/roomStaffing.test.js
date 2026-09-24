@@ -6,6 +6,7 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { createHash, randomUUID } from 'crypto'
+import { stopChild } from './stopChild.js'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const MISSION = 'go investigate this one spot that\'s available for rent or for purchase and build me a business plan for what it would look like to run an EV-only auto shop out of that location'
@@ -369,8 +370,7 @@ describe('Room staffing from the template', () => {
       // The comment itself never shows up as a Leader-message card.
       assert.ok(!JSON.stringify(refreshed).includes('[Super Feed comment'))
     } finally {
-      child.kill('SIGTERM')
-      await new Promise(resolve => child.once('exit', resolve))
+      await stopChild(child)
       fs.rmSync(root, { recursive: true, force: true })
     }
   })

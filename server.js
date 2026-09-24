@@ -5,7 +5,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync as rawExecFileSync, execSync, spawn } from 'child_process';
+import { execFileSync as rawExecFileSync, execFile, execSync, spawn } from 'child_process';
 import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket as WS } from 'ws';
 import pty from 'node-pty';
@@ -1046,6 +1046,10 @@ async function waitForPaneChange(target, before, timeoutMs, pollMs = 100) {
 // for two polls in a row: the harness is at its composer, not still booting.
 // Replaces a blind 6s sleep. Falls back to that sleep when unobservable.
 const TMUX_READY_TIMEOUT_MS = Number(process.env.FEATHER_TMUX_READY_TIMEOUT_MS || 15_000);
+// Shortest boot a real harness needs before its screen can count as settled.
+// Tests with an instant fake tmux lower it; the poll scales with it (300ms in production).
+const TMUX_SETTLE_MIN_MS = Number(process.env.FEATHER_TMUX_SETTLE_MIN_MS || 1500);
+const TMUX_SETTLE_POLL_MS = Math.min(300, Math.max(10, Math.floor(TMUX_SETTLE_MIN_MS / 5)));
 
 // Deterministic pause points for the lifecycle tests only. With
 // FEATHER_TEST_BARRIER_DIR set, a boundary named <name>.<id> parks (async, the
@@ -1059,7 +1063,7 @@ async function testBarrier(name, id) {
   try { fs.writeFileSync(`${file}.waiting`, ''); } catch {}
   while (fs.existsSync(file)) await pause(20);
 }
-async function waitForPaneSettled(target, { timeoutMs = TMUX_READY_TIMEOUT_MS, minMs = 1500, pollMs = 300 } = {}) {
+async function waitForPaneSettled(target, { timeoutMs = TMUX_READY_TIMEOUT_MS, minMs = TMUX_SETTLE_MIN_MS, pollMs = TMUX_SETTLE_POLL_MS } = {}) {
   const start = Date.now();
   let previous;
   while (Date.now() - start < timeoutMs) {
@@ -4798,33 +4802,30 @@ function executableAvailable(command) {
   return false;
 }
 
-function discoverAgents() {
-  const agents = [{ id: 'claude', label: 'Claude Code', available: true }];
-  if (READ_ONLY_MODE) {
-    // Read-only means no writes anywhere, including subprocess caches/logs.
-    // OMP v18 writes audit logs and Bun cache entries even for `--version`, so
-    // determine availability from PATH and omit version labels in canary mode.
-    agents.push({ id: 'omp', label: 'oh-my-pi', available: executableAvailable('omp') });
-    agents.push({ id: 'codex', label: 'Codex', available: executableAvailable('codex') });
-    return agents;
-  }
-  try {
-    const ver = execFileSync('omp', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-    agents.push({ id: 'omp', label: `oh-my-pi ${ver}`, available: true });
-  } catch {
-    agents.push({ id: 'omp', label: 'oh-my-pi', available: false });
-  }
-  try {
-    const ver = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 3000 }).trim();
-    agents.push({ id: 'codex', label: `Codex ${ver}`, available: true });
-  } catch {
-    agents.push({ id: 'codex', label: 'Codex', available: false });
-  }
-  return agents;
+// Availability comes from PATH so boot never waits on a CLI. Version labels are
+// cosmetic: the first /api/agents request probes them once, so a server that
+// never shows the agent picker (tests, canaries) never runs a harness CLI.
+// Read-only mode skips them: OMP v18 writes audit logs and Bun cache entries
+// even for `--version`.
+let agentsSnapshot = [
+  { id: 'claude', label: 'Claude Code', available: true },
+  { id: 'omp', label: 'oh-my-pi', available: executableAvailable('omp') },
+  { id: 'codex', label: 'Codex', available: executableAvailable('codex') },
+];
+let agentVersionProbe = null;
+function probeAgentVersions() {
+  agentVersionProbe ??= Promise.all(agentsSnapshot.filter(({ id, available }) => id !== 'claude' && available).map(({ id, label }) =>
+    new Promise(resolve => execFile(id, ['--version'], { encoding: 'utf8', timeout: 3000 }, (error, stdout) => {
+      const version = String(stdout || '').trim();
+      if (!error && version) agentsSnapshot = agentsSnapshot.map(agent => agent.id === id ? { ...agent, label: `${label} ${version}` } : agent);
+      resolve();
+    }))));
+  return agentVersionProbe;
 }
-
-const AGENTS_SNAPSHOT = discoverAgents();
-app.get('/api/agents', (_req, res) => res.json({ agents: AGENTS_SNAPSHOT }));
+app.get('/api/agents', async (_req, res) => {
+  if (!READ_ONLY_MODE) await probeAgentVersions();
+  res.json({ agents: agentsSnapshot });
+});
 
 function httpError(status, message) {
   const e = new Error(message);

@@ -6,6 +6,8 @@ import os from 'os'
 import path from 'path'
 import { spawn } from 'child_process'
 import { encodeProjectPath } from '../../lib/rooms.js'
+import { stopChild } from './stopChild.js'
+import { NO_TMUX_PATH } from './noTmux.js'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 
@@ -66,7 +68,7 @@ describe('Super Feed API', () => {
     const base = `http://127.0.0.1:${port}`
     const child = spawn(process.execPath, ['server.js'], {
       cwd: REPO,
-      env: { ...process.env, HOME: home, FEATHER_STATE_DIR: state, FEATHER_ROOM_PULSES: '0', PORT: String(port) },
+      env: { ...process.env, HOME: home, FEATHER_STATE_DIR: state, FEATHER_ROOM_PULSES: '0', PORT: String(port), PATH: NO_TMUX_PATH },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let serverError = ''
@@ -120,8 +122,7 @@ describe('Super Feed API', () => {
       })
       assert.equal(badReply.status, 400)
     } finally {
-      child.kill('SIGTERM')
-      await new Promise(resolve => child.once('exit', resolve))
+      await stopChild(child)
       fs.rmSync(root, { recursive: true, force: true })
     }
   })

@@ -7,6 +7,8 @@ import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { spawn } from 'child_process'
+import { stopChild } from './stopChild.js'
+import { NO_TMUX_PATH } from './noTmux.js'
 
 const run = promisify(execFile)
 const roots = []
@@ -14,8 +16,7 @@ const servers = []
 afterEach(async () => {
   while (servers.length) {
     const child = servers.pop()
-    child.kill('SIGTERM')
-    await new Promise((resolve) => child.once('exit', resolve))
+    await stopChild(child)
   }
   while (roots.length) fs.rmSync(roots.pop(), { recursive: true, force: true })
 })
@@ -83,7 +84,7 @@ describe('room updates API', () => {
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: {
-        ...process.env, HOME: root, FEATHER_STATE_DIR: stateDir, PORT: String(port),
+        ...process.env, HOME: root, FEATHER_STATE_DIR: stateDir, PORT: String(port), PATH: NO_TMUX_PATH,
         FEATHER_ROOM_PULSES: '0',
       },
       stdio: ['ignore', 'ignore', 'pipe'],

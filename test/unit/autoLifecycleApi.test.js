@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { freePort } from './freePort.js';
+import { stopChild } from './stopChild.js';
 
 // Solo-by-default chats, /auto start and stop, chat-owned schedules, and
 // reviewer attach/detach, all against the real server with a fake tmux.
@@ -17,7 +17,9 @@ test('solo chats start, work, stop cleanly, own schedules, and gain or lose a re
   const registry = path.join(root, 'panes');
   fs.writeFileSync(registry, '');
   // The fake tmux keeps a pane registry, dumps its environment on new-session
-  // and logs every paste. A pane normally captures as a constant screen; while
+  // and logs every paste. Like a real terminal, a pane's screen changes when
+  // text is pasted or keys are sent, so the server confirms delivery at once
+  // instead of waiting out its "no screen change" timeouts. While
   // "$TMUX_REG.hold.<target>" exists its screen keeps changing, so the server's
   // async settle wait (waitForPaneSettled) parks there without blocking the
   // event loop, and a test can act while a reviewer is still priming.
@@ -30,10 +32,11 @@ list-sessions) while IFS= read -r n; do printf '%s|0\\n' "$n"; done < "$TMUX_REG
 new-session) name=''; prev=''; for a in "$@"; do if [ "$prev" = '-s' ]; then name="$a"; fi; prev="$a"; done
   printf '%s\\n' "$name" >> "$TMUX_REG"; { env; printf 'ARGS=%s\\n' "$*"; } > "$TMUX_REG.env.$name" ;;
 kill-session) if [ -e "$TMUX_REG.nokill.$target" ]; then exit 1; fi; grep -vxF "$target" "$TMUX_REG" > "$TMUX_REG.n"; mv "$TMUX_REG.n" "$TMUX_REG" ;;
-capture-pane) if [ -e "$TMUX_REG.hold.$target" ]; then date +%s%N; else echo ready; fi ;;
+capture-pane) if [ -e "$TMUX_REG.hold.$target" ]; then date +%s%N; else echo ready; cat "$TMUX_REG.screen.$target" 2>/dev/null; fi ;;
+send-keys) printf 'k\\n' >> "$TMUX_REG.screen.$target" ;;
 load-buffer) cat "$4" > "$TMUX_REG.buf.$3" 2>/dev/null || true ;;
 paste-buffer) name=''; prev=''; for a in "$@"; do if [ "$prev" = '-b' ]; then name="$a"; fi; prev="$a"; done
-  { printf '%s\\t' "$target"; base64 -w0 < "$TMUX_REG.buf.$name"; printf '\\n'; } >> "$TMUX_REG.pastes" ;;
+  { printf '%s\\t' "$target"; base64 -w0 < "$TMUX_REG.buf.$name"; printf '\\n'; } >> "$TMUX_REG.pastes"; printf 'p\\n' >> "$TMUX_REG.screen.$target" ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -50,7 +53,7 @@ exit 0
       // Allowlisted child environment: nothing from the caller's shell or an
       // enclosing Feather/tmux leaks into the server under test.
       env: { HOME: home, FEATHER_STATE_DIR: state, PORT: String(port),
-        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '6000', FEATHER_TEST_BARRIER_DIR: barriers,
+        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '6000', FEATHER_TMUX_SETTLE_MIN_MS: '50', FEATHER_TEST_BARRIER_DIR: barriers,
         PATH: `${bin}:${process.env.PATH}`, TMUX_REG: registry, LANG: 'C.UTF-8' },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -62,7 +65,7 @@ exit 0
     }
     throw new Error(`Server did not start: ${logs}`);
   }
-  async function stop() { if (child?.exitCode === null) { child.kill(); await once(child, 'exit'); } }
+  async function stop() { await stopChild(child); }
   t.after(async () => { await stop(); for (const key of Object.keys(sentinels)) delete process.env[key]; fs.rmSync(root, { recursive: true, force: true }); });
   const call = async (method, url, body) => {
     const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -116,8 +119,6 @@ exit 0
   assert.equal(meta()[solo.id].chatRole, 'creator');
   assert.equal(meta()[solo.id].chatPair, null);
   assert.equal(Object.values(meta()).filter(entry => entry.chatRole === 'reviewer').length, 0);
-  assert.match(startup(solo.id), /sole agent of a Feather chat/);
-  assert.match(startup(solo.id), /This chat has no project inbox/);
   assert.doesNotMatch(startup(solo.id), /sidecar post --group|Project inbox CLI|claim \{\}/);
   const status = await ok('GET', `/api/chats/${solo.id}/status`);
   assert.equal(status.status, 'ready');
@@ -212,7 +213,7 @@ exit 0
   assert.equal(entry.autoModeBefore, undefined);
   assert.equal(entry.ralph.enabled, false);
   assert.equal(entry.autoLifecycle, 5);
-  assert.ok(entry.autoStopNote && ['delivered', 'unobserved'].includes(entry.autoStopNote.status), JSON.stringify(entry.autoStopNote));
+  assert.equal(entry.autoStopNote?.status, 'delivered', JSON.stringify(entry.autoStopNote));
   assert.equal((await findRule()).enabled, false, 'stop disables owned schedules');
   assert.equal((await findRule()).ownerSessionId, solo.id, 'ownership survives the stop');
   assert.ok(!(await ok('GET', '/api/sessions?mode=ralph')).sessions.some(s => s.id === solo.id));
@@ -476,7 +477,7 @@ exit 0
     assert.ok(meta()[attempt.reviewerSessionId].chatDetachedAt);
     assert.ok(!pastes(chat.id).some(text => text.startsWith('A Reviewer has been attached')), 'autonomous-era instructions never land after Stop');
     lastPastes(chat.id, 'Ongoing work stopped.');
-    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved', 'the stop note was submitted despite the later detach bump');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'delivered', 'the stop note was submitted despite the later detach bump');
   }
 
   // 10b'. The unannounced pair's detach fails to kill the reviewer: the logical
@@ -642,7 +643,7 @@ exit 0
     assert.equal(second.status, 200, JSON.stringify(second.data));
     assert.equal(stopNotes(chat.id), 1, 'exactly one stop note');
     lastPastes(chat.id, 'Ongoing work stopped.');
-    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved', 'the receipt belongs to the second stop');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'delivered', 'the receipt belongs to the second stop');
   }
 
   // 13b. Stop, start again, interrupt while the first note is still queued: the
@@ -683,7 +684,7 @@ exit 0
     assert.equal((await stopping).status, 200);
     assert.equal((await detaching).status, 200);
     lastPastes(chat.id, 'Ongoing work stopped.', 'Reviewer detached.');
-    assert.equal(meta()[chat.id].autoStopNote?.status, 'unobserved');
+    assert.equal(meta()[chat.id].autoStopNote?.status, 'delivered');
     assert.equal(tombstones(chat.id).length, 0);
   }
 

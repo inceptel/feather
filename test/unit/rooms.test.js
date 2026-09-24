@@ -7,6 +7,8 @@ import path from 'path'
 import { spawn } from 'child_process'
 
 import { encodeProjectPath, groupRoomSessions } from '../../lib/rooms.js'
+import { stopChild } from './stopChild.js'
+import { NO_TMUX_PATH } from './noTmux.js'
 
 const roots = []
 
@@ -150,7 +152,7 @@ describe('portable Room membership', () => {
     const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
-      env: { ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port) },
+      env: { ...process.env, HOME: home, FEATHER_STATE_DIR: stateDir, PORT: String(port), PATH: NO_TMUX_PATH },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''
@@ -230,8 +232,7 @@ describe('portable Room membership', () => {
       rooms = (await (await fetch(`http://127.0.0.1:${port}/api/rooms`)).json()).rooms
       assert.equal(rooms.find((room) => room.name === 'marriage').pulse.status, 'paused')
     } finally {
-      child.kill('SIGTERM')
-      await new Promise((resolve) => child.once('exit', resolve))
+      await stopChild(child)
     }
   })
 })

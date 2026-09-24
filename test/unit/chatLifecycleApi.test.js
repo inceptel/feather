@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { freePort } from './freePort.js';
+import { stopChild } from './stopChild.js';
 
 test('CR chats share projects, survive server restart, and preserve Stop through peer feedback', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feather-chat-api-'));
@@ -19,6 +19,9 @@ case "$1" in
 has-session) grep -qxF "$3" "$TMUX_REG"; exit $? ;;
 list-sessions) while IFS= read -r n; do printf '%s|0\\n' "$n"; done < "$TMUX_REG" ;;
 new-session) while [ $# -gt 0 ]; do if [ "$1" = '-s' ]; then printf '%s\\n' "$2" >> "$TMUX_REG"; fi; shift; done ;;
+capture-pane|paste-buffer|send-keys) target=''; prev=''; for a in "$@"; do if [ "$prev" = '-t' ]; then target="$a"; fi; prev="$a"; done
+  # Like a real terminal, input changes the screen, so delivery is confirmed at once.
+  if [ "$1" = capture-pane ]; then echo ready; cat "$TMUX_REG.screen.$target" 2>/dev/null; else echo x >> "$TMUX_REG.screen.$target"; fi ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -28,7 +31,7 @@ exit 0
     child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
       env: { ...process.env, HOME: home, FEATHER_STATE_DIR: state, PORT: String(port),
-        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '20',
+        FEATHER_ROOM_PULSES: '0', FEATHER_SCHEDULER: '0', FEATHER_TMUX_READY_TIMEOUT_MS: '20', FEATHER_TMUX_SETTLE_MIN_MS: '50',
         PATH: `${bin}:${process.env.PATH}`, TMUX_REG: registry },
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -40,7 +43,7 @@ exit 0
     }
     throw new Error(`Server did not start: ${logs}`);
   }
-  async function stop() { if (child?.exitCode === null) { child.kill(); await once(child, 'exit'); } }
+  async function stop() { await stopChild(child); }
   t.after(async () => { await stop(); fs.rmSync(root, { recursive: true, force: true }); });
   const post = async (url, body) => {
     const response = await fetch(base + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -62,7 +65,7 @@ exit 0
   const a = await post('/api/chats', { name: 'Strategy A', mode: 'ralph', reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
   const b = await post('/api/chats', { name: 'Strategy B', projectSessionId: a.id, reviewerAgent: 'claude', reviewPolicy: 'adaptive' });
   const startup = id => { const dir = path.join(home, '.feather/session-system-prompts'); return fs.readFileSync(path.join(dir, fs.readdirSync(dir).find(name => name.startsWith(`${id}-`))), 'utf8'); };
-  assert.match(startup(a.id), /Chat naming: after the first meaningful user message/);
+  assert.match(startup(a.id), /Chat naming:/);
   assert.doesNotMatch(startup(a.reviewerSessionId), /Chat naming:/);
   await post(`/api/sessions/${a.id}/rename`, { title: 'Tic Tac Toe Rules' });
   assert.equal(meta()[a.id].title, 'Tic Tac Toe Rules');

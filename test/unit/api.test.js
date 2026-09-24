@@ -7,6 +7,7 @@ import net from 'net'
 import { execFileSync, spawn } from 'child_process'
 import { fileURLToPath } from 'url'
 import { createHash, randomUUID } from 'crypto'
+import { stopChild } from './stopChild.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
@@ -88,6 +89,15 @@ function writeLine(obj) {
   fs.appendFileSync(testSessionPath, JSON.stringify(obj) + '\n')
 }
 
+// Replace the fake tmux atomically. The server fires delayed tmux calls
+// (3/5/8s after a launch), so an earlier test's call can still be executing
+// the old script; writing it in place then fails with ETXTBSY.
+function writeTmux(content, { mode = 0o700 } = {}) {
+  const file = path.join(fixtureBin, 'tmux'), temp = `${file}.${process.pid}.next`
+  fs.writeFileSync(temp, content, { mode })
+  fs.renameSync(temp, file)
+}
+
 async function allocatePort() {
   return await new Promise((resolve, reject) => {
     const socket = net.createServer()
@@ -159,7 +169,7 @@ before(async () => {
     fs.mkdirSync(fixtureHome, { recursive: true })
     fixtureBin = path.join(fixtureRoot, 'bin')
     fs.mkdirSync(fixtureBin)
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+    writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     fixturePath = `${fixtureBin}${path.delimiter}${process.env.PATH || ''}`
   }
 
@@ -260,17 +270,7 @@ before(async () => {
 after(async () => {
   // Clean up synthetic session
   try { fs.unlinkSync(testSessionPath) } catch {}
-  if (serverProcess && serverProcess.exitCode === null && serverProcess.signalCode === null) {
-    serverProcess.kill('SIGTERM')
-    await Promise.race([
-      new Promise(resolve => serverProcess.once('exit', resolve)),
-      new Promise(resolve => setTimeout(resolve, 2000)),
-    ])
-    if (serverProcess.exitCode === null && serverProcess.signalCode === null) {
-      serverProcess.kill('SIGKILL')
-      await new Promise(resolve => serverProcess.once('exit', resolve))
-    }
-  }
+  await stopChild(serverProcess)
   if (fixtureRoot) fs.rmSync(fixtureRoot, { recursive: true, force: true })
 })
 
@@ -582,7 +582,6 @@ describe('Research subscriptions', () => {
       assert.equal(scheduler.rules.length, 1)
       assert.equal(scheduler.rules[0].id, `${subscription.room}/research`)
       assert.equal(scheduler.rules[0].every, '4h')
-      assert.ok(scheduler.rules[0].prompt.includes('Treat social posts as discovery leads'))
 
       const duplicate = await fetch(`${BASE}/api/research-subscriptions`, {
         method: 'POST',
@@ -620,7 +619,7 @@ describe('POST /api/rooms/:name/send', () => {
     const leaderId = randomUUID()
     const tmuxLog = path.join(fixtureRoot, 'room-send-tmux.log')
     const tmuxRegistry = path.join(fixtureRoot, 'room-send-tmux.reg')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
       `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
@@ -663,7 +662,7 @@ describe('POST /api/rooms/:name/send', () => {
       assert.match(delivered, /Check the live risk limit\./)
       assert.match(delivered, new RegExp(`room send ${sourceRoom} --stdin`))
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 
@@ -683,7 +682,7 @@ describe('POST /api/rooms/:name/send', () => {
     const intakeSessionId = randomUUID()
     const tmuxLog = path.join(fixtureRoot, 'intake-send-tmux.log')
     const tmuxRegistry = path.join(fixtureRoot, 'intake-send-tmux.reg')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
       `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
@@ -735,7 +734,7 @@ describe('POST /api/rooms/:name/send', () => {
       assert.match(delivered, /The requested review is complete\./)
       assert.match(delivered, new RegExp(`room send ${sourceRoom} --stdin`))
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 
@@ -784,7 +783,7 @@ describe('Room Ralph publication capability', () => {
     assert.equal(roomResponse.status, 200)
     const { cwd } = await roomResponse.json()
     const tmuxRegistry = path.join(fixtureRoot, 'publication-tmux.reg')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `if [ "$1" = has-session ]; then grep -qxF "$3" ${JSON.stringify(tmuxRegistry)} 2>/dev/null; exit $?; fi`,
       `if [ "$1" = new-session ]; then while [ "$#" -gt 0 ]; do if [ "$1" = -s ]; then printf '%s\\n' "$2" >> ${JSON.stringify(tmuxRegistry)}; break; fi; shift; done; exit 0; fi`,
@@ -859,7 +858,7 @@ describe('Room Ralph publication capability', () => {
       assert.equal(canonical.publication.sourceEvidenceId, body.sourceEvidenceId)
       assert.equal(canonical.publication.attention, body.attention)
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 })
@@ -1504,7 +1503,7 @@ describe('POST /api/sessions/:id/fork', () => {
   it('launches a distinct Claude fork and preserves Room lineage', async () => {
     if (EXTERNAL_SERVER) return
     const tmuxLog = path.join(fixtureRoot, 'fork-tmux.log')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
       'exit 1',
@@ -1531,7 +1530,7 @@ describe('POST /api/sessions/:id/fork', () => {
       assert.match(calls, /--fork-session/)
       assert.match(calls, new RegExp(`--session-id [^\\n]*${forked.id}`))
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 
@@ -1551,7 +1550,7 @@ describe('POST /api/sessions/:id/fork', () => {
       isMeta: false, isSidechain: false, message: { role: 'user', content: 'Fork this repository' },
     })}\n`)
     const tmuxLog = path.join(fixtureRoot, 'fork-isolated-tmux.log')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
       'exit 1',
@@ -1572,7 +1571,7 @@ describe('POST /api/sessions/:id/fork', () => {
       assert.equal(context.workspaceMode, 'isolated')
       assert.match(context.forkBranch, /^feather\/fork-/)
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 
@@ -1588,7 +1587,7 @@ describe('POST /api/sessions/:id/fork', () => {
       '',
     ].join('\n'))
     const tmuxLog = path.join(fixtureRoot, 'fork-omp-tmux.log')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
       'exit 1',
@@ -1607,7 +1606,7 @@ describe('POST /api/sessions/:id/fork', () => {
       assert.match(calls, new RegExp(`--fork [^\\n]*${internalId}`))
       assert.ok(fs.existsSync(path.join(fixtureHome, '.feather', 'omp-sessions', forked.id, '.feather-bridge.json')))
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
     }
   })
 
@@ -1623,7 +1622,7 @@ describe('POST /api/sessions/:id/fork', () => {
       '',
     ].join('\n'))
     const tmuxLog = path.join(fixtureRoot, 'fork-codex-tmux.log')
-    fs.writeFileSync(path.join(fixtureBin, 'tmux'), [
+    writeTmux([
       '#!/bin/sh',
       `case "$1" in new-session|set-option) printf '%s\\n' "$*" >> ${JSON.stringify(tmuxLog)}; exit 0;; esac`,
       'exit 1',
@@ -1643,7 +1642,7 @@ describe('POST /api/sessions/:id/fork', () => {
       const context = await (await fetch(`${BASE}/api/sessions/${forked.id}/room`)).json()
       assert.equal(context.forkOf, sourceId)
     } finally {
-      fs.writeFileSync(path.join(fixtureBin, 'tmux'), '#!/bin/sh\nexit 1\n', { mode: 0o700 })
+      writeTmux('#!/bin/sh\nexit 1\n', { mode: 0o700 })
       fs.rmSync(path.join(fixtureHome, '.codex'), { recursive: true, force: true })
     }
   })

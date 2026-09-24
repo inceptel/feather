@@ -7,6 +7,8 @@ import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 
 import { JsonStateError, createJsonState } from '../../lib/json-state.js'
+import { stopChild } from './stopChild.js'
+import { NO_TMUX_PATH } from './noTmux.js'
 
 const roots = []
 
@@ -245,7 +247,7 @@ describe('server and rollback integration', () => {
     const port = await freePort()
     const child = spawn(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
-      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir, PORT: String(port) },
+      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir, PORT: String(port), PATH: NO_TMUX_PATH },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
     let stderr = ''
@@ -283,8 +285,7 @@ describe('server and rollback integration', () => {
         existing: 'marriage', session2: 'marriage',
       })
     } finally {
-      child.kill('SIGTERM')
-      await new Promise((resolve) => child.once('exit', resolve))
+      await stopChild(child)
     }
   })
 
@@ -301,7 +302,7 @@ describe('server and rollback integration', () => {
 
     const result = spawnSync(process.execPath, ['server.js'], {
       cwd: path.resolve(import.meta.dirname, '../..'),
-      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir },
+      env: { ...process.env, HOME: homeDir, FEATHER_STATE_DIR: stateDir, PATH: NO_TMUX_PATH },
       encoding: 'utf8',
       timeout: 10_000,
     })
