@@ -388,34 +388,46 @@ test.describe('Chat input', () => {
     expect(newHeight).toBeGreaterThan(initialHeight)
   })
 
+  // The composer clears only after the server acknowledges delivery. The real
+  // endpoint resumes a tmux agent and confirms the paste on screen (seconds, and
+  // host-dependent), so stub the acknowledgement and record what was delivered.
+  async function acknowledgeSends(page) {
+    const sent = []
+    await page.route(`**/api/sessions/${TEST_SESSION_ID}/send`, async route => {
+      sent.push(JSON.parse(route.request().postData() || '{}').text)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, sentAt: new Date().toISOString() }) })
+    })
+    return sent
+  }
+
   test('input clears after sending', async ({ page }) => {
+    const sent = await acknowledgeSends(page)
     const textarea = page.locator('textarea[placeholder="Send a message..."]')
     await textarea.fill('test message to clear')
-    await page.waitForTimeout(100)
 
     // Send
     await page.locator('button:has-text("Send")').click()
-    await page.waitForTimeout(300)
 
     await expect(textarea).toHaveValue('')
+    expect(sent).toEqual(['test message to clear'])
   })
 
   test('Enter key sends, Shift+Enter adds newline', async ({ page }) => {
+    const sent = await acknowledgeSends(page)
     const textarea = page.locator('textarea[placeholder="Send a message..."]')
 
     // Shift+Enter should not send
     await textarea.fill('line 1')
     await textarea.press('Shift+Enter')
-    await page.waitForTimeout(100)
-    // Should still have text
-    const val = await textarea.inputValue()
-    expect(val.length).toBeGreaterThan(0)
+    // Should still have text, now with a newline
+    await expect(textarea).toHaveValue('line 1\n')
+    expect(sent).toEqual([])
 
     // Enter should send and clear
     await textarea.fill('will be sent')
     await textarea.press('Enter')
-    await page.waitForTimeout(300)
     await expect(textarea).toHaveValue('')
+    expect(sent).toEqual(['will be sent'])
   })
 })
 

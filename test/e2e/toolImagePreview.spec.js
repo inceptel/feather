@@ -32,6 +32,11 @@ test.beforeAll(() => {
         content: [{ type: 'tool_use', id: 'view-image-call', name: 'view_image', input: { path: previewPath, detail: 'original' } }],
       },
     },
+    {
+      type: 'assistant', uuid: 'tool-image-answer', timestamp: '2026-07-26T12:00:02Z',
+      isSidechain: false, isMeta: false,
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Here is the image.' }] },
+    },
   ]
   fs.writeFileSync(sessionPath, lines.map(line => JSON.stringify(line)).join('\n') + '\n')
 })
@@ -43,7 +48,12 @@ test.afterAll(() => {
 test('view_image expands to a tappable preview and full-screen lightbox', async ({ page }) => {
   await page.goto(`/#${sessionId}`, { waitUntil: 'domcontentloaded' })
 
-  const summary = page.locator('summary').filter({ hasText: 'View Image' })
+  // Tool calls live in the collapsed Activity disclosure rendered above the answer.
+  await expect(page.locator('.asst-bubble').filter({ hasText: 'Here is the image.' })).toBeVisible()
+  const activity = page.getByTestId('turn-activity')
+  await activity.getByTestId('work-log-summary').click()
+
+  const summary = activity.getByTestId('work-log-detail').locator('summary').filter({ hasText: 'View Image' })
   await expect(summary).toContainText('tool-preview.svg')
   await summary.click()
 

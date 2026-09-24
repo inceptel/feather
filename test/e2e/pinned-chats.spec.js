@@ -87,12 +87,12 @@ for (const width of [1280, 390]) {
     await page.getByRole('link', { name: 'Open chat →' }).click();
     await expect(page).toHaveURL(/#boat$/);
     await page.screenshot({ path: testInfo.outputPath('chat.png'), fullPage: true });
-    await page.getByRole('button', { name: '⋮', exact: true }).click();
+    await page.getByRole('button', { name: 'Chat menu', exact: true }).click();
     page.once('dialog', dialog => dialog.accept('Boating'));
     const renamed = page.waitForRequest(request => request.url().endsWith('/api/chats/boat/project/rename'));
     await page.getByTestId('rename-project').click();
     await renamed;
-    await page.getByRole('button', { name: '⋮', exact: true }).click();
+    await page.getByRole('button', { name: 'Chat menu', exact: true }).click();
     page.once('dialog', dialog => { throw new Error(`Unexpected naming dialog: ${dialog.message()}`); });
     await page.getByTestId('new-project-chat').click();
     await expect(page).toHaveURL(/#boat-b$/);

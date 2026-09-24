@@ -167,11 +167,22 @@ test.beforeAll(async () => {
       isMeta: false, isSidechain: false, message: { role: 'user', content: 'Mounted prefix fixture' },
     },
     {
-      type: 'assistant', uuid: 'prefix-assistant', cwd: fixtureRoot, timestamp: '2026-08-22T12:00:01Z',
+      type: 'assistant', uuid: 'prefix-tool-call', cwd: fixtureRoot, timestamp: '2026-08-22T12:00:01Z',
+      isMeta: false, isSidechain: false,
+      message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'prefix-tool', name: 'view_image', input: { path: previewPath } },
+      ] },
+    },
+    {
+      type: 'user', uuid: 'prefix-tool-result', cwd: fixtureRoot, timestamp: '2026-08-22T12:00:02Z',
+      isMeta: false, isSidechain: false,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'prefix-tool', content: 'Viewed image' }] },
+    },
+    {
+      type: 'assistant', uuid: 'prefix-assistant', cwd: fixtureRoot, timestamp: '2026-08-22T12:00:03Z',
       isMeta: false, isSidechain: false,
       message: { role: 'assistant', content: [
         { type: 'text', text: `![Mounted preview](${previewPath})\n\n[Attached image: ${previewPath}]` },
-        { type: 'tool_use', id: 'prefix-tool', name: 'view_image', input: { path: previewPath } },
       ] },
     },
   ].map(line => JSON.stringify(line)).join('\n') + '\n')
@@ -236,6 +247,7 @@ test('production prefix carries SPA assets, REST, SSE, media, files, export, WS,
   await expect(markdownImage).toHaveAttribute('src', /^\/feather2\/api\/file\?path=/)
   await expect.poll(() => markdownImage.evaluate(image => image.naturalWidth)).toBeGreaterThan(0)
 
+  await page.getByTestId('work-log-summary').click()
   const tool = page.locator('summary').filter({ hasText: 'View Image' })
   await tool.click()
   await expect(tool.locator('xpath=..').locator('img')).toHaveAttribute('src', /^\/feather2\/api\/file\?path=/)
