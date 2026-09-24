@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Instance discovery must be tested from a clean slate: agents launched by
+# Feather inherit FEATHER_URL/PORT pointing at the live server.
+unset FEATHER_URL FEATHER_PORT PORT
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -14,7 +17,7 @@ omp_extensions="$TMP/home/.omp/agent/extensions"
 bindir="$TMP/home/.local/bin"
 backup="$TMP/conflict-backup"
 mkdir -p "$release/skills" "$release/omp-tools" "$release/bin"
-for skill in feather sidecar council; do
+for skill in feather sidecar auto council; do
   mkdir -p "$release/skills/$skill"
   printf -- '---\nname: %s\n---\n' "$skill" >"$release/skills/$skill/SKILL.md"
 done
@@ -33,7 +36,7 @@ install=("$ROOT/bin/refeather" install-capabilities --release "$release" --targe
 "${install[@]}" # idempotent
 
 for harness in "$claude" "$codex"; do
-  for skill in feather sidecar; do
+  for skill in feather sidecar auto; do
     [ "$(readlink "$harness/$skill")" = "$current/skills/$skill" ]
   done
 done

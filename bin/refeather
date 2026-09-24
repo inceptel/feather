@@ -23,9 +23,15 @@ Usage:
   refeather rollback --release DIR --current-link LINK --program NAME
                      --supervisor-socket URL --health-url URL [--skip-capability-install]
   refeather recover [--journal-dir DIR] [--lock-file FILE]
+  refeather prune [--releases-dir DIR] [--current-link LINK] [--keep N]
+                  [--reference-dir DIR] [--dry-run]
   refeather install-capabilities --release DIR [--target-root DIR]
                     [--claude-skills-dir DIR] [--codex-skills-dir DIR]
                     [--omp-skills-dir DIR] [--omp-extensions-dir DIR] [--bin-dir DIR]
+
+Promote and rollback prune afterwards (REFEATHER_KEEP_RELEASES, default 10;
+0 disables): the current and prior releases, the N newest, and any release a
+running process or a recent session prompt references are always kept.
 
 Environment equivalents use the REFEATHER_ prefix. Promotion never guesses a
 Supervisor program/socket or health URL. FEATHER_URL is unrelated runtime
@@ -566,6 +572,88 @@ run_switch() {
   finish_tx complete
   trap - ERR INT TERM
   note "$TX_COMMAND complete: $TX_CURRENT -> $TX_CANDIDATE (version $TX_EXPECTED)"
+  # Space is reclaimed only after a verified switch; a prune problem never
+  # undoes a successful promotion.
+  if [ "${REFEATHER_KEEP_RELEASES:-10}" != 0 ]; then
+    prune_releases "$(dirname "$TX_CANDIDATE")" "$TX_CURRENT" "${REFEATHER_KEEP_RELEASES:-10}" \
+      "${REFEATHER_REFERENCE_DIR:-$HOME/.feather/session-system-prompts}" 0 "$TX_PRIOR" \
+      || note "release prune failed; promotion unaffected"
+  fi
+}
+
+# Delete old immutable releases. Kept: the current link's target, any extra
+# paths given, the N newest by staging time, and every release named by a
+# running process (argv or cwd) or by a file under the reference dir changed
+# in the last 14 days (session prompts embed release CLI paths, so a live
+# agent keeps its release).
+prune_releases() {
+  local releases="$1" current="$2" keep="$3" reference_dir="$4" dry_run="$5"; shift 5
+  python3 - "$releases" "$current" "$keep" "$reference_dir" "$dry_run" "$@" <<'PY'
+import os, re, shutil, stat, sys, time
+releases, current, keep, reference_dir, dry_run, *extra = sys.argv[1:]
+keep, dry_run = int(keep), dry_run == "1"
+releases = os.path.realpath(releases)
+pattern = re.compile(re.escape(releases) + r"/([0-9a-f]{40})")
+candidates = [name for name in os.listdir(releases)
+              if re.fullmatch(r"[0-9a-f]{40}", name) and os.path.isdir(os.path.join(releases, name))]
+kept = set()
+for path in [current, *extra]:
+    if path and os.path.exists(path):
+        kept.add(os.path.basename(os.path.realpath(path)))
+kept.update(sorted(candidates, key=lambda name: os.stat(os.path.join(releases, name)).st_mtime, reverse=True)[:keep])
+def scan(text):
+    kept.update(pattern.findall(text))
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle: scan(handle.read().replace(b"\0", b" ").decode("utf-8", "replace"))
+        scan(os.readlink(f"/proc/{pid}/cwd"))
+    except OSError:
+        pass
+cutoff = time.time() - 14 * 86400
+if reference_dir and os.path.isdir(reference_dir):
+    for root, _dirs, files in os.walk(reference_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                if os.stat(path).st_mtime < cutoff: continue
+                with open(path, encoding="utf-8", errors="replace") as handle: scan(handle.read())
+            except OSError:
+                pass
+doomed = [name for name in candidates if name not in kept]
+freed = 0
+for name in doomed:
+    target = os.path.join(releases, name)
+    for root, dirs, files in os.walk(target):
+        for entry in files:
+            try: freed += os.lstat(os.path.join(root, entry)).st_size
+            except OSError: pass
+    if dry_run: continue
+    # Releases are read-only by design; unlock only the one being removed.
+    for root, dirs, _files in os.walk(target):
+        os.chmod(root, stat.S_IRWXU)
+    shutil.rmtree(target)
+verb = "would prune" if dry_run else "pruned"
+print(f"refeather: {verb} {len(doomed)} release(s), {freed // (1024 * 1024)} MB; kept {len(candidates) - len(doomed)}", file=sys.stderr)
+for name in doomed: print(name)
+PY
+}
+
+cmd_prune() {
+  local releases="${REFEATHER_RELEASES_DIR:-$HOME/.local/share/feather/releases}"
+  local current="${REFEATHER_CURRENT_LINK:-$HOME/.local/share/feather/current}"
+  local keep="${REFEATHER_KEEP_RELEASES:-10}" dry_run=0
+  local reference_dir="${REFEATHER_REFERENCE_DIR:-$HOME/.feather/session-system-prompts}"
+  while [ $# -gt 0 ]; do case "$1" in
+    --releases-dir) releases="$2"; shift 2 ;; --current-link) current="$2"; shift 2 ;;
+    --keep) keep="$2"; shift 2 ;; --reference-dir) reference_dir="$2"; shift 2 ;;
+    --dry-run) dry_run=1; shift ;; *) die "unknown prune option: $1" ;; esac; done
+  [[ "$keep" =~ ^[0-9]+$ ]] || die "--keep must be a non-negative integer"
+  [ -L "$current" ] || die "current link must be a symlink: $current"
+  need_command python3
+  releases="$(realpath_existing "$releases")"
+  exec 9>"${REFEATHER_LOCK_FILE:-$(default_lock_file)}"
+  flock -n 9 || die "a promotion or rollback is running; prune later"
+  prune_releases "$releases" "$current" "$keep" "$reference_dir" "$dry_run"
 }
 
 cmd_recover() {
@@ -616,6 +704,6 @@ PY
 command="${1:-}"; [ -n "$command" ] || { usage; exit 1; }; shift
 case "$command" in
   stage) cmd_stage "$@" ;; promote) run_switch promote "$@" ;; rollback) run_switch rollback "$@" ;;
-  recover) cmd_recover "$@" ;; install-capabilities) cmd_install_capabilities "$@" ;;
+  recover) cmd_recover "$@" ;; install-capabilities) cmd_install_capabilities "$@" ;; prune) cmd_prune "$@" ;;
   -h|--help|help) usage ;; *) die "unknown command: $command" ;;
 esac

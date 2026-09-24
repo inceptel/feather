@@ -149,6 +149,26 @@ If restoration cannot be verified, the journal records `rollback-failed` and
 retains `active.json`. Repair the underlying Supervisor or listener issue and
 rerun `refeather recover`; do not remove the active transaction by hand.
 
+## Release retention
+
+Every stage leaves an immutable release (~200 MB). After each verified promote
+or rollback, refeather prunes old releases automatically. It always keeps:
+
+- the current release and the one it replaced (the rollback target);
+- the `REFEATHER_KEEP_RELEASES` newest (default 10; `0` disables pruning);
+- any release named by a running process's argv or cwd;
+- any release named in a file under `REFEATHER_REFERENCE_DIR` (default
+  `~/.feather/session-system-prompts`) changed in the last 14 days. Session
+  prompts embed release CLI paths, so live agents keep their release.
+
+A prune failure is reported but never undoes a promotion. To preview or run it
+by hand (it takes the promotion lock):
+
+```bash
+bin/refeather prune --dry-run   # list what would go
+bin/refeather prune --keep 5
+```
+
 ## Failure gates and retained evidence
 
 Stop before promotion for an incomplete restore rehearsal, malformed state,

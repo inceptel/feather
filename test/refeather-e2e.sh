@@ -17,7 +17,7 @@ git init -q "$source_repo"
 git -C "$source_repo" config user.email test@example.com
 git -C "$source_repo" config user.name Test
 mkdir -p "$source_repo/skills" "$source_repo/omp-tools" "$source_repo/bin"
-for skill in feather sidecar council; do
+for skill in feather sidecar auto council; do
   mkdir -p "$source_repo/skills/$skill"
   printf -- '---\nname: %s\n---\n' "$skill" >"$source_repo/skills/$skill/SKILL.md"
 done
@@ -344,5 +344,35 @@ wait "$interrupted_pid" 2>/dev/null || true
 "${switch_env[@]}" "$ROOT/bin/refeather" recover
 [ "$(readlink -f "$current")" = "$old" ]
 [ ! -e "$journal/active.json" ]
+
+# Prune keeps the current release, the N newest, and anything a running process
+# or a recent session prompt names; it removes the rest despite read-only trees.
+prune_root="$TMP/prune"
+prune_releases="$prune_root/releases"
+prune_refs="$prune_root/prompts"
+mkdir -p "$prune_releases" "$prune_refs"
+hash() { printf '%040d' "$1"; }
+for n in 1 2 3 4 5 6; do
+  mkdir -p "$prune_releases/$(hash "$n")/node_modules/pkg"
+  printf 'x\n' >"$prune_releases/$(hash "$n")/node_modules/pkg/index.js"
+  chmod -R a-w "$prune_releases/$(hash "$n")"
+  touch -d "2026-01-0$n" "$prune_releases/$(hash "$n")"
+done
+mkdir -p "$prune_releases/.stage-inflight"                           # never a candidate
+ln -s "$prune_releases/$(hash 1)" "$prune_root/current"               # oldest, but current
+printf 'Inbox CLI: node "%s/%s/bin/feather-inbox.mjs"\n' "$prune_releases" "$(hash 2)" >"$prune_refs/recent-prompt.md"
+printf 'node "%s/%s/bin/old.mjs"\n' "$prune_releases" "$(hash 4)" >"$prune_refs/stale-prompt.md"
+touch -d '30 days ago' "$prune_refs/stale-prompt.md"                  # too old to protect
+sh -c 'sleep 30' "$prune_releases/$(hash 3)/bin/running" & running_pid=$!
+prune=("$ROOT/bin/refeather" prune --releases-dir "$prune_releases" --current-link "$prune_root/current"
+  --reference-dir "$prune_refs" --keep 1)
+REFEATHER_LOCK_FILE="$TMP/prune.lock" "${prune[@]}" --dry-run >"$TMP/prune-dry.out" 2>"$TMP/prune-dry.err"
+[ "$(ls "$prune_releases" | grep -c .)" = 6 ]                         # dry run deletes nothing
+[ "$(sort "$TMP/prune-dry.out" | tr '\n' ' ')" = "$(hash 4) $(hash 5) " ]
+REFEATHER_LOCK_FILE="$TMP/prune.lock" "${prune[@]}" >"$TMP/prune.out" 2>"$TMP/prune.err"
+kill "$running_pid" 2>/dev/null || true; wait "$running_pid" 2>/dev/null || true
+[ "$(ls "$prune_releases" | sort | tr '\n' ' ')" = "$(hash 1) $(hash 2) $(hash 3) $(hash 6) " ]
+[ -d "$prune_releases/.stage-inflight" ]
+grep -q 'pruned 2 release(s)' "$TMP/prune.err"
 
 echo "refeather-e2e: PASS"
