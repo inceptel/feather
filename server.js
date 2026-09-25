@@ -584,7 +584,7 @@ function readLatestMessages(fpath, agent, count) {
       fs.readSync(fd, chunk, 0, length, position);
       const data = suffix.length ? Buffer.concat([chunk, suffix]) : chunk;
       let end = data.length;
-      while (reverse.length <= wanted) {
+      while (end > 0 && reverse.length <= wanted) {
         const newline = data.lastIndexOf(10, end - 1);
         if (newline < 0) break;
         const line = data.subarray(newline + 1, end);
@@ -1989,9 +1989,8 @@ function scheduleRalphCallback(id, boundary) {
   armRalphCallback(id, boundary.key);
 }
 
-function observeRalphBoundary(id, line) {
-  if (!isRalphSession(id)) return;
-  const boundary = ralphBoundaryFromLine(line, getAgentForSession(id));
+function observeRalphBoundary(id, line, agent) {
+  const boundary = ralphBoundaryFromLine(line, agent);
   if (!boundary) return;
   if (boundary.type === 'active') {
     cancelRalphCallback(id);
@@ -2156,10 +2155,9 @@ function evictRevokedSseClients(sessionId) {
   }
 }
 
-function broadcast(sessionId, line, offset) {
+function broadcast(sessionId, line, offset, agent) {
   const clients = sseClients.get(sessionId);
   if (!clients || clients.size === 0) return;
-  const agent = getAgentForSession(sessionId);
   const parsed = parseMessageForAgent(line, agent);
   if (!parsed) return;
   const chunk = `id: ${offset}\nevent: message\ndata: ${JSON.stringify(parsed)}\n\n`;
@@ -2474,6 +2472,7 @@ function replayOmpBridgeEvents(sessionId, clients, res) {
 // ── File watcher ────────────────────────────────────────────────────────────
 
 const fileOffsets = new Map();
+const processingFileChanges = new Map();
 
 // Init offsets for existing files to current size
 if (fs.existsSync(CLAUDE_PROJECTS)) {
@@ -2495,6 +2494,20 @@ function ompBridgeIsLive(sessionId, now = Date.now()) {
   return Number.isFinite(live?.seenAt) && live.version >= OMP_BRIDGE_VERSION && now - live.seenAt < 30_000;
 }
 
+function ompBridgeOwnedElsewhere(sessionId) {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(
+      path.join(OMP_SESSIONS, sessionId, '.feather-bridge.json'),
+      'utf8',
+    ));
+    if (metadata?.sessionId !== sessionId || typeof metadata.url !== 'string') return false;
+    return new URL(metadata.url).origin !== `http://127.0.0.1:${PORT}`;
+  } catch {
+    // Missing metadata identifies a legacy pre-bridge session.
+    return false;
+  }
+}
+
 function cancelOmpBridgeMigration(sessionId) {
   const timer = pendingOmpBridgeMigrations.get(sessionId);
   if (!timer) return;
@@ -2502,25 +2515,35 @@ function cancelOmpBridgeMigration(sessionId) {
   pendingOmpBridgeMigrations.delete(sessionId);
 }
 
-function observeOmpTurnBoundary(sessionId, line) {
+function observeOmpTurnBoundary(sessionId, line, agent) {
+  if (READ_ONLY_MODE || agent !== 'omp') return;
   const boundary = ompTurnBoundaryFromLine(line);
   if (!boundary) return;
   if (boundary === 'active') {
     cancelOmpBridgeMigration(sessionId);
     return;
   }
-  if (getAgentForSession(sessionId) !== 'omp') return;
-  if (ompBridgeIsLive(sessionId) || !tmuxIsActive(sessionId) || pendingOmpBridgeMigrations.has(sessionId)) return;
-  const timer = setTimeout(() => {
+  if (ompBridgeIsLive(sessionId) || pendingOmpBridgeMigrations.has(sessionId)) return;
+  const migrate = () => {
+    // Historical completions are not migration points until all later records
+    // have been observed; an active record cancels this pending migration.
+    if (processingFileChanges.has(sessionId)) {
+      const timer = setTimeout(migrate, 1500);
+      timer.unref();
+      pendingOmpBridgeMigrations.set(sessionId, timer);
+      return;
+    }
     pendingOmpBridgeMigrations.delete(sessionId);
-    if (ompBridgeIsLive(sessionId) || !tmuxIsActive(sessionId) || getAgentForSession(sessionId) !== 'omp') return;
+    if (ompBridgeIsLive(sessionId) || ompBridgeOwnedElsewhere(sessionId)
+      || !tmuxIsActive(sessionId) || getAgentForSession(sessionId) !== 'omp') return;
     try {
       launchOmpSession(sessionId, getOmpSessionCwd(sessionId), { resume: true });
       console.log(`[omp bridge] migrated completed session ${sessionId}`);
     } catch (error) {
       console.warn(`[omp bridge] migration failed for ${sessionId}:`, error.message);
     }
-  }, 1500);
+  };
+  const timer = setTimeout(migrate, 1500);
   timer.unref();
   pendingOmpBridgeMigrations.set(sessionId, timer);
 }
@@ -2528,31 +2551,81 @@ function observeOmpTurnBoundary(sessionId, line) {
 function processFileChange(filePath, sessionIdOverride) {
   if (!filePath.endsWith('.jsonl')) return;
   const sessionId = sessionIdOverride || path.basename(filePath, '.jsonl');
-  const currentOffset = fileOffsets.get(sessionId) || 0;
-  try {
-    const stat = fs.statSync(filePath);
-    if (stat.size <= currentOffset) return;
-    const fd = fs.openSync(filePath, 'r');
-    const buf = Buffer.alloc(stat.size - currentOffset);
-    fs.readSync(fd, buf, 0, buf.length, currentOffset);
-    fs.closeSync(fd);
-    const lastNewline = buf.lastIndexOf(10);
-    if (lastNewline < 0) return;
-    const complete = buf.subarray(0, lastNewline + 1);
-    let start = 0;
-    while (start < complete.length) {
-      const newline = complete.indexOf(10, start);
-      const line = complete.subarray(start, newline).toString('utf8');
-      const offset = currentOffset + newline + 1;
-      if (line) {
-        broadcast(sessionId, line, offset);
-        observeOmpTurnBoundary(sessionId, line);
-        observeRalphBoundary(sessionId, line);
-      }
-      start = newline + 1;
+  const running = processingFileChanges.get(sessionId);
+  if (running) {
+    running.nextPath = filePath;
+    return running.promise;
+  }
+  const job = { nextPath: filePath, promise: null };
+  processingFileChanges.set(sessionId, job);
+  job.promise = (async () => {
+    while (job.nextPath) {
+      const nextPath = job.nextPath;
+      job.nextPath = null;
+      await drainTranscriptAppend(nextPath, sessionId);
     }
-    fileOffsets.set(sessionId, currentOffset + complete.length);
-  } catch {}
+  })().catch(error => {
+    if (error.code !== 'ENOENT') console.warn('[transcript] append failed:', error.message);
+  }).finally(() => processingFileChanges.delete(sessionId));
+  return job.promise;
+}
+
+async function drainTranscriptAppend(filePath, sessionId) {
+  let offset = fileOffsets.get(sessionId) || 0;
+  const stat = await fs.promises.stat(filePath);
+  if (stat.size < offset) {
+    offset = 0;
+    fileOffsets.set(sessionId, 0);
+  }
+  if (stat.size === offset) return;
+  const stream = fs.createReadStream(filePath, { start: offset, end: stat.size - 1, highWaterMark: 64 * 1024 });
+  let fragments = [];
+  let fragmentBytes = 0;
+  let position = offset;
+  let records = 0;
+  let agent, ralph;
+  const refreshContext = () => {
+    const meta = readMeta();
+    agent = meta[sessionId]?.agent || getAgentForSession(sessionId);
+    ralph = meta[sessionId]?.mode === RALPH_MODE;
+  };
+  try {
+    for await (const chunk of stream) {
+      refreshContext();
+      let start = 0;
+      while (start < chunk.length) {
+        const newline = chunk.indexOf(10, start);
+        if (newline < 0) {
+          fragments.push(chunk.subarray(start));
+          fragmentBytes += chunk.length - start;
+          break;
+        }
+        const part = chunk.subarray(start, newline);
+        const bytes = fragments.length ? Buffer.concat([...fragments, part], fragmentBytes + part.length) : part;
+        fragments = [];
+        fragmentBytes = 0;
+        const line = bytes.toString('utf8');
+        const end = position + newline + 1;
+        if (line) {
+          broadcast(sessionId, line, end, agent);
+          observeOmpTurnBoundary(sessionId, line, agent);
+          if (ralph) observeRalphBoundary(sessionId, line, agent);
+        }
+        fileOffsets.set(sessionId, end);
+        start = newline + 1;
+        if (++records % 100 === 0) {
+          await new Promise(resolve => setImmediate(resolve));
+          refreshContext();
+        }
+      }
+      position += chunk.length;
+      // Leave room for HTTP requests, heartbeats, and fresh automation authority,
+      // including while catching up a single long incomplete record.
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  } finally {
+    stream.destroy();
+  }
 }
 
 // ── omp session dir watchers ────────────────────────────────────────────────
