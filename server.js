@@ -1295,8 +1295,12 @@ function sessionSystemPrompt(id) {
     if (!rolePrompt.includes(CHAT_PAIR_PUBLICATION_PROMPT)) parts.push(CHAT_PAIR_PUBLICATION_PROMPT);
     if (chat.chatRole === 'creator') parts.push(chatWorkflowInstructions(id));
   }
+  parts.push(FILE_LINK_PROMPT);
   return parts.join('\n\n');
 }
+// Feather opens Markdown links to local files in its file viewer, but bare
+// filenames ("FINDINGS.md") have no path to open. Ask for linked full paths.
+const FILE_LINK_PROMPT = 'File references in replies: whenever you mention a file or folder the user may want to open, write it as a Markdown link whose label is the short name and whose target is the full absolute path, for example [report.md](/home/user/project/report.md) or [parts/](/home/user/project/parts/). If the path contains spaces, wrap the target in angle brackets: [notes.md](</home/user/My Project/notes.md>). Never leave a bare or relative filename, and do not wrap the link in backticks. Feather renders these as tappable links to its file viewer.';
 
 function chatInboxCliPrompt() {
   return `Project inbox CLI: node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`;
