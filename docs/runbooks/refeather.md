@@ -177,3 +177,201 @@ conflicting capabilities, or version mismatch. Retain source archive receipts,
 release manifests, pre/post state hashes, the current/prior release targets,
 Supervisor identity, journal JSONL, completed transaction state, and the exact
 recovery command. Never include secret values in these receipts.
+
+## Optional independent recovery chat
+
+`recovery/server.mjs` is a standalone Node server using only builtins and the
+three adjacent static assets. It does not import, call, start, or restart the
+normal Feather backend. Nothing in staging, promotion, or normal server startup
+enables it. It starts an OMP RPC child only after a human sends a request.
+
+### Separate code, state, and service
+
+Keep a reviewed copy of `recovery/` in an independently pinned, read-only tree
+(for example `/opt/feather-recovery/pinned/recovery`). Do not point it at
+`/opt/feather/current` or keep its only copy inside releases subject to normal
+retention. Pin the Node runtime and OMP executable independently too, record
+their versions and code hashes, and retain a prior working pin. Moving Feather's
+release link must not move recovery. Deploying these files never requires an
+`npm install` or frontend build.
+
+Use a dedicated Unix service account with only the host permissions needed for
+the repairs you intend to authorize. It is a real coding agent, not a sandbox:
+its tools run with that account's permissions. Do not grant blanket sudo or
+reuse a privileged account merely for convenience. Provision its OMP/provider
+credentials explicitly; browser authentication does not provide model access.
+
+Required environment:
+
+| Variable | Meaning |
+| --- | --- |
+| `RECOVERY_ORIGIN` | Exact public HTTP(S) origin, including any nondefault port, with no trailing slash or path. Use HTTPS outside local smoke checks. |
+| `RECOVERY_USER` | Exact authenticated `Remote-User` identity allowed to use this single-user service; there is no default account. |
+| `RECOVERY_STATE_DIR` | Absolute private writable directory outside the code pin and normal Feather state. Run exactly one recovery service against it. |
+| `RECOVERY_MODEL` | Explicit provider/model identifier supported by the pinned OMP installation. No provider or model is assumed. |
+| `RECOVERY_THINKING` | Explicit thinking setting supported by that model and OMP version (for example `high`, where supported). |
+
+Optional `RECOVERY_PORT` defaults to `4881` and always binds IPv4 loopback.
+`RECOVERY_OMP_BIN` defaults to `omp` on PATH; use an absolute independently
+pinned executable for production. `RECOVERY_CWD` defaults to `HOME`; set an
+explicit existing workspace for production. Provide a private `HOME` and PATH
+for the service account. Inherited `FEATHER_*`, `OMP_*`, `PI_*`, and `RECOVERY_*`
+variables are removed from the agent environment to avoid inheriting another
+session or backend integration. Configure any required OMP settings through
+that account's local configuration instead; ordinary provider environment
+variables remain available. Extensions, skills, rules, and automatic titles
+are disabled for this child.
+
+The optional `infra/feather-recovery.supervisor.conf` follows the existing
+Supervisor convention but has `autostart=false`. Customize the account, paths,
+workspace, log directory and permissions before loading it. Its required
+`ENV_RECOVERY_*` substitutions must exist in the **supervisord daemon's**
+environment, not merely the shell running `supervisorctl`. Installing the
+template is not authorization to start it. An operator must explicitly load
+and start the separate program; never change the normal Feather program to
+point at recovery.
+
+The state directory contains fsynced JSON request receipts in `turns/` and
+durable native OMP session history in `sessions/`. The child uses that dedicated
+session directory with `--continue`. Keep both together when backing up.
+New directories/files use modes 0700/0600; pre-existing parent directories and
+the service account's credentials still require an operator permission check.
+There is no automatic retention or deletion. Transcripts and browser pending
+requests can contain sensitive material; back them up and protect them as such.
+
+### Authenticating proxy: ordering is a security boundary
+
+The listener trusts only IPv4 loopback requests whose `Remote-User` equals
+`RECOVERY_USER`. Every mutation additionally requires an exact `Origin` and
+rejects a conflicting Fetch Metadata site. There is no wildcard CORS or
+unauthenticated health exception. **Loopback is not authentication against
+other local processes**: any process able to connect locally can forge that
+header. Use only on a host where local users/processes are trusted.
+
+For Caddy, put identity stripping, authentication, recovery routing, and the
+ordinary fallback **inside one enclosing `route` block**. Caddy otherwise
+reorders directives: merely placing `request_header` above `forward_auth` in
+the file does not guarantee it runs first. Strip client-supplied identity
+before authentication, then copy only the identity returned by the trusted
+auth service. The example verify address/path must be adapted to your existing
+auth gateway's successful verification endpoint and header contract:
+
+```caddyfile
+chat.example.test {
+    route {
+        request_header -Remote-User
+        forward_auth 127.0.0.1:9091 {
+            uri /verify
+            copy_headers Remote-User
+        }
+        @recovery path /recovery /recovery/*
+        handle @recovery {
+            reverse_proxy 127.0.0.1:4881
+        }
+        handle {
+            reverse_proxy 127.0.0.1:4870
+        }
+    }
+}
+```
+
+Retain the `/recovery` prefix: use `handle`, **not** `handle_path`, and do not
+strip or rewrite it upstream. Route it before the normal Feather catch-all;
+`RECOVERY_ORIGIN` here would be `https://chat.example.test`. Integrate existing
+login/static exceptions only after the outer identity strip and never allow
+them to bypass authentication for `/recovery` or `/recovery/*`. Verify with an
+unauthenticated forged `Remote-User` header that the public proxy refuses
+access. A direct authenticated loopback request cannot prove proxy ordering.
+Do not expose port 4881 on a public interface.
+
+### Receipts, interruption, and protocol compatibility
+
+The browser saves a UUID and exact prompt before sending; the server persists
+acceptance before delivering the prompt to OMP. Retrying that same UUID/text
+returns its saved receipt without sending again; different text with the same
+UUID is rejected. There is one active request at a time. Reload/reconnect polls
+saved output and never automatically replays a prompt. If browser storage is
+unavailable, sending is disabled. An unconfirmed request requires an explicit
+**Retry same request**, not a fresh duplicate.
+
+On service restart, unfinished receipts become `interrupted` and are never
+resent. This is durable acceptance and at-most-once prompt dispatch per retained
+receipt, **not exactly-once tool execution**: a crash can occur before delivery,
+or after side effects but before the receipt is updated. Inspect results before
+requesting more work. Stop requests abort OMP and force-kill its process group
+after eight seconds if necessary; stopping cannot undo completed actions.
+
+OMP compatibility is intentionally explicit:
+
+- The installed 18.1.10-style protocol completes a turn only on
+  `agent_end` with `isTerminal: true` (or an acknowledged local command with
+  `agentInvoked: false`). Unmarked/nonterminal `agent_end` events do not free
+  the occupied request slot.
+- Newer OMP advertises `isSettled` in `get_state`; recovery then uses correlated
+  `prompt_result` and, when `sessionSettled: false`, waits for
+  `session_settled`. An early local-command acknowledgement is not completion
+  in this mode. Background wakes must settle before the next request.
+- Native session paths must remain inside the dedicated recovery session
+  directory. Protocol-v1 newline JSON frames are bounded to 1 MiB; malformed,
+  oversized, or incomplete frames interrupt the turn rather than exposing raw
+  agent diagnostics. Protocol-v2 chunk negotiation is not implemented. Pin and
+  smoke-check your OMP version before upgrading; unsupported completion markers
+  leave the slot occupied until Stop rather than guessing that it is idle.
+
+The web view shows completed assistant text, not raw stderr, tool payloads,
+provider metadata, or `get_state`. Its bounded display archive is separate from
+the native session history. Plain text rendering avoids executing model output,
+but it is not secret redaction: an authorized agent can still quote sensitive
+information in its reply. Pending prompt text is also stored in same-origin
+browser localStorage until acceptance is reconciled.
+
+### Boundaries and operator smoke checks
+
+This is backend independence, not disaster recovery isolation. It still shares
+the host, disk, kernel, reverse proxy, authentication service, network, and
+model/provider availability. It cannot repair a powered-off host, bypass a
+failed authentication gateway, or produce answers when the provider is
+unavailable. Same-origin malicious script in another application can access
+recovery and its pending browser state; an isolated origin is stronger, if
+your auth topology permits it. Retain SSH/console access and offline backups.
+
+Graceful SIGTERM/SIGINT kills the child process group; uncatchable parent death
+can leave a detached child or independently detached tool process alive.
+Before starting another recovery instance after such a failure, use the OS
+process tree and the dedicated session path to identify any survivor and have
+an operator stop that exact process. Neither Supervisor group flags nor an
+`interrupted` receipt proves all tool side effects have stopped.
+
+Before opting in, use a disposable state directory, an unused loopback port,
+an explicit local origin/user/model/thinking configuration, and a fake OMP
+executable for offline protocol exercises. Do not use production credentials
+or send a real diagnostic prompt as part of unattended checks:
+
+1. Launch `node recovery/server.mjs` in the foreground (or a supervised
+   throwaway process). GET `/recovery/api/state` with the configured
+   `Remote-User` must return empty history without spawning OMP. Missing/wrong
+   identity must return 403. GET `/recovery/`, `app.js`, and `style.css` should
+   work without Feather running.
+2. POST `/recovery/api/send` with JSON `{ "id": "<UUID-v4>", "text": "hello" }`.
+   Missing/wrong Origin must return 403. The configured exact Origin and user
+   must yield a durable 202 receipt; duplicate UUID/text returns that receipt,
+   changed text with the same UUID returns 409, and a new UUID while occupied
+   returns 409.
+3. Have the fake OMP answer `get_state` with a session path under `sessions/`,
+   acknowledge `prompt`, and emit a completed assistant message. Exercise both
+   terminal `agent_end` and newer settled-protocol frames. Nonterminal
+   `agent_end` and `prompt_result` with `sessionSettled: false` must keep the
+   slot occupied; only the matching terminal/settled event completes it.
+4. Exercise Stop, provider errors, malformed frames, service restart during an
+   unfinished receipt, and retrieval of older/long replies. Restart must show
+   interruption without another prompt dispatch. Reload the browser while a
+   request is unconfirmed and confirm that only an explicit retry can send it.
+5. Separately verify the actual public auth proxy rejects forged identity,
+   preserves `/recovery`, and still serves recovery when only the main Feather
+   backend is unavailable. Never stop production just to prove this; use a
+   disposable proxy/backend configuration. Review the browser surface there.
+
+After these offline checks, an operator may authorize a small read-only prompt
+against the pinned real OMP/provider to establish version compatibility.
+Do not auto-launch an agent, schedule a repair, replay saved prompts, or remove
+history as part of installation or upgrade.
