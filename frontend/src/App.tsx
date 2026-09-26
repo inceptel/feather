@@ -152,6 +152,8 @@ export default function App() {
     chatStartup: { status: restoredChat.id.startsWith('new-chat-') ? 'failed' : 'starting', error: restoredChat.id.startsWith('new-chat-') ? 'Startup was interrupted. Retry to reconnect your chat.' : undefined },
   }] : [])
   const [currentId, setCurrentId] = createSignal<string | null>(null)
+  // Do not mount the default home while a reload's destination is unresolved.
+  const [restoringRoute, setRestoringRoute] = createSignal(!!location.hash)
   const [boxes, setBoxes] = createSignal<BoxInfo[]>([{ id: 'local', label: 'Local', available: true }])
   const [currentBox, setCurrentBox] = createSignal('local')
   const [peerControl, setPeerControl] = createSignal(false)
@@ -635,24 +637,36 @@ export default function App() {
   }
   onMount(async () => {
     document.addEventListener('keydown', onGlobalKeyDown)
-    fetchBoxes().then(setBoxes).catch(() => {})
+    const boxesReady = fetchBoxes().then(setBoxes).catch(() => {})
     fetchSharingPeers().then(r => setSharingPeers(r.peers)).catch(() => {})
-    // Hash may carry a box prefix: #boxid:sessionid
-    const hash = location.hash.slice(1)
-    const boxMatch = hash.match(/^([a-z0-9_-]+):(.+)$/i)
-    if (boxMatch) setCurrentBox(boxMatch[1])
-    else applyHomeHash(hash)
-    await refreshSessions()
+    try {
+      // Resolve boxes before sessions so peer control is known before rendering.
+      const initialBox = location.hash.slice(1).match(/^([a-z0-9_-]+):(.+)$/i)
+      if (initialBox) setCurrentBox(initialBox[1])
+      await boxesReady
+      await refreshSessions()
+      while (true) {
+        // Navigation during either request wins, including an empty/home hash.
+        const hash = location.hash.slice(1)
+        if (applyHomeHash(hash)) break
+        const boxMatch = hash.match(/^([a-z0-9_-]+):(.+)$/i)
+        const box = boxMatch?.[1] || 'local'
+        if (box !== currentBox()) {
+          setCurrentBox(box)
+          setPeerControl(false)
+          setSessions([])
+          await refreshSessions()
+          continue
+        }
+        void select(boxMatch?.[2] || hash)
+        break
+      }
+    } finally {
+      setRestoringRoute(false)
+    }
     fetchAgents().then(setAgents).catch(() => {})
     fetch(appUrl('/api/quick-links')).then(r => r.json()).then(setLinks).catch(() => {})
     fetchStarred().then(setStarred).catch(() => {})
-    if (boxMatch) select(boxMatch[2])
-    else {
-      // Re-read the hash: the user may have moved (e.g. to #costs) while the
-      // session list was loading, and a stale value must not undo that.
-      const current = location.hash.slice(1)
-      if (current && !applyHomeHash(current)) select(current)
-    }
     window.addEventListener('hashchange', onHashChange)
     // Refresh session list when tab becomes visible
     document.addEventListener('visibilitychange', onVisibility)
@@ -1879,6 +1893,9 @@ export default function App() {
 
 
   return (
+    <Show when={!restoringRoute()} fallback={
+      <div role="status" aria-label="Restoring view" style={{ display: 'grid', 'place-items': 'center', height: 'calc(var(--vh, 1vh) * 100)', background: 'var(--bg-primary, #0a0e14)', color: 'var(--text-secondary, #888)' }}>Restoring view…</div>
+    }>
     <div
       class="feather-shell"
       onTouchStart={onTouchStart}
@@ -2633,5 +2650,6 @@ export default function App() {
         </Show>
       </div>
     </div>
+    </Show>
   )
 }
