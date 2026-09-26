@@ -2101,6 +2101,10 @@ function flushSseWrites(sessionId, clients, res, state) {
   }
   try {
     while (!state.waiting && state.queue.length > 0) {
+      if (res.writableEnded || res.destroyed) {
+        closeSseClient(clients, res);
+        return;
+      }
       const chunk = state.queue.shift();
       state.bytes -= Buffer.byteLength(chunk);
       if (!res.write(chunk)) {
@@ -2121,10 +2125,19 @@ function writeSse(sessionId, clients, res, chunk, forceAuth = false) {
     closeSseClient(clients, res);
     return false;
   }
+  // A response that has already been ended, by an overflow close or by the
+  // client going away, reports a further write by emitting 'error'
+  // asynchronously. No try/catch here can see that, so without a listener it
+  // surfaces as an unhandled 'error' event and takes the process down.
+  if (res.writableEnded || res.destroyed) {
+    closeSseClient(clients, res);
+    return false;
+  }
   let state = ssePendingWrites.get(res);
   if (!state) {
     state = { queue: [], bytes: 0, waiting: false };
     ssePendingWrites.set(res, state);
+    res.on('error', () => closeSseClient(clients, res));
   }
   if (state.waiting) {
     const bytes = Buffer.byteLength(chunk);
