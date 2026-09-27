@@ -214,8 +214,13 @@ describe('Scheduler API: rules, chains, runs, and the handoff from the old wake 
       assert.equal(meta[builderId].title, 'Creator agent: #ev-shop')
       assert.equal(meta[checkerId].title, 'Reviewer agent: #ev-shop')
       assert.equal((await post(`${base}/api/scheduler/rules/ev-shop/agent/fire`)).status, 409, 'one wake per agent at a time')
-      // The builder's last word ends the wake; both chats are retired.
-      fs.appendFileSync(path.join(home, '.feather/sidecars', groupId, 'chat.jsonl'), JSON.stringify({ ts: Date.now(), seq: 1, from: 'builder', to: 'checker', text: '[DONE] approved; wiki/Pricing.md written' }) + '\n')
+      // The builder's tagged [DONE] ends the wake even when the checker's ack
+      // lands after it; both chats are retired instead of ping-ponging.
+      const chatFile = path.join(home, '.feather/sidecars', groupId, 'chat.jsonl')
+      fs.appendFileSync(chatFile, [
+        { ts: Date.now(), seq: 1, from: 'builder', to: 'checker', text: '[DONE · builder · card #25] approved; wiki/Pricing.md written' },
+        { ts: Date.now(), seq: 2, from: 'checker', to: 'builder', text: '[ack · checker] landing verified' },
+      ].map(message => JSON.stringify(message)).join('\n') + '\n')
       await waitFor(async () => {
         const entry = (await json(await fetch(`${base}/api/scheduler`))).body.rules.find(rule => rule.id === 'ev-shop/agent')
         return entry.runtime.running === null && entry.runtime.lastOutcome === 'done' ? entry : null

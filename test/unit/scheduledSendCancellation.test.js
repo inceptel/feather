@@ -196,8 +196,8 @@ for (const scenario of ['inject', 'fresh', 'round']) {
       schedulerTargetSessionId: () => 'chat', prepareRalphForHumanInput: () => {},
       ROOM_ASSIGN_STATE: { update: () => {} }, spawnSession: () => {}, updateMeta: () => {},
       ROOM_KICKOFF_DELAY_MS: 0,
-      schedulerAgentLastMessage: () => ({ from: 'builder', ts: 0, seq: 1, text: 'Review this' }),
-      AGENT_END_RE: /never-match/, DEFAULT_ROUND_MS: 100, formatDuration: String,
+      schedulerAgentThread: () => [{ from: 'builder', ts: 0, seq: 1, text: 'Review this' }],
+      agentEnded: () => false, DEFAULT_ROUND_MS: 100, formatDuration: String,
     });
     vm.runInContext(section('function schedulerAssertActive(', '// One agent = a builder chat'), f.context);
     vm.runInContext(section('async function schedulerAgentRoundCheck(', 'function schedulerRetireAgent('), f.context);

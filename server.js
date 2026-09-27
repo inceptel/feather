@@ -7268,30 +7268,26 @@ async function schedulerLaunchAgent(rule, run, at) {
 function schedulerAgentThread(run) {
   try { return run.agent?.groupId ? sidecar.readThread(run.agent.groupId) : []; } catch { return []; }
 }
-function schedulerAgentLastMessage(run) {
-  const thread = schedulerAgentThread(run);
-  return thread.length ? thread[thread.length - 1] : null;
-}
-const AGENT_END_RE = /^\s*\[(DONE|STOPPED)\]/i;
-// The builder's last word ends the wake: [DONE] after approval, [STOPPED]
-// on budget. Both chats gone also ends it; a dead builder with no last word
-// is a failure.
+// `[DONE]`, `[STOPPED]`, and tagged forms such as `[DONE · builder · card #25]`.
+const AGENT_END_RE = /^\s*\[(DONE|STOPPED)\b/i;
+const agentEnded = (thread, from = null) => thread.some((m) => (!from || m.from === from) && AGENT_END_RE.test(m.text || ''));
+// The builder's word ends the wake: [DONE] after approval, [STOPPED]
+// on budget. Later acks never reopen it. Both chats gone also ends it; a
+// dead builder with no last word is a failure.
 function schedulerAgentStatus(run) {
-  const last = schedulerAgentLastMessage(run);
-  if (last && last.from === 'builder' && AGENT_END_RE.test(last.text || '')) return 'done';
-  if (!tmuxIsActive(run.sessionId)) {
-    const thread = schedulerAgentThread(run);
-    return thread.some((m) => m.from === 'builder' && AGENT_END_RE.test(m.text || '')) ? 'done' : 'failed';
-  }
-  return 'running';
+  const thread = schedulerAgentThread(run);
+  if (agentEnded(thread, 'builder')) return 'done';
+  return tmuxIsActive(run.sessionId) ? 'running' : 'failed';
 }
 // Round limit: the party a message is waiting on gets one reminder at
 // roundMs and the wake ends as 'timeout' at twice that. Returns 'timeout'
 // when the tick should close the run.
 async function schedulerAgentRoundCheck(run, rule, now) {
   if (!scheduledRunMayContinue(SCHEDULER_STATE.read(), run)) return null;
-  const last = schedulerAgentLastMessage(run);
-  if (!last || AGENT_END_RE.test(last.text || '')) return null;
+  const thread = schedulerAgentThread(run);
+  // Once either side has posted [DONE] or [STOPPED], nobody owes a reply.
+  if (!thread.length || agentEnded(thread)) return null;
+  const last = thread[thread.length - 1];
   const roundMs = run.agent?.roundMs || rule.target.roundMs || DEFAULT_ROUND_MS;
   const waited = now - (last.ts || Date.parse(run.startedAt));
   if (waited < roundMs) return null;
