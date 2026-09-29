@@ -35,6 +35,8 @@ export interface SessionMeta {
   isActive: boolean
   agent?: string
   isWorker?: boolean
+  /** Set in search results: the session that drives this spawned sidecar peer. */
+  sidecarOf?: string
   chatRole?: 'creator' | 'reviewer'
   chatPair?: { groupId: string; creatorSessionId: string; reviewerSessionId: string } | null
   reviewPolicy?: 'none' | 'adaptive' | 'always'

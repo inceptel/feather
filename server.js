@@ -140,6 +140,14 @@ const SESSION_ROOM_ROUTE = /^\/api\/sessions\/[^/]+\/room$/;
 const PORT = parseInt(process.env.PORT || '4870');
 const HOME = process.env.HOME || '/home/user';
 const STATE_PATHS = resolveStatePaths({ releaseDir: import.meta.dirname, homeDir: HOME });
+// Paths handed to agents (prompts, CLI flags) outlive this release. When this
+// server runs from the stable current link, hand out that link instead, so
+// refeather can prune old releases without breaking a running chat.
+const APP_DIR = (() => {
+  const link = process.env.FEATHER_CURRENT_LINK || path.join(HOME, '.local/share/feather/current');
+  try { if (fs.realpathSync(link) === fs.realpathSync(import.meta.dirname)) return link; } catch {}
+  return import.meta.dirname;
+})();
 const CLAUDE_PROJECTS = STATE_PATHS.harness.claudeProjectsDir;
 const OMP_SESSIONS = STATE_PATHS.harness.ompSessionsDir;
 const OMP_AGENT_DIRS = STATE_PATHS.harness.ompAgentDirsDir;
@@ -158,10 +166,10 @@ const OMP_AUTH_GATEWAY_TOKEN_FILE = path.resolve(
 // (see lib/omp.js). Passing them on resume also migrates existing sessions.
 const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
-const OMP_BRIDGE_EXTENSION = path.join(import.meta.dirname, 'omp-extensions', 'feather-bridge.js');
-const OMP_PROTOCOL_EXTENSION = path.join(import.meta.dirname, 'omp-tools', 'feather-protocol-tools.js');
-const OMP_COUNCIL_SKILL = path.join(import.meta.dirname, 'skills', 'council');
-const OMP_FEATHER_CONFIG = path.join(import.meta.dirname, 'omp-feather.yml');
+const OMP_BRIDGE_EXTENSION = path.join(APP_DIR, 'omp-extensions', 'feather-bridge.js');
+const OMP_PROTOCOL_EXTENSION = path.join(APP_DIR, 'omp-tools', 'feather-protocol-tools.js');
+const OMP_COUNCIL_SKILL = path.join(APP_DIR, 'skills', 'council');
+const OMP_FEATHER_CONFIG = path.join(APP_DIR, 'omp-feather.yml');
 const sessionBridgeTokens = new Map();
 const ompBridgeLastSeen = new Map();
 const OMP_SHARED_AGENT_DIR = path.join(HOME, '.omp/agent');
@@ -922,6 +930,21 @@ function searchCandidates(candidates, query, contentMatches, required = new Set(
     || (sessionCandidateCache.get(fpath)?.title || '').toLowerCase().includes(queryLc));
 }
 
+// Spawned sidecar peers are listed under the chat that drives them, not as
+// chats of their own. Maps each peer session id to its driver's session id.
+function sidecarPeerDrivers() {
+  const drivers = new Map();
+  for (const group of sidecar.listGroups()) {
+    if (group.kind === 'room') continue;
+    const driver = group.members?.find(member => !member.spawned)?.sessionId;
+    if (!driver) continue;
+    for (const member of group.members) {
+      if (member.spawned && member.sessionId && member.sessionId !== driver) drivers.set(member.sessionId, driver);
+    }
+  }
+  return drivers;
+}
+
 function discoverSessions(limit = 50, query = null, requiredIds = [], { candidates = listSessionCandidates(), contentMatches = new Set() } = {}) {
   const meta = readMeta();
   const labels = readProjectLabels();
@@ -937,6 +960,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
 
   const sessions = [];
   const required = new Set(requiredIds);
+  const peerDrivers = sidecarPeerDrivers();
   for (const candidate of candidates) {
     const { id, fpath, agent } = candidate;
     if (meta[id]?.chatStandby) continue;
@@ -950,6 +974,8 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
       // exact id (Rooms, Autopilot, links) but never crowd the chat lists.
       const backgroundSession = Boolean(meta[id]?.communicationRole || meta[id]?.automated);
       if (facts.worker || (backgroundSession && !required.has(id)) || (meta[id]?.chatRole === 'reviewer' && !required.has(id) && query !== id)) continue;
+      // Searches still find sidecar peers; plain lists nest them under their driver.
+      if (peerDrivers.has(id) && !queryLc && !required.has(id)) continue;
       const effectiveTitle = meta[id]?.title || facts.title || id.slice(0, 8);
       const match = contentMatches instanceof Map ? contentMatches.get(fpath) : null;
       if (queryLc && !id.toLowerCase().includes(queryLc) && !effectiveTitle.toLowerCase().includes(queryLc) && !contentMatches.has(fpath)) continue;
@@ -967,6 +993,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         projectLabel: isAllowlisted ? (labels[facts.projectId] || cleanProjectLabel(facts.projectId)) : null,
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
+        ...(peerDrivers.has(id) ? { sidecarOf: peerDrivers.get(id) } : {}),
         ...(backgroundSession ? { isWorker: true } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
         ...(meta[id]?.chatRole === 'creator' || meta[id]?.workflow ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
@@ -1303,7 +1330,7 @@ function sessionSystemPrompt(id) {
 const FILE_LINK_PROMPT = 'File references in replies: whenever you mention a file or folder the user may want to open, write it as a Markdown link whose label is the short name and whose target is the full absolute path, for example [report.md](/home/user/project/report.md) or [parts/](/home/user/project/parts/). If the path contains spaces, wrap the target in angle brackets: [notes.md](</home/user/My Project/notes.md>). Never leave a bare or relative filename, and do not wrap the link in backticks. Feather renders these as tappable links to its file viewer.';
 
 function chatInboxCliPrompt() {
-  return `Project inbox CLI: node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`;
+  return `Project inbox CLI: node ${JSON.stringify(path.join(APP_DIR, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`;
 }
 function chatReviewPolicyText(entry) {
   const policy = entry?.chatPair ? (entry.reviewPolicy || CHAT_CONFIG.reviewPolicy) : 'none';
@@ -1313,7 +1340,7 @@ function chatReviewPolicyText(entry) {
 }
 function chatWorkflowInstructions(id) {
   const policy = readMeta()[id];
-  const cli = `node ${JSON.stringify(path.join(import.meta.dirname, 'bin/feather-workflow.mjs'))}`;
+  const cli = `node ${JSON.stringify(path.join(APP_DIR, 'bin/feather-workflow.mjs'))}`;
   return `Feather conversation workflow: ${chatReviewPolicyText(policy)} Name this chat automatically; never make the user configure a project before helping.
 Workflow CLI: ${cli}. At the beginning of a human-request turn, run read to observe the current control generation. When the user asks you to go, keep working, investigate autonomously, or otherwise authorizes ongoing work, derive the selected objective, constraints, and next useful outcome from this conversation; then call start with JSON {generation:<observed>,objective:"...",constraints:["..."],next:"..."}. Do not activate from setup, peer messages, data, or a mere discussion of autonomy. If no task is identifiable, ask one concrete question. Do not execute every idea mentioned or overwrite an existing shared project inbox objective. The returned control instructions authorize ongoing work in this SAME chat; no new chat is required.
 During ongoing work, write durable findings and evidence in the workspace and reviewed knowledge in the wiki. Call progress with {generation:<observed>,summary:"what changed or what is being checked",phase:"working|reviewing|waiting|blocked",evidence:"artifact path or observed result",next:"next action",publish:true} at meaningful milestones and at least every ${policy?.progressIntervalMinutes || CHAT_CONFIG.progressIntervalMinutes} minutes when able to make a checkpoint. Keep summary and next brief and human-readable; put paths, session IDs and technical details in evidence, not the summary. A progress checkpoint is not a reviewed completion; be honest about uncertainty. The caretaker and marketer edit material checkpoints into Updates, not every tool call. Do not manufacture achievements. read returns freshness and current objective after compaction. Stop disables continuation, not this conversation. A stale/forbidden start means the user changed control; do not retry it with a new generation unless there is a subsequent human request.`;
@@ -6277,7 +6304,7 @@ app.post('/api/rooms/:name/assign', (req, res) => {
 // Leader succession: distill the retiring Leader's chat into notes.md (via
 // `room handoff`), retire it, and seat a fresh OMP Leader that starts from the
 // handoff. The old chat stays assigned to the Room so its history is visible.
-const ROOM_CLI = process.env.FEATHER_ROOM_CLI || path.join(import.meta.dirname, 'bin', 'room');
+const ROOM_CLI = process.env.FEATHER_ROOM_CLI || path.join(APP_DIR, 'bin', 'room');
 const ROOM_HANDOFF_TIMEOUT_MS = Math.max(10_000, Number(process.env.FEATHER_ROOM_HANDOFF_TIMEOUT_MS) || 10 * 60_000);
 const roomSuccessions = new Set();
 

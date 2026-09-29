@@ -456,8 +456,13 @@ export default function App() {
   onMount(() => { refreshSidecars(); const t = setInterval(refreshSidecars, 5000); onCleanup(() => clearInterval(t)) })
   // A group belongs to the session that drives it (the non-spawned member),
   // matched by 8-char tmux prefix so CLI- and GUI-created groups both attach.
+  // The server leaves spawned peers out of the chat list, so ended groups stay
+  // listed here too: this is the only place their chats appear. Live first.
   const sidecarsForSession = (sid: string) =>
-    sidecars().filter(g => g.kind !== 'room' && g.status === 'active' && g.members.some(m => !m.spawned && m.sessionId.slice(0, 8) === sid.slice(0, 8)))
+    sidecars().filter(g => g.kind !== 'room' && g.members.some(m => !m.spawned && m.sessionId.slice(0, 8) === sid.slice(0, 8)))
+      .sort((a, b) => Number(b.status === 'active') - Number(a.status === 'active') || b.createdAt - a.createdAt)
+  const drivesCurrentPeer = (sid: string) =>
+    sidecarsForSession(sid).some(g => g.members.some(m => m.spawned && m.sessionId === currentId()))
   async function spawnSidecarFor(sid: string) {
     const task = prompt('Task / opening message for the sidecar (optional):') ?? ''
     const agent = (prompt('Agent for the peer (claude / codex):', 'claude') || 'claude').trim()
@@ -2043,6 +2048,7 @@ export default function App() {
                           <Show when={s.agent === 'omp'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2200', color: '#ff7b00', 'flex-shrink': '0', 'font-weight': '600' }}>omp</span></Show>
                           <Show when={s.agent === 'codex'}><span style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#2a1e3a', color: '#c084fc', 'flex-shrink': '0', 'font-weight': '600' }}>codex</span></Show>
                           <Show when={s.mode === 'ralph'}><span title={s.ralph?.blockedReason || s.ralph?.completionReason || s.ralph?.error || `Ralph ${s.ralph?.status || 'waiting'}`} style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#3a2b12', color: '#ffb347', 'flex-shrink': '0', 'font-weight': '700' }}>ralph</span></Show>
+                          <Show when={s.sidecarOf}><span title="Sidecar of another chat" style={{ 'font-size': '9px', padding: '1px 5px', 'border-radius': '3px', background: '#1e2a3a', color: '#6aa6e5', 'flex-shrink': '0', 'font-weight': '600' }}>sidecar</span></Show>
                           <span style={{ 'font-size': '11px', color: '#555', 'flex-shrink': '0' }}>{timeAgo(s.updatedAt)}</span>
                         </div>
                         <Show when={s.projectLabel}>
@@ -2067,19 +2073,26 @@ export default function App() {
                         />
                       </Show>
                       <Show when={sidecarsForSession(s.id).length > 0 || s.id === currentId()}>
-                        <details onClick={e => e.stopPropagation()}>
+                        <details open={drivesCurrentPeer(s.id)} onClick={e => e.stopPropagation()}>
                           <summary style={{ color: 'var(--text-secondary)', 'font-size': '11px', cursor: 'pointer', padding: '6px 0' }}>Sidecars ({sidecarsForSession(s.id).length})</summary>
                         <div style={{ 'margin-top': '6px', 'padding-left': '14px', display: 'flex', 'flex-direction': 'column', gap: '3px' }}>
-                          <For each={sidecarsForSession(s.id)}>{(g) => (
+                          <For each={sidecarsForSession(s.id)}>{(g) => (<>
                             <div onClick={(e) => { e.stopPropagation(); setOpenSidecarId(g.id) }}
-                              style={{ 'font-size': '11px', color: '#9a9ab0', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '5px', '-webkit-tap-highlight-color': 'transparent' }}
+                              title="Open the sidecar conversation"
+                              style={{ 'font-size': '11px', color: g.status === 'active' ? '#9a9ab0' : '#666', cursor: 'pointer', display: 'flex', 'align-items': 'center', gap: '5px', '-webkit-tap-highlight-color': 'transparent' }}
                               onMouseOver={(e) => (e.currentTarget.style.color = '#cccccc')}
-                              onMouseOut={(e) => (e.currentTarget.style.color = '#9a9ab0')}>
-                              <span style={{ color: '#4aba6a' }}>↳</span>
-                              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{g.members.filter(m => m.spawned).map(m => m.role).join(', ')}</span>
-                              <span style={{ color: '#555' }}>{g.members.length}p</span>
+                              onMouseOut={(e) => (e.currentTarget.style.color = g.status === 'active' ? '#9a9ab0' : '#666')}>
+                              <span style={{ color: g.status === 'active' ? '#4aba6a' : '#555' }}>↳</span>
+                              <span style={{ overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', flex: '1' }}>{g.task?.trim() || g.members.filter(m => m.spawned).map(m => m.role).join(', ')}</span>
+                              <span style={{ color: '#555', 'flex-shrink': '0' }}>{g.status === 'active' ? `${g.members.length}p` : 'ended'}</span>
                             </div>
-                          )}</For>
+                            <For each={g.members.filter(m => m.spawned)}>{(m) => (
+                              <div data-testid="sidecar-peer" onClick={(e) => { e.stopPropagation(); select(m.sessionId) }}
+                                style={{ 'font-size': '11px', 'padding-left': '16px', color: m.sessionId === currentId() ? '#4aba6a' : '#8a8a9a', cursor: 'pointer', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap', '-webkit-tap-highlight-color': 'transparent' }}>
+                                {m.role} chat
+                              </div>
+                            )}</For>
+                          </>)}</For>
                           <Show when={s.id === currentId() && !isRemoteBox()}>
                             <div onClick={(e) => { e.stopPropagation(); spawnSidecarFor(s.id) }}
                               style={{ 'font-size': '11px', color: '#555', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../../server.js', import.meta.url), 'utf8');
-const naming = source.slice(source.indexOf('function sessionSystemPrompt('), source.indexOf('function writeSessionSystemPrompt(')).replaceAll('import.meta.dirname', '"/app"');
+const naming = source.slice(source.indexOf('function sessionSystemPrompt('), source.indexOf('function writeSessionSystemPrompt(')).replaceAll('import.meta.dirname', '"/app"').replaceAll('APP_DIR', '"/app"');
 function prompt(chat = {}, roomName = null) {
   const context = vm.createContext({ PORT: 3300, readMeta: () => ({ chat }), roomLeaderNameForSession: () => roomName, roomLeaderPrompt: () => 'Room leader', isRalphSession: () => false });
   vm.runInContext(naming, context);

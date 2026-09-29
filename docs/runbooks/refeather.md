@@ -151,15 +151,19 @@ rerun `refeather recover`; do not remove the active transaction by hand.
 
 ## Release retention
 
-Every stage leaves an immutable release (~200 MB). After each verified promote
-or rollback, refeather prunes old releases automatically. It always keeps:
+Every stage leaves an immutable release (~100 MB; the frontend's build-only
+`node_modules` is removed after the build). After each verified promote or
+rollback, refeather prunes old releases automatically. It keeps:
 
-- the current release and the one it replaced (the rollback target);
-- the `REFEATHER_KEEP_RELEASES` newest (default 10; `0` disables pruning);
-- any release named by a running process's argv or cwd;
-- any release named in a file under `REFEATHER_REFERENCE_DIR` (default
-  `~/.feather/session-system-prompts`) changed in the last 14 days. Session
-  prompts embed release CLI paths, so live agents keep their release.
+- the current release and the one it replaced (the one backup, and the
+  rollback target);
+- the `REFEATHER_KEEP_RELEASES` newest (default 1; `0` disables pruning);
+- any release named by a running process's argv or cwd.
+
+Each pruned release is replaced by a symlink to the current link. Feather hands
+agents paths through the stable current link, but older chat prompts named a
+release directly; those paths now run the current release. Staging a commit
+whose release was pruned removes the symlink and rebuilds it.
 
 A prune failure is reported but never undoes a promotion. To preview or run it
 by hand (it takes the promotion lock):
