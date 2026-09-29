@@ -2317,7 +2317,7 @@ export default function App() {
             <Show when={homeRoute().kind === 'costs'} fallback={
               <Show when={homeRoute().kind === 'scheduler'} fallback={
               <Show when={homeRoute().kind === 'room' ? (homeRoute() as { kind: 'room', name: string }).name : null} fallback={
-                <RoomsHome sessions={sessions()} view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew()} onOpen={select} onSessionsChanged={refreshSessions} />
+                <RoomsHome sessions={sessions()} view={homeRoute().kind === 'wiki' ? 'wiki' : homeRoute().kind === 'updates' ? 'updates' : 'chats'} onNewChat={() => handleNew()} onOpen={select} onSessionsChanged={refreshSessions} sidecarsFor={sidecarsForSession} />
               }>
                 {(name) => <RoomPage name={name()} wikiPage={(homeRoute() as { kind: 'room', name: string, wiki?: string }).wiki} onOpenSession={select} onSessionsChanged={refreshSessions} onBack={() => showHome({ kind: 'rooms' })} />}
               </Show>

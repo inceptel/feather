@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, onMount, onCleanup, Show, For } from 'solid-js'
-import { fetchRooms, fetchSessions, RoomInfo, SessionMeta, SEARCH_RESULT_LIMIT } from './api'
+import { fetchRooms, fetchSessions, RoomInfo, SessionMeta, SidecarGroup, SEARCH_RESULT_LIMIT } from './api'
 import { appUrl } from './lib/appPath.js'
 import { markdownCSS, renderWikiMarkdown } from './components/MessageView'
 import { SuperFeed } from './components/SuperFeed'
@@ -187,6 +187,8 @@ export default function RoomsHome(props: {
   onNewChat?: () => void
   onSessionsChanged?: () => void | Promise<void>
   view?: 'chats' | 'wiki' | 'updates'
+  /** Sidecar groups a chat drives; their peer chats are listed under it. */
+  sidecarsFor?: (sessionId: string) => SidecarGroup[]
 }) {
   const [rooms, setRooms] = createSignal<RoomInfo[]>([])
   const [pins, setPins] = createSignal<ChatPin[]>([])
@@ -321,7 +323,9 @@ export default function RoomsHome(props: {
 
   function ChatRow(row: { session: SessionMeta }) {
     const pinned = () => pins().some(pin => pin.id === row.session.id)
-    return <div class="chat-home-row">
+    const groups = () => props.sidecarsFor?.(row.session.id) || []
+    const peerCount = () => groups().reduce((sum, group) => sum + group.members.filter(member => member.spawned).length, 0)
+    return <div class="chat-home-item"><div class="chat-home-row">
       <button class="chat-home-open" onClick={() => props.onOpen(row.session.id)}>
         <span class="chat-home-title-line">
           <span class="chat-home-title">{row.session.title || 'Untitled chat'}</span>
@@ -336,6 +340,18 @@ export default function RoomsHome(props: {
       </button>
       <button class="chat-home-pin chat-home-action" aria-label={`${pinned() ? 'Unpin' : 'Pin'} ${row.session.title || 'chat'}`} aria-pressed={pinned()} disabled={pendingPins().includes(row.session.id)} onClick={() => void togglePin(row.session)}>{pendingPins().includes(row.session.id) ? '…' : pinned() ? 'Unpin' : 'Pin'}</button>
       <button class="chat-home-control chat-home-action" aria-label={`${archived().includes(row.session.id) ? 'Restore' : 'Archive'} ${row.session.title || 'chat'}`} disabled={pendingPins().includes(row.session.id)} onClick={() => void toggleArchive(row.session)}>{archived().includes(row.session.id) ? 'Restore' : 'Archive'}</button>
+    </div>
+    <Show when={peerCount() > 0}>
+      <details class="chat-home-sidecars" open={groups().some(group => group.status === 'active')}>
+        <summary>{peerCount()} sidecar{peerCount() === 1 ? '' : 's'}</summary>
+        <For each={groups()}>{group => <For each={group.members.filter(member => member.spawned)}>{member =>
+          <button data-testid="home-sidecar-peer" class="chat-home-sidecar" onClick={() => props.onOpen(member.sessionId)}>
+            <span class="chat-home-sidecar-role">↳ {member.role}</span>
+            <span class="chat-home-sidecar-task">{group.task?.trim() || ''}</span>
+            <span class="chat-home-sidecar-state">{group.status === 'active' ? 'live' : 'ended'}</span>
+          </button>}</For>}</For>
+      </details>
+    </Show>
     </div>
   }
 

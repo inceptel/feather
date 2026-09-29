@@ -35,6 +35,15 @@
 .workspace-error { color: var(--error); font-size: 13px; line-height: 1.6; }
 
 .chat-home-row { display: flex; align-items: center; gap: 4px; padding: 0 8px; margin: 0 -8px; border-bottom: 1px solid var(--border-base); border-radius: 6px; }
+.chat-home-item { border-bottom: 1px solid var(--border-base); }
+.chat-home-item > .chat-home-row { border-bottom: 0; }
+.chat-home-sidecars { margin: -4px 0 8px 14px; font-size: 12px; color: var(--workspace-secondary); }
+.chat-home-sidecars summary { cursor: pointer; padding: 2px 0; }
+.chat-home-sidecar { display: flex; gap: 8px; align-items: baseline; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.chat-home-sidecar:hover, .chat-home-sidecar:focus-visible { background: var(--bg-secondary); }
+.chat-home-sidecar-role { flex-shrink: 0; color: var(--text-primary); }
+.chat-home-sidecar-task { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-home-sidecar-state { flex-shrink: 0; }
 .chat-home-row:hover, .chat-home-row:focus-within { background: var(--bg-secondary); }
 .chat-home-open { flex: 1; min-width: 0; display: block; min-height: 64px; padding: 18px 8px 18px 0; background: transparent; border: 0; border-radius: 4px; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
 .chat-home-title-line { display: flex; align-items: center; gap: 10px; }
