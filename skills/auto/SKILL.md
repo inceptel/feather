@@ -1,6 +1,6 @@
 ---
 name: auto
-description: Turn the current Feather chat into ongoing autonomous work, stop it, attach or detach a reviewer, schedule a recurring nudge, or list the running autos. Use when the user says /auto, "keep working on this", "autopilot", "stop working", or asks which autos are running.
+description: Turn the current Feather chat into ongoing autonomous work, stop it, attach or detach a reviewer, attach a dashboard sidecar that trails the chat, schedule a recurring nudge, or list the running autos. Use when the user says /auto, "keep working on this", "autopilot", "stop working", "keep me up to date", "dashboard", or asks which autos are running.
 ---
 
 # /auto — ongoing work for this chat
@@ -13,6 +13,8 @@ Commands, all run from inside the chat they apply to:
 | `/auto stop` | Back to an ordinary chat (same as ⋯ "Stop working") |
 | `/auto review` | Attach one Reviewer to this chat (same as ⋯ "Attach reviewer") |
 | `/auto review off` | Detach the Reviewer (same as ⋯ "Detach reviewer") |
+| `/auto dashboard` | Attach a sidecar that trails this chat and keeps its dashboard current |
+| `/auto dashboard off` | Stop the dashboard sidecar; the dashboard file stays |
 | `/auto every <duration>: <task>` | Inject `<task>` into this chat every `<duration>` while the rule is enabled |
 | `/auto every off` | Delete this chat's recurring rules |
 | `/auto status` | Read-only table of every auto and rule; also at `<Feather>/autos.html` |
@@ -116,6 +118,75 @@ curl -sS -X DELETE "$FEATHER_URL/api/chats/$FEATHER_SESSION_ID/reviewer"
   404 "Chat not found" on a plain session or a reviewer means review is not
   available there.
 
+## `/auto dashboard` and `/auto dashboard off`
+
+A dashboard is where the user checks in on a project: one page showing its
+current state, so they can glance instead of reading the chat. The main chat
+never stops its work to maintain it. A sidecar with role `dashboard` trails
+the main chat and keeps the page current.
+
+**The page.** One file, `dashboard.html`, in this chat's working folder. Feather
+opens it in its file viewer: inline `<style>` works; scripts, forms and external
+CSS or fonts are stripped. Images resolve relative to the file, so renders in
+the project folder show up as they are.
+
+**Attach.** Already attached? Check first, and never start a second one:
+
+```bash
+curl -sS "$FEATHER_URL/api/sidecar" | jq --arg s "$FEATHER_SESSION_ID" \
+  '[.groups[] | select(.status=="active" and any(.members[]; .sessionId==$s)
+     and any(.members[]; .role=="dashboard"))] | .[0].id'
+```
+
+Otherwise write the request to a file and post it (the task is the brief below,
+with the working folder filled in):
+
+```bash
+# sidecar.json: {"driverSessionId":"<FEATHER_SESSION_ID>","peerRole":"dashboard",
+#   "agent":"claude","cwd":"<working folder>","task":"<brief>"}
+curl -sS -X POST -H 'Content-Type: application/json' --data @sidecar.json \
+  "$FEATHER_URL/api/sidecar"        # -> {"group":{"id":…}}
+```
+
+Then give the user one link: [dashboard.html](</absolute/path/dashboard.html>).
+
+**Brief for the sidecar** (send it as `task`):
+
+> You trail the main chat and keep `<folder>/dashboard.html` up to date for the
+> user. You never steer the main chat or do its work, and you never message the
+> user. Each time the main chat pings you, read what changed (its recent
+> messages via the transcript, the files it produced, the room notes) and
+> rewrite the page. Rules:
+> - Show current state, not history: replace sections, never append events.
+> - Every section shows when it was last updated. Hide empty sections. No counts
+>   of blocked or failed items.
+> - At most one "Needs you" item, with a suggested answer.
+> - Pick sections that fit the project: to-do, latest images or renders, result
+>   tables (for example search results), key numbers, links to viewers and files.
+> - Quiet, clean, phone-first design in the style of shadcn/ui: one column on
+>   phones, neutral colours, generous spacing, small muted labels, cards with
+>   thin borders. Inline CSS only, no scripts, no web fonts.
+> - If unsure whether something is true, mark it "unconfirmed" rather than
+>   asking. Ask the main chat only when the page would otherwise be wrong.
+> - Write the file atomically (temp file, then rename). If nothing changed, do
+>   nothing and say nothing.
+
+**Trail.** After each turn of yours that changed the project's state (and with
+every `progress` checkpoint during ongoing work), send one line; do not wait
+for a reply:
+
+```bash
+sidecar post --group <id> --to dashboard "updated: <what changed, one line>"
+```
+
+**Off.** Stop only the dashboard group, never the reviewer pair:
+
+```bash
+curl -sS -X POST "$FEATHER_URL/api/sidecar/<id>/delete"
+```
+
+`dashboard.html` stays where it is.
+
 ## `/auto every <duration>: <task>`
 
 Recurring rules for chats live under the reserved scheduler room `chats`, one
@@ -180,4 +251,4 @@ live table with token usage.
 - Install itself or edit `~/.claude/skills/`, `~/rooms/**`, or `~/feather`.
 - Start any continuation the Feather Stop button cannot see.
 - Retry a 409 with a refreshed generation.
-- Act on another chat's id, or spawn a second reviewer.
+- Act on another chat's id, or spawn a second reviewer or dashboard sidecar.
