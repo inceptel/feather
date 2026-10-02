@@ -134,8 +134,8 @@ the project folder show up as they are.
 
 ```bash
 curl -sS "$FEATHER_URL/api/sidecar" | jq --arg s "$FEATHER_SESSION_ID" \
-  '[.groups[] | select(.status=="active" and any(.members[]; .sessionId==$s)
-     and any(.members[]; .role=="dashboard"))] | .[0].id'
+  '[.groups[] | select(.status=="active" and any(.members[]?; .sessionId==$s)
+     and any(.members[]?; .role=="dashboard"))] | .[0].id'
 ```
 
 Otherwise write the request to a file and post it (the task is the brief below,
