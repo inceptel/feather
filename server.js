@@ -26,6 +26,7 @@ import { createProjectCommsRuntime, projectCommsFeed, projectCommsComment } from
 import { installProjectInboxRoutes, projectInboxUpdates } from './lib/project-inbox-api.js';
 import { projectInboxWakeIds } from './lib/project-inbox-wakes.js';
 import { createProjectRenamer, managedChatProject } from './lib/chat-projects.js';
+import { createChatLinks, installChatLinkRoutes, hasFrontPage } from './lib/chat-links.js';
 import { createKeyedLock } from './lib/sendlock.js';
 import { createSessionSearch } from './lib/session-search.js';
 import { createWikiSearch } from './lib/wiki-search.js';
@@ -994,6 +995,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
         share: Array.isArray(meta[id]?.share) && meta[id].share.length ? meta[id].share : undefined,
         ...(meta[id]?.chatRole ? { chatRole: meta[id].chatRole, chatPair: meta[id].chatPair ?? null } : {}),
         ...(peerDrivers.has(id) ? { sidecarOf: peerDrivers.get(id) } : {}),
+        ...(hasFrontPage(meta[id]) ? { frontPage: true } : {}),
         ...(backgroundSession ? { isWorker: true } : {}),
         ...(meta[id]?.chatStartup ? { chatStartup: meta[id].chatStartup } : {}),
         ...(meta[id]?.chatRole === 'creator' || meta[id]?.workflow ? { workflow: publicChatWorkflow(meta[id].workflow) } : {}),
@@ -1013,7 +1015,7 @@ function discoverSessions(limit = 50, query = null, requiredIds = [], { candidat
     if (queryLc && !`${entry.title || ''} ${id}`.toLowerCase().includes(queryLc)) continue;
     sessions.push({ id, title: entry.title || 'New chat', agent: entry.agent,
       updatedAt: entry.chatCreatedAt || new Date(0).toISOString(), isActive: tmuxIsActive(id),
-      chatRole: entry.chatRole, chatPair: entry.chatPair, chatStartup: entry.chatStartup,
+      chatRole: entry.chatRole, chatPair: entry.chatPair, chatStartup: entry.chatStartup, ...(hasFrontPage(entry) ? { frontPage: true } : {}),
       workflow: publicChatWorkflow(entry.workflow), ...publicAutoHistory(entry), ...(entry.mode === RALPH_MODE ? { mode: RALPH_MODE, ralph: publicRalphState(entry) } : {}) });
   }
   // Re-sort by real activity. Candidates were ordered by file mtime, which is
@@ -1322,12 +1324,18 @@ function sessionSystemPrompt(id) {
     if (!rolePrompt.includes(CHAT_PAIR_PUBLICATION_PROMPT)) parts.push(CHAT_PAIR_PUBLICATION_PROMPT);
     if (chat.chatRole === 'creator') parts.push(chatWorkflowInstructions(id));
   }
-  parts.push(FILE_LINK_PROMPT);
+  parts.push(FILE_LINK_PROMPT, chatLinksPrompt(id));
   return parts.join('\n\n');
 }
 // Feather opens Markdown links to local files in its file viewer, but bare
 // filenames ("FINDINGS.md") have no path to open. Ask for linked full paths.
 const FILE_LINK_PROMPT = 'File references in replies: whenever you mention a file or folder the user may want to open, write it as a Markdown link whose label is the short name and whose target is the full absolute path, for example [report.md](/home/user/project/report.md) or [parts/](/home/user/project/parts/). If the path contains spaces, wrap the target in angle brackets: [notes.md](</home/user/My Project/notes.md>). Never leave a bare or relative filename, and do not wrap the link in backticks. Feather renders these as tappable links to its file viewer.';
+
+// The Links tab lists what a chat made that the user will open again; its
+// optional front page is the status page the user glances at.
+function chatLinksPrompt(id) {
+  return `Chat links: register files or viewers the user will want to open again as links in this chat's Links tab, and if the chat has a standing status, keep one front page there (an HTML or Markdown file you keep current; HTML renders with inline styles only, no scripts). POST JSON to http://127.0.0.1:${PORT}/api/internal/sessions/${id}/links with headers Content-Type: application/json and X-Feather-Bridge-Token: $FEATHER_BRIDGE_TOKEN; bodies: {"action":"add","label":"Short name","target":"/absolute/path or https://…"} (adds or updates by target; add "front":true to make a file the front page), {"action":"remove","target":"…"}, {"action":"clear-front"}, {"action":"read"}. Only this chat's own links.`;
+}
 
 function chatInboxCliPrompt() {
   return `Project inbox CLI: node ${JSON.stringify(path.join(APP_DIR, 'bin/feather-inbox.mjs'))}. The CLI uses this session's authenticated identity. Run read to recover the current standing assignment, tasks and review records.`;
@@ -3520,6 +3528,21 @@ app.post('/api/chats/:id/project/rename', (req, res) => {
   try { res.json(PROJECT_RENAMER.rename(req.params.id, req.body?.name)); }
   catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
+
+// The live sidecar group in which `sessionId` is a spawned peer names the chat
+// that drives it; only that driver's front page is open to the peer.
+function sidecarDriverOf(sessionId) {
+  for (const group of sidecar.listGroups()) {
+    if (group.kind === 'room' || group.status !== 'active') continue;
+    if (!group.members?.some(member => member.spawned && member.sessionId === sessionId)) continue;
+    const driver = group.members.find(member => !member.spawned)?.sessionId;
+    if (driver && driver !== sessionId) return driver;
+  }
+  return null;
+}
+const CHAT_LINKS = createChatLinks({ readMeta, updateMeta, home: HOME, sidecarDriverOf });
+installChatLinkRoutes(app, { links: CHAT_LINKS, tokenValid: bridgeTokenValid,
+  changed: () => roomSnapshotCache.invalidate() });
 
 installProjectInboxRoutes(app, { store: PROJECT_INBOX, readMeta, tokenValid: bridgeTokenValid,
   changed: (projectId, event) => { wakeProjectInbox(projectId, event); void projectCommsRuntime.tick(); } });

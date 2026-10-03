@@ -6,6 +6,51 @@ import { localFileUrl } from '../lib/localMedia.js'
 import { linkTarget, addHeadingIds } from '../lib/linkTarget.js'
 import './FilePreview.css'
 
+const PREVIEW_LIMIT = 2 * 1024 * 1024
+
+export function fileKind(path: string) {
+  const ext = path.split('.').pop()?.toLowerCase() || ''
+  return /^(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(ext) ? 'image' : ext === 'pdf' ? 'pdf' : /^(md|markdown)$/.test(ext) ? 'md' : /^(html?|xhtml)$/.test(ext) ? 'html' : /^(mp4|webm|mov)$/.test(ext) ? 'video' : /^(mp3|wav|ogg|m4a)$/.test(ext) ? 'audio' : 'text'
+}
+
+// Read a text file through /api/file with the viewer's size and binary guards.
+export async function loadFileText(url: string, signal: AbortSignal, init: RequestInit = {}) {
+  const response = await fetch(url, { ...init, signal })
+  if (!response.ok) throw new Error(`Could not open this file (${response.status}).`)
+  if (Number(response.headers.get('content-length')) > PREVIEW_LIMIT) throw new Error('This file is too large to preview. Download it instead.')
+  const reader = response.body!.getReader(); const chunks: Uint8Array[] = []; let size = 0
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break
+    size += value.length
+    if (size > PREVIEW_LIMIT) { await reader.cancel(); throw new Error('This file is too large to preview. Download it instead.') }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(size); let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
+  const text = new TextDecoder().decode(bytes)
+  if (text.includes('\0')) throw new Error('This binary file cannot be previewed. Download it instead.')
+  return text
+}
+
+// The locked-down preview: Markdown through the chat pipeline; HTML sanitized,
+// scripts and forms stripped, and wrapped in a CSP that allows inline styles
+// and same-origin images only. Shown in an iframe with an empty sandbox.
+export function previewDocument(kind: string, content: string, baseDir: string) {
+  if (!['md', 'html'].includes(kind)) return ''
+  const html = kind === 'md' ? renderMarkdown(content) : DOMPurify.sanitize(content, { WHOLE_DOCUMENT: true, ADD_TAGS: ['style'], FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'base', 'link', 'meta'] })
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  addHeadingIds(doc)
+  for (const img of doc.querySelectorAll('img')) {
+    const target = linkTarget(img.getAttribute('src'), baseDir)
+    img.removeAttribute('srcset')
+    if (target.kind === 'file') img.src = localFileUrl(target.path)!
+    else img.removeAttribute('src')
+  }
+  if (kind === 'md') return doc.body.innerHTML
+  const policy = `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src ${location.origin} data:; base-uri 'none'; form-action 'none'`
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}">${doc.head.innerHTML}</head><body>${doc.body.innerHTML}</body></html>`
+}
+
 export function FilePreview(props: { path: string, line?: number, onClose: () => void, onOpen: (path: string) => void }) {
   const [content, setContent] = createSignal('')
   const [state, setState] = createSignal<'loading' | 'ready' | 'error'>('loading')
@@ -16,7 +61,7 @@ export function FilePreview(props: { path: string, line?: number, onClose: () =>
   let dialog!: HTMLDivElement
   const previousFocus = document.activeElement as HTMLElement | null
   const ext = () => props.path.split('.').pop()?.toLowerCase() || ''
-  const kind = () => /^(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(ext()) ? 'image' : ext() === 'pdf' ? 'pdf' : /^(md|markdown)$/.test(ext()) ? 'md' : /^(html?|xhtml)$/.test(ext()) ? 'html' : /^(mp4|webm|mov)$/.test(ext()) ? 'video' : /^(mp3|wav|ogg|m4a)$/.test(ext()) ? 'audio' : 'text'
+  const kind = () => fileKind(props.path)
   const url = () => localFileUrl(props.path)!
   const baseDir = () => props.path.slice(0, props.path.lastIndexOf('/'))
   const textKind = () => ['text', 'md', 'html'].includes(kind())
@@ -27,20 +72,7 @@ export function FilePreview(props: { path: string, line?: number, onClose: () =>
     if (!textKind()) setState('ready')
     else void (async () => {
       try {
-        const response = await fetch(url(), { signal: controller.signal })
-        if (!response.ok) throw new Error(`Could not open this file (${response.status}).`)
-        if (Number(response.headers.get('content-length')) > 2 * 1024 * 1024) throw new Error('This file is too large to preview. Download it instead.')
-        const reader = response.body!.getReader(); const chunks: Uint8Array[] = []; let size = 0
-        while (true) {
-          const { value, done } = await reader.read(); if (done) break
-          size += value.length
-          if (size > 2 * 1024 * 1024) { await reader.cancel(); throw new Error('This file is too large to preview. Download it instead.') }
-          chunks.push(value)
-        }
-        const bytes = new Uint8Array(size); let offset = 0
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
-        const text = new TextDecoder().decode(bytes)
-        if (text.includes('\0')) throw new Error('This binary file cannot be previewed. Download it instead.')
+        const text = await loadFileText(url(), controller.signal)
         if (!controller.signal.aborted) { setContent(text); setState('ready') }
       } catch (e) { if (!controller.signal.aborted) { setError(e instanceof Error ? e.message : String(e)); setState('error') } }
     })()
@@ -55,21 +87,7 @@ export function FilePreview(props: { path: string, line?: number, onClose: () =>
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
   }
-  const preview = createMemo(() => {
-    if (!['md', 'html'].includes(kind())) return ''
-    const html = kind() === 'md' ? renderMarkdown(content()) : DOMPurify.sanitize(content(), { WHOLE_DOCUMENT: true, ADD_TAGS: ['style'], FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'base', 'link', 'meta'] })
-    const doc = new DOMParser().parseFromString(html, 'text/html')
-    addHeadingIds(doc)
-    for (const img of doc.querySelectorAll('img')) {
-      const target = linkTarget(img.getAttribute('src'), baseDir())
-      img.removeAttribute('srcset')
-      if (target.kind === 'file') img.src = localFileUrl(target.path)!
-      else img.removeAttribute('src')
-    }
-    if (kind() === 'md') return doc.body.innerHTML
-    const policy = `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src ${location.origin} data:; base-uri 'none'; form-action 'none'`
-    return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}">${doc.head.innerHTML}</head><body>${doc.body.innerHTML}</body></html>`
-  })
+  const preview = createMemo(() => previewDocument(kind(), content(), baseDir()))
   const code = createMemo(() => {
     const language = ({ ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', py: 'python', sh: 'bash' } as Record<string, string>)[ext()] || ext()
     return content().length < 200000 && hljs.getLanguage(language) ? hljs.highlight(content(), { language }).value : content().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

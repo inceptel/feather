@@ -49,6 +49,7 @@
 .chat-home-title-line { display: flex; align-items: center; gap: 10px; }
 .chat-home-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; line-height: 1.5; font-weight: 500; }
 .chat-home-working { width: 6px; height: 6px; background: var(--success); border-radius: 50%; flex-shrink: 0; }
+.chat-home-front { flex-shrink: 0; padding: 1px 6px; border: 1px solid var(--border-medium); border-radius: 999px; color: var(--workspace-secondary); font-size: 10px; font-weight: 600; letter-spacing: .04em; line-height: 1.5; text-transform: uppercase; }
 .chat-home-time { margin-left: auto; flex-shrink: 0; color: var(--workspace-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chat-home-project { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.5; }
 .chat-home-snippet { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: var(--workspace-secondary); font-size: 12px; line-height: 1.5; }

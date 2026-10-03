@@ -9,6 +9,7 @@ import { RoomPage } from './components/RoomPage'
 import { CostsView } from './components/CostsView'
 import { SchedulerView } from './components/SchedulerView'
 import { FilePreview } from './components/FilePreview'
+import { ChatLinks } from './components/ChatLinks'
 import { linkTarget } from './lib/linkTarget.js'
 const Terminal = lazy(() => import('./components/Terminal').then(m => ({ default: m.Terminal })))
 import type { BtwItem, SessionMeta, Message, MessageSubscription, ContentBlock, AgentInfo, FileListing, SidecarGroup, OmpBridgeEvent, OmpAsyncJob, OmpMirrorState, OmpTodoSnapshot, ProtocolRunSnapshot, BoxInfo, PeerInfo, RoomSessionContext } from './api'
@@ -214,7 +215,7 @@ export default function App() {
     } catch { /* Drafting remains available when browser storage is full. */ }
   })
   const [text, setText] = createSignal('')
-  const [tab, setTab] = createSignal<'chat' | 'terminal'>('chat')
+  const [tab, setTab] = createSignal<'chat' | 'terminal' | 'links'>('chat')
   // Home sub-view when no session is open: the Rooms home, the Costs tab,
   // or a Room page. Kept in the hash so reloads and back buttons work.
   const [homeRoute, setHomeRoute] = createSignal<{ kind: 'rooms' | 'wiki' | 'updates' } | { kind: 'costs' } | { kind: 'scheduler' } | { kind: 'room', name: string, wiki?: string }>({ kind: 'rooms' })
@@ -2302,6 +2303,7 @@ export default function App() {
             <button onClick={() => setTab('chat')} style={tabStyle('chat')}>Chat</button>
             <Show when={!isRemoteBox()}>
               <button onClick={() => setTab('terminal')} style={tabStyle('terminal')}>Terminal</button>
+              <button onClick={() => setTab('links')} style={tabStyle('links')}>Links</button>
             </Show>
           </nav>
         </Show>
@@ -2362,6 +2364,11 @@ export default function App() {
                 </Suspense>
               </Show>
             </div>
+            <Show when={!isRemoteBox()}>
+              <div style={{ display: tab() === 'links' ? 'block' : 'none', height: '100%' }}>
+                <ChatLinks sessionId={currentId()!} active={tab() === 'links'} onOpenFile={openFile} />
+              </div>
+            </Show>
           </Show>
         </div>
 

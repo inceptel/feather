@@ -330,6 +330,7 @@ export default function RoomsHome(props: {
         <span class="chat-home-title-line">
           <span class="chat-home-title">{row.session.title || 'Untitled chat'}</span>
           <Show when={row.session.isActive}><span class="chat-home-working" aria-label="Working" title="Working" /></Show>
+          <Show when={row.session.frontPage}><span class="chat-home-front" data-testid="chat-home-front" title="This chat has a front page in its Links tab">Front page</span></Show>
           <span class="chat-home-time">{timeAgo(row.session.updatedAt)}</span>
         </span>
         <Show when={row.session.projectLabel}><span class="chat-home-project">{row.session.projectLabel}</span></Show>

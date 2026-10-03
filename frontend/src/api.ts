@@ -37,6 +37,8 @@ export interface SessionMeta {
   isWorker?: boolean
   /** Set in search results: the session that drives this spawned sidecar peer. */
   sidecarOf?: string
+  /** True when the chat's Links tab has a front page. */
+  frontPage?: boolean
   chatRole?: 'creator' | 'reviewer'
   chatPair?: { groupId: string; creatorSessionId: string; reviewerSessionId: string } | null
   reviewPolicy?: 'none' | 'adaptive' | 'always'
@@ -720,6 +722,23 @@ export async function forkSession(id: string, options: { title: string, workspac
   })
   return responseJson(response)
 }
+
+// ── Chat links: per-chat Links tab and its front page ──────────────────────
+
+export interface ChatLink { label: string; target: string; kind: 'file' | 'web'; front?: boolean; mtimeMs?: number; missing?: boolean }
+
+export async function fetchChatLinks(id: string, signal?: AbortSignal): Promise<ChatLink[]> {
+  return (await responseJson<{ links: ChatLink[] }>(await fetch(`${BASE}/api/chats/${id}/links`, { signal }))).links
+}
+
+async function postChatLinks(id: string, action: 'remove' | 'order', body: object): Promise<ChatLink[]> {
+  const response = await fetch(`${BASE}/api/chats/${id}/links/${action}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  return (await responseJson<{ links: ChatLink[] }>(response)).links
+}
+export const removeChatLink = (id: string, target: string) => postChatLinks(id, 'remove', { target })
+export const reorderChatLinks = (id: string, targets: string[]) => postChatLinks(id, 'order', { targets })
 
 export const fetchStarred = (): Promise<Record<string, string[]>> =>
   fetch(`${BASE}/api/starred`).then(r => r.json())

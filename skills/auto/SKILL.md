@@ -14,7 +14,7 @@ Commands, all run from inside the chat they apply to:
 | `/auto review` | Attach one Reviewer to this chat (same as ⋯ "Attach reviewer") |
 | `/auto review off` | Detach the Reviewer (same as ⋯ "Detach reviewer") |
 | `/auto dashboard` | Attach a sidecar that trails this chat and keeps its dashboard current |
-| `/auto dashboard off` | Stop the dashboard sidecar; the dashboard file stays |
+| `/auto dashboard off` | Stop the dashboard sidecar; the page stays as this chat's front page |
 | `/auto every <duration>: <task>` | Inject `<task>` into this chat every `<duration>` while the rule is enabled |
 | `/auto every off` | Delete this chat's recurring rules |
 | `/auto status` | Read-only table of every auto and rule; also at `<Feather>/autos.html` |
@@ -29,7 +29,7 @@ Feather sets these on every session it launches:
 
 - `FEATHER_SESSION_ID` — this chat's id
 - `FEATHER_URL` — the loopback origin of this Feather instance (`http://127.0.0.1:<port>`)
-- `FEATHER_BRIDGE_URL`, `FEATHER_BRIDGE_TOKEN` — used by the workflow CLI
+- `FEATHER_BRIDGE_URL`, `FEATHER_BRIDGE_TOKEN` — used by the workflow CLI and the chat links route
 - the workflow CLI path is given in the system prompt as `bin/feather-workflow.mjs`; call it `$WF` below
 
 If `FEATHER_SESSION_ID` or `FEATHER_URL` is missing, say **"/auto is not
@@ -125,10 +125,13 @@ current state, so they can glance instead of reading the chat. The main chat
 never stops its work to maintain it. A sidecar with role `dashboard` trails
 the main chat and keeps the page current.
 
-**The page.** One file, `dashboard.html`, in this chat's working folder. Feather
-opens it in its file viewer: inline `<style>` works; scripts, forms and external
-CSS or fonts are stripped. Images resolve relative to the file, so renders in
-the project folder show up as they are.
+**The page.** One HTML file. The sidecar writes it wherever it likes and
+registers it as this chat's **front page**, so it shows inline at the top of
+the chat's Links tab and the Chats page marks the chat. Feather renders it with
+the file viewer's locked-down preview: inline `<style>` works; scripts, forms
+and external CSS or fonts are stripped. Images resolve relative to the file, so
+renders in the project folder show up as they are. The tab refreshes when the
+file changes.
 
 **Attach.** Already attached? Check first, and never start a second one:
 
@@ -140,7 +143,7 @@ curl -sS "$FEATHER_URL/api/sidecar" | jq --arg s "$FEATHER_SESSION_ID" \
 ```
 
 Otherwise write the request to a file and post it (the task is the brief below,
-with the working folder filled in):
+with the working folder and this chat's id filled in):
 
 ```bash
 # sidecar.json: {"driverSessionId":"<FEATHER_SESSION_ID>","peerRole":"dashboard",
@@ -149,12 +152,16 @@ curl -sS -X POST -H 'Content-Type: application/json' --data @sidecar.json \
   "$FEATHER_URL/api/sidecar"        # -> {"group":{"id":…}}
 ```
 
-Then give the user one link: [dashboard.html](</absolute/path/dashboard.html>).
+Then tell the user the dashboard will appear in this chat's Links tab.
 
 **Brief for the sidecar** (send it as `task`):
 
-> You trail the main chat and keep `<folder>/dashboard.html` up to date for the
-> user. You never steer the main chat or do its work, and you never message the
+> You trail the main chat (id `<driver id>`) and keep one dashboard page up to
+> date for the user. Write it as an HTML file wherever suits the project (for
+> example `<folder>/dashboard.html`). Once it exists, register it as the main
+> chat's front page, and again if you move it:
+> `curl -sS -X POST -H 'Content-Type: application/json' -H "X-Feather-Bridge-Token: $FEATHER_BRIDGE_TOKEN" --data '{"action":"add","chat":"<driver id>","label":"Dashboard","target":"<absolute path>","front":true}' "$FEATHER_URL/api/internal/sessions/$FEATHER_SESSION_ID/links"`
+> That is the only change you may make to the main chat's links. You never steer the main chat or do its work, and you never message the
 > user. Each time the main chat pings you, read what changed (its recent
 > messages via the transcript, the files it produced, the room notes) and
 > rewrite the page. Rules:
@@ -186,7 +193,8 @@ sidecar post --group <id> --to dashboard "updated: <what changed, one line>"
 curl -sS -X POST "$FEATHER_URL/api/sidecar/<id>/delete"
 ```
 
-`dashboard.html` stays where it is.
+The page file and the front page stay. The user can remove the link in the
+Links tab.
 
 ## `/auto every <duration>: <task>`
 
