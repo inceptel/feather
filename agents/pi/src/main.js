@@ -98,7 +98,14 @@ transcript.append(stream.snapshot.entries);
 bridge.post([sessionStateEvent(currentRef)]);
 
 let streamingText = false;
-stream.start(async events => {
+// Batches are handled strictly in order: a batch that waits for the bridge
+// must not let a later batch write its transcript lines first.
+let streamQueue = Promise.resolve();
+stream.start(events => {
+  streamQueue = streamQueue.then(() => handleEvents(events)).catch(error => note(`pi: event handling failed: ${error.message}`));
+});
+
+async function handleEvents(events) {
   const entries = [];
   for (const event of events) {
     if (event.type === 'entry_appended' || event.type === 'message_end' || event.type === 'tool_execution_end') {
@@ -106,12 +113,14 @@ stream.start(async events => {
     }
     if (event.type === 'snapshot') entries.push(...event.entries);
   }
-  // Write the transcript before live events, so a refresh never shows a live
-  // message that the file does not have yet.
-  try { transcript.append(entries); } catch (error) { note(`pi: transcript write failed: ${error.message}`); }
+  // Live events go first, as OMP does. The chat view drops the live bubble
+  // when the transcript message arrives; a final snapshot that arrives after
+  // that message would show the answer twice.
   mapper.handleBatch(events);
+  if (events.some(event => event.type === 'message_end')) await bridge.drained();
+  try { transcript.append(entries); } catch (error) { note(`pi: transcript write failed: ${error.message}`); }
   for (const event of events) render(event);
-});
+}
 
 function render(event) {
   switch (event.type) {

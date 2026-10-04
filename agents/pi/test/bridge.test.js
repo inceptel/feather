@@ -69,3 +69,22 @@ test('client without a token sends nothing', async () => {
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(called, false);
 });
+
+test('drained waits for in-flight delivery, and gives up after its timeout', async () => {
+  let release;
+  const fetchImpl = () => new Promise(resolve => { release = () => resolve({ ok: true }); });
+  const client = createBridgeClient({ url: 'http://x/events', token: 't', fetchImpl });
+  await client.drained();
+  client.post([{ type: 'agent_start' }]);
+  let done = false;
+  const waiting = client.drained(5_000).then(() => { done = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(done, false);
+  release();
+  await waiting;
+  assert.equal(done, true);
+  client.post([{ type: 'agent_end' }]);
+  const started = Date.now();
+  await client.drained(30);
+  assert.ok(Date.now() - started < 1_000);
+});

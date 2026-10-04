@@ -183,6 +183,7 @@ export function createBridgeClient({ url, token, fetchImpl = globalThis.fetch, o
   const queue = [];
   let delivering = false;
   let closed = false;
+  let waiters = [];
 
   async function deliver() {
     if (!url || !token || delivering) return;
@@ -213,6 +214,9 @@ export function createBridgeClient({ url, token, fetchImpl = globalThis.fetch, o
       }
     } finally {
       delivering = false;
+      const done = waiters;
+      waiters = [];
+      for (const resolve of done) resolve();
     }
   }
 
@@ -222,6 +226,14 @@ export function createBridgeClient({ url, token, fetchImpl = globalThis.fetch, o
       queue.push(...events);
       if (queue.length > 500) queue.splice(0, queue.length - 500);
       void deliver();
+    },
+    /** Resolves when queued events are delivered, or after `ms`. */
+    drained(ms = 1_000) {
+      if (!delivering && !queue.length) return Promise.resolve();
+      return new Promise(resolve => {
+        const timer = setTimeout(resolve, ms);
+        waiters.push(() => { clearTimeout(timer); resolve(); });
+      });
     },
     close() { closed = true; },
     get pending() { return queue.length; },
