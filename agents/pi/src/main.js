@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, Harness, LiveDoc, watchEvents } from '@earendil-works/pi-durable';
+import { createRegistry, defineExtension, Harness, LiveDoc, watchEvents } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
@@ -23,6 +23,8 @@ import { createTranscript } from './transcript.js';
 import { createBridgeClient, createEventMapper, sessionStateEvent } from './bridge.js';
 import { acquireSessionLock } from './lock.js';
 import { compactorModelRef, memoryEnabled, modelCompleter, openMemory } from './optchat/memory.js';
+import { codemodeEnabled, createCodemodeExtension } from './codemode.js';
+import { createFeatherTools, createWebFetchTool, featherBridge } from './tools.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -70,6 +72,7 @@ const keyvault = process.env.FEATHER_PI_KEYVAULT || path.join(os.homedir(), 'key
 const openrouterKey = process.env.OPENROUTER_API_KEY || readKeyvaultKey(keyvault, 'OPENROUTER_API_KEY');
 delete process.env.OPENROUTER_API_KEY;
 const memoryOn = memoryEnabled();
+const codemodeOn = codemodeEnabled();
 const { models, ensure } = createAgentModels({ secrets: openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}, viewMarks: memoryOn });
 
 const initialRef = parseModelRef(args.model)?.ref || defaultModelRef();
@@ -85,12 +88,20 @@ if (memoryOn) {
     compactorRef = initialRef;
     compactor = ensure(initialRef);
   }
-  memory = openMemory({ sessionDir, complete: modelCompleter(models, compactor), modelName: compactorRef, report: note });
+  memory = openMemory({ sessionDir, complete: modelCompleter(models, compactor), modelName: compactorRef, report: note, offerTools: !codemodeOn });
 }
 
+// Code mode (default): the model gets one `codemode` tool and calls the
+// others from a sandboxed script. FEATHER_PI_CODEMODE=off offers them directly.
+const extraTools = [createWebFetchTool(), ...createFeatherTools(featherBridge())];
 const registry = createRegistry();
 if (memory) registry.install(memory.extension);
-registry.install(CodingTools);
+if (codemodeOn) {
+  registry.install(createCodemodeExtension([...CodingTools.tools, ...extraTools, ...(memory ? memory.tools : [])]));
+} else {
+  registry.install(CodingTools);
+  registry.install(defineExtension({ name: 'feather-tools', tools: extraTools }));
+}
 
 const storage = await openNodeSqliteStorage(path.join(sessionDir, 'state.sqlite'));
 const harness = await Harness.open(storage, {
@@ -274,7 +285,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => parser.feed(chunk));
 process.stdin.on('end', () => void shutdown(0));
 out('\x1b[?2004h');
-note(`pi agent · ${currentRef} · ${cwd}${memory ? ` · memory ${memory.store.messages.length} messages` : ''}`);
+note(`pi agent · ${currentRef} · ${cwd}${memory ? ` · memory ${memory.store.messages.length} messages` : ''} · ${codemodeOn ? 'code mode' : 'plain tools'}`);
 out('pi> ');
 
 // Continue any run a killed process left behind.

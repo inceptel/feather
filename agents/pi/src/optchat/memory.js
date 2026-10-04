@@ -34,7 +34,7 @@ export function modelCompleter(models, ref) {
  * Open the memory in `sessionDir`. `complete` runs compactor calls and
  * `modelName` names the compactor in tree rows.
  */
-export function openMemory({ sessionDir, complete, modelName, report = () => {}, budget, settleMs }) {
+export function openMemory({ sessionDir, complete, modelName, report = () => {}, budget, settleMs, offerTools = true }) {
   fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
   const store = openStore(sessionDir, { report });
   const view = createView(store, budget ? { budget } : {});
@@ -85,6 +85,7 @@ export function openMemory({ sessionDir, complete, modelName, report = () => {},
     },
     stop() { compactor.stop(); },
   };
-  memory.extension = createOptChatExtension(memory, settleMs ? { settleMs } : {});
+  memory.extension = createOptChatExtension(memory, { ...(settleMs ? { settleMs } : {}), offerTools });
+  memory.tools = memory.extension.memoryTools;
   return memory;
 }

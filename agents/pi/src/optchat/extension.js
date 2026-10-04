@@ -118,9 +118,11 @@ const runKey = message => `${message.timestamp}:${textOf(message.content).length
 
 /**
  * The extension. `memory` = {store, view, sessionDir, log, note}: `log()`
- * brings the OptChat log up to date; `note(text)` tells the pane.
+ * brings the OptChat log up to date; `note(text)` tells the pane. The zoom and
+ * date tools are on `extension.memoryTools`; with `offerTools: false` the
+ * extension does not offer them itself (code mode calls them instead).
  */
-export function createOptChatExtension(memory, { settleMs = SETTLE_MS } = {}) {
+export function createOptChatExtension(memory, { settleMs = SETTLE_MS, offerTools = true } = {}) {
   const { store, view, sessionDir } = memory;
   const turnFile = path.join(sessionDir, TURN_FILE);
   const turnsLog = path.join(sessionDir, TURNS_LOG);
@@ -196,9 +198,9 @@ export function createOptChatExtension(memory, { settleMs = SETTLE_MS } = {}) {
     },
   });
 
-  return defineExtension({
+  const extension = defineExtension({
     name: 'optchat',
-    tools: [zoom, date],
+    tools: offerTools ? [zoom, date] : [],
     sections: [section('optchat', () => `${MASTER}\n\n${VIEW_DOC}`, { tag: false })],
     hooks: [hook(GenerationTask, {
       async beforeRequest({ messages }) {
@@ -214,4 +216,5 @@ export function createOptChatExtension(memory, { settleMs = SETTLE_MS } = {}) {
       },
     })],
   });
+  return Object.assign(extension, { memoryTools: [zoom, date] });
 }
