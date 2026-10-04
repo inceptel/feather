@@ -90,7 +90,13 @@ export async function runLauncher({ sessionDir, shippedPiDir, args, env = proces
     }
     try { fs.rmSync(readyPath(sessionDir), { force: true }); } catch {}
     const started = Date.now();
-    const code = await runChild(main, args, { ...env, FEATHER_PI_CODE_SHA: sha || shipped || '' }, sessionDir, readyTimeoutMs, log);
+    // A candidate that reports ready becomes the good code at once, so status
+    // is true while it runs and a later relaunch falls back to it.
+    const promote = () => {
+      const now = readState(sessionDir);
+      if (sha && now.candidate === sha) writeState(sessionDir, { ...now, good: sha, candidate: null });
+    };
+    const code = await runChild(main, args, { ...env, FEATHER_PI_CODE_SHA: sha || shipped || '' }, sessionDir, readyTimeoutMs, log, promote);
     const ready = readReady(sessionDir);
     const wasReady = !!ready && (ready.sha || null) === (sha || shipped || null) && Date.parse(ready.at) >= started - 1000;
     state = readState(sessionDir);
@@ -98,11 +104,7 @@ export async function runLauncher({ sessionDir, shippedPiDir, args, env = proces
       rollback(sessionDir, state, sha, code === 'timeout' ? `it did not report ready in ${Math.round(readyTimeoutMs / 1000)} s` : `it exited (${code}) before it was ready`, log);
       continue;
     }
-    if (sha && sha === state.candidate) {
-      // A clean start: the candidate becomes the good code.
-      writeState(sessionDir, { ...state, good: sha, candidate: null });
-      state = readState(sessionDir);
-    }
+    if (sha && sha === state.candidate) promote();
     if (code === RELAUNCH_EXIT_CODE) continue;
     return typeof code === 'number' ? code : 1;
   }
@@ -122,14 +124,18 @@ function rollback(sessionDir, state, sha, reason, log) {
 }
 
 // Runs one main.js; resolves its exit code, or 'timeout' when it never got ready.
-function runChild(main, args, env, sessionDir, readyTimeoutMs, log) {
+function runChild(main, args, env, sessionDir, readyTimeoutMs, log, onReady) {
   return new Promise(resolve => {
     const child = spawnProcess(process.execPath, ['--no-warnings', main, ...args], { stdio: 'inherit', env });
     let timedOut = false;
     const started = Date.now();
     const watch = setInterval(() => {
       const ready = readReady(sessionDir);
-      if (ready && Date.parse(ready.at) >= started - 1000) { clearInterval(watch); return; }
+      if (ready && (ready.sha || null) === (env.FEATHER_PI_CODE_SHA || null) && Date.parse(ready.at) >= started - 1000) {
+        clearInterval(watch);
+        onReady();
+        return;
+      }
       if (Date.now() - started > readyTimeoutMs) {
         clearInterval(watch);
         timedOut = true;

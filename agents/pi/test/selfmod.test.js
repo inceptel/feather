@@ -72,6 +72,21 @@ test('launcher relaunches on request and keeps a candidate that starts', async (
   assert.deepEqual(f.runs(), ['a', 'b', 'b']);
 });
 
+test('a candidate becomes the good code as soon as it reports ready', async () => {
+  const f = fixture([{ ready: true, state: asks(NEW), exit: RELAUNCH_EXIT_CODE }, { ready: true, exit: 0, wait: 2000 }]);
+  const done = f.launch();
+  let seen = null;
+  for (let k = 0; k < 60 && !seen; k++) {
+    await new Promise(r => setTimeout(r, 25));
+    const state = readState(f.sessionDir);
+    if (state.good === NEW) seen = state;
+  }
+  assert.equal(await done, 0);
+  assert.ok(seen, 'good was set while the candidate ran');
+  assert.equal(seen.candidate, null);
+  assert.ok(f.runs().length === 2);
+});
+
 test('launcher rolls back a candidate that exits before it is ready', async () => {
   const f = fixture([{ ready: true, state: asks(NEW), exit: RELAUNCH_EXIT_CODE }, { ready: false, exit: 1 }, { ready: true, exit: 0 }]);
   assert.equal(await f.launch(), 0);
