@@ -8,6 +8,7 @@ import { bytes } from './store.js';
 
 export const NODE = 512;
 export const VIEW = 128_000;
+const FRAME = bytes('<chat>\n</chat>');
 export const PLACEHOLDER = '(not summarized yet: zoom it)';
 
 export const startOf = part => part.i * 2 ** part.l;
@@ -19,11 +20,13 @@ export function createView(store, { budget = VIEW } = {}) {
   const waiters = new Set();
   const built = (l, i) => store.node(l, i) !== undefined;
   const textOf = part => store.node(part.l, part.i)?.text ?? PLACEHOLDER;
-  const sizeOf = part => bytes(textOf(part));
+  // A part's size is its rendered line (`id+n|text` and a newline), so the
+  // budget bounds what the model is sent.
+  const sizeOf = part => bytes(`${startOf(part)}+${2 ** part.l}|${flat(textOf(part))}\n`);
 
   function fit({ notify = true } = {}) {
     const T = store.messages.length;
-    let size = 0;
+    let size = FRAME;
     for (const part of parts) size += sizeOf(part);
     const most = needBuilt => {
       let best = -1;
@@ -130,7 +133,7 @@ export function createView(store, { budget = VIEW } = {}) {
       return `<chat>\n${lines.join('\n')}${lines.length ? '\n' : ''}</chat>`;
     },
     size() {
-      let size = 0;
+      let size = FRAME;
       for (const part of parts) size += sizeOf(part);
       return size;
     },

@@ -75,32 +75,34 @@ export function createCompactor({ store, view, complete, model = undefined, jobs
       contextEnd = (i + 1) * 2 ** l;
     }
     if (bytes(source) <= NODE) { save(l, i, source); return; } // a free node
-    const messages = [
+    // Each try is a fresh one-turn request with the step last. A retry adds
+    // the earlier try cut at the limit (spec §4.4) before the step: as a
+    // follow-up turn instead (the spec's form), Codex models compressed the
+    // feedback itself into the line.
+    const request = hint => [
       { role: 'system', content: COMPACT, timestamp: 0 },
       {
         role: 'user',
         content: [
           { type: 'text', text: view.bare(contextEnd) },
-          { type: 'text', text: `For scale only, this sample line is exactly ${NODE} bytes:\n${SCALE}\n\n${step}` },
+          { type: 'text', text: `For scale only, this sample line is exactly ${NODE} bytes:\n${SCALE}\n\n${hint}${step}` },
         ],
         timestamp: Date.now(),
       },
     ];
     const attempts = [];
+    let hint = '';
     for (;;) {
-      const reply = await complete(messages, controller.signal);
+      const reply = await complete(request(hint), controller.signal);
       if (stopped) throw new Error('compactor stopped');
       const line = replyText(reply).trim();
       if (!line) throw new Error(reply?.errorMessage || `empty reply (${reply?.stopReason || 'no stop reason'})`);
       attempts.push(line);
       if (bytes(line) <= NODE || attempts.length >= tries) break;
-      messages.push(reply, {
-        role: 'user',
-        content: `That line is ${bytes(line)} bytes; the limit is ${NODE}. It must end where it is cut here:\n${cutBytes(line, NODE)}| ← LIMIT`,
-        timestamp: Date.now(),
-      });
+      hint = `An earlier try at this step gave a line of ${bytes(line)} bytes; the limit is ${NODE}. Cut at the limit, it ends here:\n${cutBytes(line, NODE)}| ← LIMIT\nSo write a shorter line. The step:\n`;
     }
-    const shortest = attempts.reduce((a, b) => (bytes(b) < bytes(a) ? b : a));
+    // The last resort keeps the node within the limit.
+    const shortest = cutBytes(attempts.reduce((a, b) => (bytes(b) < bytes(a) ? b : a)), NODE);
     save(l, i, shortest, model ? { model } : {});
   }
 

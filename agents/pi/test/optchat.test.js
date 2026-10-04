@@ -100,7 +100,7 @@ test('compactor: builds in order, free nodes skip the model, retries with the cu
   const complete = async messages => {
     calls.push(messages);
     const text = lastUserText(messages);
-    if (/^That line is/.test(text)) return reply('short enough');
+    if (/An earlier try at this step gave a line of \d+ bytes/.test(text)) return reply('short enough');
     return reply(calls.length === 1 ? 'w'.repeat(NODE + 10) : `S${calls.length}`);
   };
   const compactor = createCompactor({ store, view, complete, model: 'fake/model' });
@@ -112,7 +112,9 @@ test('compactor: builds in order, free nodes skip the model, retries with the cu
   // Message 0: too long, then cut at the limit and retried.
   assert.equal(store.node(0, 0).text, 'short enough');
   assert.equal(store.node(0, 0).model, 'fake/model');
-  assert.match(lastUserText(calls[1]), /\| ← LIMIT$/);
+  // The retry is a fresh one-turn request; the cut comes before the step.
+  assert.equal(calls[1].length, 2);
+  assert.match(lastUserText(calls[1]), /\| ← LIMIT\nSo write a shorter line\. The step:\nCompress this message into one line/);
   // Message 1 and the merge fit in a node: no model call.
   assert.equal(store.node(0, 1).text, 'user: tiny');
   assert.equal(store.node(1, 0).text, 'short enough\nuser: tiny');
@@ -157,6 +159,8 @@ test('view: over budget with merges failing, it folds into placeholders; the com
   await until(() => [...Array(32).keys()].every(i => view.built(0, i)));
   // Every message is summarized, no merge is built, and the budget still holds.
   assert.ok(view.size() <= budget, `${view.size()} > ${budget}`);
+  // The budget bounds the rendered view, line prefixes included.
+  assert.equal(Buffer.byteLength(view.render()), view.size());
   assert.ok(view.parts.some(part => part.l > 0 && !view.built(part.l, part.i)));
   assert.ok(reports.some(text => /402/.test(text)));
   // Merges work again: every placeholder is filled in.
@@ -164,6 +168,21 @@ test('view: over budget with merges failing, it folds into placeholders; the com
   await until(() => view.settledBefore(32), 5000);
   assert.ok(view.size() <= budget);
   assert.ok(!view.render().includes(PLACEHOLDER));
+  compactor.stop();
+});
+
+test('compactor: a line still too long after every try is cut to the limit', async () => {
+  const store = openStore(tmp());
+  const view = createView(store);
+  let calls = 0;
+  const complete = async () => { calls++; return reply('z'.repeat(NODE + 40)); };
+  const compactor = createCompactor({ store, view, complete, tries: 3 });
+  store.addMessage('note', long('x'));
+  view.fold();
+  compactor.pump();
+  await until(() => view.built(0, 0));
+  assert.equal(calls, 3);
+  assert.equal(store.node(0, 0).text, 'z'.repeat(NODE));
   compactor.stop();
 });
 
