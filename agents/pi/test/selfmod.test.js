@@ -138,6 +138,8 @@ function repoFixture() {
   const shippedPiDir = path.join(root, 'releases', base, 'agents', 'pi');
   fs.mkdirSync(path.join(shippedPiDir, 'node_modules', 'dep'), { recursive: true });
   fs.writeFileSync(path.join(shippedPiDir, 'node_modules', 'dep', 'index.js'), '');
+  // Read-only, as refeather leaves a release.
+  execFileSync('chmod', ['-R', 'a-w', path.join(shippedPiDir, 'node_modules')]);
   const sessionDir = path.join(root, 'session');
   fs.mkdirSync(sessionDir);
   const exits = [];
@@ -150,7 +152,7 @@ function repoFixture() {
     const ended = new Promise(resolve => { exited = () => setTimeout(() => resolve('pending'), 100); });
     return Promise.race([tool.execute(args), ended]);
   };
-  return { base, sessionDir, clone, exits, commit, reset, call };
+  return { base, sessionDir, shippedPiDir, clone, exits, commit, reset, call };
 }
 const text = result => result.content[0].text;
 
@@ -194,4 +196,8 @@ test('self_update: a worktree, then only a tested agents/pi commit relaunches', 
   writeState(f.sessionDir, { ...state, candidate: null, bad: { [failing]: 'it exited (1) before it was ready' } });
   assert.match(text(await f.call({ action: 'relaunch', commit: failing })), /failed before/);
   assert.match(text(await f.call({ action: 'status' })), /"shipped": "[0-9a-f]{40}"/);
+  // Feather can delete the chat: the linked copies are writable dirs over shared read-only files.
+  fs.rmSync(f.sessionDir, { recursive: true });
+  assert.ok(!fs.existsSync(f.sessionDir));
+  assert.equal(fs.statSync(path.join(f.shippedPiDir, 'node_modules', 'dep', 'index.js')).mode & 0o222, 0);
 });

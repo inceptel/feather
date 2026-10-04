@@ -170,6 +170,10 @@ function linkModules(fromPiDir, toPiDir) {
   if (!fs.existsSync(from)) throw new Error(`no node_modules at ${from}`);
   const copy = run('cp', ['-al', from, path.join(toPiDir, 'node_modules')]);
   if (!copy.ok) throw new Error(`could not link node_modules: ${tail(copy.out, 5)}`);
+  // Releases are read-only. The copied dirs must be writable, or the session
+  // dir can never be deleted; the files stay shared and read-only.
+  const writable = run('find', [path.join(toPiDir, 'node_modules'), '-type', 'd', '-exec', 'chmod', 'u+w', '{}', '+']);
+  if (!writable.ok) throw new Error(`could not make node_modules writable: ${tail(writable.out, 5)}`);
 }
 
 // The env for the candidate's tests: no Feather bridge, so tests cannot act on the chat.
