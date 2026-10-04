@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
-import { createRegistry, Harness, watchEvents } from '@earendil-works/pi-durable';
+import { createRegistry, Harness, LiveDoc, watchEvents } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
@@ -22,6 +22,7 @@ import { createInputParser } from './input.js';
 import { createTranscript } from './transcript.js';
 import { createBridgeClient, createEventMapper, sessionStateEvent } from './bridge.js';
 import { acquireSessionLock } from './lock.js';
+import { compactorModelRef, memoryEnabled, modelCompleter, openMemory } from './optchat/memory.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -68,9 +69,27 @@ const lock = await acquireSessionLock(sessionDir).catch(error => {
 const keyvault = process.env.FEATHER_PI_KEYVAULT || path.join(os.homedir(), 'keyvault.txt');
 const openrouterKey = process.env.OPENROUTER_API_KEY || readKeyvaultKey(keyvault, 'OPENROUTER_API_KEY');
 delete process.env.OPENROUTER_API_KEY;
-const { models, ensure } = createAgentModels({ secrets: openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {} });
+const memoryOn = memoryEnabled();
+const { models, ensure } = createAgentModels({ secrets: openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}, viewMarks: memoryOn });
+
+const initialRef = parseModelRef(args.model)?.ref || defaultModelRef();
+
+// OptChat memory (spec: pi-optchat-agent.md). A cheap model builds the
+// summaries; without it (say, no OpenRouter key) the chat's own model does.
+let memory;
+if (memoryOn) {
+  let compactorRef = compactorModelRef();
+  let compactor;
+  try { compactor = ensure(compactorRef); } catch (error) {
+    note(`memory: compactor ${compactorRef} unavailable (${error.message}); using ${initialRef}`);
+    compactorRef = initialRef;
+    compactor = ensure(initialRef);
+  }
+  memory = openMemory({ sessionDir, complete: modelCompleter(models, compactor), modelName: compactorRef, report: note });
+}
 
 const registry = createRegistry();
+if (memory) registry.install(memory.extension);
 registry.install(CodingTools);
 
 const storage = await openNodeSqliteStorage(path.join(sessionDir, 'state.sqlite'));
@@ -82,7 +101,6 @@ const harness = await Harness.open(storage, {
 
 // The chat's model is chosen once, at creation (Feather's --model, else the
 // FEATHER_PI_DEFAULT_MODEL default), and kept in pi.agent. /model changes it.
-const initialRef = parseModelRef(args.model)?.ref || defaultModelRef();
 const root = await harness.root(ctx, { agent: { model: ensure(initialRef), cwd, instructions: readInstructions() ?? null } });
 const agent = await root.agent(ctx);
 let currentRef = agent.model ? (agent.model.provider === 'gateway' ? agent.model.modelId : `${agent.model.provider}/${agent.model.modelId}`) : initialRef;
@@ -95,6 +113,7 @@ const transcript = createTranscript(sessionDir);
 const mapper = createEventMapper({ emit: events => bridge.post(events) });
 const stream = await watchEvents(harness, root.id, ctx);
 transcript.append(stream.snapshot.entries);
+if (memory) void memory.attach(root, ctx);
 bridge.post([sessionStateEvent(currentRef)]);
 
 let streamingText = false;
@@ -119,6 +138,8 @@ async function handleEvents(events) {
   mapper.handleBatch(events);
   if (events.some(event => event.type === 'message_end')) await bridge.drained();
   try { transcript.append(entries); } catch (error) { note(`pi: transcript write failed: ${error.message}`); }
+  if (memory && entries.length) void memory.logEntries(entries);
+  if (memory && events.some(event => event.type === 'run_end')) resetWhenIdle();
   for (const event of events) render(event);
 }
 
@@ -160,8 +181,47 @@ function render(event) {
   }
 }
 
+// After a run, start a new pi context: the memory view carries the chat, so
+// pi's own context holds one run at most and its compaction never has to run.
+// Only when idle: a reset placed inside a run would end that run.
+function resetWhenIdle() {
+  queue = queue.then(async () => {
+    await memory.log();
+    const live = await harness.documentState(LiveDoc, root.id, ctx);
+    const busy = !!live?.value?.run;
+    live?.dispose();
+    if (!busy) await root.reset(undefined, ctx);
+  }).catch(error => note(`memory: context reset failed: ${error.message}`));
+}
+
+async function memoryCommand(command, value) {
+  if (!memory) { note('memory is off (FEATHER_PI_MEMORY=off)'); return; }
+  if (command === '/view') {
+    const T = memory.store.messages.length;
+    note(`view: ${memory.view.parts.length} lines, ${memory.view.size()} bytes, ${T} messages, first unsummarized ${memory.view.first()}`);
+    out(memory.view.render().replace(/\r?\n/g, '\r\n') + '\r\n');
+    return;
+  }
+  // /import <file>: append each line of a JSONL file ({text} or a string) as a note.
+  let count = 0;
+  try {
+    for (const raw of fs.readFileSync(path.resolve(cwd, value || ''), 'utf8').split('\n')) {
+      if (!raw.trim()) continue;
+      const row = JSON.parse(raw);
+      const text = typeof row === 'string' ? row : row?.text;
+      if (typeof text !== 'string' || !text) continue;
+      memory.addNote(text, row?.date ? new Date(row.date) : undefined);
+      count++;
+    }
+    note(`imported ${count} notes`);
+  } catch (error) {
+    note(`import stopped after ${count} notes: ${error.message}`);
+  }
+}
+
 async function handleCommand(text) {
   const [command, value] = text.split(/\s+/, 2);
+  if (command === '/view' || command === '/import') { await memoryCommand(command, value); return true; }
   if (command !== '/model') return false;
   if (!value) { note(`model: ${currentRef}`); return true; }
   const parsed = parseModelRef(value);
@@ -200,6 +260,7 @@ async function shutdown(code = 0) {
   closing = true;
   out('\x1b[?2004l');
   try { await stream.stop(); } catch {}
+  memory?.stop();
   try { await harness.close(ctx); } catch {}
   bridge.close();
   await lock.release().catch(() => {});
@@ -213,7 +274,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => parser.feed(chunk));
 process.stdin.on('end', () => void shutdown(0));
 out('\x1b[?2004h');
-note(`pi agent · ${currentRef} · ${cwd}`);
+note(`pi agent · ${currentRef} · ${cwd}${memory ? ` · memory ${memory.store.messages.length} messages` : ''}`);
 out('pi> ');
 
 // Continue any run a killed process left behind.

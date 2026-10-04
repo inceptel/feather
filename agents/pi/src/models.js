@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import { defaultProviderAuthContext } from '@earendil-works/pi-ai';
 import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
+import { withViewMarks } from './optchat/cache.js';
 import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 import { openrouterProvider } from '@earendil-works/pi-ai/providers/openrouter';
 
@@ -98,6 +99,7 @@ export function createAgentModels({
   gatewayUrl = process.env.FEATHER_OMP_AUTH_GATEWAY_URL || 'http://127.0.0.1:4000',
   tokenFile = process.env.FEATHER_OMP_AUTH_GATEWAY_TOKEN_FILE || `${process.env.HOME}/.omp/auth-gateway.token`,
   secrets = {},
+  viewMarks = false,
 } = {}) {
   const ambient = defaultProviderAuthContext();
   const models = createModels({
@@ -114,7 +116,7 @@ export function createAgentModels({
     baseUrl: gatewayUrl,
     auth,
     models: [...gatewayModels.values()],
-    api: anthropicMessagesApi(),
+    api: viewMarks ? withViewMarks(anthropicMessagesApi()) : anthropicMessagesApi(),
   }));
   installGateway();
   models.setProvider(openrouterProvider());
