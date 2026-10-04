@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build": "echo {\\\"version\\\":\\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"} > version.json && cd frontend && npm install && npm run build",
+    "build": "echo {\\\"version\\\":\\\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\\\"} > version.json && npm --prefix agents/pi ci --omit=dev --ignore-scripts --no-audit --no-fund && cd frontend && npm install && npm run build",
     "build:frontend": "npm run build",
     "deploy": "bin/refeather stage",
     "refeather": "bin/refeather",

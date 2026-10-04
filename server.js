@@ -122,6 +122,9 @@ if (!process.env.OPENAI_API_KEY && process.env.FEATHER_OPENAI_API_KEY) {
 const DEEPGRAM_API_KEY = process.env.FEATHER_DEEPGRAM_API_KEY || '';
 const envEnabled = (value) => /^(1|true|yes|on)$/i.test(String(value || '').trim());
 const READ_ONLY_MODE = envEnabled(process.env.FEATHER_READ_ONLY);
+// The experimental pi agent (agents/pi). Off by default; with it off, no pi
+// chat can start, resume or be listed, and nothing else changes.
+const PI_AGENT_ENABLED = envEnabled(process.env.FEATHER_PI_AGENT);
 const CHAT_CONFIG = loadChatConfig();
 const ROOM_PULSES_ENABLED = !READ_ONLY_MODE && !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_ROOM_PULSES || '').trim());
 const configuredPulseInterval = Number(process.env.FEATHER_ROOM_PULSE_INTERVAL_MS);
@@ -168,6 +171,8 @@ const OMP_AUTH_GATEWAY_TOKEN_FILE = path.resolve(
 const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
 const OMP_BRIDGE_EXTENSION = path.join(APP_DIR, 'omp-extensions', 'feather-bridge.js');
+const PI_SESSIONS = STATE_PATHS.harness.piSessionsDir;
+const PI_AGENT_MAIN = path.join(APP_DIR, 'agents', 'pi', 'src', 'main.js');
 const OMP_PROTOCOL_EXTENSION = path.join(APP_DIR, 'omp-tools', 'feather-protocol-tools.js');
 const OMP_COUNCIL_SKILL = path.join(APP_DIR, 'skills', 'council');
 const OMP_FEATHER_CONFIG = path.join(APP_DIR, 'omp-feather.yml');
@@ -488,6 +493,11 @@ function findOmpJsonlPath(sessionId) {
   } catch { return null; }
 }
 
+function findPiJsonlPath(sessionId) {
+  const file = path.join(PI_SESSIONS, String(sessionId), 'transcript.jsonl');
+  return fs.existsSync(file) ? file : null;
+}
+
 function findCodexJsonlPath(idOrUuid) {
   // Codex stores files at ~/.codex/sessions/YYYY/MM/DD/rollout-*-<UUID>.jsonl
   // Caller may pass either feather's local id (mapped via session-meta.codexUuid)
@@ -513,8 +523,10 @@ function findJsonlPath(sessionId, agent) {
   if (agent === 'omp') return findOmpJsonlPath(sessionId);
   if (agent === 'codex') return findCodexJsonlPath(sessionId);
   if (agent === 'claude') return findClaudeJsonlPath(sessionId);
+  if (agent === 'pi') return findPiJsonlPath(sessionId);
   // Unknown agent — try all
-  return findClaudeJsonlPath(sessionId) || findOmpJsonlPath(sessionId) || findCodexJsonlPath(sessionId);
+  return findClaudeJsonlPath(sessionId) || findOmpJsonlPath(sessionId) || findCodexJsonlPath(sessionId)
+    || (PI_AGENT_ENABLED ? findPiJsonlPath(sessionId) : null);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -528,6 +540,7 @@ function getAgentForSession(sessionId) {
   // by another instance is misread with the Claude parser — getMessages returns
   // nothing and live broadcasts are dropped.
   if (findOmpJsonlPath(sessionId)) return 'omp';
+  if (PI_AGENT_ENABLED && findPiJsonlPath(sessionId)) return 'pi';
   if (UUID_RE.test(sessionId) && findCodexJsonlPath(sessionId)) return 'codex';
   return 'claude';
 }
@@ -823,7 +836,7 @@ function inspectSessionCandidate({ fpath, mtime, size, agent, projectId: candida
   const sessionCwd = extractSessionCwd(buf, agent);
   const projectId = candidateProjectId || (sessionCwd ? encodeProjectPath(sessionCwd) : null);
   let title;
-  if (agent === 'omp') title = extractOmpTitle(buf);
+  if (agent === 'omp' || agent === 'pi') title = extractOmpTitle(buf);
   else if (agent === 'codex') title = extractCodexTitle(buf);
   else title = extractClaudeTitle(buf);
   const facts = {
@@ -883,6 +896,18 @@ function listSessionCandidates(meta = readMeta()) {
         const stat = fs.statSync(fpath);
         if (stat.size < 50) continue;
         candidates.push({ id: dir, fpath, mtime: stat.mtime, size: stat.size, agent: 'omp' });
+      } catch {}
+    }
+  }
+
+  // pi sessions (experimental, FEATHER_PI_AGENT)
+  if (PI_AGENT_ENABLED && fs.existsSync(PI_SESSIONS)) {
+    for (const dir of fs.readdirSync(PI_SESSIONS)) {
+      const fpath = path.join(PI_SESSIONS, dir, 'transcript.jsonl');
+      try {
+        const stat = fs.statSync(fpath);
+        if (stat.size < 50) continue;
+        candidates.push({ id: dir, fpath, mtime: stat.mtime, size: stat.size, agent: 'pi' });
       } catch {}
     }
   }
@@ -1130,6 +1155,7 @@ function validateFreshSessionId(id) {
     || residentIds.includes(id)
     || tmuxIsActive(id)
     || fs.existsSync(path.join(OMP_SESSIONS, id))
+    || fs.existsSync(path.join(PI_SESSIONS, id))
     || findJsonlPath(id)) {
     throw httpError(409, 'session id already exists');
   }
@@ -1437,6 +1463,31 @@ function launchOmpSession(id, cwd, { resume = false, forkFrom = null, promptFile
   launchInTmux(tmuxName(id), command, cwd);
 }
 
+// The pi agent runs on the server's own Node binary. Its state is durable in
+// <pi-sessions>/<id>/state.sqlite, so a resume is the same command as a start.
+function launchPiSession(id, cwd) {
+  if (!PI_AGENT_ENABLED) throw httpError(409, 'The pi agent is disabled (FEATHER_PI_AGENT)');
+  const sessionDir = path.join(PI_SESSIONS, id);
+  fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+  const transcript = path.join(sessionDir, 'transcript.jsonl');
+  try { fileOffsets.set(id, completeFileOffset(transcript)); } catch { fileOffsets.set(id, 0); }
+  watchOmpSessionDir(sessionDir, id);
+  const systemPromptFile = writeSessionSystemPrompt(id);
+  const model = sanitizeOmpModel(readMeta()[id]?.model || '');
+  const args = [
+    shellQuote(process.execPath),
+    '--no-warnings',
+    shellQuote(PI_AGENT_MAIN),
+    `--session-id ${shellQuote(id)}`,
+    `--session-dir ${shellQuote(sessionDir)}`,
+    `--cwd ${shellQuote(cwd || HOME)}`,
+    model ? `--model ${shellQuote(model)}` : '',
+    systemPromptFile ? `--system-prompt-file ${shellQuote(systemPromptFile)}` : '',
+  ].filter(Boolean).join(' ');
+  const bridgeEnv = issueSessionBridgeCapability(id);
+  launchInTmux(tmuxName(id), `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, cwd || HOME);
+}
+
 function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, model: engineModel = '' } = {}) {
   const name = tmuxName(id);
   const model = agent === 'omp' ? sanitizeOmpModel(ompModel) : '';
@@ -1464,6 +1515,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       } : {}),
     },
   }));
+  if (agent === 'pi') return launchPiSession(id, cwd);
   const bridgeEnv = agent === 'omp' ? '' : issueSessionBridgeCapability(id);
 
   if (agent === 'omp') {
@@ -1555,6 +1607,7 @@ function adoptNewCodexUuid(featherId, beforeUuids, spawnCwd = null, attempts = 3
 function resumeSession(id, cwd) {
   cwd ||= readMeta()[id]?.harnessCwd || readMeta()[id]?.cwd;
   const agent = getAgentForSession(id);
+  if (agent === 'pi') return launchPiSession(id, cwd);
   const name = tmuxName(id);
   // Codex/Claude model slug persisted at launch (scheduler-created sessions);
   // empty for sessions launched without one.
@@ -2680,6 +2733,18 @@ if (fs.existsSync(OMP_SESSIONS)) {
   });
 }
 
+// Watch existing pi session dirs on startup (FEATHER_PI_AGENT)
+if (PI_AGENT_ENABLED && fs.existsSync(PI_SESSIONS)) {
+  for (const dir of fs.readdirSync(PI_SESSIONS)) {
+    const dirPath = path.join(PI_SESSIONS, dir);
+    try {
+      if (!fs.statSync(dirPath).isDirectory()) continue;
+      try { fileOffsets.set(dir, completeFileOffset(path.join(dirPath, 'transcript.jsonl'))); } catch {}
+      watchOmpSessionDir(dirPath, dir);
+    } catch {}
+  }
+}
+
 // Watch each project subdirectory with fs.watch
 if (fs.existsSync(CLAUDE_PROJECTS)) {
   for (const dir of fs.readdirSync(CLAUDE_PROJECTS)) {
@@ -3567,6 +3632,7 @@ function beginChatCreation(options, { requestId, fingerprint } = {}) {
   const ensureCurrent = () => { if (startup.cancelled) throw httpError(409, 'Chat startup cancelled'); };
   const done = createChatPair(options, {
       root: CHAT_PROJECTS_ROOT,
+      piAgent: PI_AGENT_ENABLED,
       resolveProject: (id) => managedChatProject(CHAT_PROJECTS_ROOT, readMeta(), id),
       wikiPath: process.env.FEATHER_WIKI_DIR || path.join(os.homedir(), 'wiki'),
       spawn: (id, cwd, agent, options) => { ensureCurrent(); return spawnSession(id, cwd, agent, options); },
@@ -4076,6 +4142,8 @@ app.post('/api/sessions/:id/delete', async (req, res) => {
       const dir = path.join(OMP_SESSIONS, id);
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
       try { fs.rmSync(path.join(OMP_AGENT_DIRS, id), { recursive: true, force: true }); } catch {}
+    } else if (agent === 'pi') {
+      try { fs.rmSync(path.join(PI_SESSIONS, id), { recursive: true, force: true }); } catch {}
     } else {
       const fpath = findJsonlPath(id, agent);
       if (fpath) fs.unlinkSync(fpath);
@@ -4881,10 +4949,11 @@ let agentsSnapshot = [
   { id: 'claude', label: 'Claude Code', available: true },
   { id: 'omp', label: 'oh-my-pi', available: executableAvailable('omp') },
   { id: 'codex', label: 'Codex', available: executableAvailable('codex') },
+  ...(PI_AGENT_ENABLED ? [{ id: 'pi', label: 'pi (experimental)', available: fs.existsSync(path.join(APP_DIR, 'agents', 'pi', 'node_modules', '@earendil-works', 'pi-durable')) }] : []),
 ];
 let agentVersionProbe = null;
 function probeAgentVersions() {
-  agentVersionProbe ??= Promise.all(agentsSnapshot.filter(({ id, available }) => id !== 'claude' && available).map(({ id, label }) =>
+  agentVersionProbe ??= Promise.all(agentsSnapshot.filter(({ id, available }) => id !== 'claude' && id !== 'pi' && available).map(({ id, label }) =>
     new Promise(resolve => execFile(id, ['--version'], { encoding: 'utf8', timeout: 3000 }, (error, stdout) => {
       const version = String(stdout || '').trim();
       if (!error && version) agentsSnapshot = agentsSnapshot.map(agent => agent.id === id ? { ...agent, label: `${label} ${version}` } : agent);
