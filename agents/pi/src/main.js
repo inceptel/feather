@@ -28,6 +28,7 @@ import { codemodeEnabled, createCodemodeExtension } from './codemode.js';
 import { createFeatherTools, createWebFetchTool, featherBridge } from './tools.js';
 import { createSubagentExtension, createSubagentTaskExtension, createSubagentTools, subagentsEnabled } from './subagent.js';
 import { createSelfUpdateTool, defaultRepo, markReady, relaunchReport, selfmodEnabled } from './selfmod.js';
+import { openMcp } from './mcp.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -112,6 +113,9 @@ if (underLauncher && selfmodEnabled()) {
     exit: code => { note('pi: relaunching on new code'); void lock.release().catch(() => {}).finally(() => process.exit(code)); },
   }));
 }
+// MCP servers from ~/.feather/pi-mcp.json (none when absent; FEATHER_PI_MCP=off).
+const mcp = await openMcp({ report: note });
+extraTools.push(...mcp.tools);
 const subagentsOn = subagentsEnabled();
 const subagentOptions = { remove: () => (memory ? [memory.extension] : []), view: () => memory?.extension.frozenView() };
 const registry = createRegistry();
@@ -298,6 +302,7 @@ async function shutdown(code = 0) {
   try { await stream.stop(); } catch {}
   memory?.stop();
   try { await harness.close(ctx); } catch {}
+  await mcp.close();
   bridge.close();
   await lock.release().catch(() => {});
   process.exit(code);
@@ -310,7 +315,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => parser.feed(chunk));
 process.stdin.on('end', () => void shutdown(0));
 out('\x1b[?2004h');
-note(`pi agent · ${currentRef} · ${cwd}${memory ? ` · memory ${memory.store.messages.length} messages` : ''} · ${codemodeOn ? 'code mode' : 'plain tools'}`);
+note(`pi agent · ${currentRef} · ${cwd}${memory ? ` · memory ${memory.store.messages.length} messages` : ''} · ${codemodeOn ? 'code mode' : 'plain tools'}${mcp.summary ? ` · mcp ${mcp.summary}` : ''}`);
 out('pi> ');
 
 // Continue any run a killed process left behind.
