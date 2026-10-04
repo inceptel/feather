@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { BACKGROUND_CONTEXT as ctx } from '@earendil-works/chord/context';
 import { createRegistry, defineExtension, Harness, LiveDoc, watchEvents } from '@earendil-works/pi-durable';
@@ -26,6 +27,7 @@ import { compactorModelRef, memoryEnabled, modelCompleter, openMemory } from './
 import { codemodeEnabled, createCodemodeExtension } from './codemode.js';
 import { createFeatherTools, createWebFetchTool, featherBridge } from './tools.js';
 import { createSubagentExtension, createSubagentTaskExtension, createSubagentTools, subagentsEnabled } from './subagent.js';
+import { createSelfUpdateTool, defaultRepo, markReady, relaunchReport, selfmodEnabled } from './selfmod.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -97,6 +99,19 @@ if (memoryOn) {
 // Subagents (FEATHER_PI_SUBAGENTS=off drops them) lose the memory view
 // (the optchat extension) but keep zoom and date.
 const extraTools = [createWebFetchTool(), ...createFeatherTools(featherBridge())];
+// Self-update (FEATHER_PI_SELFMOD=off drops it) only under launcher.js, which
+// owns the relaunch and the rollback.
+const runningPiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const underLauncher = process.env.FEATHER_PI_LAUNCHER === '1';
+if (underLauncher && selfmodEnabled()) {
+  extraTools.push(createSelfUpdateTool({
+    sessionDir,
+    shippedPiDir: process.env.FEATHER_PI_SHIPPED_DIR || runningPiDir,
+    runningPiDir,
+    repo: defaultRepo(),
+    exit: code => { note('pi: relaunching on new code'); void lock.release().catch(() => {}).finally(() => process.exit(code)); },
+  }));
+}
 const subagentsOn = subagentsEnabled();
 const subagentOptions = { remove: () => (memory ? [memory.extension] : []), view: () => memory?.extension.frozenView() };
 const registry = createRegistry();
@@ -300,3 +315,9 @@ out('pi> ');
 
 // Continue any run a killed process left behind.
 harness.resume();
+
+// After a self-update relaunch or rollback, tell the chat once (request ids
+// make a repeat a no-op). Then tell the launcher this start is good.
+const relaunched = underLauncher ? relaunchReport(sessionDir, process.env.FEATHER_PI_CODE_SHA) : null;
+if (relaunched) void root.submit({ type: 'input', content: relaunched.text, whenBusy: 'steer', requestId: relaunched.requestId }, ctx).catch(error => note(`pi: relaunch report failed: ${error.message}`));
+if (underLauncher) setTimeout(() => { try { markReady(sessionDir, process.env.FEATHER_PI_CODE_SHA); } catch (error) { note(`pi: ready mark failed: ${error.message}`); } }, 3000);

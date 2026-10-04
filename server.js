@@ -172,7 +172,8 @@ const OMP_MODEL = resolveOmpModel(process.env);
 const OMP_THINKING = resolveOmpThinking(process.env);
 const OMP_BRIDGE_EXTENSION = path.join(APP_DIR, 'omp-extensions', 'feather-bridge.js');
 const PI_SESSIONS = STATE_PATHS.harness.piSessionsDir;
-const PI_AGENT_MAIN = path.join(APP_DIR, 'agents', 'pi', 'src', 'main.js');
+// launcher.js runs agents/pi/src/main.js and owns pi's self-update relaunch and rollback.
+const PI_AGENT_MAIN = path.join(APP_DIR, 'agents', 'pi', 'src', 'launcher.js');
 const OMP_PROTOCOL_EXTENSION = path.join(APP_DIR, 'omp-tools', 'feather-protocol-tools.js');
 const OMP_COUNCIL_SKILL = path.join(APP_DIR, 'skills', 'council');
 const OMP_FEATHER_CONFIG = path.join(APP_DIR, 'omp-feather.yml');
