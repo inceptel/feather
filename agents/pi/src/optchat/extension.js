@@ -216,5 +216,6 @@ export function createOptChatExtension(memory, { settleMs = SETTLE_MS, offerTool
       },
     })],
   });
-  return Object.assign(extension, { memoryTools: [zoom, date] });
+  // frozenView(): the view of the current run, which a spawn hands its subagents.
+  return Object.assign(extension, { memoryTools: [zoom, date], frozenView: () => frozen?.text });
 }

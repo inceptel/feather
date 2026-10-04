@@ -62,8 +62,9 @@ function nestedTool(registration, api, context) {
       }
       let output = '';
       const diagnostics = [];
-      const nestedApi = {
-        ...api,
+      // The outer api (its methods bound to it), with output, diagnostics
+      // and details kept per call.
+      const own = {
         output(chunk) {
           output += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
           if (output.length > 2 * NESTED_OUTPUT_CHARS) output = output.slice(-NESTED_OUTPUT_CHARS);
@@ -71,6 +72,13 @@ function nestedTool(registration, api, context) {
         diagnostic(diagnostic) { diagnostics.push(diagnostic); },
         async details() {},
       };
+      const nestedApi = new Proxy(api, {
+        get(target, key) {
+          if (Object.hasOwn(own, key)) return own[key];
+          const value = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       let result;
       try {
         result = await registration.execute(args, nestedApi, withAbortSignal(signal, context));

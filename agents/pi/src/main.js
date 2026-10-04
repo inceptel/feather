@@ -25,6 +25,7 @@ import { acquireSessionLock } from './lock.js';
 import { compactorModelRef, memoryEnabled, modelCompleter, openMemory } from './optchat/memory.js';
 import { codemodeEnabled, createCodemodeExtension } from './codemode.js';
 import { createFeatherTools, createWebFetchTool, featherBridge } from './tools.js';
+import { createSubagentExtension, createSubagentTaskExtension, createSubagentTools, subagentsEnabled } from './subagent.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -88,19 +89,27 @@ if (memoryOn) {
     compactorRef = initialRef;
     compactor = ensure(initialRef);
   }
-  memory = openMemory({ sessionDir, complete: modelCompleter(models, compactor), modelName: compactorRef, report: note, offerTools: !codemodeOn });
+  memory = openMemory({ sessionDir, complete: modelCompleter(models, compactor), modelName: compactorRef, report: note, offerTools: false });
 }
 
 // Code mode (default): the model gets one `codemode` tool and calls the
 // others from a sandboxed script. FEATHER_PI_CODEMODE=off offers them directly.
+// Subagents (FEATHER_PI_SUBAGENTS=off drops them) lose the memory view
+// (the optchat extension) but keep zoom and date.
 const extraTools = [createWebFetchTool(), ...createFeatherTools(featherBridge())];
+const subagentsOn = subagentsEnabled();
+const subagentOptions = { remove: () => (memory ? [memory.extension] : []), view: () => memory?.extension.frozenView() };
 const registry = createRegistry();
 if (memory) registry.install(memory.extension);
 if (codemodeOn) {
-  registry.install(createCodemodeExtension([...CodingTools.tools, ...extraTools, ...(memory ? memory.tools : [])]));
+  const subagentTools = subagentsOn ? createSubagentTools(subagentOptions) : [];
+  registry.install(createCodemodeExtension([...CodingTools.tools, ...extraTools, ...(memory ? memory.tools : []), ...subagentTools]));
+  if (subagentsOn) registry.install(createSubagentTaskExtension());
 } else {
   registry.install(CodingTools);
   registry.install(defineExtension({ name: 'feather-tools', tools: extraTools }));
+  if (memory) registry.install(defineExtension({ name: 'optchat-tools', tools: memory.tools }));
+  if (subagentsOn) registry.install(createSubagentExtension(subagentOptions));
 }
 
 const storage = await openNodeSqliteStorage(path.join(sessionDir, 'state.sqlite'));
@@ -261,7 +270,8 @@ function submit(text) {
 
 const parser = createInputParser({
   onSubmit: submit,
-  onInterrupt: () => { void root.abort(ctx).catch(error => note(`pi: abort failed: ${error.message}`)); },
+  // Interrupt also stops the chat's subagents, which run as background work.
+  onInterrupt: () => { void root.abort(ctx, { background: true }).catch(error => note(`pi: abort failed: ${error.message}`)); },
   onEcho: out,
 });
 

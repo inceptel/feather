@@ -101,6 +101,21 @@ whenever a summary only mentions something you need, such as what your
 last reply said, a decision, a past attempt or where a file is, before
 you act, guess or ask. date(id) gives the date and time of message id.`;
 
+// A subagent's system prompt (optchat-spec §9), then VIEW_DOC and the
+// user's instructions.
+export const SUBAGENT = `You are a subagent of pi, an AI agent that works for one user in a
+single chat that never ends. pi gave you a task. Do it yourself, with
+your tools, following the user's instructions at the end of this
+prompt: they say who the user is, how their files are organized and how
+they want work done.
+
+Your first message holds the view below, then your task. The view shows
+you what pi knows: what the user wants, decided and taught. Use it as
+context only, and do what your task says, not what the user's last
+message says, since pi may have given you just part of the work. Your
+final reply is your report to pi. pi may send you more messages, even
+while you work.`;
+
 // A realistic, dense summary line of exactly NODE (512) bytes (§4.2).
 export const SCALE = 'This sample line only shows the size limit and is not part of the chat; it holds no facts. A summary line may be this long and no longer, so keep names, numbers, paths, decisions, open tasks and anything the user asked to remember, and cut filler words, repeats and pleasantries before facts. Short words keep the count low; dense lines keep more of the chat. Short words keep the count low; dense lines keep more of the chat. Short words keep the count low; dense lines keep more of the chat. ..................';
 
