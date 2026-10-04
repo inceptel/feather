@@ -11,7 +11,7 @@ import { Type } from 'typebox';
 import { defineExtension, defineTool, GenerationTask, hook, section } from '@earendil-works/pi-durable';
 import { getCurrentSystemMessage } from '@earendil-works/pi-ai/utils/transcript';
 import { DATE_DESCRIPTION, MASTER, VIEW_DOC, ZOOM_DESCRIPTION } from './prompts.js';
-import { flat } from './view.js';
+import { flat, PLACEHOLDER } from './view.js';
 
 export const ECHO_CAP = 30_000;
 export const SETTLE_MS = 120_000;
@@ -176,11 +176,11 @@ export function createOptChatExtension(memory, { settleMs = SETTLE_MS } = {}) {
         return { content: [{ type: 'text', text: `${id}+0|${row.kind}: ${row.text}` }] };
       }
       const l = Math.log2(n) - 1;
-      const a = store.node(l, (2 * id) / n);
-      const b = store.node(l, (2 * id) / n + 1);
-      if (!a || !b) return fail(`No line ${id}+${n}.`);
+      // A child that is not summarized yet shows the placeholder; zoom it in turn.
+      const a = store.node(l, (2 * id) / n)?.text ?? PLACEHOLDER;
+      const b = store.node(l, (2 * id) / n + 1)?.text ?? PLACEHOLDER;
       const half = n / 2;
-      return { content: [{ type: 'text', text: `${id}+${half}|${flat(a.text)}\n${id + half}+${half}|${flat(b.text)}` }] };
+      return { content: [{ type: 'text', text: `${id}+${half}|${flat(a)}\n${id + half}+${half}|${flat(b)}` }] };
     },
   });
 

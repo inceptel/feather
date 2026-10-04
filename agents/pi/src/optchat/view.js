@@ -1,6 +1,9 @@
 // The OptChat view (spec §5, §6): tree nodes ("parts") that tile the whole
 // chat [0, T), oldest first, under a byte budget. It only ever appends at the
 // end and merges the most due pair whose parent is built; it never splits.
+// When no such pair is left and the view is still over budget (the compactor
+// is behind or failing), it merges the most due pair anyway. That parent shows
+// as a placeholder until the compactor builds it, so the budget always holds.
 import { bytes } from './store.js';
 
 export const NODE = 512;
@@ -22,17 +25,22 @@ export function createView(store, { budget = VIEW } = {}) {
     const T = store.messages.length;
     let size = 0;
     for (const part of parts) size += sizeOf(part);
-    while (size > budget) {
+    const most = needBuilt => {
       let best = -1;
       let bestDue = -Infinity;
       for (let k = 0; k + 1 < parts.length; k++) {
         const a = parts[k];
         const b = parts[k + 1];
-        if (a.l !== b.l || a.i % 2 !== 0 || b.i !== a.i + 1 || !built(a.l + 1, a.i / 2)) continue;
+        if (a.l !== b.l || a.i % 2 !== 0 || b.i !== a.i + 1 || (needBuilt && !built(a.l + 1, a.i / 2))) continue;
         const due = (T - startOf(a)) / 2 ** (a.l + 2); // OptMem's age rule
         if (due > bestDue) { bestDue = due; best = k; }
       }
-      if (best < 0) break; // wait until a parent is built
+      return best;
+    };
+    while (size > budget) {
+      let best = most(true);
+      if (best < 0) best = most(false); // a parent is not built yet: show a placeholder
+      if (best < 0) break;
       const [a, b] = parts.slice(best, best + 2);
       const parent = { l: a.l + 1, i: a.i / 2 };
       size += sizeOf(parent) - sizeOf(a) - sizeOf(b);
@@ -73,9 +81,13 @@ export function createView(store, { budget = VIEW } = {}) {
       fit();
     },
     fit,
-    /** First message whose view line is not built yet (spec §4.1 `first`). */
-    first() {
-      for (const part of parts) if (!built(part.l, part.i)) return startOf(part);
+    /**
+     * First message whose view line is not built yet (spec §4.1 `first`).
+     * With `merges: false`, placeholder merges are skipped: they wait only
+     * for their own children, and must not hold up the messages after them.
+     */
+    first({ merges = true } = {}) {
+      for (const part of parts) if (!built(part.l, part.i) && (merges || part.l === 0)) return startOf(part);
       return store.messages.length;
     },
     settledBefore,

@@ -7,7 +7,10 @@ import { createView } from './view.js';
 import { createCompactor } from './compactor.js';
 import { createOptChatExtension, logEntries, unloggedEntries } from './extension.js';
 
-export const DEFAULT_COMPACTOR_MODEL = 'openrouter/google/gemini-3.6-flash';
+// Codex luna through the gateway: a subscription, so no paid credits run out
+// (OpenRouter returned 402 in the phase 2 live check). Gemini 3.6 flash was
+// faster in the probe; set FEATHER_PI_COMPACTOR_MODEL to use it.
+export const DEFAULT_COMPACTOR_MODEL = 'openai-codex/gpt-5.6-luna';
 
 export function memoryEnabled(env = process.env) {
   return !/^(0|off|false|no)$/i.test(String(env.FEATHER_PI_MEMORY ?? '').trim());

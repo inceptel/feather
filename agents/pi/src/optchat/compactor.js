@@ -1,7 +1,9 @@
 // The OptChat compactor (spec §4): a background pump that builds tree nodes
 // with a cheap model, in strict order. A node starts only when its sources
 // exist and every view line before its end is a built summary, so messages
-// are compressed one at a time, in order, while merges run alongside.
+// are compressed one at a time, in order, while merges run alongside. A
+// placeholder merge in the view (view.js) does not count as unbuilt here: it
+// waits only for its own children, which come before its end.
 import { COMPACT, SCALE } from './prompts.js';
 import { bytes } from './store.js';
 import { NODE, flat } from './view.js';
@@ -32,7 +34,7 @@ export function createCompactor({ store, view, complete, model = undefined, jobs
   function pump() {
     if (stopped) return;
     const T = store.messages.length;
-    const first = view.first();
+    const first = view.first({ merges: false });
     for (let l = 0; 2 ** l <= T; l++) {
       for (let i = 0; (i + 1) * 2 ** l <= T; i++) {
         if (busy.size >= jobs) return;

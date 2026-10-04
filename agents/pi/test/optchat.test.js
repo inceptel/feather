@@ -141,6 +141,32 @@ test('compactor: a failure is reported once and retried', async () => {
   compactor.stop();
 });
 
+test('view: over budget with merges failing, it folds into placeholders; the compactor fills them later', async () => {
+  const store = openStore(tmp());
+  const budget = 8 * 420;
+  const view = createView(store, { budget });
+  let merges = false;
+  const reports = [];
+  const complete = async messages => {
+    const step = lastUserText(messages);
+    if (/^Merge|\nMerge/.test(step) && !merges) return { role: 'assistant', content: [], stopReason: 'error', errorMessage: '402' };
+    return reply(`s ${'q'.repeat(400)}`);
+  };
+  const compactor = createCompactor({ store, view, complete, retryMs: 10, report: text => reports.push(text) });
+  for (let i = 0; i < 32; i++) { store.addMessage('note', long(`m${i}`)); view.append(i); compactor.pump(); }
+  await until(() => [...Array(32).keys()].every(i => view.built(0, i)));
+  // Every message is summarized, no merge is built, and the budget still holds.
+  assert.ok(view.size() <= budget, `${view.size()} > ${budget}`);
+  assert.ok(view.parts.some(part => part.l > 0 && !view.built(part.l, part.i)));
+  assert.ok(reports.some(text => /402/.test(text)));
+  // Merges work again: every placeholder is filled in.
+  merges = true;
+  await until(() => view.settledBefore(32), 5000);
+  assert.ok(view.size() <= budget);
+  assert.ok(!view.render().includes(PLACEHOLDER));
+  compactor.stop();
+});
+
 test('cutBytes never splits a character', () => {
   assert.equal(cutBytes('aé', 2), 'a');
   assert.equal(cutBytes('abc', 2), 'ab');
