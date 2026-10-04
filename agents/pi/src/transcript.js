@@ -13,12 +13,17 @@ import { upstreamOf } from './models.js';
 const VISIBLE_KINDS = new Set(['pi.user', 'pi.assistant', 'pi.tool-result']);
 export const TRANSCRIPT_FILE = 'transcript.jsonl';
 
+// pi-durable entry ids are numbers. Feather's UI expects string message ids.
+export function lineId(entryId) {
+  return typeof entryId === 'string' && entryId.startsWith('pi-') ? entryId : `pi-${entryId}`;
+}
+
 export function transcriptLine(entry) {
   if (!VISIBLE_KINDS.has(entry?.kind)) return null;
   const message = entry.model?.[0];
   if (!message || typeof message !== 'object') return null;
   const timestamp = new Date(Number.isFinite(message.timestamp) ? message.timestamp : Date.now()).toISOString();
-  const line = { type: 'message', id: entry.id, timestamp, message };
+  const line = { type: 'message', id: lineId(entry.id), timestamp, message };
   if (message.role === 'assistant') {
     line.modelRef = message.provider === 'gateway' ? message.model : `${message.provider}/${message.model}`;
     line.upstreamProvider = upstreamOf(message.provider, message.model);
@@ -32,7 +37,7 @@ export function createTranscript(sessionDir) {
   try {
     for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
       if (!raw.trim()) continue;
-      try { const id = JSON.parse(raw).id; if (id) written.add(id); } catch { /* torn tail line */ }
+      try { const id = JSON.parse(raw).id; if (id != null) written.add(lineId(id)); } catch { /* torn tail line */ }
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -53,10 +58,10 @@ export function createTranscript(sessionDir) {
   function append(entries) {
     const lines = [];
     for (const entry of entries) {
-      if (!entry?.id || written.has(entry.id)) continue;
+      if (entry?.id == null || written.has(lineId(entry.id))) continue;
       const line = transcriptLine(entry);
       if (!line) continue;
-      written.add(entry.id);
+      written.add(line.id);
       lines.push(JSON.stringify(line));
     }
     if (lines.length === 0) return 0;
@@ -71,5 +76,5 @@ export function createTranscript(sessionDir) {
     return lines.length;
   }
 
-  return { file, append, has: id => written.has(id) };
+  return { file, append, has: id => written.has(lineId(id)) };
 }
