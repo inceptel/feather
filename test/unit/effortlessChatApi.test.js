@@ -186,13 +186,17 @@ fs.writeFileSync(file, JSON.stringify(panes));
   assert.equal((await request('/api/chats', { ...coldInput, name: 'Different objective' })).status, 409);
   const startingListing = await ok(`/api/sessions?id=${cold.id}`);
   assert.ok(startingListing.sessions.some(session => session.id === cold.id), 'allocated creator is visible before a transcript exists');
-  await until(async () => (await ok(`/api/chats/${cold.id}/status`)).status === 'ready', 'cold pair ready');
+  // Scripts may send as soon as creation returns 202: the send waits for the
+  // pair to finish starting instead of failing with 409.
+  assert.equal(meta()[cold.id].chatStartup.status, 'starting', 'send below targets a starting chat');
+  const earlySend = await request(`/api/sessions/${cold.id}/send`, { text: 'Investigate only the synthetic comparison discussed here.' }, { 'X-Feather-Message-ID': 'human-objective-one' });
+  assert.equal(earlySend.status, 200, JSON.stringify(earlySend.body));
+  assert.equal((await ok(`/api/chats/${cold.id}/status`)).status, 'ready', 'send returned after startup finished');
   for (const query of ['', `?q=${cold.reviewerSessionId}`, `?id=${cold.reviewerSessionId}`]) {
     const listing = await ok(`/api/sessions${query}`);
     assert.ok(!listing.sessions.some(session => session.id === cold.reviewerSessionId), 'reviewer stays internal');
   }
 
-  await ok(`/api/sessions/${cold.id}/send`, { text: 'Investigate only the synthetic comparison discussed here.' }, { 'X-Feather-Message-ID': 'human-objective-one' });
   const read = await bridge(cold.id, { action: 'read' });
   assert.equal(read.status, 200);
   const generation = workflow(read.body).generation;

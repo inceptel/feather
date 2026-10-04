@@ -3607,6 +3607,7 @@ function beginChatCreation(options, { requestId, fingerprint } = {}) {
       if (allocatedId && !startup.cancelled) updateMeta(meta => meta[allocatedId] ? ({ ...meta, [allocatedId]: { ...meta[allocatedId], chatStartup: { status: 'failed', error: 'Could not start agents. Check engine login and try again.' } } }) : meta);
       throw error;
     }).finally(() => { if (allocatedId) chatStartups.delete(allocatedId); });
+  startup.done = done;
   // A 202 caller observes errors through status; always consume rejection.
   done.catch(error => console.warn('[chat-pair] startup failed:', error.message));
   allocated.catch(() => {});
@@ -3902,14 +3903,29 @@ app.post('/api/sessions', (req, res) => {
 });
 
 
+// A send to a chat that is still starting waits for that startup (the creator
+// is primed first), so scripts and agents can create a chat and send at once.
+const CHAT_SEND_STARTUP_WAIT_MS = Math.max(1000, Number(process.env.FEATHER_CHAT_SEND_STARTUP_WAIT_MS) || 180_000);
+async function awaitChatStartupForSend(id) {
+  if (readMeta()[id]?.chatStartup?.status !== 'starting') return;
+  const startup = chatStartups.get(id);
+  if (!startup?.done) throw httpError(409, 'Chat is still starting; your draft has not been sent');
+  let timer;
+  const timedOut = new Promise((resolve) => { timer = setTimeout(() => resolve(true), CHAT_SEND_STARTUP_WAIT_MS); });
+  try {
+    const late = await Promise.race([startup.done.then(() => false, () => false), timedOut]);
+    if (late) throw httpError(409, 'Chat is still starting; your draft has not been sent');
+  } finally { clearTimeout(timer); }
+}
+
 app.post('/api/sessions/:id/send', async (req, res) => {
   try {
-    if (readMeta()[req.params.id]?.chatStartup?.status === 'starting') throw httpError(409, 'Chat is still starting; your draft has not been sent');
-    if (readMeta()[req.params.id]?.chatStartup?.status === 'failed') throw httpError(409, 'Chat startup failed; start a new chat');
     const messageId = req.get('X-Feather-Message-ID');
     if (messageId !== undefined && !/^[a-zA-Z0-9_-]{8,128}$/.test(messageId)) {
       return res.status(400).json({ error: 'invalid message id' });
     }
+    await awaitChatStartupForSend(req.params.id);
+    if (readMeta()[req.params.id]?.chatStartup?.status === 'failed') throw httpError(409, 'Chat startup failed; start a new chat');
     return res.json(await sendInputIdempotent(req.params.id, req.body.text, messageId || randomUUID()));
   } catch (e) { res.status(protocolErrorStatus(e)).json({ error: e.message }); }
 });
