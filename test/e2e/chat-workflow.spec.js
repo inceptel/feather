@@ -66,7 +66,7 @@ for (const width of [1280, 390]) {
           sessions[0].chatPair = null; sessions[0].reviewPolicy = 'none';
           body = { detached: true, chatPair: null, reviewPolicy: 'none' };
         }
-      } else if (p.endsWith('/input')) { sends.push(route.request().postDataJSON()); body = { ok: true }; }
+      } else if (p.endsWith('/send')) { sends.push(route.request().postDataJSON()); body = { ok: true, sentAt: new Date().toISOString() }; }
       else if (p === '/api/sessions') body = { sessions };
       else if (p.endsWith('/messages')) body = { messages: [], hasMore: false, cursor: 0, nextBefore: 0 };
       else if (p.endsWith('/protocol-runs')) body = { runs: [] };
@@ -87,7 +87,8 @@ for (const width of [1280, 390]) {
     const editor = page.locator('textarea').first();
     await expect(editor).toBeEditable();
     await editor.fill('Compare the sample options');
-    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+    // Sending is allowed while the chat starts; the message is held until ready.
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath(`startup-${width}.png`), fullPage: true });
     releaseCreation();
     await expect(page.getByRole('button', { name: 'Retry startup', exact: true })).toBeVisible();
@@ -155,3 +156,47 @@ for (const width of [1280, 390]) {
     expect(errors).toEqual([]);
   });
 }
+
+test('a message sent while a new chat starts goes out once it is ready', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.EventSource = class extends EventTarget {
+      constructor(url) { super(); this.url = String(url); this.readyState = 1; setTimeout(() => this.dispatchEvent(new MessageEvent('connected', { data: '{}' })), 0); }
+      close() { this.readyState = 2; }
+    };
+  });
+  let status = 'starting';
+  const sends = [];
+  const sessions = [];
+  await page.route('**/api/**', async route => {
+    const p = new URL(route.request().url()).pathname;
+    let body = {};
+    if (p === '/api/chats') {
+      sessions.push({ id: 'fresh', title: 'New chat', chatRole: 'creator', isActive: false, updatedAt: new Date().toISOString(), chatStartup: { status: 'starting' } });
+      body = { id: 'fresh', status: 'starting' };
+    } else if (p === '/api/chats/fresh/status') {
+      sessions[0].chatStartup.status = status;
+      body = { id: 'fresh', status };
+    } else if (p === '/api/sessions/fresh/send') {
+      if (status !== 'ready') { await route.fulfill({ status: 409, json: { error: 'Chat is still starting' } }); return; }
+      sends.push(route.request().postDataJSON().text); body = { ok: true, sentAt: new Date().toISOString() };
+    } else if (p === '/api/sessions') body = { sessions };
+    else if (p.endsWith('/messages')) body = { messages: [], hasMore: false, cursor: 0, nextBefore: 0 };
+    else if (p.endsWith('/protocol-runs')) body = { runs: [] };
+    else if (p.endsWith('/btw')) body = { items: [] };
+    else if (p.endsWith('/links')) body = { links: [] };
+    else if (p === '/api/chat-pins') body = { pins: [], archived: [] };
+    else if (['/api/rooms', '/api/agents', '/api/boxes', '/api/sidecar', '/api/sharing/peers'].includes(p)) body = { rooms: [], agents: [], boxes: [], groups: [], peers: [] };
+    else if (p === '/api/quick-links' || p === '/api/starred') body = [];
+    await route.fulfill({ json: body });
+  });
+  await page.goto('/#');
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  const editor = page.locator('textarea').first();
+  await editor.fill('Start the boat dashboard');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.waitForTimeout(1000);
+  expect(sends).toEqual([]);
+  status = 'ready';
+  await expect.poll(() => sends, { timeout: 10_000 }).toEqual(['Start the boat dashboard']);
+  await expect(editor).toHaveValue('');
+});

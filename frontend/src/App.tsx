@@ -536,7 +536,7 @@ export default function App() {
     // expires) right after this returns its promise, which empties that same
     // live FileList, so iterating it after an await kept only the first file.
     const selected = Array.from(fileList)
-    if (startupBlocked()) { setMediaNotice('You can attach files once the chat is ready. Your text draft is saved.'); return }
+    if (startupFailed()) { setMediaNotice('This chat could not start. Start a new chat to attach files.'); return }
     if (uploading()) return
     const sessionId = currentId()
     const boxId = currentBox()
@@ -1056,6 +1056,31 @@ export default function App() {
     await submitChat({ id, request })
   }
 
+  // Placeholder ids ("new-chat-…") of chats the server has since allocated.
+  const startedChatIds = new Map<string, string>()
+  const resolveChatId = (id: string) => startedChatIds.get(id) || id
+  // Hold a send made while its chat is still starting, then deliver it to the
+  // real chat id as soon as the server reports the chat ready.
+  async function whenChatReady(target: SendTarget): Promise<SendTarget> {
+    const deadline = Date.now() + 180_000
+    for (;;) {
+      const id = resolveChatId(target.id)
+      const startup = sessions().find(s => s.id === id)?.chatStartup
+      if (!startup || startup.status === 'ready') return { ...target, id }
+      if (startup.status === 'failed') throw new Error(startup.error || 'Chat could not start')
+      if (Date.now() > deadline) throw new Error('Chat is taking too long to start')
+      // The open chat is already polled by the startup effect; poll others here.
+      if (!id.startsWith('new-chat-') && id !== startingChatId()) {
+        try {
+          const state = await fetchChatStatus(id)
+          setSessions(previous => previous.map(s => s.id === id ? { ...s, chatStartup: { status: state.status || 'starting', error: state.error } } : s))
+          if (state.status !== 'starting') continue
+        } catch { /* retry below */ }
+      }
+      await new Promise(resolve => setTimeout(resolve, 400))
+    }
+  }
+
   async function submitChat(pending: { id: string; request: ChatRequest }) {
     if (creating()) return
     setCreating(true)
@@ -1063,6 +1088,7 @@ export default function App() {
     setSessions(previous => previous.map(s => s.id === pending.id ? { ...s, chatStartup: { status: 'starting' } } : s))
     try {
       const result = await createChat(pending.request)
+      if (pending.id !== result.id) startedChatIds.set(pending.id, result.id)
       if (result.status === 'failed') setFailedStartupId(result.id)
       const selected = currentId() === pending.id
       saveDraft(result.id, selected ? text() : loadDraft(pending.id))
@@ -1513,8 +1539,8 @@ export default function App() {
           await persistMediaPatch(memo.id, { transcript })
         }
         if (memo.intent === 'send') {
-          const target = { id: memo.sessionId, box: memo.boxId }
-          const onCurrent = memo.sessionId === currentId() && memo.boxId === currentBox()
+          const target = await whenChatReady({ id: memo.sessionId, box: memo.boxId })
+          const onCurrent = target.id === currentId() && memo.boxId === currentBox()
           // One Send sends everything: fold any pending attachments into the same
           // message as the transcript, so voice + image never needs two taps.
           const pending = onCurrent ? files() : []
@@ -1526,10 +1552,11 @@ export default function App() {
           await sendSessionText(parts.join('\n'), target, memo.id)
           acknowledgeComposedMessage(target, memo.capturedText, pending)
         } else {
-          const previous = memo.sessionId === currentId() && memo.boxId === currentBox() ? text().trim() : loadDraft(memo.sessionId).trim()
+          const sessionId = resolveChatId(memo.sessionId)
+          const previous = sessionId === currentId() && memo.boxId === currentBox() ? text().trim() : loadDraft(sessionId).trim()
           const next = [previous, transcript].filter(Boolean).join(' ')
-          saveDraft(memo.sessionId, next)
-          if (memo.sessionId === currentId() && memo.boxId === currentBox()) setText(next)
+          saveDraft(sessionId, next)
+          if (sessionId === currentId() && memo.boxId === currentBox()) setText(next)
         }
         // Keep a tiny terminal tombstone after acknowledgement. It prevents a
         // stale second tab from replaying the memo even when Blob cleanup fails.
@@ -1570,7 +1597,7 @@ export default function App() {
   }
 
   async function toggleVoice() {
-    if (startupBlocked()) { setMediaNotice('Voice recording is available once the chat is ready.'); return }
+    if (startupFailed()) { setMediaNotice('This chat could not start. Start a new chat to record.'); return }
     if (listening()) {
       // Stop recording and transcribe
       spinSendAfterStop = false
@@ -1738,14 +1765,15 @@ export default function App() {
   }
 
   async function sendComposedMessage(rawText: string, pending: PendingFile[] = files()) {
-    if (startupBlocked()) return
+    if (startupFailed()) return
     const val = rawText.trim()
     if ((!val && !pending.length) || !currentId()) return
-    const target = { id: currentId()!, box: currentBox() }
-    const scope = mediaScopeKey(target.box, target.id)
+    const origin = { id: currentId()!, box: currentBox() }
+    const scope = mediaScopeKey(origin.box, origin.id)
     const payload = JSON.stringify({ text: rawText, files: pending.map(file => file.id) })
     try { await messageDelivery.run(scope, payload, async messageId => {
-      setUploadingFor(target, true)
+      setUploadingFor(origin, true)
+      let target = origin
       setMediaNotice('')
       try {
         const parts: string[] = val ? [val] : []
@@ -1753,13 +1781,14 @@ export default function App() {
           const uploadPath = await uploadPendingFile(file)
           parts.push(file.isImage ? `[Attached image: ${uploadPath}]` : `[Attached file: ${uploadPath}] (${file.name})`)
         }
+        target = await whenChatReady(origin)
         await sendSessionText(parts.join('\n'), target, messageId)
         acknowledgeComposedMessage(target, rawText, pending)
       } catch (e: any) {
         if (target.id === currentId() && target.box === currentBox()) setMediaNotice(`Media retained — ${e?.message || e}. Retry when ready.`)
         throw e
       } finally {
-        setUploadingFor(target, false)
+        setUploadingFor(origin, false)
       }
     }, pending[0]?.id) } catch {}
   }
@@ -1771,6 +1800,9 @@ export default function App() {
 
   const cur = () => sessions().find(s => s.id === currentId())
   const startupBlocked = () => !!cur()?.chatStartup && cur()?.chatStartup?.status !== 'ready'
+  // A new chat is usable the moment it appears: typing, attaching and voice all
+  // work while it starts, and whatever is sent then waits in whenChatReady.
+  const startupFailed = () => cur()?.chatStartup?.status === 'failed'
   const preparingWork = () => startingWorkId() === currentId() || !!cur()?.workflow?.pendingStart
   const ongoingEnabled = () => !!(preparingWork() || cur()?.workflow?.enabled || cur()?.ralph?.enabled)
   const startingChatId = createMemo(() => {
@@ -2287,7 +2319,7 @@ export default function App() {
             <Show when={startupBlocked()}>
               <div class="chat-workflow-copy" role={cur()?.chatStartup?.status === 'failed' ? 'alert' : 'status'}>
                 <strong>{cur()?.chatStartup?.status === 'failed' ? 'Chat could not start' : 'Starting chat…'}</strong>
-                <p>{cur()?.chatStartup?.error || 'You can draft your message while the chat starts.'}</p>
+                <p>{cur()?.chatStartup?.error || 'Talk or type now. It sends the moment the chat is ready.'}</p>
               </div>
               <Show when={cur()?.chatStartup?.status === 'failed' && pendingChat()?.id === currentId()}>
                 <button disabled={creating()} onClick={retryStartup}>{failedStartupId() === currentId() ? 'Try again' : 'Retry startup'}</button>
@@ -2647,7 +2679,7 @@ export default function App() {
                   <button onClick={() => { setExpanded(false); setTimeout(() => { if (textareaRef) { textareaRef.style.height = 'auto'; textareaRef.style.height = Math.min(textareaRef.scrollHeight, 120) + 'px' } }, 10) }} style={{ background: 'none', border: 'none', color: '#666', 'font-size': '14px', cursor: 'pointer', padding: '8px 6px', 'line-height': '1', '-webkit-tap-highlight-color': 'transparent', 'min-height': '42px' }} title="Collapse">{'\u2193'} Collapse</button>
                 </div>
               </Show>
-              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={startupBlocked() || uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
+              <button onClick={() => { handleSend(); setExpanded(false) }} disabled={startupFailed() || uploading() || transcribing()} title={listening() ? 'Stop, transcribe & send' : 'Send'} style={{ background: (text().trim() || files().length || listening()) ? '#4aba6a' : '#333', color: (text().trim() || files().length || listening()) ? '#000' : '#666', border: 'none', 'border-radius': '12px', padding: '10px 16px', 'font-size': '15px', 'font-weight': '600', cursor: (text().trim() || files().length || listening()) ? 'pointer' : 'default', 'min-height': '42px', '-webkit-tap-highlight-color': 'transparent' }}>{uploading() || transcribing() ? '...' : 'Send'}</button>
             </div>
           </div>
         </Show>
