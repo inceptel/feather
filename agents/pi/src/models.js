@@ -44,6 +44,39 @@ export function parseModelRef(ref) {
   return { provider: GATEWAY_PROVIDER, modelId: value, upstream: head, ref: value };
 }
 
+const squash = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function distance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let previous = row[0]; row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const kept = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+      previous = kept;
+    }
+  }
+  return row[b.length];
+}
+
+/**
+ * Resolve what a user typed against the models the gateway lists. Spelling
+ * differences in punctuation and case are forgiven ("claude-opus5.5" finds
+ * "claude-opus-5-5"); otherwise the closest names come back as suggestions.
+ */
+export function matchModelRef(input, available) {
+  const value = String(input || '').trim();
+  if (available.includes(value)) return { ref: value };
+  const loose = available.filter(ref => squash(ref) === squash(value));
+  if (loose.length === 1) return { ref: loose[0] };
+  const target = squash(value);
+  const suggestions = [...available]
+    .map(ref => ({ ref, score: distance(squash(ref), target) }))
+    .sort((x, y) => x.score - y.score || x.ref.localeCompare(y.ref))
+    .slice(0, 3).map(item => item.ref);
+  return { suggestions };
+}
+
 /** The upstream provider a recorded model ran on, e.g. "openai-codex". */
 export function upstreamOf(provider, modelId) {
   if (provider === GATEWAY_PROVIDER) return String(modelId || '').split('/')[0] || 'gateway';
@@ -132,7 +165,16 @@ export function createAgentModels({
     return { provider: parsed.provider, modelId: parsed.modelId };
   }
 
-  return { models, ensure };
+  /** Model ids the gateway serves right now (Claude and Codex subscriptions). */
+  async function listGateway() {
+    const token = fs.readFileSync(tokenFile, 'utf8').trim();
+    const response = await fetch(`${gatewayUrl}/v1/models`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) throw new Error(`gateway model list: HTTP ${response.status}`);
+    const body = await response.json();
+    return (Array.isArray(body) ? body : body.data || []).map(model => model.id).filter(Boolean);
+  }
+
+  return { models, ensure, listGateway };
 }
 
 /** Read one NAME=value key from a keyvault file without exposing the others. */

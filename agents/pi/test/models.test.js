@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createAgentModels, defaultModelRef, FALLBACK_DEFAULT_MODEL, parseModelRef, readKeyvaultKey, upstreamOf } from '../src/models.js';
+import { matchModelRef, createAgentModels, defaultModelRef, FALLBACK_DEFAULT_MODEL, parseModelRef, readKeyvaultKey, upstreamOf } from '../src/models.js';
 
 test('default model is Codex unless configured', () => {
   assert.equal(defaultModelRef({}), FALLBACK_DEFAULT_MODEL);
@@ -36,4 +36,14 @@ test('keyvault reader returns one key only', () => {
   assert.equal(readKeyvaultKey(file, 'OPENROUTER_API_KEY'), 'sk-test');
   assert.equal(readKeyvaultKey(file, 'MISSING'), undefined);
   assert.equal(readKeyvaultKey('/nonexistent', 'X'), undefined);
+});
+
+test('model names typed loosely resolve; typos get suggestions', () => {
+  const available = ['anthropic/claude-opus-5', 'anthropic/claude-opus-5-5', 'anthropic/claude-sonnet-5', 'openai-codex/gpt-5.6-sol'];
+  assert.deepEqual(matchModelRef('anthropic/claude-opus-5-5', available), { ref: 'anthropic/claude-opus-5-5' });
+  assert.deepEqual(matchModelRef('anthropic/claude-opus5.5', available), { ref: 'anthropic/claude-opus-5-5' });
+  assert.deepEqual(matchModelRef('Anthropic/Claude-Opus-5.5', available), { ref: 'anthropic/claude-opus-5-5' });
+  const typo = matchModelRef('anthropix/claude-opus-5.5', available);
+  assert.equal(typo.ref, undefined);
+  assert.equal(typo.suggestions[0], 'anthropic/claude-opus-5-5');
 });

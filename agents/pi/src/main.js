@@ -18,7 +18,7 @@ import { createRegistry, defineExtension, Harness, LiveDoc, watchEvents } from '
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { createAgentModels, defaultModelRef, parseModelRef, readKeyvaultKey } from './models.js';
+import { createAgentModels, defaultModelRef, matchModelRef, parseModelRef, readKeyvaultKey } from './models.js';
 import { createInputParser } from './input.js';
 import { createTranscript } from './transcript.js';
 import { createBridgeClient, createEventMapper, sessionStateEvent } from './bridge.js';
@@ -77,7 +77,8 @@ const openrouterKey = process.env.OPENROUTER_API_KEY || readKeyvaultKey(keyvault
 delete process.env.OPENROUTER_API_KEY;
 const memoryOn = memoryEnabled();
 const codemodeOn = codemodeEnabled();
-const { models, ensure } = createAgentModels({ secrets: openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}, viewMarks: memoryOn });
+const agentModels = createAgentModels({ secrets: openrouterKey ? { OPENROUTER_API_KEY: openrouterKey } : {}, viewMarks: memoryOn });
+const { models, ensure } = agentModels;
 
 const initialRef = parseModelRef(args.model)?.ref || defaultModelRef();
 
@@ -262,8 +263,20 @@ async function handleCommand(text) {
   const [command, value] = text.split(/\s+/, 2);
   if (command === '/view' || command === '/import') { await memoryCommand(command, value); return true; }
   if (command !== '/model') return false;
-  if (!value) { note(`model: ${currentRef}`); return true; }
-  const parsed = parseModelRef(value);
+  if (!value) { note(`model: ${currentRef}. Type /model list to see the choices.`); return true; }
+  let available = null;
+  try { available = await agentModels.listGateway(); } catch { /* gateway down: accept the ref as typed */ }
+  if (value === 'list') {
+    note(available ? `models: ${available.filter(ref => /^(anthropic|openai-codex)\//.test(ref)).join(', ')}; also openrouter/<vendor>/<model>` : 'model list unavailable: the gateway did not answer');
+    return true;
+  }
+  let ref = value;
+  if (available && !value.startsWith('openrouter/')) {
+    const match = matchModelRef(value, available);
+    if (!match.ref) { note(`unknown model: ${value.slice(0, 80)}. Did you mean ${match.suggestions.join(', ')}? Type /model list for all.`); return true; }
+    ref = match.ref;
+  }
+  const parsed = parseModelRef(ref);
   if (!parsed) { note(`invalid model: ${value.slice(0, 80)}`); return true; }
   try {
     await root.configure({ model: ensure(parsed.ref) }, ctx);
