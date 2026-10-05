@@ -76,5 +76,26 @@ export function createTranscript(sessionDir) {
     return lines.length;
   }
 
-  return { file, append, has: id => written.has(lineId(id)) };
+  // Slash commands (/model, /view …) are handled outside the durable log, so
+  // they never reach the model's memory. Write the command and its reply here
+  // so the Chat view shows what happened instead of silence.
+  let commandSeq = 0;
+  function command(userText, replyText) {
+    const now = Date.now();
+    const id = `pi-cmd-${now}-${++commandSeq}`;
+    const lines = [
+      { type: 'message', id: `${id}-u`, timestamp: new Date(now).toISOString(), message: { role: 'user', content: userText, timestamp: now } },
+      { type: 'message', id: `${id}-a`, timestamp: new Date(now + 1).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: replyText }], timestamp: now + 1 } },
+    ];
+    const fd = fs.openSync(file, 'a', 0o600);
+    try {
+      fs.writeSync(fd, (needsNewline ? '\n' : '') + lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+      fs.fsyncSync(fd);
+      needsNewline = false;
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  return { file, append, command, has: id => written.has(lineId(id)) };
 }

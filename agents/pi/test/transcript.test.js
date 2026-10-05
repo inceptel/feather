@@ -42,3 +42,16 @@ test('a transcript with numeric ids from the first release is not duplicated', (
   assert.equal(transcript.append([user, assistant]), 1);
   assert.ok(transcript.has(1) && transcript.has(2));
 });
+
+test('slash command and its reply land in the transcript, outside the entry ids', async () => {
+  const { createTranscript } = await import('../src/transcript.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cmd-'));
+  const t = createTranscript(dir);
+  t.command('/model anthropix/x', 'unknown model: anthropix/x. Did you mean anthropic/x?');
+  const lines = fs.readFileSync(t.file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(lines.map(line => line.message.role), ['user', 'assistant']);
+  assert.equal(lines[0].message.content, '/model anthropix/x');
+  assert.match(lines[1].message.content[0].text, /Did you mean anthropic\/x/);
+  assert.ok(lines.every(line => line.id.startsWith('pi-cmd-')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});

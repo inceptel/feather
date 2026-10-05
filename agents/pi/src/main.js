@@ -263,28 +263,30 @@ async function handleCommand(text) {
   const [command, value] = text.split(/\s+/, 2);
   if (command === '/view' || command === '/import') { await memoryCommand(command, value); return true; }
   if (command !== '/model') return false;
-  if (!value) { note(`model: ${currentRef}. Type /model list to see the choices.`); return true; }
+  // Answer in the Chat view too, not only in the Terminal.
+  const reply = message => { note(message); try { transcript.command(text, message); } catch { /* terminal still shows it */ } };
+  if (!value) { reply(`model: ${currentRef}. Type /model list to see the choices.`); return true; }
   let available = null;
   try { available = await agentModels.listGateway(); } catch { /* gateway down: accept the ref as typed */ }
   if (value === 'list') {
-    note(available ? `models: ${available.filter(ref => /^(anthropic|openai-codex)\//.test(ref)).join(', ')}; also openrouter/<vendor>/<model>` : 'model list unavailable: the gateway did not answer');
+    reply(available ? `models: ${available.filter(ref => /^(anthropic|openai-codex)\//.test(ref)).join(', ')}; also openrouter/<vendor>/<model>` : 'model list unavailable: the gateway did not answer');
     return true;
   }
   let ref = value;
   if (available && !value.startsWith('openrouter/')) {
     const match = matchModelRef(value, available);
-    if (!match.ref) { note(`unknown model: ${value.slice(0, 80)}. Did you mean ${match.suggestions.join(', ')}? Type /model list for all.`); return true; }
+    if (!match.ref) { reply(`unknown model: ${value.slice(0, 80)}. Did you mean ${match.suggestions.join(', ')}? Type /model list for all.`); return true; }
     ref = match.ref;
   }
   const parsed = parseModelRef(ref);
-  if (!parsed) { note(`invalid model: ${value.slice(0, 80)}`); return true; }
+  if (!parsed) { reply(`invalid model: ${value.slice(0, 80)}`); return true; }
   try {
     await root.configure({ model: ensure(parsed.ref) }, ctx);
     currentRef = parsed.ref;
     bridge.post([sessionStateEvent(currentRef)]);
-    note(`model set to ${currentRef}`);
+    reply(`model set to ${currentRef}`);
   } catch (error) {
-    note(`could not set model: ${error.message}`);
+    reply(`could not set model: ${error.message}`);
   }
   return true;
 }
