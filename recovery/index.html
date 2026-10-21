@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Feather recovery chat</title>
+  <link rel="stylesheet" href="/recovery/style.css">
+  <script src="/recovery/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Recovery chat</h1>
+      <p>Independent of the main Feather backend. The agent starts only when you send a message and acts on your requests.</p>
+      <p class="muted">Shares this host, authentication gateway, network and model provider. It cannot recover a powered-off host. Replies appear as the agent completes messages.</p>
+    </header>
+    <p id="status" role="status">Connecting to recovery service…</p>
+    <p id="error" role="alert" hidden></p>
+    <button id="older" type="button" hidden>Show older requests</button>
+    <section id="messages" aria-label="Conversation"></section>
+    <form id="composer">
+      <label for="prompt">Message to recovery agent</label>
+      <textarea id="prompt" rows="4" maxlength="32768" placeholder="Describe the problem or ask the agent to inspect the host."></textarea>
+      <div class="actions">
+        <button id="send" type="submit" disabled>Send</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+      <p class="muted">Sending is recorded before execution. A lost connection never automatically sends your request again. Keep this page open or return later for the saved reply.</p>
+    </form>
+    <noscript>Enable JavaScript to send messages. This page uses only small local assets.</noscript>
+  </main>
+</body>
+</html>

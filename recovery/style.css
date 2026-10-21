@@ -1,0 +1,21 @@
+:root { font-family: system-ui, sans-serif; color-scheme: dark light; line-height: 1.5; }
+* { box-sizing: border-box; }
+body { margin: 0; background: light-dark(#f6f7f9, #14171c); color: light-dark(#19212c, #e9edf4); }
+main { max-width: 860px; margin: auto; padding: 22px 16px 40px; }
+h1 { font-size: 1.65rem; margin-bottom: 6px; }
+header p { margin: 8px 0; }
+.muted, .meta { color: light-dark(#526070, #a7b1c0); font-size: .88rem; }
+#status { border-left: 3px solid #739de7; padding-left: 10px; }
+#error { color: light-dark(#8e1524, #ffb2b2); border: 1px solid currentColor; padding: 10px; white-space: pre-wrap; }
+article { border: 1px solid light-dark(#cbd0d8, #3b4350); border-radius: 10px; margin: 16px 0; padding: 14px; overflow-wrap: anywhere; }
+article h2 { margin: 0 0 8px; font-size: .95rem; }
+article pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 18px; }
+article .reply { border-top: 1px solid light-dark(#d5dae2, #3b4350); padding-top: 12px; }
+article .issue { color: light-dark(#8e1524, #ffb2b2); }
+label { display: block; margin: 16px 0 8px; font-weight: 600; }
+textarea { width: 100%; resize: vertical; min-height: 100px; font: inherit; padding: 12px; border-radius: 8px; border: 1px solid #788699; background: light-dark(white, #202630); color: inherit; }
+button { font: inherit; padding: 9px 16px; border: 1px solid #788699; border-radius: 7px; background: light-dark(#e6ecf8, #283d60); color: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; gap: 12px; margin-top: 10px; }
+:focus-visible { outline: 3px solid #78aaff; outline-offset: 3px; }
+[hidden] { display: none !important; }
