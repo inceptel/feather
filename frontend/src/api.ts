@@ -1196,6 +1196,7 @@ export interface SchedulerRule {
   room: string
   target: { kind: 'leader' } | { kind: 'resident', role: string } | { kind: 'session', sessionId: string } | { kind: 'new', engine: string, model?: string | null, title?: string | null }
     | { kind: 'agent', builder: { engine: string, model?: string | null }, checker: { engine: string, model?: string | null }, roundMs?: number | null }
+    | { kind: 'command', command: string, args?: string[] }
   mode: 'inject' | 'fresh'
   every: string | null
   everyMs: number | null

@@ -7314,6 +7314,7 @@ async function schedulerLaunch(rule, run) {
     return { sessionId: seated.leaderSessionId, marker: prompt.split('\n')[0] };
   }
   if (rule.mode === 'fresh' && rule.target.kind === 'agent') return schedulerLaunchAgent(rule, run, at);
+  if (rule.target.kind === 'command') return schedulerLaunchCommand(rule, run, cwd);
   if (rule.mode === 'fresh') {
     if (!rule.prompt && rule.room !== HOUSE_ROOM_NAME) throw new Error('a fresh session rule needs a prompt');
     if (rule.room === HOUSE_ROOM_NAME) ensureHouseRoom();
@@ -7360,6 +7361,83 @@ async function schedulerStartFreshSession({ id, cwd, room, engine, model = null,
   if (run) schedulerAssertActive(run);
   const delivered = await sendInput(id, prompt, run ? () => scheduledRunMayContinue(SCHEDULER_STATE.read(), run) : null);
   if (delivered.cancelled) throw new Error('Autopilot run stopped');
+}
+
+// A command run is one detached process group, so a server restart (a
+// promote) does not kill it. A small sh wrapper writes the exit code to a
+// file; the tick reads that file, or the pid, to see whether the run ended.
+// No shell parses the command or its args: they reach sh as "$0" "$@".
+function schedulerCommandsDir() { return path.join(path.dirname(SCHEDULER_RUNS_FILE), 'scheduler-commands'); }
+function schedulerPruneCommandLogs(dir, kept = 200) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return; }
+  const files = names.map((name) => path.join(dir, name))
+    .map((file) => { try { return { file, mtime: fs.statSync(file).mtimeMs }; } catch { return null; } })
+    .filter(Boolean)
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const { file } of files.slice(kept * 2)) { try { fs.unlinkSync(file); } catch {} }
+}
+async function schedulerLaunchCommand(rule, run, cwd) {
+  const file = path.join(cwd, rule.target.command);
+  if (path.relative(cwd, file).startsWith('..')) throw new Error('command is outside the Room');
+  try { fs.accessSync(file, fs.constants.X_OK); } catch { throw new Error(`${rule.target.command} is missing or not executable in #${rule.room}`); }
+  const dir = schedulerCommandsDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  schedulerPruneCommandLogs(dir);
+  const logFile = path.join(dir, `${run.runId}.log`);
+  const exitFile = path.join(dir, `${run.runId}.exit`);
+  schedulerAssertActive(run);
+  const child = spawn('/bin/sh', ['-c', '"$0" "$@" >"$FEATHER_RUN_LOG" 2>&1; echo $? >"$FEATHER_RUN_EXIT"', file, ...rule.target.args], {
+    cwd,
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, FEATHER_RULE_ID: rule.id, FEATHER_RUN_ID: run.runId, FEATHER_ROOM: rule.room, FEATHER_RUN_LOG: logFile, FEATHER_RUN_EXIT: exitFile },
+  });
+  if (!child.pid) throw new Error(`could not start ${rule.target.command}`);
+  child.on('error', (error) => console.warn(`[scheduler] ${rule.id} command:`, error.message));
+  child.unref();
+  const command = { pid: child.pid, logFile, exitFile };
+  schedulerRecordLaunch(run, { command });
+  return { sessionId: null, marker: null, command };
+}
+function schedulerPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+}
+function schedulerCommandStatus(run) {
+  const info = run.command;
+  if (!info) return 'running'; // still launching
+  let code = null;
+  try { code = fs.readFileSync(info.exitFile, 'utf8').trim(); } catch {}
+  if (code !== null && code !== '') return code === '0' ? 'done' : 'failed';
+  return schedulerPidAlive(info.pid) ? 'running' : 'failed';
+}
+// The last output line says what the run did ("3 new, 1 match"), or why it failed.
+function schedulerCommandDetail(run) {
+  const info = run.command;
+  if (!info) return null;
+  let code = '';
+  try { code = fs.readFileSync(info.exitFile, 'utf8').trim(); } catch {}
+  let last = '';
+  try {
+    const size = fs.statSync(info.logFile).size;
+    const length = Math.min(size, 4096);
+    const fd = fs.openSync(info.logFile, 'r');
+    try {
+      const buf = Buffer.alloc(length);
+      fs.readSync(fd, buf, 0, length, size - length);
+      last = buf.toString('utf8').split('\n').map((line) => line.trim()).filter(Boolean).pop() || '';
+    } finally { fs.closeSync(fd); }
+  } catch {}
+  const parts = [];
+  if (code && code !== '0') parts.push(`exit ${code}`);
+  else if (!code) parts.push('ended without an exit code');
+  if (last) parts.push(last.slice(0, 300));
+  return parts.join(': ') || null;
+}
+function schedulerKillCommand(run) {
+  const pid = run.command?.pid;
+  if (!pid || !schedulerPidAlive(pid)) return;
+  try { process.kill(-pid, 'SIGTERM'); } catch {}
 }
 
 // One agent = a builder chat plus a checker chat in one sidecar group. The
@@ -7523,6 +7601,7 @@ function schedulerFreshTurnEnded(run, agent) {
 // (OMP exits on its own) or the turn ended (Claude, Codex). Other engines:
 // the transcript went quiet. Anything else keeps running.
 function schedulerRunStatus(run, rule) {
+  if (rule.target.kind === 'command') return schedulerCommandStatus(run);
   const sessionId = run.sessionId;
   if (!sessionId) return 'running';
   if (rule.target.kind === 'agent') return schedulerAgentStatus(run);
@@ -7616,7 +7695,7 @@ function sessionTurnEndedAfter(sessionId, marker) {
 // starts the same gap from zero.
 const SCHEDULER_NUDGE_FRACTION = 0.75;
 function schedulerNudgeDue(run, rule, now) {
-  if (run.nudgedAt || !run.sessionId || rule.mode !== 'fresh') return false;
+  if (run.nudgedAt || !run.sessionId || rule.mode !== 'fresh' || rule.target.kind === 'command') return false;
   const timeout = rule.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return now - Date.parse(run.startedAt) >= timeout * SCHEDULER_NUDGE_FRACTION;
 }
@@ -7662,6 +7741,7 @@ function schedulerFinishRun(run, outcome, { rule, now = Date.now(), detail = nul
     active: (current.active || []).filter((candidate) => candidate.runId !== run.runId),
   }));
   appendSchedulerRun({ ...run, room: run.room || rule?.room || run.ruleId.split('/')[0], event: 'finished', outcome, finishedAt: new Date(now).toISOString(), durationMs: now - Date.parse(run.startedAt), ...(detail ? { detail } : {}) });
+  if (run.command) { schedulerKillCommand(run); return; }
   if (preserveChat) return;
   if (rule?.target.kind === 'agent' || run.agent) { schedulerRetireAgent(run); return; }
   // A fresh one-shot that is still open (a Claude or Codex chat idling after
@@ -7743,7 +7823,7 @@ function schedulerTick(now = Date.now()) {
       if (schedulerLaunchesInFlight.has(rule.id)) continue;
       if (expiredRuns([run], rules, now).length) { schedulerFinishRun(run, 'timeout', { rule, now }); continue; }
       const status = schedulerRunStatus(run, rule);
-      if (status !== 'running') { schedulerFinishRun(run, status, { rule, now }); continue; }
+      if (status !== 'running') { schedulerFinishRun(run, status, { rule, now, detail: run.command ? schedulerCommandDetail(run) : null }); continue; }
       if (rule.target.kind === 'agent' && run.sessionId) {
         schedulerAgentRoundCheck(run, rule, now).then((stalled) => {
           if (stalled) schedulerFinishRun(run, 'timeout', { rule, now: Date.now(), detail: stalled });

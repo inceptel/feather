@@ -37,6 +37,7 @@ function targetText(rule: SchedulerRule) {
   if (t.kind === 'session') return `session ${t.sessionId.slice(0, 8)}`
   if (t.kind === 'new') return `new ${t.engine}${t.model ? ` ${t.model}` : ''}`
   if (t.kind === 'agent') return `CR pair · ${t.builder.engine} + ${t.checker.engine}`
+  if (t.kind === 'command') return `command ${[t.command, ...(t.args || [])].join(' ')}`
   return 'chat'
 }
 function cadenceText(rule: SchedulerRule) {

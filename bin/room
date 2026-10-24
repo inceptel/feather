@@ -41,7 +41,7 @@
 #   room succeed [--model M] [--no-handoff] [--force]  retire the Leader and seat a new one
 #   room autonomy [--every 30m|--off] [--pause|--resume] [--now] [--judge]  Leader wakes + judge (actor-critic loop)
 #   room schedule [list [--all]]      Feather scheduler rules for this Room (or every Room)
-#   room schedule set <name> --target agent[:<builder>[+<checker>]]|leader|<role>|new:<engine>[:<model>] [--round 8m] [--fresh] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:RE|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH]
+#   room schedule set <name> --target agent[:<builder>[+<checker>]]|leader|<role>|new:<engine>[:<model>]|'command:<path> [args]' [--round 8m] [--fresh] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:RE|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH]
 #   room schedule fire|pause|resume|rm <name>   act on one rule;  room schedule runs [--all] [-n N]  recent runs
 #   room steer TEXT | --stdin | --file PATH   Add a dated line to STEERING.md and fire the Room's agents now
 #
@@ -948,6 +948,7 @@ def target(r):
     if k == "agent":
         party = lambda p: p.get("engine", "claude") + (":" + p["model"] if p.get("model") else "")
         return "agent " + party(t.get("builder") or {}) + "+" + party(t.get("checker") or {}) + " round " + str(round((t.get("roundMs") or 0) / 60000)) + "m"
+    if k == "command": return "command " + " ".join([t["command"]] + (t.get("args") or []))
     return k
 def cadence(r):
     parts = []
@@ -987,7 +988,7 @@ for r in rules:
 }
 
 schedule_set() {
-  local id="${1:-}"; [ -n "$id" ] || die "usage: room schedule set <name> --target agent[:<builder-engine>[:<model>][+<checker-engine>[:<model>]]]|leader|<role>|new:<engine>[:<model>]|session:<id> [--round 8m] [--fresh|--inject] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:REGEX|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH] [--timeout 1h] [--max-per-hour N] [--disabled] [--note TEXT]"
+  local id="${1:-}"; [ -n "$id" ] || die "usage: room schedule set <name> --target agent[:<builder-engine>[:<model>][+<checker-engine>[:<model>]]]|leader|<role>|new:<engine>[:<model>]|session:<id>|'command:<path-in-room> [args]' [--round 8m] [--fresh|--inject] [--every 1h|--cron '0 * * * *'|--after <rule>] [--when idle|changed:PATH|matches:PATH:REGEX|todo:SECTION|wiki-approved|frontier:SECTION]... [--prompt TEXT|--prompt-file PATH] [--timeout 1h] [--max-per-hour N] [--disabled] [--note TEXT]"
   shift
   local path; path=$(schedule_rule_path "$id") || exit 1
   local target="" mode="" every="" cron="" after="" prompt="" prompt_file="" timeout="" maxph="" enabled=true note="" round="" when=()
@@ -1034,6 +1035,9 @@ elif target.startswith("new:"):
     _, engine, *model = target.split(":", 2)
     body["target"] = {"kind": "new", "engine": engine, **({"model": model[0]} if model else {})}
 elif target.startswith("session:"): body["target"] = {"kind": "session", "sessionId": target.split(":", 1)[1]}
+elif target.startswith("command:"):
+    command, *args = target.split(":", 1)[1].split()
+    body["target"] = {"kind": "command", "command": command, "args": args}
 else: body["target"] = {"kind": "resident", "role": target}
 if mode: body["mode"] = mode
 if every: body["every"] = every

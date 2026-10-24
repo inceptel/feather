@@ -50,6 +50,19 @@ describe('scheduler rules', () => {
     assert.equal(normalizeRule({ ...leader, cron: '0 * * * *', every: null }).cron, '0 * * * *')
   })
 
+  it('normalizes a command target: a path inside the Room, args as a list, fresh only', () => {
+    const rule = normalizeRule({ id: 'boat/watch', target: { kind: 'command', command: 'workers/run', args: ['--worker', 'outboard'] }, every: '30m' })
+    assert.deepEqual(rule.target, { kind: 'command', command: 'workers/run', args: ['--worker', 'outboard'] })
+    assert.equal(rule.mode, 'fresh')
+    assert.deepEqual(normalizeRule({ id: 'boat/watch', target: { kind: 'command', command: 'run.sh' }, every: '30m' }).target.args, [])
+    for (const command of ['', '/usr/bin/env', '../escape.sh', 'bin/../../x', 'a b', '$(id)']) {
+      assert.throws(() => normalizeRule({ id: 'boat/watch', target: { kind: 'command', command }, every: '30m' }), /relative path inside the Room/, command)
+    }
+    assert.throws(() => normalizeRule({ id: 'boat/watch', target: { kind: 'command', command: 'run.sh', args: 'nope' }, every: '30m' }), /target.args/)
+    assert.throws(() => normalizeRule({ id: 'boat/watch', target: { kind: 'command', command: 'run.sh', args: [1] }, every: '30m' }), /target.args/)
+    assert.throws(() => normalizeRule({ id: 'boat/watch', target: { kind: 'command', command: 'run.sh' }, mode: 'inject', every: '30m' }), /needs mode fresh/)
+  })
+
   it('validates chains: missing parents and cycles fail', () => {
     const table = validateRules({ [leader.id]: leader, [caretaker.id]: caretaker, [judge.id]: judge })
     assert.deepEqual(Object.keys(table), [leader.id, caretaker.id, judge.id])
