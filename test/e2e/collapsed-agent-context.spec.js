@@ -6,6 +6,9 @@ test('agent setup and sidecars are collapsed without hiding normal conversation'
   const messages = [
     { uuid: 'setup', role: 'user', content: [{ type: 'text', text: setup }] },
     { uuid: 'user', role: 'user', content: [{ type: 'text', text: 'Please check my report.' }] },
+    { uuid: 'ralph', role: 'user', content: [{ type: 'text', text: '<feather-ralph-callback event="turn_complete" iteration="3">\nContinue the Ralph loop.\n</feather-ralph-callback>' }] },
+    { uuid: 'compact', role: 'user', content: [{ type: 'text', text: 'This session is being continued from a previous conversation that ran out of context. Summary details.' }] },
+    { uuid: 'inbox', role: 'user', content: [{ type: 'text', text: '<pasted_content id="ab12">\nPlannotator Inbox reply on "Pick a name" (reply msg_1, thread msg_0).\n\nAnswer: Blue\n</pasted_content id="ab12">' }] },
     { uuid: 'answer', role: 'assistant', content: [{ type: 'text', text: 'Your report is ready.' }] },
   ].map(m => ({ ...m, timestamp: '2026-09-14T12:00:00Z' }));
   await page.route('**/api/**', async route => {
@@ -30,9 +33,13 @@ test('agent setup and sidecars are collapsed without hiding normal conversation'
   await expect(page.getByText('Your report is ready.', { exact: true })).toBeVisible({ timeout: 12000 });
   await expect(page.getByText('Please check my report.', { exact: true })).toBeVisible();
   await expect(page.getByText(setup, { exact: true })).not.toBeVisible();
-  await page.locator('summary').filter({ hasText: /^Agent setup$/ }).click();
+  await page.locator('summary').filter({ hasText: /Agent setup$/ }).click();
   await expect(page.getByText(setup, { exact: true })).toBeVisible();
-  await page.locator('summary').filter({ hasText: /^Agent setup$/ }).click();
+  await page.locator('summary').filter({ hasText: /Agent setup$/ }).click();
+  for (const label of ['🖍️Ralph · iteration 3', '🗜️Compacted', '📬Inbox reply · Pick a name']) await expect(page.locator('summary').filter({ hasText: label })).toBeVisible();
+  await expect(page.getByText('Summary details.', { exact: false })).not.toBeVisible();
+  await page.locator('summary').filter({ hasText: 'Inbox reply' }).click();
+  await expect(page.getByText('Answer: Blue', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   const sidecars = page.locator('summary').filter({ hasText: /^Sidecars \(1\)$/ });
   await expect(sidecars).toBeVisible();

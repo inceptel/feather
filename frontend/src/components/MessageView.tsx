@@ -38,6 +38,7 @@ import { appUrl } from '../lib/appPath.js'
 import { extractImages } from '../lib/attachments.js'
 import { ProtocolRunCard } from './ProtocolRunCard'
 import { runsForInvocation } from '../lib/protocolRuns.js'
+import { agentNotice } from '../lib/agentNotice'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -1634,13 +1635,13 @@ export function MessageView(props: MessageViewProps) {
           </div>
         )
 
-        const internalText = (msg.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n').trim()
-        const internalLabel = /^\[feather-sidecar [^\]]+\]/.test(internalText) ? 'Sidecar message'
-          : /^(You are part of a Creator–Reviewer \(CR\) pair in Feather\.|# Feather Ralph:|You are a Feather \*\*sidecar\*\* agent\.)/.test(internalText) ? 'Agent setup' : null
-        if (msg.role === 'user' && internalLabel) {
-          return <details class="agent-context-disclosure" style={{ margin: '0 0 12px', color: 'var(--text-secondary)', 'font-size': '12px' }}>
-            <summary style={{ cursor: 'pointer', padding: '8px 0' }}>{internalLabel}</summary>
-            <div style={{ 'white-space': 'pre-wrap', 'overflow-wrap': 'anywhere', padding: '8px 12px', color: 'var(--text-primary)' }}>{internalText}</div>
+        const notice = msg.role === 'user' ? agentNotice((msg.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n')) : null
+        if (notice) {
+          return <details class="agent-context-disclosure" style={{ margin: '0 0 6px', color: 'var(--text-muted)', 'font-size': '12px' }}>
+            <summary style={{ cursor: 'pointer', padding: '2px 0', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
+              <span aria-hidden="true" style={{ 'margin-right': '6px' }}>{notice.icon}</span>{notice.label}
+            </summary>
+            <div style={{ 'white-space': 'pre-wrap', 'overflow-wrap': 'anywhere', padding: '8px 12px', color: 'var(--text-primary)' }}>{notice.body}</div>
             {metadataRow}
           </details>
         }
