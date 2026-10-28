@@ -1637,8 +1637,9 @@ export function MessageView(props: MessageViewProps) {
 
         const notice = msg.role === 'user' ? agentNotice((msg.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('\n')) : null
         if (notice) {
-          return <details class="agent-context-disclosure" style={{ margin: '0 0 6px', color: 'var(--text-muted)', 'font-size': '12px' }}>
-            <summary style={{ cursor: 'pointer', padding: '2px 0', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
+          // The agent wrote these, not the person, but they sit in the user role: keep them on the right.
+          return <details class="agent-context-disclosure" style={{ margin: '0 0 6px auto', width: 'fit-content', 'max-width': '100%', color: 'var(--text-muted)', 'font-size': '12px' }}>
+            <summary style={{ cursor: 'pointer', padding: '2px 0', 'text-align': 'right', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis' }}>
               <span aria-hidden="true" style={{ 'margin-right': '6px' }}>{notice.icon}</span>{notice.label}
             </summary>
             <div style={{ 'white-space': 'pre-wrap', 'overflow-wrap': 'anywhere', padding: '8px 12px', color: 'var(--text-primary)' }}>{notice.body}</div>

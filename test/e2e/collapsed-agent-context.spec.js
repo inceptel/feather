@@ -38,6 +38,13 @@ test('agent setup and sidecars are collapsed without hiding normal conversation'
   await page.locator('summary').filter({ hasText: /Agent setup$/ }).click();
   for (const label of ['🖍️Ralph · iteration 3', '🗜️Compacted', '📬Inbox reply · Pick a name']) await expect(page.locator('summary').filter({ hasText: label })).toBeVisible();
   await expect(page.getByText('Summary details.', { exact: false })).not.toBeVisible();
+  const right = async locator => { const box = await locator.boundingBox(); return box.x + box.width; };
+  const userRight = await right(page.getByText('Please check my report.', { exact: true }).locator('xpath=ancestor::div[contains(@class,"msg-row")]'));
+  for (const label of ['Ralph · iteration 3', 'Compacted']) {
+    const notice = page.locator('details.agent-context-disclosure').filter({ hasText: label });
+    expect(Math.abs(await right(notice) - userRight)).toBeLessThan(2);
+    expect((await notice.boundingBox()).x).toBeGreaterThan(userRight / 2);
+  }
   await page.locator('summary').filter({ hasText: 'Inbox reply' }).click();
   await expect(page.getByText('Answer: Blue', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Open sidebar' }).click();
