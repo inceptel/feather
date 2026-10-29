@@ -18,21 +18,22 @@ const AGENT_CWD = process.env.AGENT_CWD || join(HOME, 'projects/voice-agent');
 const MAX_WORKERS = Number(process.env.MAX_WORKERS) || 4;
 const DEBUG_LOG = join(HOME, '.local/state/voice-web/toolcalls.jsonl'); // every voice tool call, for review
 
-const INSTRUCTIONS = `You are Allan's voice assistant. Talk like a sharp friend on the phone: casual, fast, few words. Most replies are one sentence. Never more than two unless he asks for detail. No filler, no recaps, no "let me know if".
+const INSTRUCTIONS = `You are Allan's voice line to his Feather chats. You are a router, not an assistant: you do not think up answers, do research or give opinions. His Feather chats do the work. Your job is to carry his words to the right chat, bring back what it says, and tell him what is waiting on him.
 
-You cannot see his computer. Feather can: his agents, with a shell, his files, email, calendar, the web, and his Feather chats and Rooms.
-- Any real task or question about his stuff: call ask_feather with a clear, self-contained request, and say only "On it." or "Got it." once. Do not guess what Feather would find.
-- Tasks run in parallel. Several requests at once means several ask_feather calls, one per task. Each call returns a task number.
-- To add to or change a task, call ask_feather with its task_id.
-- A system message "Feather #N done" brings a result. Say the gist in one sentence, and say which task if more than one is open. Never read paths, ids or code aloud.
-- feather_status: what is running. stop_feather: cancel one task, or all.
-- New Feather chat ("start a chat", "new chat about X", "spin up an agent for X"): call create_chat once, never ask_feather. Pass his task if he gave one, and a short title if he named it.
-- His existing Feather chats: message_chat, read_chat take his words for the chat directly, so do not call find_chat first; find_chat is only for "which chats…" questions. message_chat sends into a chat as him and brings back its reply as "Feather #N done"; follow-ups go through ask_feather with that task_id. read_chat returns a chat's latest messages (and its live screen if busy) without touching it: answer his question from that yourself, in a sentence or two. When he says to tell or ask a chat something, use message_chat even if it is busy; the chat reads it after its current step. Only interrupt a chat when he says so. Say "On it." once per request, even across several tool calls; never say task numbers, "sent" or "Got it." after it.
-- The picked chat: he can pick one of his chats on screen. A system note says which ("Picked chat: …"). "Tell it…", "ask the chat…", "what is it doing" mean that chat: call message_chat or read_chat without chat. When he names another chat, pass its name. "Switch to the X chat" or "talk to X": call pick_chat.
-- Every tool result has ok and say. When ok is true and you speak, say the gist of say. When ok is false, it did not work as asked: tell him in a few words (error.message says if part of it happened, like a send that timed out and may still arrive), and if error.choices is there, ask which one. Never claim something worked when ok is false.
-- Before anything sends email, posts publicly, spends money or deletes data, get his yes out loud.
-- You do not know the current time, date, weather, news or prices. Ask Feather; never tell him to look it up.
-- Chit-chat and general knowledge: answer yourself.`;
+Routing:
+- He picks a chat on screen; a system note says which ("Picked chat: …"). Whatever he says goes to the picked chat with message_chat, in his own words: drop "um" and false starts, keep everything else, never rephrase, summarize or add to it. Questions too, even easy ones: the chat answers, not you.
+- He names another chat ("tell the boat chat…", "ask the Alexa one…"): message_chat with that chat. "Switch to X", "talk to X", "go to X": pick_chat, then say its name in a few words.
+- No chat is picked and he names none: ask "Which chat?" and nothing else. "New chat" or "start a chat about X": create_chat.
+- "What's it doing", "what did it say", "is it done": read_chat (no chat = the picked one) and answer in a sentence from what it returns. Nothing is sent.
+- "What's waiting on me", "what needs me", "catch me up": waiting_chats. Say how many, then each one in a few words: its name and what it needs from him, the ones that ask him something first. Skip the ones still working unless he asks. Then offer to switch to the top one.
+- A system message "Feather #N done" brings a chat's reply. Say the gist in one or two sentences. If the chat asked him something, ask him that question. Never read paths, ids or code aloud.
+- When he says to tell or ask a chat something, send it even if the chat is busy; it reads it after its current step. Only interrupt a chat when he says so.
+
+Talking:
+- Few words. Before a tool call say "On it." or nothing, never "let me check" or what you are about to do. Once per request; never "sent", task numbers or "Got it." after it. No filler, no recaps, no "let me know if".
+- Every tool result has ok and say. When ok is false, it did not work as asked: tell him in a few words, and if error.choices is there, ask which one. Never claim something worked when ok is false.
+- Only when he says "ask Feather" or wants a job done outside his chats: ask_feather. feather_status and stop_feather cover those jobs.
+- The only things you answer yourself: which chat is picked, what you can do, and repeating what a chat said.`;
 
 const TOOLS = [
   {
@@ -86,6 +87,11 @@ const TOOLS = [
     type: 'function', name: 'pick_chat',
     description: 'Make a chat the picked chat (shown on his screen), so later message_chat and read_chat calls go to it. Use for "switch to", "talk to", "pick" a chat.',
     parameters: { type: 'object', properties: { chat: { type: 'string', description: 'The chat id from find_chat, or his words for it.' } }, required: ['chat'] },
+  },
+  {
+    type: 'function', name: 'waiting_chats',
+    description: 'His chats from the last day that are waiting on him (the agent finished and the next move is his), with their last words and whether they ask him something; and the chats still working.',
+    parameters: { type: 'object', properties: {} },
   },
   { type: 'function', name: 'feather_status', description: 'Which Feather tasks are running or queued, and recent results.', parameters: { type: 'object', properties: {} } },
   {
@@ -513,7 +519,7 @@ const titleHas = (title, w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?
 async function searchChats(query = '', limit = 20) {
   const q = String(query).trim();
   if (!q) return (await sessions(limit + 15)).filter(s => !untitled(s)).slice(0, limit);
-  if (/^[0-9a-f]{8,}$/i.test(q)) return (await sessions(400)).filter(s => s.id.startsWith(q.toLowerCase())).slice(0, limit);
+  if (/^[0-9a-f]{8}(-[0-9a-f-]*)?$/i.test(q)) return (await sessions(400)).filter(s => s.id.startsWith(q.toLowerCase())).slice(0, limit);
   const words = queryWords(q);
   if (!words.length) return [];
   const score = new Map(), seen = new Map();
@@ -556,10 +562,14 @@ async function resolveChat(chat) {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
     const d = await feather(`/api/sessions?id=${q.toLowerCase()}`);
     const s = (d.sessions || []).find(x => x.id === q.toLowerCase());
-    if (s) return (await findChats(s.id))[0] || { chat: s.id.slice(0, 8), id: s.id, title: s.title, agent: s.agent, busy: false };
+    if (!s) throw fail('not_found', `No Feather chat has the id ${q}. Nothing was done.`);
+    let busy = false;
+    try { busy = looksBusy(await lastMessages(s.id, 4), s.updatedAt); } catch {}
+    return { chat: s.id.slice(0, 8), id: s.id, title: s.title || '(untitled)', agent: s.agent, busy,
+      minutes_since_activity: s.updatedAt ? Math.round((Date.now() - Date.parse(s.updatedAt)) / 60000) : null };
   }
   const found = await findChats(q);
-  if (/^[0-9a-f]{8,}$/i.test(q) && found.length === 1) return found[0];
+  if (/^[0-9a-f]{8}(-[0-9a-f-]*)?$/i.test(q) && found.length === 1) return found[0];
   const exact = found.filter(c => norm(c.title) === norm(q));
   if (exact.length === 1) return exact[0];
   const named = found.filter(c => norm(c.title).includes(norm(q).replace(/^#/, '')));
@@ -769,6 +779,30 @@ function tmuxScreen(id, lines = 25) {
   } catch { return null; }
 }
 
+// "What's waiting on me": chats from the last day whose turn has ended with the agent's words,
+// so the next move is his. Feather keeps no read marks, so a chat he already read still counts
+// until he answers it. Chats still working are listed apart.
+async function waitingChats(hours = 24) {
+  const since = Date.now() - hours * 3600_000;
+  const recent = (await sessions(40)).filter(s => !untitled(s) && s.title !== 'New chat' && Date.parse(s.updatedAt || 0) > since).slice(0, 20);
+  const rows = await Promise.all(recent.map(async s => {
+    const msgs = await lastMessages(s.id, 6).catch(() => []);
+    const minutes = Math.round((Date.now() - Date.parse(s.updatedAt)) / 60000);
+    if (looksBusy(msgs, s.updatedAt)) return { kind: 'working', chat: s.id.slice(0, 8), title: s.title, minutes_since_activity: minutes };
+    const last = msgs.filter(m => (m.role === 'user' || m.role === 'assistant') && !isToolResult(m)).at(-1);
+    if (last?.role !== 'assistant') return null;
+    const text = msgText(last);
+    if (!text) return null;
+    const tail = text.slice(-400);
+    return { kind: 'waiting', chat: s.id.slice(0, 8), title: s.title, minutes_since_activity: minutes,
+      asks_him: /\?\s*$/.test(text) || s.workflow?.phase === 'blocked', last_words: tail.length < text.length ? '…' + tail : tail };
+  }));
+  const waiting = rows.filter(r => r?.kind === 'waiting').slice(0, 8), working = rows.filter(r => r?.kind === 'working');
+  const say = waiting.length ? `${waiting.length} chat${waiting.length > 1 ? 's' : ''} waiting on him${working.length ? `, ${working.length} still working` : ''}.`
+    : working.length ? `Nothing waiting on him; ${working.length} still working.` : 'Nothing waiting on him.';
+  return okResult(say, { waiting: waiting.map(({ kind, ...r }) => r), working: working.map(({ kind, ...r }) => r) });
+}
+
 async function readChat(chat) {
   const c = await resolveChat(chat);
   const msgs = await lastMessages(c.id, 16);
@@ -812,6 +846,7 @@ const HANDLERS = {
   create_chat: (a, callId) => createChat(a, callId),
   async message_chat(a, callId, picked) { need(a, 'message'); return messageChat(chatArg(a, picked), a.message.slice(0, 20000), !!a.interrupt, callId); },
   async read_chat(a, callId, picked) { return readChat(chatArg(a, picked)); },
+  async waiting_chats() { return waitingChats(); },
   async pick_chat(a) {
     need(a, 'chat');
     const c = await resolveChat(a.chat);

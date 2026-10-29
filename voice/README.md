@@ -67,6 +67,18 @@ Typing with no call open makes a task directly.
   "the Alexa chat" finds "Alexa replacement", and "disaster kit Amazon" still finds the
   emergency supplies chat. Voice workers' `[voice] …` transcripts and sidecars are hidden.
   A name resolves when one title has every word he said.
+- **Router prompt** (2026-10-29): the voice model is a router, not an assistant. What he says
+  goes to the picked chat word for word with `message_chat`, questions too. It answers only
+  about which chat is picked and repeats what chats said.
+- `waiting_chats()`: no LLM. Chats from the last 24 h whose last message is the agent's text, so
+  the next move is his. Up to 8, each with its last words and `asks_him` (it ends in a question or
+  its workflow is blocked); chats still working are listed apart. Feather has no read marks, so a
+  chat he has read still counts until he answers it. Untitled "New chat" chats are skipped.
+- **Talk from the tap.** The mic opens on the tap and records into memory while the call connects
+  (the call key is also made ahead of time). When the data channel opens, that audio goes as
+  `input_audio_buffer.append` (PCM16 24 kHz), and new audio keeps streaming that way until the first
+  pause (0.35 s quiet or `speech_stopped`). Then the WebRTC track (a clone of the mic, silent until
+  now) takes over. Switching mid-word lost words in tests; switching at a pause does not.
 - `find_chat(query)`: that search, or an id prefix. It returns up to 5 chats with a `busy` flag.
   Busy means the latest message is from the user or is a tool call, within 30 minutes.
   (`isActive` only says the tmux session is alive.)

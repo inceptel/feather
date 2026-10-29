@@ -156,7 +156,7 @@ function reportToVoice(t) {
     pendingReports.push(`Feather #${t.id} FAILED (${what}). ${why} Detail: ${(t.error?.message || t.report || '').slice(0, 400)}\n\nTell him in one short sentence that it did not work. Do not present it as a result.${which}`);
   } else {
     const body = t.status === 'stopped' ? (t.report || 'Stopped before finishing.') : (t.report || 'Done, no text.');
-    pendingReports.push(`Feather #${t.id} ${t.status === 'stopped' ? 'stopped' : 'done'} (${what}). Result:\n${body.slice(0, 4000)}\n\nSay the gist in one sentence.${which}`);
+    pendingReports.push(`Feather #${t.id} ${t.status === 'stopped' ? 'stopped' : 'done'} (${what}). Result:\n${body.slice(0, 4000)}\n\n${t.kind === 'chat' ? 'Say the gist in one or two sentences. If it asks him something, ask him that.' : 'Say the gist in one sentence.'}${which}`);
   }
   flushReports();
 }
@@ -265,7 +265,7 @@ async function handleFunctionCalls(output) {
   calls.forEach((c, i) => rt({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: c.call_id, output: JSON.stringify(results[i]) } }));
   // If it already said its "On it" while starting or stopping tasks, don't make it speak twice.
   const spoke = output.some(o => o.type === 'message' && o.content?.some(c => c.transcript || c.text));
-  if (spoke && results.every(r => r?.ok !== false) && calls.every(c => !['feather_status', 'find_chat', 'read_chat', 'create_chat'].includes(c.name))) return false;
+  if (spoke && results.every(r => r?.ok !== false) && calls.every(c => !['feather_status', 'find_chat', 'read_chat', 'create_chat', 'waiting_chats'].includes(c.name))) return false;
   rt({ type: 'response.create' });
   return true;
 }
@@ -286,7 +286,7 @@ function onRealtime(ev) {
       }
       break;
     }
-    case 'input_audio_buffer.speech_stopped': setStatus('thinking', 'live'); break;
+    case 'input_audio_buffer.speech_stopped': setStatus('thinking', 'live'); if (early?.streaming) handOver(); break;
     case 'conversation.item.input_audio_transcription.delta': {
       let el = partial.you.get(ev.item_id);
       if (!el) { el = addMsg('you', '', { partial: true }); partial.you.set(ev.item_id, el); }
@@ -334,15 +334,19 @@ async function start() {
   talk.classList.add('connecting'); talk.textContent = '…'; setStatus('connecting');
   const audioEl = $('remote');
   audioEl.play().catch(() => {}); // unlock playback inside the tap (iOS)
+  try { audioCtx = new AudioContext(); audioCtx.resume().catch(() => {}); } catch {} // made inside the tap so iOS lets it run
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    const key = await post('api/session');
+    meter(); earlyRecord(); // you can talk from the tap: words said while connecting are sent once the call is up
+    const key = await getKey();
     pc = new RTCPeerConnection();
     pc.ontrack = e => { audioEl.srcObject = e.streams[0]; audioEl.muted = speakerOff; audioEl.play().catch(() => {}); };
     pc.onconnectionstatechange = () => {
       if (['failed', 'disconnected', 'closed'].includes(pc?.connectionState)) { addMsg('sys', 'call ended (' + pc.connectionState + ')'); stop(); }
     };
-    micStream.getTracks().forEach(t => pc.addTrack(t, micStream));
+    // The call gets its own copy of the mic, silent until the early audio is sent, so nothing is heard twice.
+    sendTrack = micStream.getAudioTracks()[0].clone(); sendTrack.enabled = false;
+    pc.addTrack(sendTrack, micStream);
     dc = pc.createDataChannel('oai-events');
     dc.onmessage = e => onRealtime(JSON.parse(e.data));
     dc.onopen = () => {
@@ -350,6 +354,7 @@ async function start() {
       const recent = [...tasks.values()].slice(-5).map(t => `#${t.id} (${t.status}): ${t.request.slice(0, 150)}${t.report ? ' → ' + t.report.slice(0, 300) : ''}`);
       if (picked) rt({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: pickedNote() }] } });
       if (recent.length) rt({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: 'Context, recent Feather tasks:\n' + recent.join('\n') }] } });
+      flushEarly();
     };
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -361,7 +366,6 @@ async function start() {
     talk.classList.remove('connecting'); talk.classList.add('on'); talk.textContent = 'Live'; talk.title = 'Call is live'; talk.setAttribute('aria-disabled', 'true');
     $('mute').disabled = false; $('speaker').disabled = false; $('endCall').hidden = false; applyMic();
     hint.textContent = `${key.model} via ${key.source === 'codex' ? 'Codex login' : 'API key'} · speak any time, interrupt freely`;
-    meter();
     try { wakeLock = await navigator.wakeLock?.request('screen'); } catch {}
   } catch (e) {
     addMsg('sys', 'could not start: ' + e.message);
@@ -375,7 +379,10 @@ function stop() {
   micStream?.getTracks().forEach(t => t.stop());
   try { audioCtx?.close(); } catch {}
   try { wakeLock?.release(); } catch {}
-  pc = dc = micStream = audioCtx = wakeLock = null;
+  try { sendTrack?.stop(); } catch {}
+  early?.node.disconnect(); early = null;
+  pc = dc = micStream = audioCtx = wakeLock = sendTrack = null;
+  prefetchKey();
   responding = false; muted = false; speakerOff = false;
   talk.classList.remove('on', 'connecting'); talk.textContent = 'Talk'; talk.title = ''; talk.removeAttribute('aria-disabled'); talk.style.removeProperty('--lvl');
   renderMute(); renderSpeaker(); applySpeaker();
@@ -385,7 +392,7 @@ function stop() {
 
 function meter() {
   try {
-    audioCtx = new AudioContext();
+    audioCtx ||= new AudioContext();
     const an = audioCtx.createAnalyser(); an.fftSize = 512;
     audioCtx.createMediaStreamSource(micStream).connect(an);
     const buf = new Uint8Array(an.fftSize);
@@ -397,10 +404,82 @@ function meter() {
   } catch {}
 }
 
+// ---------- early audio ----------
+// Connecting takes a second or two. The mic opens on the tap and records into memory. When the
+// data channel opens, that audio goes to the model as input_audio_buffer.append (PCM16, 24 kHz),
+// and new audio keeps going the same way while he is still talking. At the first pause the live
+// WebRTC track takes over, so the switch never cuts a word.
+
+let sendTrack = null, early = null;
+function earlyRecord() {
+  if (!audioCtx) return;
+  const src = audioCtx.createMediaStreamSource(micStream);
+  const node = audioCtx.createScriptProcessor(1024, 1, 1);
+  early = { node, chunks: [], rate: audioCtx.sampleRate, streaming: false, quiet: 0, sent: 0 };
+  node.onaudioprocess = e => {
+    const e2 = early; if (e2?.node !== node) return;
+    const x = new Float32Array(e.inputBuffer.getChannelData(0));
+    if (!e2.streaming) return e2.chunks.push(x);
+    if (!muted) { const pcm = to24k([x], e2.rate); e2.sent += pcm.length; rt({ type: 'input_audio_buffer.append', audio: b64(pcm) }); }
+    let sum = 0; for (const v of x) sum += v * v;
+    e2.quiet = Math.sqrt(sum / x.length) < 0.01 ? e2.quiet + x.length / e2.rate : 0;
+    if (e2.quiet >= 0.35) handOver();
+  };
+  const sink = audioCtx.createGain(); sink.gain.value = 0; // the node must reach the output to run
+  src.connect(node); node.connect(sink); sink.connect(audioCtx.destination);
+}
+
+// Data channel open: send what was said while connecting, then stream until a pause.
+function flushEarly() {
+  const e = early;
+  if (!e) return applyMic();
+  const pcm = to24k(e.chunks, e.rate); e.chunks = [];
+  if (!muted) for (let i = 0; i < pcm.length; i += 24000) rt({ type: 'input_audio_buffer.append', audio: b64(pcm.subarray(i, i + 24000)) });
+  e.sent = pcm.length; e.streaming = true;
+}
+
+function handOver() {
+  const e = early; early = null;
+  if (!e) return;
+  e.node.disconnect();
+  dbg(`early audio · ${(e.sent / 24000).toFixed(1)} s sent before the live mic took over`);
+  applyMic();
+}
+
+function to24k(chunks, rate) {
+  const n = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(n);
+  let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+  const out = new Int16Array(Math.floor(n * 24000 / rate));
+  for (let i = 0; i < out.length; i++) {
+    const x = i * rate / 24000, j = Math.floor(x), f = x - j;
+    const v = (all[j] || 0) * (1 - f) + (all[j + 1] ?? all[j] ?? 0) * f;
+    out[i] = Math.max(-1, Math.min(1, v)) * 0x7fff;
+  }
+  return out;
+}
+function b64(int16) {
+  const u8 = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+  let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+// A call key is made ahead of time, so the tap goes straight to connecting.
+let keyAhead = null;
+function prefetchKey() { keyAhead = post('api/session').catch(() => null); }
+async function getKey() {
+  const k = await keyAhead; keyAhead = null;
+  if (k?.value && (!k.expires_at || k.expires_at * 1000 > Date.now() + 20_000)) return k;
+  return post('api/session');
+}
+prefetchKey();
+
 // ---------- mic and speaker ----------
 // Mute turns off only your mic. Speaker turns off only the assistant's voice. End call hangs up.
 
-function applyMic() { micStream?.getAudioTracks().forEach(t => { t.enabled = !muted; }); }
+function applyMic() {
+  micStream?.getAudioTracks().forEach(t => { t.enabled = !muted; });
+  if (sendTrack && !early) sendTrack.enabled = !muted;
+}
 function applySpeaker() { $('remote').muted = speakerOff; }
 
 function renderMute() {
@@ -424,7 +503,7 @@ function liveHint() {
 // ---------- controls ----------
 
 talk.onclick = () => {
-  if (!pc) return start();
+  if (!pc && !talk.classList.contains('connecting')) return start();
   if (talk.classList.contains('connecting')) return stop(); // cancel a stuck connect
   // While live, this button only shows status and mic level; End call hangs up.
 };
