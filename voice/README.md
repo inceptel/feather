@@ -1,8 +1,8 @@
 # voice: the Feather voice page
 
 Built 2026-10-28. Open it from "Voice" in the Feather sidebar (`/voice/`, behind Authelia).
-It runs as its own process (supervisord `voice-web`) from the deployed release:
-`<release>/voice/server.js`.
+Feather starts it when `FEATHER_VOICE=1` is set. It runs as Feather's child process, on its own
+port, so a Voice crash restarts Voice only (`lib/voice-process.js`).
 
 ## The pieces
 
@@ -13,8 +13,8 @@ It runs as its own process (supervisord `voice-web`) from the deployed release:
 2. **Voice model**: OpenAI `gpt-realtime-2.1`, voice `marin`, semantic VAD (it decides when you
    finished a thought), `gpt-4o-mini-transcribe` for your side of the transcript. It is fast and
    chatty but cannot see the computer. Its instructions and tools live in `server.js`.
-3. **voice-web server** (`server.js`, Node, no dependencies, supervisord `voice-web`,
-   127.0.0.1:4930, Caddy `handle_path /voice/*`). It does three jobs:
+3. **voice-web server** (`server.js`, Node, no dependencies, a child process of Feather,
+   127.0.0.1:4930 (`FEATHER_VOICE_PORT`), Caddy `handle_path /voice/*`). It does three jobs:
    - Mints a short-lived Realtime key (`POST /api/session`). It uses the Codex ChatGPT login in
      `~/.codex/auth.json` first, then `OPENAI_API_KEY` as a fallback (environment, else
      `VOICE_ENV_FILE`, else `~/.config/feather/voice.env`; never in this repo). The real credential never
@@ -123,7 +123,12 @@ typed requests.
 
 ## Run and roll back
 
-- Logs: `~/.local/state/voice-web.log`, `~/.local/state/voice-web.err.log`.
-- Restart: `supervisorctl -c /etc/supervisor/conf.d/supervisord.conf restart voice-web`.
-- Supervisord runs `node /home/user/.local/share/feather/current/voice/server.js`, so a
-  refeather ships it; restart `voice-web` after a promote to load the new code.
+- Turn it on: set `FEATHER_VOICE=1` in Feather's environment. Read-only Feather never starts it.
+- Feather starts Voice when it starts and stops it (and its workers) when it stops. So a
+  refeather or a Feather restart also restarts Voice. That ends an open call and its tasks.
+- If Voice exits, Feather starts it again after 1 s, then 5 s, then every 30 s.
+- Voice gets the user's environment without Feather's own `FEATHER_*` settings, plus `PORT`
+  and `FEATHER_URL` (this Feather), which `bin/feather` uses.
+- Feather keeps the Voice pid in `<state dir>/voice.pid`. After a hard crash, the next Feather
+  stops the Voice that was left behind before it starts a new one.
+- Logs: Feather's log, each line marked `[voice]`.

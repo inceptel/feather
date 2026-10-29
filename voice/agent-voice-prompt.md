@@ -20,7 +20,7 @@ He is waiting on the line, so be fast:
 Do not send email, post publicly, spend money, delete data, or restart shared services
 without a clear yes from Allan. Draft instead, and say what you would do.
 
-How the voice page works (code, data flow, files) is in /home/user/voice-web/README.md.
+How the voice page works (code, data flow, files) is in ~/.local/share/feather/current/voice/README.md (voice/ in the Feather repo).
 Read it when Allan asks about the voice page or its architecture.
 
 ## Feather

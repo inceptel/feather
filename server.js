@@ -88,6 +88,7 @@ import {
 import { appendSteering, normalizeSteerText } from './lib/room-frontier.js';
 import { FEED_COMMENTS_MAX, FEED_COMMENT_ID_RE, feedCommentQueueLine, isFeedCommentState, normalizeFeedCommentText, normalizeFeedReplyText, publicFeedComment } from './lib/feed-comments.js';
 import { retrySpawnCapacitySync } from './lib/process-retry.js';
+import { startVoiceProcess } from './lib/voice-process.js';
 
 import { createProtocolRunStore } from './lib/protocol-runs.js';
 import {
@@ -125,6 +126,9 @@ const READ_ONLY_MODE = envEnabled(process.env.FEATHER_READ_ONLY);
 // The experimental pi agent (agents/pi). Off by default; with it off, no pi
 // chat can start, resume or be listed, and nothing else changes.
 const PI_AGENT_ENABLED = envEnabled(process.env.FEATHER_PI_AGENT);
+// The Voice page (voice/). Off by default; with it on, Feather runs
+// voice/server.js as a child process on FEATHER_VOICE_PORT (4930).
+const VOICE_ENABLED = !READ_ONLY_MODE && envEnabled(process.env.FEATHER_VOICE);
 const CHAT_CONFIG = loadChatConfig();
 const ROOM_PULSES_ENABLED = !READ_ONLY_MODE && !/^(0|false|no|off)$/i.test(String(process.env.FEATHER_ROOM_PULSES || '').trim());
 const configuredPulseInterval = Number(process.env.FEATHER_ROOM_PULSE_INTERVAL_MS);
@@ -8177,6 +8181,19 @@ server.listen(PORT, '0.0.0.0', () => {
     setInterval(checkLeaderWakes, ROOM_PULSE_CHECK_MS);
   }
   if (SCHEDULER_ENABLED) setInterval(schedulerTick, SCHEDULER_CHECK_MS);
+  if (VOICE_ENABLED) {
+    const voice = startVoiceProcess({
+      appDir: APP_DIR,
+      pidFile: path.join(STATE_PATHS.instance.root, 'voice.pid'),
+      port: Number(process.env.FEATHER_VOICE_PORT) || 4930,
+      featherUrl: `http://127.0.0.1:${PORT}`,
+    });
+    // Feather has no other shutdown work: stop Voice, then die of the same signal.
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+      process.once(signal, () => { voice.stop(); process.kill(process.pid, signal); });
+    }
+    process.once('exit', () => voice.stop());
+  }
   if (!READ_ONLY_MODE && process.env.FEATHER_PROJECT_COMMS_ENABLED !== '0') {
     setTimeout(() => void projectCommsRuntime.tick(), 1500);
     setInterval(() => void projectCommsRuntime.tick(), 10_000).unref();

@@ -1961,7 +1961,7 @@ export default function App() {
             <span>Workspace</span>
             <button onClick={() => { setSidebar(false); showHome({ kind: 'wiki' }) }}>Wiki</button>
             <Show when={!isRemoteBox()}><button onClick={openWorkspaceFiles}>Files</button></Show>
-            {/* Voice page (~/voice-web) is served at /voice/ on this host, outside Feather. */}
+            {/* Voice page (voice/), served at /voice/ on this host when Feather runs with FEATHER_VOICE=1. */}
             <Show when={!isRemoteBox()}><a href="/voice/" target="_blank" rel="noopener" onClick={() => setSidebar(false)}>Voice</a></Show>
           </nav>
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
