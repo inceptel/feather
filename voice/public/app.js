@@ -168,6 +168,66 @@ function flushReports() {
   rt({ type: 'response.create' });
 }
 
+// ---------- picked chat ----------
+// The chat the voice talks to. Picked by tap (or by voice via pick_chat); message_chat and read_chat
+// use it when no chat is named. The last few picks stay as one-tap chips.
+
+let picked = null, recentPicks = [];
+try { picked = JSON.parse(localStorage.getItem('voicePicked') || 'null'); recentPicks = JSON.parse(localStorage.getItem('voicePicks') || '[]'); } catch {}
+const pickedNote = () => picked ? `Picked chat: "${picked.title}" (chat ${picked.id.slice(0, 8)}). Message_chat and read_chat go there unless he names another chat.` : 'No chat is picked now. Ask which chat if he does not name one.';
+
+function setPicked(c, { tell = true } = {}) {
+  const same = picked?.id === c?.id;
+  picked = c ? { id: c.id, title: c.title } : null;
+  if (picked) recentPicks = [picked, ...recentPicks.filter(x => x.id !== picked.id)].slice(0, 4);
+  try { localStorage.setItem('voicePicked', JSON.stringify(picked)); localStorage.setItem('voicePicks', JSON.stringify(recentPicks)); } catch {}
+  renderPicked();
+  if (!same && tell && dc?.readyState === 'open') rt({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: pickedNote() }] } });
+  if (!same && c && dc?.readyState === 'open') addMsg('sys', 'talking to ' + picked.title);
+}
+
+function renderPicked() {
+  const btn = $('pickBtn');
+  btn.classList.toggle('none', !picked);
+  btn.querySelector('.name').textContent = picked ? picked.title : 'no chat · tap to pick';
+  $('unpick').hidden = !picked;
+  $('recentPicks').replaceChildren(...recentPicks.filter(x => x.id !== picked?.id).slice(0, 3).map(x => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = x.title; b.title = 'Talk to ' + x.title;
+    b.onclick = () => setPicked(x);
+    return b;
+  }));
+}
+
+const ago = m => m == null ? '' : m < 1 ? 'now' : m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd';
+let chatSeq = 0;
+async function loadChats(q) {
+  const list = $('chatList'), seq = ++chatSeq;
+  if (!list.children.length || q) list.replaceChildren(Object.assign(document.createElement('div'), { className: 'note', textContent: q ? 'Searching…' : 'Loading…' }));
+  let chats;
+  try { const r = await fetch('api/chats?q=' + encodeURIComponent(q)); chats = (await r.json()).chats; if (!r.ok || !chats) throw new Error(); }
+  catch { if (seq === chatSeq) list.replaceChildren(Object.assign(document.createElement('div'), { className: 'note', textContent: 'Could not load chats.' })); return; }
+  if (seq !== chatSeq) return; // a newer search won
+  if (!chats.length) { list.replaceChildren(Object.assign(document.createElement('div'), { className: 'note', textContent: `No chat matches "${q}".` })); return; }
+  list.replaceChildren(...chats.map(c => {
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = 'row' + (c.live ? ' live' : '') + (c.id === picked?.id ? ' cur' : '');
+    const dot = document.createElement('span'); dot.className = 'live-dot'; dot.title = 'open now';
+    const t = document.createElement('span'); t.className = 't'; t.textContent = c.title;
+    const a = document.createElement('span'); a.className = 'ago'; a.textContent = ago(c.minutes_since_activity);
+    b.append(dot, t, a);
+    b.onclick = () => { setPicked(c); $('chatDlg').close(); };
+    return b;
+  }));
+}
+
+let chatTimer = null;
+$('pickBtn').onclick = () => { $('chatQ').value = ''; $('chatDlg').showModal(); loadChats(''); };
+$('chatQ').oninput = () => { clearTimeout(chatTimer); chatTimer = setTimeout(() => loadChats($('chatQ').value.trim()), 250); };
+$('chatClose').onclick = () => $('chatDlg').close();
+$('chatDlg').onclick = e => { if (e.target === $('chatDlg')) $('chatDlg').close(); };
+$('unpick').onclick = () => setPicked(null);
+renderPicked();
+
 // ---------- tools ----------
 
 async function post(path, body) {
@@ -180,7 +240,11 @@ async function post(path, body) {
 // All tools run on the server (POST api/tool). The result is typed: { ok, say, ... } or { ok: false, say, error: { code, ... } }.
 // The call id lets the server treat a retried call as the same operation.
 async function runTool(name, args, callId) {
-  try { return await post('api/tool', { name, args, call_id: callId }); }
+  try {
+    const r = await post('api/tool', { name, args, call_id: callId, picked: picked?.id });
+    if (name === 'pick_chat' && r.ok && r.picked) setPicked(r.picked, { tell: false });
+    return r;
+  }
   catch (e) { return { ok: false, say: 'The voice server did not answer.', error: { code: 'backend', message: e.message, retryable: true } }; }
 }
 
@@ -284,6 +348,7 @@ async function start() {
     dc.onopen = () => {
       // A new call still knows what Feather is doing and what it last found.
       const recent = [...tasks.values()].slice(-5).map(t => `#${t.id} (${t.status}): ${t.request.slice(0, 150)}${t.report ? ' → ' + t.report.slice(0, 300) : ''}`);
+      if (picked) rt({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: pickedNote() }] } });
       if (recent.length) rt({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: 'Context, recent Feather tasks:\n' + recent.join('\n') }] } });
     };
     const offer = await pc.createOffer();

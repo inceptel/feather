@@ -54,11 +54,23 @@ Typing with no call open makes a task directly.
 
 ## Talking to existing Feather chats
 
-- `find_chat(query)`: Feather's own search (`/api/sessions?q=`), or an id prefix. It returns up
-  to 5 chats with a `busy` flag. Busy means the latest message is from the user or is a tool
-  call, within 30 minutes. (`isActive` only says the tmux session is alive.) The voice workers'
-  own `[voice] …` transcripts are hidden.
-- `message_chat(chat, message, interrupt?)`: `POST /api/sessions/:id/send`, as you. It becomes a
+- **The picked chat.** The "Talking to" bar at the top picks one chat by tap: recent chats
+  (green dot = open now), a search box, and the last 3 picks as one-tap chips. The pick lives in
+  the browser (`localStorage`) and goes with every tool call as `picked`. `message_chat` and
+  `read_chat` use it when no chat is named. A system note tells the voice model which chat is
+  picked, at call start and on every change. `pick_chat(chat)` picks one by voice ("switch to the
+  Alexa chat"). The page's list comes from `GET api/chats?q=`.
+- **Chat search** (`searchChats`, shared by the picker, `find_chat` and name lookups): Feather's
+  own search (`/api/sessions?q=`) on the query minus filler words. Feather needs every word to
+  match, so when that finds fewer than 3 chats, each word is also searched on its own. Ranking:
+  words at the start of a title word first, then words matched in the content, then recency. So
+  "the Alexa chat" finds "Alexa replacement", and "disaster kit Amazon" still finds the
+  emergency supplies chat. Voice workers' `[voice] …` transcripts and sidecars are hidden.
+  A name resolves when one title has every word he said.
+- `find_chat(query)`: that search, or an id prefix. It returns up to 5 chats with a `busy` flag.
+  Busy means the latest message is from the user or is a tool call, within 30 minutes.
+  (`isActive` only says the tmux session is alive.)
+- `message_chat(chat?, message, interrupt?)`: `POST /api/sessions/:id/send`, as you. It becomes a
   `kind: chat` task card with an "Open chat" link. The server polls `/messages` every 2 s and
   streams the chat's tool calls to the card. The reply counts as done when the latest message is
   assistant text with no tool call and nothing new comes for 8 s (cap 20 minutes). This works for
@@ -66,7 +78,7 @@ Typing with no call open makes a task directly.
   `interrupt: true` first calls `/interrupt` (tmux C-c, and it stops autopilot).
   `ask_feather` with that task_id sends a follow-up into the chat. `stop_feather` only stops
   listening; it never touches the chat.
-- `read_chat(chat)`: no LLM. The server returns the last 6 messages and, when the chat is busy,
+- `read_chat(chat?)`: no LLM. The server returns the last 6 messages and, when the chat is busy,
   its live screen (`tmux capture-pane` of `feather-<id8>`). The voice model answers from that.
   Nothing is sent into the chat.
 - `create_chat(task?, title?, agent?)`: no LLM. `POST /api/chats {requestId}` with no options takes a

@@ -66,6 +66,39 @@
   #toolsBody code { font-size: 12.5px; color: var(--text); }
   #toolsBody pre { white-space: pre-wrap; font-size: 12.5px; background: var(--panel2); padding: 8px 10px; border-radius: 8px; }
 
+  #target { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  #pickBtn { flex: 0 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: calc(100% - 34px); padding: 6px 12px; border-radius: 18px; border: 1px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); font-size: 14px; cursor: pointer; }
+  #pickBtn .lbl { color: var(--muted); font-size: 12.5px; flex: none; }
+  #pickBtn .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #pickBtn.none { border-style: dashed; border-color: var(--line); background: none; }
+  #pickBtn.none .name { color: var(--muted); font-weight: 400; }
+  #unpick { flex: none; background: none; border: 0; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 2px; }
+  #unpick[hidden] { display: none; }
+  #recentPicks { display: flex; gap: 6px; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  #recentPicks:empty { display: none; }
+  #recentPicks::-webkit-scrollbar { display: none; }
+  .chip { flex: 0 1 auto; min-width: 0; max-width: 60%; padding: 5px 11px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+  #chatDlg { width: min(560px, 100vw); max-width: 100vw; height: min(80dvh, 640px); margin: auto auto 0; border: 1px solid var(--line); border-radius: 16px 16px 0 0;
+    background: var(--panel); color: var(--text); padding: 0; }
+  @media (min-width: 600px) { #chatDlg { margin: auto; border-radius: 16px; } }
+  #chatDlg[open] { display: flex; flex-direction: column; }
+  #chatDlg::backdrop { background: rgb(0 0 0 / .5); }
+  #chatDlg .bar { display: flex; gap: 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  #chatQ { flex: 1; min-width: 0; padding: 9px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); font-size: 16px; }
+  #chatDlg .bar button { background: none; border: 0; color: var(--muted); font-size: 22px; cursor: pointer; }
+  #chatList { flex: 1; overflow-y: auto; padding: 4px 0 calc(8px + env(safe-area-inset-bottom)); }
+  #chatList .row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 16px; border: 0; border-bottom: 1px solid var(--line); background: none;
+    color: var(--text); text-align: left; font-size: 15px; cursor: pointer; }
+  #chatList .row:hover, #chatList .row.cur { background: var(--panel2); }
+  #chatList .row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chatList .row .ago { flex: none; font-size: 12px; color: var(--muted); }
+  #chatList .row .live-dot { visibility: hidden; }
+  #chatList .row.live .live-dot { visibility: visible; }
+  #chatList .note { padding: 16px; color: var(--muted); font-size: 14px; text-align: center; }
+
   #tasks { margin: 0 16px; display: flex; flex-direction: column; gap: 6px; max-height: 40dvh; overflow-y: auto; }
   #tasks:empty { display: none; }
   .task { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; overflow: hidden; }
@@ -125,6 +158,12 @@
   <a href="/" title="Back to Feather">Feather</a>
 </header>
 
+<div id="target">
+  <button id="pickBtn" class="none" type="button" title="Pick the chat your voice talks to"><span class="lbl">Talking to</span><span class="name">no chat · tap to pick</span><span aria-hidden="true">▾</span></button>
+  <button id="unpick" type="button" hidden title="Clear the picked chat" aria-label="Clear the picked chat">×</button>
+  <div id="recentPicks"></div>
+</div>
+
 <main id="log">
   <div class="empty" id="empty">
     <p><b>Tap Talk and speak.</b> During a call: <b>Mute</b> turns off your mic, <b>Speaker</b> turns the voice on or off, <b>End call</b> hangs up.</p>
@@ -154,6 +193,7 @@
   <button id="endCall" type="button" hidden>End call</button>
 </footer>
 <dialog id="toolsDlg"><div class="bar"><h2>What the voice model has</h2><button id="toolsClose" type="button" aria-label="Close">×</button></div><div id="toolsBody">Loading…</div></dialog>
+<dialog id="chatDlg"><div class="bar"><input id="chatQ" type="search" placeholder="Search chats…" autocomplete="off" enterkeyhint="search"><button id="chatClose" type="button" aria-label="Close">×</button></div><div id="chatList" tabindex="-1" autofocus></div></dialog>
 <audio id="remote" autoplay playsinline></audio>
 <script src="app.js"></script>
 </body>

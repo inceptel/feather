@@ -28,6 +28,7 @@ You cannot see his computer. Feather can: his agents, with a shell, his files, e
 - feather_status: what is running. stop_feather: cancel one task, or all.
 - New Feather chat ("start a chat", "new chat about X", "spin up an agent for X"): call create_chat once, never ask_feather. Pass his task if he gave one, and a short title if he named it.
 - His existing Feather chats: message_chat, read_chat take his words for the chat directly, so do not call find_chat first; find_chat is only for "which chats…" questions. message_chat sends into a chat as him and brings back its reply as "Feather #N done"; follow-ups go through ask_feather with that task_id. read_chat returns a chat's latest messages (and its live screen if busy) without touching it: answer his question from that yourself, in a sentence or two. When he says to tell or ask a chat something, use message_chat even if it is busy; the chat reads it after its current step. Only interrupt a chat when he says so. Say "On it." once per request, even across several tool calls; never say task numbers, "sent" or "Got it." after it.
+- The picked chat: he can pick one of his chats on screen. A system note says which ("Picked chat: …"). "Tell it…", "ask the chat…", "what is it doing" mean that chat: call message_chat or read_chat without chat. When he names another chat, pass its name. "Switch to the X chat" or "talk to X": call pick_chat.
 - Every tool result has ok and say. When ok is true and you speak, say the gist of say. When ok is false, it did not work as asked: tell him in a few words (error.message says if part of it happened, like a send that timed out and may still arrive), and if error.choices is there, ask which one. Never claim something worked when ok is false.
 - Before anything sends email, posts publicly, spends money or deletes data, get his yes out loud.
 - You do not know the current time, date, weather, news or prices. Ask Feather; never tell him to look it up.
@@ -57,11 +58,11 @@ const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        chat: { type: 'string', description: 'The chat id from find_chat (best), or its exact name. If several chats match, nothing is sent and you get the choices.' },
+        chat: { type: 'string', description: 'Omit for the picked chat. Otherwise the chat id from find_chat (best), or its name. If several chats match, nothing is sent and you get the choices.' },
         message: { type: 'string', description: 'What to send, as he would type it.' },
         interrupt: { type: 'boolean', description: 'Stop what the chat is doing first (also stops its autopilot). Only when he says so.' },
       },
-      required: ['chat', 'message'],
+      required: ['message'],
     },
   },
   {
@@ -79,7 +80,12 @@ const TOOLS = [
   {
     type: 'function', name: 'read_chat',
     description: 'Read an existing chat without touching it: its latest messages, whether it is busy, and its live screen when busy. Use it to answer his questions about a chat.',
-    parameters: { type: 'object', properties: { chat: { type: 'string', description: 'The chat id from find_chat, or its name.' } }, required: ['chat'] },
+    parameters: { type: 'object', properties: { chat: { type: 'string', description: 'Omit for the picked chat. Otherwise the chat id from find_chat, or its name.' } } },
+  },
+  {
+    type: 'function', name: 'pick_chat',
+    description: 'Make a chat the picked chat (shown on his screen), so later message_chat and read_chat calls go to it. Use for "switch to", "talk to", "pick" a chat.',
+    parameters: { type: 'object', properties: { chat: { type: 'string', description: 'The chat id from find_chat, or his words for it.' } }, required: ['chat'] },
   },
   { type: 'function', name: 'feather_status', description: 'Which Feather tasks are running or queued, and recent results.', parameters: { type: 'object', properties: {} } },
   {
@@ -486,13 +492,55 @@ function looksBusy(msgs, updatedAt) {
   return last.role === 'user' || blocks(last).some(b => b.type === 'tool_use');
 }
 
-async function findChats(query = '') {
+// Chats a person would pick: not the voice workers' own transcripts, not sidecar helpers.
+function pickable(s) {
+  return !s.chatStandby && !/^\[voice\]/.test(s.title || '') && !/(^|-)voice-agent$/.test(s.projectId || '')
+    && !/^(You are a Feather \*\*sidecar|\[feather-sidecar )/.test(s.title || '');
+}
+const untitled = s => !s.title || s.title === s.id.slice(0, 8);
+const STOP = new Set('a an and are about any chat chats feather find for from in is it me my of on one or our search that the this to was we were what where which with you your'.split(' '));
+const sessions = async (limit, q) => ((await feather(`/api/sessions?limit=${limit}${q ? `&q=${encodeURIComponent(q)}` : ''}`)).sessions || []).filter(pickable);
+
+const queryWords = q => [...new Set(String(q).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1 && !STOP.has(w)))];
+// A word starts somewhere in the title ("boat" hits "#boat" and "boats", not "sailboat").
+const titleHas = (title, w) => new RegExp(`(^|[^\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'iu').test(title || '');
+
+// Feather's search needs every word to match somewhere in a chat. Spoken queries rarely do
+// ("disaster kit Amazon" for a chat about emergency supplies), so when the whole query finds
+// little, each word is also searched on its own. Chats are ranked by words in the title first
+// (a long chat that mentions everything should not beat the chat named for it), then by how
+// many words hit the content, then by recency.
+async function searchChats(query = '', limit = 20) {
   const q = String(query).trim();
-  const hex = /^[0-9a-f]{8,}/i.test(q) ? q.toLowerCase() : null;
-  const d = await feather(`/api/sessions?limit=${hex ? 200 : 5}${q && !hex ? `&q=${encodeURIComponent(q)}` : ''}`);
-  let list = (d.sessions || []).filter(s => !s.chatStandby && !/^\[voice\]/.test(s.title || '')); // skip the voice workers' own transcripts
-  if (hex) list = list.filter(s => s.id.startsWith(hex));
-  return Promise.all(list.slice(0, 5).map(async s => {
+  if (!q) return (await sessions(limit + 15)).filter(s => !untitled(s)).slice(0, limit);
+  if (/^[0-9a-f]{8,}$/i.test(q)) return (await sessions(400)).filter(s => s.id.startsWith(q.toLowerCase())).slice(0, limit);
+  const words = queryWords(q);
+  if (!words.length) return [];
+  const score = new Map(), seen = new Map();
+  const hit = (s, n) => { score.set(s.id, (score.get(s.id) || 0) + n); if (!seen.has(s.id)) seen.set(s.id, s); };
+  (await sessions(limit + 10, words.join(' '))).forEach(s => hit(s, words.length));
+  if (seen.size < 3 && words.length > 1) {
+    const per = await Promise.all(words.map(w => sessions(15, w).catch(() => [])));
+    per.forEach(list => list.forEach(s => hit(s, 1)));
+  }
+  const at = s => Date.parse(s.updatedAt || 0) || 0;
+  const phrase = words.join(' ');
+  for (const s of seen.values()) {
+    const t = (s.title || '').toLowerCase();
+    hit(s, words.filter(w => titleHas(t, w)).length * 10 + (t.includes(phrase) ? 10 : 0));
+  }
+  return [...seen.values()].sort((a, b) => score.get(b.id) - score.get(a.id) || at(b) - at(a)).slice(0, limit);
+}
+
+// The picker's list: cheap, no per-chat transcript reads.
+function chatRow(s) {
+  return { id: s.id, chat: s.id.slice(0, 8), title: untitled(s) ? '(untitled)' : s.title, agent: s.agent, live: !!s.isActive,
+    minutes_since_activity: s.updatedAt ? Math.round((Date.now() - Date.parse(s.updatedAt)) / 60000) : null };
+}
+
+async function findChats(query = '') {
+  const list = await searchChats(query, 5);
+  return Promise.all(list.map(async s => {
     let busy = false;
     try { busy = looksBusy(await lastMessages(s.id, 4), s.updatedAt); } catch {}
     return { chat: s.id.slice(0, 8), id: s.id, title: s.title || '(untitled)', agent: s.agent, busy,
@@ -516,8 +564,12 @@ async function resolveChat(chat) {
   if (exact.length === 1) return exact[0];
   const named = found.filter(c => norm(c.title).includes(norm(q).replace(/^#/, '')));
   if (named.length === 1 && !/^[0-9a-f]{8,}$/i.test(q)) return named[0];
+  // "the Alexa chat": the one chat whose title has every word he said.
+  const words = queryWords(q);
+  const titled = found.filter(c => words.length && words.every(w => titleHas(c.title, w)));
+  if (titled.length === 1) return titled[0];
   if (!found.length) throw fail('not_found', `No Feather chat matches "${q}". Nothing was sent.`);
-  throw fail('ambiguous_chat', `"${q}" matches more than one chat, so nothing was sent. Ask him which one, then pass its chat id.`,
+  throw fail('ambiguous_chat', `"${q}" matches more than one chat, so nothing was done. Ask him which one, then pass its chat id.`,
     { choices: found.map(c => ({ chat: c.chat, title: c.title, busy: c.busy })) });
 }
 
@@ -758,8 +810,13 @@ const HANDLERS = {
     return okResult('On it.', r);
   },
   create_chat: (a, callId) => createChat(a, callId),
-  async message_chat(a, callId) { need(a, 'chat', 'message'); return messageChat(a.chat, a.message.slice(0, 20000), !!a.interrupt, callId); },
-  async read_chat(a) { need(a, 'chat'); return readChat(a.chat); },
+  async message_chat(a, callId, picked) { need(a, 'message'); return messageChat(chatArg(a, picked), a.message.slice(0, 20000), !!a.interrupt, callId); },
+  async read_chat(a, callId, picked) { return readChat(chatArg(a, picked)); },
+  async pick_chat(a) {
+    need(a, 'chat');
+    const c = await resolveChat(a.chat);
+    return okResult(`Picked ${c.title}.`, { picked: { id: c.id, title: c.title }, busy: c.busy });
+  },
   async find_chat(a) {
     const chats = await findChats(a.query || '');
     return okResult(chats.length ? `${chats.length} chat${chats.length > 1 ? 's' : ''} found.` : 'No chats match.',
@@ -778,13 +835,21 @@ const HANDLERS = {
 const callMemo = new Map();   // "tool:call id" -> { at, promise }
 const MEMO_TOOLS = new Set(['ask_feather', 'message_chat']);
 
-async function runTool(name, args, callId) {
+// No chat named: the one he picked on the page.
+function chatArg(a, picked) {
+  const c = typeof a.chat === 'string' ? a.chat.trim() : '';
+  if (c && !/^(it|this|that|the chat|this chat|that chat|picked|current|the picked chat)$/i.test(c)) return c;
+  if (picked) return picked;
+  throw fail('bad_args', 'No chat is picked and none was named. Ask him which chat.');
+}
+
+async function runTool(name, args, callId, picked) {
   const h = HANDLERS[name];
   if (!h) return errResult(fail('bad_args', `unknown tool ${name}`));
   const memoKey = callId && MEMO_TOOLS.has(name) ? `${name}:${callId}` : null;
   if (memoKey && callMemo.has(memoKey)) return callMemo.get(memoKey).promise;
   const promise = (async () => {
-    try { return await h(args && typeof args === 'object' ? args : {}, callId); }
+    try { return await h(args && typeof args === 'object' ? args : {}, callId, picked); }
     catch (e) { return errResult(e); }
   })();
   if (memoKey) {
@@ -829,8 +894,15 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await ask(request.slice(0, 20000), task_id, !!steer));
     }
     if (path === '/api/tool' && req.method === 'POST') {
-      const { name, args, call_id } = await readBody(req);
-      return send(res, 200, await runTool(String(name || ''), args, typeof call_id === 'string' ? call_id : null));
+      const { name, args, call_id, picked } = await readBody(req);
+      const pid = typeof picked === 'string' && /^[0-9a-f-]{36}$/i.test(picked) ? picked.toLowerCase() : null;
+      return send(res, 200, await runTool(String(name || ''), args, typeof call_id === 'string' ? call_id : null, pid));
+    }
+    if (path === '/api/chats' && req.method === 'GET') {
+      const q = (url.searchParams.get('q') || '').slice(0, 200);
+      try {
+        return send(res, 200, { chats: (await searchChats(q, 25)).map(chatRow) });
+      } catch (e) { return send(res, 502, { error: e.message }); }
     }
     if (path === '/api/stop' && req.method === 'POST') {
       const { task_id } = await readBody(req);
