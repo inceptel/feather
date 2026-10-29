@@ -133,7 +133,7 @@ function launchClaude(name, claudeArgs, cwd) {
   try {
     const token = process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
     const envLine = token ? `export CLAUDE_CODE_OAUTH_TOKEN="${token}"\n` : '';
-    fs.writeFileSync(script, `#!/bin/bash -l\n${envLine}exec claude ${claudeArgs} --dangerously-skip-permissions --disallowed-tools AskUserQuestion\n`, { mode: 0o755 });
+    fs.writeFileSync(script, `#!/bin/bash -l\n${envLine}exec claude ${claudeArgs} --dangerously-skip-permissions --disallowed-tools AskUserQuestion,SendFeedback\n`, { mode: 0o755 });
     console.log(`[launch] script written OK`);
   } catch (e) {
     console.error(`[launch] writeFileSync FAILED: ${e.message}`);

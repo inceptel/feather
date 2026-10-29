@@ -1546,7 +1546,7 @@ function spawnSession(id, cwd, agent = 'claude', { ompModel = '', mode = null, m
       systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
       cliModel ? `--model ${shellQuote(cliModel)}` : '',
       '--dangerously-skip-permissions',
-      '--disallowed-tools AskUserQuestion',
+      '--disallowed-tools AskUserQuestion,SendFeedback',
     ].filter(Boolean).join(' ');
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, cwd);
   }
@@ -1669,7 +1669,7 @@ function resumeSession(id, cwd) {
       systemPromptFile ? `--append-system-prompt-file ${shellQuote(systemPromptFile)}` : '',
       cliModel ? `--model ${shellQuote(cliModel)}` : '',
       '--dangerously-skip-permissions',
-      '--disallowed-tools AskUserQuestion',
+      '--disallowed-tools AskUserQuestion,SendFeedback',
     ].filter(Boolean).join(' ');
     launchInTmux(name, `bash --rcfile ~/.bashrc -ic ${shellQuote(`${bridgeEnv} ${args}`)}`, sessionCwd);
   }
@@ -4269,7 +4269,7 @@ app.post('/api/sessions/:id/fork', (req, res) => {
         `--session-id ${shellQuote(newId)}`,
         `--append-system-prompt-file ${shellQuote(forkPromptFile)}`,
         '--dangerously-skip-permissions',
-        '--disallowed-tools AskUserQuestion',
+        '--disallowed-tools AskUserQuestion,SendFeedback',
       ].join(' ');
       launchInTmux(tmuxName(newId), `bash --rcfile ~/.bashrc -ic ${shellQuote(args)}`, workspace.cwd);
     }
