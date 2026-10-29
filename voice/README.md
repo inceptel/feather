@@ -77,8 +77,8 @@ Typing with no call open makes a task directly.
 - **Talk from the tap.** The mic opens on the tap and records into memory while the call connects
   (the call key is also made ahead of time). When the data channel opens, that audio goes as
   `input_audio_buffer.append` (PCM16 24 kHz), and new audio keeps streaming that way until the first
-  pause (0.35 s quiet or `speech_stopped`). Then the WebRTC track (a clone of the mic, silent until
-  now) takes over. Switching mid-word lost words in tests; switching at a pause does not.
+  pause (0.35 s quiet or `speech_stopped`). Then the mic track goes on the WebRTC sender with
+  `replaceTrack` (the sender starts empty; a cloned, disabled track stayed silent on iPhone). Switching mid-word lost words in tests; switching at a pause does not.
 - `find_chat(query)`: that search, or an id prefix. It returns up to 5 chats with a `busy` flag.
   Busy means the latest message is from the user or is a tool call, within 30 minutes.
   (`isActive` only says the tmux session is alive.)

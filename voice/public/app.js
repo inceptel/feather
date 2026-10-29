@@ -279,7 +279,7 @@ function onRealtime(ev) {
     case 'session.created': setStatus('live', 'live'); break;
     case 'input_audio_buffer.speech_started': {
       // Hold the user's place now: the transcript comes later, often after the reply has started.
-      setStatus('listening', 'live');
+      setStatus('listening', 'live'); if (callStats) callStats.speech++;
       if (ev.item_id && !partial.you.has(ev.item_id)) {
         const el = addMsg('you', '…', { partial: true }); el.dataset.empty = '1';
         partial.you.set(ev.item_id, el);
@@ -298,7 +298,7 @@ function onRealtime(ev) {
       const t = (ev.transcript || '').trim();
       if (!el && t) el = addMsg('you', t);
       if (el) { if (t) el.textContent = t; else el.remove(); el.classList.remove('partial'); }
-      if (t) { lastHeard = t; logCall({ heard: t }); }
+      if (t) { lastHeard = t; logCall({ heard: t }); if (callStats) callStats.heard++; }
       partial.you.delete(ev.item_id); break;
     }
     case 'conversation.item.input_audio_transcription.failed':
@@ -347,9 +347,10 @@ async function start() {
     pc.onconnectionstatechange = () => {
       if (['failed', 'disconnected', 'closed'].includes(pc?.connectionState)) { addMsg('sys', 'call ended (' + pc.connectionState + ')'); stop(); }
     };
-    // The call gets its own copy of the mic, silent until the early audio is sent, so nothing is heard twice.
-    sendTrack = micStream.getAudioTracks()[0].clone(); sendTrack.enabled = false;
-    pc.addTrack(sendTrack, micStream);
+    // The call's audio sender starts with no track; the mic goes on it after the early audio is sent,
+    // so nothing is heard twice. (A cloned, disabled track stayed silent on iPhone.)
+    sender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
+    callStats = { speech: 0, heard: 0 };
     dc = pc.createDataChannel('oai-events');
     dc.onmessage = e => onRealtime(JSON.parse(e.data));
     dc.onopen = () => {
@@ -382,9 +383,9 @@ function stop() {
   micStream?.getTracks().forEach(t => t.stop());
   try { audioCtx?.close(); } catch {}
   try { wakeLock?.release(); } catch {}
-  try { sendTrack?.stop(); } catch {}
+  if (callStats) logCall({ call_end: callStats }); callStats = null;
   early?.node.disconnect(); early = null;
-  pc = dc = micStream = audioCtx = wakeLock = sendTrack = null;
+  pc = dc = micStream = audioCtx = wakeLock = sender = null;
   prefetchKey();
   responding = false; muted = false; speakerOff = false;
   talk.classList.remove('on', 'connecting'); talk.textContent = 'Talk'; talk.title = ''; talk.removeAttribute('aria-disabled'); talk.style.removeProperty('--lvl');
@@ -413,7 +414,7 @@ function meter() {
 // and new audio keeps going the same way while he is still talking. At the first pause the live
 // WebRTC track takes over, so the switch never cuts a word.
 
-let sendTrack = null, early = null, tapAt = 0;
+let sender = null, early = null, tapAt = 0, callStats = null;
 function earlyRecord() {
   if (!audioCtx) return;
   const src = audioCtx.createMediaStreamSource(micStream);
@@ -437,7 +438,8 @@ function flushEarly() {
   const e = early;
   if (!e) return applyMic();
   const pcm = to24k(e.chunks, e.rate); e.chunks = [];
-  const stats = { connect_ms: Math.round(performance.now() - tapAt), recorded_s: +(pcm.length / 24000).toFixed(2), rate: e.rate, ctx_at_start: e.ctx, ctx_now: audioCtx?.state, ua: navigator.userAgent.slice(0, 120) };
+  let pk = 0, ss = 0; for (const v of pcm) { const a = Math.abs(v); if (a > pk) pk = a; ss += v * v; }
+  const stats = { peak: +(pk / 32767).toFixed(3), rms: +(Math.sqrt(ss / (pcm.length || 1)) / 32767).toFixed(4), connect_ms: Math.round(performance.now() - tapAt), recorded_s: +(pcm.length / 24000).toFixed(2), rate: e.rate, ctx_at_start: e.ctx, ctx_now: audioCtx?.state, ua: navigator.userAgent.slice(0, 120) };
   logCall({ early: stats });
   // The recorder got nothing (the phone kept the audio context asleep): use the live mic at once.
   if (pcm.length < 2400 && stats.connect_ms > 400) { early = null; e.node.disconnect(); dbg('early audio · recorder got nothing, live mic now'); return applyMic(); }
@@ -451,7 +453,7 @@ function handOver() {
   if (!e) return;
   e.node.disconnect();
   dbg(`early audio · ${(e.sent / 24000).toFixed(1)} s sent before the live mic took over`);
-  logCall({ early_handover: { sent_s: +(e.sent / 24000).toFixed(2), live_track: sendTrack?.readyState } });
+  logCall({ early_handover: { sent_s: +(e.sent / 24000).toFixed(2), live_track: micStream?.getAudioTracks()[0]?.readyState } });
   applyMic();
 }
 
@@ -487,7 +489,8 @@ prefetchKey();
 
 function applyMic() {
   micStream?.getAudioTracks().forEach(t => { t.enabled = !muted; });
-  if (sendTrack && !early) sendTrack.enabled = !muted;
+  const t = micStream?.getAudioTracks()[0];
+  if (sender && !early && t && sender.track !== t) sender.replaceTrack(t).catch(err => addMsg('sys', 'live mic failed: ' + err.message));
 }
 function applySpeaker() { $('remote').muted = speakerOff; }
 
