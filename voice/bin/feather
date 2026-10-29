@@ -1,0 +1,108 @@
+#!/usr/bin/env node
+// Small Feather CLI for the voice pi agent. Talks to Feather on loopback.
+//   feather chats [n]            recent chats (id, agent, active, title)
+//   feather read <id> [n]        last n messages of a chat, text only
+//   feather send <id> <text...>  send a message into a chat (as the user)
+//   feather new <prompt...> [--name NAME] [--agent claude|codex|pi]
+//   feather peek <id> [lines]    live terminal of a running chat (read-only)
+//   feather rooms                list Rooms
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+
+const FEATHER = process.env.FEATHER_URL || 'http://127.0.0.1:3300';
+const [cmd, ...args] = process.argv.slice(2);
+
+async function api(path, opts = {}) {
+  const res = await fetch(FEATHER + path, opts);
+  const body = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${body.slice(0, 300)}`);
+  try { return JSON.parse(body); } catch { return body; }
+}
+const post = (path, data, headers = {}) => api(path, {
+  method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(data),
+});
+
+function textOf(m) {
+  const c = m.content;
+  if (typeof c === 'string') return c;
+  if (!Array.isArray(c)) return '';
+  return c.map(b => b.type === 'text' ? b.text : b.type === 'tool_use' ? `[tool ${b.name}]` : '').filter(Boolean).join('\n');
+}
+
+async function main() {
+  switch (cmd) {
+    case 'chats': {
+      const n = Number(args[0]) || 20;
+      const d = await api('/api/sessions');
+      const list = (Array.isArray(d) ? d : d.sessions || []).slice(0, n);
+      for (const s of list) console.log(`${s.id}  ${(s.agent || '').padEnd(6)} ${s.isActive ? 'active' : 'idle  '}  ${s.updatedAt || ''}  ${s.title || '(untitled)'}`);
+      break;
+    }
+    case 'read': {
+      const [id, n] = args;
+      if (!id) throw new Error('usage: feather read <id> [n]');
+      const d = await api(`/api/sessions/${encodeURIComponent(id)}/messages?limit=${Number(n) || 10}`);
+      for (const m of d.messages || []) {
+        const t = textOf(m).trim();
+        if (t) console.log(`--- ${m.role} ${m.timestamp || ''}\n${t.slice(0, 4000)}`);
+      }
+      break;
+    }
+    case 'send': {
+      const [id, ...rest] = args;
+      const text = rest.join(' ').trim();
+      if (!id || !text) throw new Error('usage: feather send <id> <text>');
+      const d = await post(`/api/sessions/${encodeURIComponent(id)}/send`, { text }, { 'x-feather-message-id': randomUUID() });
+      console.log(JSON.stringify(d));
+      break;
+    }
+    case 'new': {
+      // Warm-first: a create with only requestId gets a ready standby chat at once. Name and task are applied
+      // after, the task as a normal first message (Feather's /send waits for a chat that is still starting).
+      const key = randomUUID().replace(/-/g, '');
+      const body = { requestId: `cli-${key}` };
+      const words = [];
+      let name = '';
+      for (let i = 0; i < args.length; i++) {
+        if (args[i] === '--name') name = args[++i] || '';
+        else if (args[i] === '--agent') body.agent = args[++i];
+        else words.push(args[i]);
+      }
+      const d = await post('/api/chats', body);
+      if (d.status === 'failed') throw new Error(`chat ${d.id} failed to start: ${d.error || ''}`);
+      const prompt = words.join(' ').trim();
+      if (name && d.status === 'starting' && !prompt) {
+        // Cold start with no first message: wait for it, so the name sticks.
+        let s = d;
+        for (let i = 0; i < 90 && s.status === 'starting'; i++) { await new Promise(r => setTimeout(r, 2000)); s = await api(`/api/chats/${d.id}/status`); }
+        if (s.status !== 'ready') throw new Error(`chat ${d.id} did not start: ${s.status} ${s.error || ''}`);
+        d.status = 'ready';
+      }
+      if (name && d.status !== 'starting') await post(`/api/sessions/${d.id}/rename`, { title: name });
+      if (prompt) {
+        await post(`/api/sessions/${d.id}/send`, { text: name ? `${prompt}\n\n(Allan named this chat "${name}". Keep that title.)` : prompt },
+          { 'x-feather-message-id': `cli-${key}-send` });
+        if (name) await post(`/api/sessions/${d.id}/rename`, { title: name });
+      }
+      console.log(JSON.stringify({ id: d.id, title: name || null, status: prompt ? 'sent' : d.status, url: `/#${d.id}` }));
+      break;
+    }
+    case 'peek': {
+      const [id, n] = args;
+      if (!/^[0-9a-f-]{8,}$/i.test(id || '')) throw new Error('usage: feather peek <id> [lines]');
+      const out = execFileSync('tmux', ['capture-pane', '-p', '-J', '-t', `feather-${id.slice(0, 8)}`, '-S', `-${Number(n) || 60}`], { encoding: 'utf8' });
+      console.log(out.replace(/\n{3,}/g, '\n\n').trimEnd());
+      break;
+    }
+    case 'rooms': {
+      const d = await api('/api/rooms');
+      const list = Array.isArray(d) ? d : d.rooms || [];
+      for (const r of list) console.log(`${r.name || r.id}  ${r.title || r.description || ''}`.trim());
+      break;
+    }
+    default:
+      console.log('usage: feather chats [n] | read <id> [n] | send <id> <text> | new <prompt> [--name N] [--agent A] | peek <id> [lines] | rooms');
+      process.exit(cmd ? 1 : 0);
+  }
+}
+main().catch(e => { console.error('feather:', e.message); process.exit(1); });

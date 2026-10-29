@@ -1,0 +1,270 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice call UI concepts</title><style>
+:root{color-scheme:dark;--bg:#0f1115;--p:#171a21;--l:#2a2f3a;--t:#e8ebf2;--m:#8b93a7;--a:#7c9cff}
+@media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f6f7fb;--p:#fff;--l:#dde1ea;--t:#161a22;--m:#646c80;--a:#4062e8}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:16px/1.5 system-ui,sans-serif;display:flex;flex-direction:column;height:100dvh}
+header{padding:12px 16px;border-bottom:1px solid var(--l)}header h1{font-size:18px;margin:0 0 6px}
+.intro{color:var(--m);font-size:13.5px;max-width:900px}.intro p{margin:4px 0}.intro ul{margin:2px 0}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 16px}nav button{flex:none;border:1px solid var(--l);background:var(--p);color:var(--t);border-radius:99px;padding:6px 12px;cursor:pointer;font-size:14px}
+nav button.on{background:var(--a);border-color:var(--a);color:#fff}
+.track{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth}
+.slide{flex:0 0 100%;scroll-snap-align:start;overflow-y:auto;padding:4px 20px 24px;max-width:100%}
+.slide>*{max-width:900px;margin-left:auto;margin-right:auto}h2{font-size:22px}
+pre{background:var(--p);border:1px solid var(--l);border-radius:10px;padding:12px;overflow-x:auto;font:13px/1.35 ui-monospace,Menlo,monospace}
+code{background:var(--p);padding:1px 5px;border-radius:4px}
+footer{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-top:1px solid var(--l)}
+footer button{border:0;background:var(--a);color:#fff;border-radius:22px;padding:10px 20px;font-size:15px;cursor:pointer}footer button:disabled{opacity:.35}
+#n{color:var(--m)}</style></head><body>
+<header><h1>Voice call UI: five concepts</h1><div class="intro"><p>Mock concepts for the Feather voice page. All of them cover pause/resume, mic mute, voice output,</p>
+<p>call status and end call. Text wireframes only; nothing here is built.</p>
+<p><b>Today&#x27;s page:</b> one round button (&quot;Talk&quot;, then &quot;Pause call&quot;, then a larger amber &quot;Resume&quot;), a small</p>
+<p>round speaker button, a status pill in the header, and a small &quot;End call now&quot; link that shows only while paused.</p>
+<p>A pause ends the call after 5 minutes.</p>
+<p><b>Terms used below</b></p>
+<ul><li>
+<b>Pause</b> = mic off + voice off, and the call stays open (5-minute limit).
+</li><li>
+<b>Mute mic</b> = only your mic is off. You still hear the voice and Feather results.
+</li><li>
+<b>Voice off</b> = you don&#x27;t hear the voice. Your mic stays on (useful in a meeting, or with captions).
+</li></ul></div></header>
+<nav><button data-i="0">1. Minimal</button><button data-i="1">2. Prominent pause/resume (pause is the hero)</button><button data-i="2">3. Separate mic and speaker controls (phone-call style)</button><button data-i="3">4. Accessibility first</button><button data-i="4">5. Compact desktop style</button><button data-i="5">Recommendation</button><button data-i="6">Wording rules for all of them</button></nav><main class="track" id="track"><section class="slide" id="s0" aria-roledescription="slide" aria-label="1 of 7"><h2>1. Minimal: one button</h2>
+<pre>┌──────────────────────────────┐
+│ Voice              ● Live    │
+│                              │
+│   (transcript / task cards)  │
+│                              │
+│          ╭────────╮          │
+│          │ Pause  │          │
+│          │  call  │          │
+│          ╰────────╯          │
+│         End call             │
+└──────────────────────────────┘
+Paused:  ● Paused · ends in 4:32
+          ╭────────╮
+          │ Resume │   (amber)
+          ╰────────╯
+         End call</pre>
+<ul><li>
+<b>Flow:</b> Talk → Pause call ⇄ Resume. End call is always a small text link under the button.
+<ul><li>
+No mute and no speaker control. Pause covers both.
+</li></ul>
+</li><li>
+<b>Rationale:</b> the fewest decisions while driving or walking. This is close to what is live today.
+</li><li>
+<b>Pros:</b> you can&#x27;t get into a confused state (for example mic off while you think you&#x27;re live). Easy to use without looking.
+</li><li>
+<b>Cons:</b> you can&#x27;t listen without being heard. Pausing also stops Feather results from being spoken until you resume.
+</li><li>
+<b>Wording:</b>
+<ul><li>
+Use &quot;Pause call&quot; and &quot;Resume&quot;, not &quot;Pause&quot; alone.
+</li><li>
+Show the countdown only when under 1 minute remains, to cut the noise.
+</li><li>
+Use &quot;End call&quot;, not &quot;End call now&quot;.
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s1" aria-roledescription="slide" aria-label="2 of 7"><h2>2. Prominent pause/resume (pause is the hero)</h2>
+<pre>┌──────────────────────────────┐
+│ Voice   ● Live · 03:12       │
+│  (transcript)                │
+│ ┌──────────────────────────┐ │
+│ │      ❚❚  Pause call      │ │  ← full-width bar, 72 px
+│ └──────────────────────────┘ │
+│  🎤 Mute mic     🔊 Voice on   │  ← small secondary toggles
+│           End call           │
+└──────────────────────────────┘
+Paused: the whole footer turns amber
+│ ┌──────────────────────────┐ │
+│ │     ▶  Resume call       │ │
+│ └──────────────────────────┘ │
+│  Paused · mic and voice off  │
+│  Call ends in 4:32           │</pre>
+<ul><li>
+<b>Flow:</b>
+<ul><li>
+The wide bar toggles pause.
+</li><li>
+The secondary toggles stay usable while paused and apply after you resume.
+</li><li>
+End call asks &quot;End call?&quot; only when Feather tasks are still running.
+</li></ul>
+</li><li>
+<b>Rationale:</b> pause is the action you use most, so it gets the biggest target. Mute and voice are still there for the less common cases.
+</li><li>
+<b>Pros:</b> you can&#x27;t miss the paused state, because the whole footer changes color. Fast to hit with a thumb.
+</li><li>
+<b>Cons:</b> three ways to go &quot;quiet&quot; can confuse: Pause, Mute mic and Voice off.
+</li><li>
+<b>Wording:</b>
+<ul><li>
+Label the toggles by their state: &quot;Mic on&quot; / &quot;Mic muted&quot; and &quot;Voice on&quot; / &quot;Voice off&quot;.
+</li><li>
+Never use &quot;Unmute&quot; as a label. It reads as the current state.
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s2" aria-roledescription="slide" aria-label="3 of 7"><h2>3. Separate mic and speaker controls (phone-call style)</h2>
+<pre>┌──────────────────────────────┐
+│ Voice  ● Live  Feather: 2 busy│
+│  (transcript)                │
+│                              │
+│   ╭────╮   ╭────╮   ╭────╮    │
+│   │ 🎤 │   │ ❚❚ │   │ 🔊 │    │
+│   ╰────╯   ╰────╯   ╰────╯    │
+│    Mic     Pause     Voice   │
+│                              │
+│          ╭──────╮            │
+│          │  ✕   │  (red)     │
+│          ╰──────╯            │
+│          End call            │
+└──────────────────────────────┘</pre>
+<ul><li>
+<b>Flow:</b>
+<ul><li>
+Each toggle shows a slash and a red fill when off.
+</li><li>
+Pause dims Mic and Voice, because they are overridden.
+</li><li>
+Resume restores what they were set to before the pause.
+</li></ul>
+</li><li>
+<b>Rationale:</b> it matches the phone-call screen everyone already knows (FaceTime or a regular phone call).
+</li><li>
+<b>Pros:</b> you know where everything is. It allows listen-only (Mic muted) and silent (Voice off) modes.
+</li><li>
+<b>Cons:</b>
+<ul><li>
+It has the most controls.
+</li><li>
+Pause plus Mic is two controls for nearly the same thing.
+</li><li>
+The red End call button is easy to hit by mistake.
+</li></ul>
+</li><li>
+<b>Wording:</b>
+<ul><li>
+Put a text label under every icon. Icons alone are not enough.
+</li><li>
+Use &quot;Voice&quot; rather than &quot;Speaker&quot;, since it controls the assistant&#x27;s audio and not your phone speaker.
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s3" aria-roledescription="slide" aria-label="4 of 7"><h2>4. Accessibility first: large targets, clear labels</h2>
+<pre>┌──────────────────────────────┐
+│  CALL IS LIVE                │  ← big text status, also announced
+│  Feather is working on 1 task│
+│                              │
+│ ┌──────────────────────────┐ │
+│ │  Pause call              │ │  ≥ 64 px tall, full width
+│ │  Mic and voice turn off  │ │  ← second line explains it
+│ └──────────────────────────┘ │
+│ ┌────────────┐┌────────────┐ │
+│ │ Mic: ON    ││ Voice: ON  │ │  ≥ 56 px, words, not icons
+│ └────────────┘└────────────┘ │
+│ ┌──────────────────────────┐ │
+│ │  End call                │ │  outlined, at the bottom, far from Pause
+│ └──────────────────────────┘ │
+└──────────────────────────────┘</pre>
+<ul><li>
+<b>Flow:</b>
+<ul><li>
+Every change is spoken by a screen reader through an aria-live status (&quot;Call paused. Mic and voice off.&quot;).
+</li><li>
+It also plays a short tone when you pause or resume.
+</li><li>
+Keyboard shortcuts: Space for Pause/Resume, M for Mic, V for Voice, Esc then Enter for End call.
+</li><li>
+End call needs a second tap, or a hold for 1 s.
+</li></ul>
+</li><li>
+<b>Rationale:</b> it can be used with low vision, shaky hands, a screen reader, or in sunlight in a car.
+</li><li>
+<b>Pros:</b>
+<ul><li>
+States are shown in words, not color alone.
+</li><li>
+The targets are hard to miss.
+</li><li>
+The destructive action is kept apart from the others.
+</li></ul>
+</li><li>
+<b>Cons:</b> it takes up more screen, so the transcript area shrinks. It may look heavy for everyday use.
+</li><li>
+<b>Wording:</b>
+<ul><li>
+Use &quot;Mic: ON&quot; / &quot;Mic: OFF&quot;. The state goes in the label, and there are no verbs to puzzle over.
+</li><li>
+The status line should be a full sentence (&quot;Call is paused. It ends in 4 minutes.&quot;).
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s4" aria-roledescription="slide" aria-label="5 of 7"><h2>5. Compact desktop style</h2>
+<pre>┌────────────────────────────────────────────────────────────┐
+│ Voice  ● Live 03:12  ·  gpt-realtime · Feather 2/4 busy      │
+│ (transcript and task cards, wide)                          │
+│                                                            │
+├────────────────────────────────────────────────────────────┤
+│ [❚❚ Pause] [🎤 Mic ▾] [🔊 Voice ▾]  Type here…  [Send]  [End] │
+└────────────────────────────────────────────────────────────┘</pre>
+<ul><li>
+<b>Flow:</b>
+<ul><li>
+One toolbar row.
+</li><li>
+The Mic and Voice dropdowns choose the device (which mic, which output) and also mute.
+</li><li>
+Hover shows the keyboard shortcut.
+</li><li>
+Paused tints the toolbar amber and shows &quot;Paused 4:32&quot; in the status.
+</li><li>
+It can collapse to a floating mini-bar when the tab is in the background (Picture-in-Picture style).
+</li></ul>
+</li><li>
+<b>Rationale:</b> made for Allan at a desk, typing and talking side by side. It keeps the transcript large.
+</li><li>
+<b>Pros:</b> dense and fast with the keyboard. It allows choosing devices (a headset versus the laptop mic).
+</li><li>
+<b>Cons:</b> the targets are too small for a phone or a car. It needs a separate mobile layout.
+</li><li>
+<b>Wording:</b>
+<ul><li>
+Use short verbs on the buttons (&quot;Pause&quot;, &quot;End&quot;) and put the details in tooltips.
+</li><li>
+In the status bar, say &quot;Paused&quot; rather than an icon only.
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s5" aria-roledescription="slide" aria-label="6 of 7"><h2>Recommendation</h2>
+<ul><li>
+<b>On the phone:</b> use concept 1 (minimal), which is what&#x27;s live today. Add one optional &quot;Listen only&quot; mode later, only if you miss muting the mic.
+</li><li>
+<b>On the desktop:</b> use concept 5.
+</li><li>
+<b>From concept 4, take these whatever layout wins:</b>
+<ul><li>
+aria-live status announcements,
+</li><li>
+text labels that show the state,
+</li><li>
+End call kept apart from Pause.
+</li></ul>
+</li></ul></section>
+<section class="slide" id="s6" aria-roledescription="slide" aria-label="7 of 7"><h2>Wording rules for all of them</h2>
+<ul><li>
+Label a toggle by its current state (&quot;Mic: OFF&quot;), or by a clear action (&quot;Pause call&quot; / &quot;Resume&quot;). Never mix the two.
+</li><li>
+Say &quot;Voice&quot; for the assistant&#x27;s audio and &quot;Mic&quot; for yours. Avoid &quot;Speaker&quot; and &quot;Mute&quot; on their own.
+</li><li>
+Use &quot;End call&quot;, not &quot;Hang up&quot; or &quot;Stop&quot;. On this page &quot;Stop&quot; already means &quot;stop the Feather task&quot;.
+</li><li>
+Say in words what Pause turns off: &quot;mic and voice off&quot;.
+</li></ul></section></main>
+<footer><button id="prev">‹ Prev</button><span id="n" aria-live="polite"></span><button id="next">Next ›</button></footer>
+<script>
+const tr=document.getElementById('track'),S=[...document.querySelectorAll('.slide')],B=[...document.querySelectorAll('nav button')];
+let cur=0;const go=i=>{cur=Math.max(0,Math.min(S.length-1,i));tr.scrollTo({left:cur*tr.clientWidth});mark();history.replaceState(null,'','#'+(cur+1));};
+function mark(){B.forEach((b,k)=>b.classList.toggle('on',k===cur));document.getElementById('n').textContent=(cur+1)+' / '+S.length;prev.disabled=cur===0;next.disabled=cur===S.length-1;B[cur].scrollIntoView({block:'nearest',inline:'nearest'});}
+tr.addEventListener('scroll',()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==cur){cur=i;mark();}});
+B.forEach(b=>b.onclick=()=>go(+b.dataset.i));prev.onclick=()=>go(cur-1);next.onclick=()=>go(cur+1);
+addEventListener('keydown',e=>{if(e.key==='ArrowRight')go(cur+1);if(e.key==='ArrowLeft')go(cur-1);});
+const h=parseInt(location.hash.slice(1));setTimeout(()=>go(h>0?h-1:0),0);
+</script></body></html>
