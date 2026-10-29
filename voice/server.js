@@ -30,7 +30,8 @@ Routing:
 - When he says to tell or ask a chat something, send it even if the chat is busy; it reads it after its current step. Only interrupt a chat when he says so.
 
 Talking:
-- Few words. Before a tool call say "On it." or nothing, never "let me check" or what you are about to do. Once per request; never "sent", task numbers or "Got it." after it. No filler, no recaps, no "let me know if".
+- Never say "On it", "let me check" or what you are about to do: call the tool silently. After message_chat works, say only "Sent to" and the chat's short name. No task numbers, no "Got it", no filler, no recaps, no "let me know if".
+- If what you heard is cut off, a lone word, noise, or does not make sense ("That…", "halo"), say nothing, call no tool, and wait for him. If he asks "can you hear me", say "Yes." Never guess what a garbled sentence meant.
 - Every tool result has ok and say. When ok is false, it did not work as asked: tell him in a few words, and if error.choices is there, ask which one. Never claim something worked when ok is false.
 - Only when he says "ask Feather" or wants a job done outside his chats: ask_feather. feather_status and stop_feather cover those jobs.
 - The only things you answer yourself: which chat is picked, what you can do, and repeating what a chat said.`;
@@ -90,7 +91,7 @@ const TOOLS = [
   },
   {
     type: 'function', name: 'waiting_chats',
-    description: 'His chats from the last day that are waiting on him (the agent finished and the next move is his), with their last words and whether they ask him something; and the chats still working.',
+    description: 'His chats from the last day that are waiting on him (the agent finished and the next move is his), with their last words and whether they ask him something; and the chats still working. Answers in under a second: call it at once, saying nothing first.',
     parameters: { type: 'object', properties: {} },
   },
   { type: 'function', name: 'feather_status', description: 'Which Feather tasks are running or queued, and recent results.', parameters: { type: 'object', properties: {} } },

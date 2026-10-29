@@ -337,7 +337,10 @@ async function start() {
   try { audioCtx = new AudioContext(); audioCtx.resume().catch(() => {}); } catch {} // made inside the tap so iOS lets it run
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    // iOS can suspend the context when the mic turns on; wake it again or nothing is recorded.
+    if (audioCtx && audioCtx.state !== 'running') await Promise.race([audioCtx.resume().catch(() => {}), new Promise(r => setTimeout(r, 300))]);
     meter(); earlyRecord(); // you can talk from the tap: words said while connecting are sent once the call is up
+    tapAt = performance.now();
     const key = await getKey();
     pc = new RTCPeerConnection();
     pc.ontrack = e => { audioEl.srcObject = e.streams[0]; audioEl.muted = speakerOff; audioEl.play().catch(() => {}); };
@@ -410,12 +413,12 @@ function meter() {
 // and new audio keeps going the same way while he is still talking. At the first pause the live
 // WebRTC track takes over, so the switch never cuts a word.
 
-let sendTrack = null, early = null;
+let sendTrack = null, early = null, tapAt = 0;
 function earlyRecord() {
   if (!audioCtx) return;
   const src = audioCtx.createMediaStreamSource(micStream);
   const node = audioCtx.createScriptProcessor(1024, 1, 1);
-  early = { node, chunks: [], rate: audioCtx.sampleRate, streaming: false, quiet: 0, sent: 0 };
+  early = { node, chunks: [], rate: audioCtx.sampleRate, streaming: false, quiet: 0, sent: 0, ctx: audioCtx.state };
   node.onaudioprocess = e => {
     const e2 = early; if (e2?.node !== node) return;
     const x = new Float32Array(e.inputBuffer.getChannelData(0));
@@ -434,6 +437,11 @@ function flushEarly() {
   const e = early;
   if (!e) return applyMic();
   const pcm = to24k(e.chunks, e.rate); e.chunks = [];
+  const stats = { connect_ms: Math.round(performance.now() - tapAt), recorded_s: +(pcm.length / 24000).toFixed(2), rate: e.rate, ctx_at_start: e.ctx, ctx_now: audioCtx?.state, ua: navigator.userAgent.slice(0, 120) };
+  logCall({ early: stats });
+  // The recorder got nothing (the phone kept the audio context asleep): use the live mic at once.
+  if (pcm.length < 2400 && stats.connect_ms > 400) { early = null; e.node.disconnect(); dbg('early audio · recorder got nothing, live mic now'); return applyMic(); }
+  setTimeout(() => { if (early === e) handOver(); }, 15000); // never keep the live mic off for long
   if (!muted) for (let i = 0; i < pcm.length; i += 24000) rt({ type: 'input_audio_buffer.append', audio: b64(pcm.subarray(i, i + 24000)) });
   e.sent = pcm.length; e.streaming = true;
 }
@@ -443,6 +451,7 @@ function handOver() {
   if (!e) return;
   e.node.disconnect();
   dbg(`early audio · ${(e.sent / 24000).toFixed(1)} s sent before the live mic took over`);
+  logCall({ early_handover: { sent_s: +(e.sent / 24000).toFixed(2), live_track: sendTrack?.readyState } });
   applyMic();
 }
 
