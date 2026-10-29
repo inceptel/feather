@@ -1961,6 +1961,8 @@ export default function App() {
             <span>Workspace</span>
             <button onClick={() => { setSidebar(false); showHome({ kind: 'wiki' }) }}>Wiki</button>
             <Show when={!isRemoteBox()}><button onClick={openWorkspaceFiles}>Files</button></Show>
+            {/* Voice page (~/voice-web) is served at /voice/ on this host, outside Feather. */}
+            <Show when={!isRemoteBox()}><a href="/voice/" target="_blank" rel="noopener" onClick={() => setSidebar(false)}>Voice</a></Show>
           </nav>
           <div style={{ display: 'flex', 'border-bottom': '1px solid #1e1e1e' }}>
             <button onClick={() => setSidebarTab('sessions')} style={{ flex: '1', padding: '8px', border: 'none', 'border-bottom': sidebarTab() === 'sessions' ? '2px solid #4aba6a' : '2px solid transparent', background: 'none', color: sidebarTab() === 'sessions' ? '#e5e5e5' : '#666', 'font-size': '12px', 'font-weight': '600', cursor: 'pointer', '-webkit-tap-highlight-color': 'transparent' }}>Sessions</button>
