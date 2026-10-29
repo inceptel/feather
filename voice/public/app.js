@@ -213,12 +213,21 @@ function rt(ev) { if (dc?.readyState === 'open') dc.send(JSON.stringify(ev)); }
 function onRealtime(ev) {
   switch (ev.type) {
     case 'session.created': setStatus('live', 'live'); break;
-    case 'input_audio_buffer.speech_started': setStatus('listening', 'live'); break;
+    case 'input_audio_buffer.speech_started': {
+      // Hold the user's place now: the transcript comes later, often after the reply has started.
+      setStatus('listening', 'live');
+      if (ev.item_id && !partial.you.has(ev.item_id)) {
+        const el = addMsg('you', '…', { partial: true }); el.dataset.empty = '1';
+        partial.you.set(ev.item_id, el);
+      }
+      break;
+    }
     case 'input_audio_buffer.speech_stopped': setStatus('thinking', 'live'); break;
     case 'conversation.item.input_audio_transcription.delta': {
       let el = partial.you.get(ev.item_id);
       if (!el) { el = addMsg('you', '', { partial: true }); partial.you.set(ev.item_id, el); }
-      el.textContent += ev.delta; scroll(); break;
+      if (el.dataset.empty) { el.textContent = ''; delete el.dataset.empty; }
+      el.textContent += ev.delta; break;
     }
     case 'conversation.item.input_audio_transcription.completed': {
       let el = partial.you.get(ev.item_id);
@@ -228,6 +237,8 @@ function onRealtime(ev) {
       if (t) { lastHeard = t; logCall({ heard: t }); }
       partial.you.delete(ev.item_id); break;
     }
+    case 'conversation.item.input_audio_transcription.failed':
+      partial.you.get(ev.item_id)?.remove(); partial.you.delete(ev.item_id); break;
     case 'response.created': responding = true; break;
     case 'response.output_audio_transcript.delta': case 'response.output_text.delta': {
       let el = partial.ai.get(ev.item_id);
