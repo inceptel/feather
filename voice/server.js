@@ -12,6 +12,7 @@ const HOME = process.env.HOME || '/home/user';
 const DIR = new URL('.', import.meta.url).pathname;
 const MODEL = process.env.VOICE_MODEL || 'gpt-realtime-2.1';
 const VOICE = process.env.VOICE_VOICE || 'marin';
+const TRANSCRIBE = process.env.VOICE_TRANSCRIBE || 'gpt-transcribe'; // writes his words as text; the voice model hears audio directly
 const AGENT_MODEL = process.env.AGENT_MODEL || 'claude-bridge/claude-opus-5-5';
 const SESSION = process.env.AGENT_SESSION || 'voice-agent';
 const AGENT_CWD = process.env.AGENT_CWD || join(HOME, 'projects/voice-agent');
@@ -136,7 +137,7 @@ function sessionConfig() {
       instructions: INSTRUCTIONS,
       audio: {
         input: {
-          transcription: { model: 'gpt-4o-mini-transcribe', language: 'en' },
+          transcription: { model: TRANSCRIBE, language: 'en' },
           turn_detection: { type: 'semantic_vad', eagerness: 'auto' },
           noise_reduction: { type: 'near_field' },
         },
