@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const nuggets = require('./nuggets');
 
 const PORT = Number(process.env.GLASS_PORT || 4896);
 const FEATHER = process.env.GLASS_FEATHER || 'http://127.0.0.1:4870';
@@ -192,6 +193,9 @@ ${paired ? `<form method="post" action="/glass-approve"><input type="hidden" nam
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
+
+  // ---- Nuggets (optional second page; see README)
+  if (await nuggets.handle(req, res, p, url, { send, authed, OWNER, ORIGIN })) return;
 
   // ---- Approval page: protected by the sign-in proxy; identity arrives as Remote-User.
   if (p === '/glass-approve') {
