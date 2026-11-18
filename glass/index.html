@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Feather</title>
+<meta name="description" content="Your Feather chats on Meta Ray-Ban Display">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Additive display: black emits no light, so it is see-through. Light is spent
+   on type and thin strokes only, never on filled panels. */
+:root {
+  --ink: #f4f7f2;
+  --dim: #93a09a;
+  --line: #3d4a45;
+  --you: #ffc54d;    /* a chat is waiting on you */
+  --live: #57e3c4;   /* a chat is working */
+  --bad: #ff7a66;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: #000; color: var(--ink); overflow: hidden; }
+body {
+  font: 500 25px/1.36 "Avenir Next", "Segoe UI Variable", "Roboto Flex", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+#app { height: 100%; max-width: 600px; max-height: 600px; margin: 0 auto; padding: 22px 26px 20px; display: flex; flex-direction: column; }
+
+/* Position strip: one tick per chat, coloured by state. The whole "where am I". */
+#strip { display: flex; gap: 6px; height: 8px; flex: none; }
+#strip i { flex: 1; max-width: 64px; border-radius: 4px; background: var(--line); }
+#strip i.working { background: var(--live); opacity: .55; }
+#strip i.waiting { background: var(--you); }
+#strip i.error { background: var(--bad); }
+#strip i.unread { background: var(--ink); }
+#strip i.here { height: 14px; margin-top: -3px; opacity: 1; outline: 2px solid var(--ink); outline-offset: 2px; }
+
+header { flex: none; padding: 16px 0 10px; border-bottom: 2px solid var(--line); }
+#state { font-size: 20px; font-weight: 700; color: var(--dim); display: flex; justify-content: space-between; gap: 12px; }
+#state b.working { color: var(--live); }
+#state b.waiting { color: var(--you); }
+#state b.error { color: var(--bad); }
+#state span { font-weight: 500; white-space: nowrap; }
+h1 { font-size: 33px; line-height: 1.12; font-weight: 800; letter-spacing: -.01em; margin: 4px 0 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+#panel { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 4px 12px 0; outline: none; scrollbar-width: none; overflow-wrap: anywhere; }
+#panel::-webkit-scrollbar { display: none; }
+#panel:focus-visible { box-shadow: inset 4px 0 0 -1px var(--ink); padding-left: 14px; }
+.msg { margin: 0 0 16px; white-space: pre-wrap; }
+.msg.user { color: var(--dim); font-size: 21px; padding-left: 14px; border-left: 3px solid var(--line); }
+.msg.ask { color: var(--you); font-weight: 700; }
+.msg code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; }
+.msg strong { font-weight: 800; }
+.live { color: var(--live); font-size: 21px; font-weight: 600; }
+.empty { color: var(--dim); }
+
+#choices { flex: none; display: flex; flex-direction: column; gap: 8px; }
+#choices:not(:empty) { padding-top: 10px; border-top: 2px solid var(--line); }
+#choices button { font: inherit; font-size: 23px; line-height: 1.2; font-weight: 600; text-align: left; color: var(--ink); background: #000;
+  border: 2px solid var(--line); border-radius: 14px; min-height: 50px; padding: 8px 16px; }
+#choices.answer button { border-color: var(--you); }
+#choices button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; border-color: var(--ink); }
+footer { flex: none; display: flex; gap: 10px; padding-top: 10px; }
+#draft, footer button {
+  font: inherit; color: var(--ink); background: #000; border: 2px solid var(--line); border-radius: 14px; height: 60px; padding: 0 18px;
+}
+#draft { flex: 1; min-width: 0; resize: none; padding-top: 12px; line-height: 1.3; white-space: nowrap; overflow: hidden; }
+#draft::placeholder { color: var(--dim); }
+footer button { font-weight: 800; flex: none; }
+footer button[hidden] { display: none; }
+#send { border-color: var(--ink); }
+:where(#draft, footer button):focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; border-color: var(--ink); }
+
+/* Notice: the one piece of unprompted motion on the page. */
+#notice { position: fixed; left: 50%; top: 14px; transform: translate(-50%, -140%); width: min(548px, calc(100% - 52px));
+  background: #000; border: 3px solid var(--you); border-radius: 18px; padding: 12px 18px; font-weight: 700; font-size: 24px; line-height: 1.2;
+  visibility: hidden; transition: transform .28s cubic-bezier(.2,.9,.3,1), visibility 0s .28s; }
+#notice.on { transform: translate(-50%, 0); visibility: visible; transition-delay: 0s; }
+#notice small { display: block; color: var(--dim); font-size: 19px; font-weight: 500; margin-top: 2px; }
+#notice.plain { border-color: var(--line); }
+
+#pair { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+#pair p { margin: 0; color: var(--dim); }
+#pair .code { font-size: 96px; font-weight: 800; letter-spacing: .08em; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+#pair .where { color: var(--ink); font-weight: 700; }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) { #notice { transition: none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <section id="pair" hidden>
+    <p>Pair these glasses with Feather</p>
+    <div class="code" id="code">······</div>
+    <p>On your phone, open <span class="where" id="where"></span> and enter this code.</p>
+    <p id="pairnote"></p>
+  </section>
+
+  <div id="main" hidden style="display:contents">
+    <div id="strip" aria-hidden="true"></div>
+    <header>
+      <div id="state"><b id="status"></b><span id="when"></span></div>
+      <h1 id="title"></h1>
+    </header>
+    <div id="panel" tabindex="0" aria-live="polite"></div>
+    <div id="choices"></div>
+    <footer>
+      <button id="suggest">Suggest replies</button>
+      <textarea id="draft" rows="1" placeholder="Write a reply" aria-label="Reply" enterkeyhint="send"></textarea>
+      <button id="send" hidden>Send</button>
+      <button id="clear" hidden>Clear</button>
+    </footer>
+  </div>
+</div>
+<div id="notice" role="status"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+$('where').textContent = location.host + '/glass-approve';
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+let token = store.get('glass.token');
+let chats = [];            // display order, stable while you browse
+let here = store.get('glass.here');   // id of the chat on screen
+const detail = new Map();  // id -> {messages, key}
+const drafts = new Map();  // id -> unsent text
+const unread = new Set();
+const suggestions = new Map(); // id -> {key, options}: guessed replies for the message on screen
+let choicesKey = '';
+let lastStatus = new Map();
+let noticeChat = null, noticeTimer = 0, shownKey = '';
+
+async function api(path, opts = {}) {
+  const r = await fetch('/glass/api' + path, {
+    ...opts,
+    headers: { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+  });
+  if (r.status === 401) { token = null; store.del('glass.token'); startPairing(); throw new Error('unpaired'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// ---------- pairing
+let pairing = false;
+async function startPairing() {
+  if (pairing) return; pairing = true;
+  $('main').hidden = true; $('pair').hidden = false;
+  for (;;) {
+    try {
+      const r = await fetch('/glass/api/pair/start', { method: 'POST' });
+      if (!r.ok) throw new Error('busy');
+      const { id, code } = await r.json();
+      $('code').textContent = code.slice(0, 3) + ' ' + code.slice(3);
+      $('pairnote').textContent = '';
+      for (;;) {
+        await sleep(2500);
+        const p = await fetch('/glass/api/pair/poll?id=' + id);
+        if (p.status === 404) break;             // code expired: get a fresh one
+        const j = await p.json();
+        if (j.status === 'approved') {
+          token = j.token; store.set('glass.token', token);
+          pairing = false; $('pair').hidden = true; $('main').hidden = false;
+          return boot();
+        }
+      }
+    } catch { $('pairnote').textContent = 'No connection. Trying again.'; await sleep(4000); }
+  }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- rendering
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function tidy(md) {
+  let s = esc(md);
+  s = s.replace(/```[^\n]*\n?/g, '');
+  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  s = s.replace(/^#{1,6}\s+(.*)$/gm, '<strong>$1</strong>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  s = s.replace(/^(\s*)[-*]\s+/gm, '$1• ');
+  return s.replace(/\n{3,}/g, '\n\n');
+}
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (s < 90) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' hr ago';
+  return Math.round(s / 86400) + ' d ago';
+}
+const WORD = { working: 'Working', waiting: 'Needs you', error: 'Stopped on an error', done: 'Finished' };
+const cur = () => chats.find((c) => c.id === here);
+
+function renderStrip() {
+  $('strip').innerHTML = chats.map((c) =>
+    `<i class="${c.status}${unread.has(c.id) ? ' unread' : ''}${c.id === here ? ' here' : ''}"></i>`).join('');
+}
+function renderHead() {
+  const c = cur(); if (!c) return;
+  $('status').className = c.status; $('status').textContent = WORD[c.status] || '';
+  $('when').textContent = `${chats.indexOf(c) + 1} of ${chats.length}, ${ago(c.updatedAt)}`;
+  $('title').textContent = c.title;
+}
+function renderPanel(force) {
+  const c = cur(); const p = $('panel');
+  if (!c) { p.innerHTML = '<p class="empty">No chats yet. Start one in Feather and it shows up here.</p>'; return; }
+  const d = detail.get(c.id);
+  const key = c.id + '|' + (d ? d.key : '') + '|' + c.status + '|' + (c.question ? c.question.text : '') + '|' + (c.activity || '');
+  if (!force && key === shownKey) return;
+  const sameChat = shownKey.split('|')[0] === c.id; const y = p.scrollTop;
+  const sameBody = sameChat && shownKey.split('|')[1] === (d ? d.key : '');
+  shownKey = key;
+  let html = '';
+  if (!d) html = '<p class="empty">Loading.</p>';
+  else if (!d.messages.length) html = '<p class="empty">Nothing written here yet.</p>';
+  else html = d.messages.map((m, i) => `<div class="msg ${m.role}"${i === d.messages.length - 1 ? ' id="last"' : ''}>${tidy(m.text)}</div>`).join('');
+  if (c.status === 'waiting' && c.question) html += `<div class="msg ask">${esc(c.question.text)}</div>`;
+  if (c.status === 'working') html += `<div class="live">${esc(c.activity || 'Working')}</div>`;
+  p.innerHTML = html;
+  if (sameBody) p.scrollTop = y;                 // only the status line changed: hold your place
+  else { const last = $('last'); p.scrollTop = last ? Math.max(0, last.offsetTop - p.offsetTop - 6) : 0; }
+}
+function renderDraft() {
+  const has = !!$('draft').value.trim();
+  $('send').hidden = !has; $('clear').hidden = !has; $('suggest').hidden = has;
+}
+// Things to pick instead of write: the agent's own multiple choice if it asked
+// one, otherwise replies guessed on request.
+function choices() {
+  const c = cur(); if (!c) return null;
+  if (c.status === 'waiting' && c.question && c.question.options.length) return { kind: 'answer', items: c.question.options };
+  const s = suggestions.get(c.id), d = detail.get(c.id);
+  if (s && d && s.key === d.key && !$('draft').value.trim()) return { kind: 'suggest', items: s.options };
+  return null;
+}
+function renderChoices() {
+  const ch = choices(); const box = $('choices');
+  const key = ch ? (cur().id + ch.kind + ch.items.join('\u0001')) : '';
+  if (key === choicesKey) return;
+  const hadFocus = box.contains(document.activeElement);
+  choicesKey = key; box.className = ch ? ch.kind : '';
+  box.innerHTML = ch ? ch.items.map((t, i) => `<button data-i="${i}">${esc(t)}</button>`).join('') : '';
+  if (hadFocus) (box.firstElementChild || $('panel')).focus();
+}
+function render() { renderStrip(); renderHead(); renderPanel(); renderChoices(); }
+
+function show(id) {
+  if (here) drafts.set(here, $('draft').value);
+  here = id; store.set('glass.here', id); unread.delete(id);
+  $('draft').value = drafts.get(id) || ''; renderDraft();
+  render(); loadDetail(id);
+  if (noticeChat === id) hideNotice();
+}
+function step(n) {
+  if (!chats.length) return;
+  const i = Math.max(0, chats.findIndex((c) => c.id === here));
+  show(chats[(i + n + chats.length) % chats.length].id);
+  $('panel').focus();
+}
+
+// ---------- notices
+function notice(text, sub, chatId) {
+  const n = $('notice');
+  n.className = chatId ? 'on' : 'on plain';
+  n.innerHTML = esc(text) + (sub ? `<small>${esc(sub)}</small>` : '');
+  noticeChat = chatId || null;
+  clearTimeout(noticeTimer); noticeTimer = setTimeout(hideNotice, chatId ? 9000 : 2500);
+}
+function hideNotice() { $('notice').classList.remove('on'); noticeChat = null; }
+let audio;
+function chime() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const t = audio.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(audio.destination);
+      g.gain.setValueAtTime(0.0001, t + i * 0.16);
+      g.gain.exponentialRampToValueAtTime(0.18, t + i * 0.16 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.16 + 0.3);
+      o.start(t + i * 0.16); o.stop(t + i * 0.16 + 0.32);
+    });
+  } catch {}
+}
+
+// ---------- data
+async function loadChats() {
+  const { chats: fresh } = await api('/chats');
+  const byId = new Map(fresh.map((c) => [c.id, c]));
+  // Keep the order you have been swiping through; new chats join at the front.
+  const kept = chats.filter((c) => byId.has(c.id)).map((c) => byId.get(c.id));
+  const keptIds = new Set(kept.map((c) => c.id));
+  chats = [...fresh.filter((c) => !keptIds.has(c.id)), ...kept];
+
+  const alerts = [];
+  for (const c of chats) {
+    const was = lastStatus.get(c.id);
+    const ended = was === 'working' && c.status !== 'working';
+    if (ended || (was && was !== 'waiting' && c.status === 'waiting')) {
+      alerts.push(c);
+      if (c.id !== here) unread.add(c.id); else if (ended) loadDetail(c.id);
+    }
+  }
+  lastStatus = new Map(chats.map((c) => [c.id, c.status]));
+  const alert = alerts.find((c) => c.id !== here) || alerts[0];   // the one you cannot already see
+  if (alert) {
+    chime();
+    const what = alert.status === 'waiting' ? 'Needs you' : alert.status === 'error' ? 'Stopped on an error' : 'Finished';
+    const more = alerts.length > 1 ? `, and ${alerts.length - 1} more` : '';
+    notice(`${what}: ${alert.title}`, alert.id === here ? '' : 'Press select to open' + more, alert.id === here ? null : alert.id);
+  }
+  if (!cur() && chats.length) show(chats[0].id); else render();
+}
+async function loadDetail(id) {
+  try {
+    const d = await api('/chats/' + id);
+    d.key = d.messages.length + ':' + (d.messages.length ? d.messages[d.messages.length - 1].text.length : 0);
+    detail.set(id, d);
+    if (id === here) { renderPanel(); renderChoices(); }
+  } catch {}
+}
+async function sendDraft() {
+  const c = cur(); const text = $('draft').value.trim();
+  if (!c || !text) return;
+  const mid = 'glass-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  $('send').disabled = true; $('send').textContent = 'Sending';
+  try {
+    await api(`/chats/${c.id}/send`, { method: 'POST', body: JSON.stringify({ text, mid }) });
+    $('draft').value = ''; drafts.delete(c.id); suggestions.delete(c.id); renderDraft();
+    c.status = 'working'; c.activity = null; lastStatus.set(c.id, 'working');
+    notice('Sent'); render(); $('panel').focus();
+    setTimeout(() => loadDetail(c.id), 1500);
+  } catch (e) {
+    notice('Not sent. Check the connection and send again.');
+  } finally { $('send').disabled = false; $('send').textContent = 'Send'; }
+}
+
+// ---------- input: touchpad and Neural Band arrive as arrow keys and Enter
+const footerOrder = () => [$('suggest'), $('draft'), $('send'), $('clear')].filter((el) => !el.hidden);
+// Top-to-bottom focus path below the message: choices, Suggest replies, reply field.
+const below = () => [...$('choices').children, $('suggest'), $('draft')].filter((el) => !el.hidden);
+document.addEventListener('keydown', (e) => {
+  if (pairing || e.metaKey || e.ctrlKey || e.altKey) return;
+  const a = document.activeElement; const inFooter = a && a.closest && a.closest('footer');
+  const onPanel = !a || a === document.body || a === $('panel');
+  const hasDraft = !!$('draft').value.trim();
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const dir = e.key === 'ArrowRight' ? 1 : -1;
+    const row = footerOrder(); const next = inFooter ? row[row.indexOf(a) + dir] : null;
+    if (next) next.focus();                        // along the bottom row: Suggest, reply, Send, Clear
+    else if (!(inFooter && hasDraft)) step(dir);   // otherwise change chat (never with a reply half written)
+    e.preventDefault();
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const p = $('panel'); const down = e.key === 'ArrowDown'; const path = below();
+    if (!onPanel) {
+      const i = Math.max(0, path.indexOf(a.closest('footer') && path.indexOf(a) < 0 ? $('draft') : a)) + (down ? 1 : -1);
+      if (i < 0) p.focus(); else if (path[i]) path[i].focus();
+    } else if (down && p.scrollTop + p.clientHeight >= p.scrollHeight - 4) path[0].focus();
+    else { p.focus(); p.scrollTop += (down ? 1 : -1) * (p.clientHeight - 40); }   // a full page per swipe, one line kept for context
+    e.preventDefault();
+  } else if (e.key === 'Enter' && onPanel) {
+    if (noticeChat) { show(noticeChat); $('panel').focus(); }
+    else { $('panel').scrollTop = $('panel').scrollHeight; below()[0].focus(); }   // select: straight to the reply area
+    e.preventDefault();
+  }
+  // Enter anywhere else is left to the browser: it presses the focused button
+  // and opens the text composer on the reply field.
+});
+$('draft').addEventListener('input', () => { renderDraft(); renderChoices(); });
+$('draft').addEventListener('change', () => { renderDraft(); if ($('draft').value.trim()) $('send').focus(); });
+$('draft').addEventListener('keydown', (e) => {   // desktop keyboards: Enter sends
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.isTrusted && window.matchMedia('(hover: hover)').matches && $('draft').value.trim()) {
+    e.preventDefault(); e.stopPropagation(); sendDraft();
+  }
+});
+$('send').addEventListener('click', sendDraft);
+$('suggest').addEventListener('click', async () => {
+  const c = cur(), d = c && detail.get(c.id), b = $('suggest');
+  if (!d || b.disabled) return;
+  b.disabled = true; b.textContent = 'Thinking';
+  try {
+    const { options } = await api(`/chats/${c.id}/suggest`, { method: 'POST', body: '{}' });
+    suggestions.set(c.id, { key: d.key, options });
+    renderChoices();
+    if (c.id === here && $('choices').firstElementChild) $('choices').firstElementChild.focus();
+  } catch { notice('No suggestions right now. Write a reply instead.'); }
+  finally { b.disabled = false; b.textContent = 'Suggest replies'; }
+});
+$('choices').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button'); const ch = choices(); const c = cur();
+  if (!btn || !ch || !c) return;
+  const i = Number(btn.dataset.i);
+  if (ch.kind === 'suggest') {               // a guess becomes a draft you confirm with Send
+    $('draft').value = ch.items[i]; renderDraft(); renderChoices(); $('send').focus();
+    return;
+  }
+  const q = c.question;
+  try {
+    await api(`/chats/${c.id}/answer`, { method: 'POST', body: JSON.stringify(q.type === 'yesno' ? { type: 'yesno', text: i === 0 ? 'y' : 'n' } : { type: 'selector', index: i }) });
+    c.question = null; c.status = 'working'; lastStatus.set(c.id, 'working');
+    notice('Answered'); render(); $('panel').focus();
+  } catch { notice('Not answered. Check the connection and pick again.'); }
+});
+$('clear').addEventListener('click', () => { $('draft').value = ''; renderDraft(); renderChoices(); $('panel').focus(); });
+
+// Phones and trackpads: swipe sideways to change chat.
+let tx = null, ty = 0;
+addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+addEventListener('touchend', (e) => {
+  if (tx === null) return;
+  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty; tx = null;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+// ---------- loop
+let booted = false;
+async function boot() {
+  $('main').hidden = false; $('pair').hidden = true;
+  try { await loadChats(); } catch {}
+  $('panel').focus();
+  if (booted) return; booted = true;
+  let n = 0;
+  setInterval(async () => {
+    if (!token || document.hidden) return;
+    n++;
+    try {
+      if (n % 2 === 0) await loadChats(); else renderHead();
+      const c = cur();
+      if (c && (c.status === 'working' || n % 4 === 0)) loadDetail(c.id);
+    } catch {}
+  }, 4000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && token) loadChats().catch(() => {}); });
+if (token) boot(); else startPairing();
+</script>
+</body>
+</html>
